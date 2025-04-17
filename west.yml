@@ -1,0 +1,34 @@
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+manifest:
+  self:
+    west-commands: scripts/west-commands.yml
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: dgamroth-github
+      url-base: https://github.com/DarrylGamroth
+
+  projects:
+    # - name: vscode-settings-zephyr
+    #   remote: dgamroth-github
+    #   revision: main
+    #   import: true
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        # Please keep this list sorted alphabetically.
+        name-whitelist:
+          - cmsis
+          - cmsis-dsp
+            #- fatfs
+          - hal_stm32
+            #- littlefs
+          - mbedtls
+          - mcuboot
+          - mcumgr
+          - picolibc
+          - segger

@@ -1,0 +1,11 @@
+# Simple Chopper Board
+
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_SIMPLECHOPPER
+
+config BOARD
+	default "simplechopper"
+
+endif # BOARD_SIMPLECHOPPER

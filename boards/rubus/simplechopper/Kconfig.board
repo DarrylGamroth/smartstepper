@@ -1,0 +1,8 @@
+# Simple Chopper MCU configuration
+
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_SIMPLECHOPPER
+	bool "Simple Chopper Board"
+	depends on SOC_STM32G071XX

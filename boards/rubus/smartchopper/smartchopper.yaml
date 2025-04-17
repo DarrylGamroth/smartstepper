@@ -1,0 +1,14 @@
+# Copyright (c) 2021 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+identifier: smartchopper
+name: Smart Chopper Controller
+vendor: rubus
+type: mcu
+arch: arm
+ram: 128
+flash: 512
+toolchain:
+  - zephyr
+supported:
+  - gpio

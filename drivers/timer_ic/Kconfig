@@ -1,0 +1,23 @@
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig TIMER_IC
+	bool "Timer Input Capture Drivers"
+	help
+	  Enable options for input capture drivers.
+
+if TIMER_IC
+
+module = TIMER_IC
+module-str = timer_ic
+source "subsys/logging/Kconfig.template.log_config"
+
+config TIMER_IC_INIT_PRIORITY
+	int "Timer input capture initialization priority"
+	default KERNEL_INIT_PRIORITY_DEVICE
+	help
+	  System initialization priority for input capture drivers.
+
+rsource "Kconfig.stm32"
+
+endif # TIMER_IC

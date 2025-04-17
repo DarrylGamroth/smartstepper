@@ -1,0 +1,201 @@
+/*
+ * Copyright (c) 2021 Nordic Semiconductor ASA
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+ /dts-v1/;
+ #include <st/f4/stm32f407Xe.dtsi>
+
+/ {
+	model = "Smart Stepper Controller";
+	compatible = "rubus,smartchopper";
+
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,ccm = &ccm0;
+		// zephyr,canbus = &can1;
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+		user_button: button {
+			label = "User";
+			gpios = <&gpiod 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		watchdog0 = &iwdg;
+		sw0 = &user_button;
+	};
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(25)>;
+	status = "okay";
+};
+
+&pll {
+	div-m = <25>;
+	mul-n = <336>;
+	div-p = <2>;
+	div-q = <7>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(168)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <4>;
+	apb2-prescaler = <2>;
+};
+
+&mco2 {
+	clocks = <&rcc STM32_SRC_HSE MCO2_SEL(2)>;
+	prescaler = <MCO2_PRE(MCO_PRE_DIV_1)>;
+	pinctrl-0 = <&rcc_mco_2_pc9>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&dma2 {
+	status = "okay";
+};
+
+&mac {
+	status = "okay";
+	pinctrl-0 = <&eth_rxd0_pc4
+		     &eth_rxd1_pc5
+		     &eth_ref_clk_pa1
+		     &eth_crs_dv_pa7
+		     &eth_tx_en_pb11
+		     &eth_txd0_pb12
+		     &eth_txd1_pb13>;
+	pinctrl-names = "default";
+	phy-connection-type = "rmii";
+	phy-handle = <&eth_phy>;
+};
+
+&mdio {
+	status = "okay";
+	pinctrl-0 = <&eth_mdio_pa2 &eth_mdc_pc1>;
+	pinctrl-names = "default";
+
+	phy: phy@0 {
+		status = "okay";
+		compatible = "ti,dp83825";
+		reg = <0>;
+		reset-gpios = <&gpiob 15 GPIO_ACTIVE_LOW>;
+		int-gpios = <&gpiob 14 GPIO_ACTIVE_LOW>;
+		ti,interface-type = "rmii";
+	};
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "disabled";
+};
+
+&i2c3 {
+	pinctrl-0 = <&i2c1_scl_ph7 &i2c1_sda_ph8>;
+	pinctrl-names = "default";
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	tmp1075: tmp1075@48 {
+		compatible = "ti,tmp1075";
+		reg = <0x48>;
+		conversion-rate = <220000>;
+	};
+
+	eeprom: eeprom@50 {
+		compatible = "st,m24c16", "st,m24xxx", "atmel,at24";
+		reg = <0x50>;
+		size = <DT_SIZE_K(2)>;
+		pagesize = <16>;
+		address-width = <8>;
+		timeout = <5>;
+	};
+
+};
+
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pb6 &usart1_rx_pb7>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "disabled";
+};
+
+&spi1 {
+	pinctrl-0 = <&spi1_sck_pb3 &spi1_miso_pb4 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	status = "okay";
+};
+
+&spi2 {
+	pinctrl-0 = <&spi1_sck_pi0 &spi1_miso_pi2 &spi1_mosi_i3>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioi 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	status = "okay";
+
+	w25q128: w25q128@0 {
+		compatible ="jedec,spi-nor";
+		size = <DT_SIZE_M(16)>;
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(20)>;
+		status = "okay";
+		jedec-id = [ef 40 18];
+	};
+};
+
+&spi3 {
+	pinctrl-0 = <&spi1_sck_pc10 &spi1_miso_pc11 &spi1_mosi_pc12>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	status = "okay";
+};
+
+&can1 {
+	pinctrl-0 = <&can1_rx_pb8 &can1_tx_pb9>;
+	pinctrl-names = "default";
+	status = "disabled";
+};
+
+zephyr_udc0: &usbotg_fs {
+	pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "disabled";
+};
+
+// vinsense {
+// 	compatible = "voltage-divider";
+// 	io-channels = <&adc1 10>;
+// 	output-ohms = <191000>;
+// 	full-ohms = <(191000 + 10000)>;
+// };
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Set 8Kb of storage at the end of the 512KB of flash */
+		storage_partition: partition@7e000 {
+			label = "storage";
+			reg = <0x0007e000 0x00002000>;
+		};
+	};
+};

@@ -1,0 +1,111 @@
+/*
+ * Copyright (c) 2023 Rubus Technologies Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <st/g0/stm32g071Xb.dtsi>
+#include <st/g0/stm32g071g(6-8-b)ux-pinctrl.dtsi>
+
+/ {
+	model = "Simple Chopper board";
+	compatible = "spiders,simplechopper";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	aliases {
+		watchdog0 = &iwdg;
+	};
+
+	zephyr,user {
+		signal-gpios = <&gpioa 4 (GPIO_OPEN_DRAIN | GPIO_ACTIVE_HIGH)>,
+		               <&gpioa 5 (GPIO_OPEN_DRAIN | GPIO_ACTIVE_HIGH)>;
+	};
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(16)>;
+	hse-bypass;
+	status = "okay";
+};
+
+// &clk_hsi {
+// 	status = "okay";
+// };
+
+&pll {
+	div-m = <1>;
+	mul-n = <8>;
+	div-p = <2>;
+	div-q = <2>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(64)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+};
+
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pb6 &usart1_rx_pb7>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		status = "okay";
+	};
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&timers2 {
+	st,prescaler = <0>;
+	status = "okay";
+	triggers: triggers {
+		compatible = "st,stm32-timer-ic";
+		pinctrl-0 = <&tim2_ch2_pa1>, <&tim2_ch3_pa2>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Set 2KB of storage at the end of 128KB flash */
+		storage_partition: partition@1f800 {
+			label = "storage";
+			reg = <0x0001f800 DT_SIZE_K(2)>;
+		};
+	};
+};
+
+&cpu0 {
+	cpu-power-states = <&stop0 &stop1>;
+};
+
+&lptim1 {
+	clocks = <&rcc STM32_CLOCK_BUS_APB1 0x80000000>,
+	         <&rcc STM32_SRC_LSI LPTIM1_SEL(1)>;
+	status = "okay";
+};
+

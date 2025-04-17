@@ -1,0 +1,30 @@
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32 timer input capture.
+
+  The input capture device is expected to be a child of a STM32 timer.
+
+  Example usage:
+
+      &timers1 {
+          ic: ic {
+              compatible = "st,stm32-timer-ic";
+              pinctrl-0 = <&tim1_ch1_pa8>;
+              pinctrl-names = "default";
+              ...
+          };
+      };
+
+compatible: "st,stm32-timer-ic"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+

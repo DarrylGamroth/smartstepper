@@ -1,0 +1,8 @@
+# Copyright (c) 2023 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: simplechopper
+  vendor: rubus
+  socs:
+    - name: STM32G071XX
