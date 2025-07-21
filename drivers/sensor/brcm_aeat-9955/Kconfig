@@ -1,0 +1,12 @@
+# AEAT-9955 magnetic encoder configuration option
+
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config BRCM_AEAT_9955
+	bool "AEAT-9955 Magnetic Encoder"
+	default y
+	depends on DT_HAS_BRCM_AEAT_9955_ENABLED
+	select SPI
+	help
+	  Enable driver for AEAT-9955 magnetic encoder.
