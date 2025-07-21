@@ -1,0 +1,578 @@
+/*
+ * Copyright (c) 2025 Rubus Technologies Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#define DT_DRV_COMPAT magntek_mt6835
+
+#include <errno.h>
+#include <zephyr/sys/__assert.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/kernel.h>
+#include <drivers/sensor/magntek_mt6835.h>
+LOG_MODULE_REGISTER(magntek_mt6835, CONFIG_SENSOR_LOG_LEVEL);
+
+#define MT6835_CMD_READ (0x03U << 4)
+#define MT6835_CMD_WRITE (0x06U << 4)
+#define MT6835_CMD_PROG (0x0BU << 4)
+#define MT6835_CMD_ZERO (0x05U << 4)
+#define MT6835_CMD_ANGLE (0x0AU << 4)
+
+#define MT6835_REG_USER_ID 0x0000U
+#define MT6835_REG_ANGLE_H 0x0003U
+#define MT6835_REG_ANGLE_M 0x0004U
+#define MT6835_REG_ANGLE_L 0x0005U
+#define MT6835_REG_CRC 0x0006U
+#define MT6835_REG_ABZ_RES1 0x0007U
+#define MT6835_REG_ABZ_RES2 0x0008U
+#define MT6835_REG_ZERO_POS_H 0x0009U
+#define MT6835_REG_ZERO_POS_L 0x000AU
+#define MT6835_REG_Z_PHASE_UVW 0x000BU
+#define MT6835_REG_PWM_NLC 0x000CU
+#define MT6835_REG_ROT_HYST 0x000DU
+#define MT6835_REG_GPIO_AUTOCAL 0x000EU
+#define MT6835_REG_OPTS5 0x0011U
+#define MT6835_REG_CAL_STATUS 0x0113U
+
+/* AUTOCAL_FREQ register bit definitions */
+#define MT6835_AUTOCAL_FREQ_MASK 0x07 /* Bits 2:0: Auto-calibration rotation speed range */
+
+/* STATUS register bit definitions (0x0005) */
+#define MT6835_REG_STATUS 0x0005U
+#define MT6835_STATUS_MASK 0x07
+
+/* Calibration status register bit definitions (0x0113) */
+#define MT6835_CAL_STATUS_MASK 0xC0
+
+/* ROT_HYST register bit definitions (0x000D) */
+#define MT6835_ROT_DIR_MASK 0x80 /* Bit 7: Rotation direction */
+#define MT6835_HYST_MASK 0x07	 /* Bits 2:0: Hysteresis */
+
+#define MT6835_FULL_ANGLE 360
+#define MT6835_PULSES_PER_REV 2097152
+#define MT6835_MILLION_UNIT 1000000
+
+struct mt6835_dev_config
+{
+	struct spi_dt_spec bus;
+	const struct gpio_dt_spec gpio_cal_en;
+};
+
+/* Device run time data */
+struct mt6835_dev_data
+{
+	uint32_t position;
+};
+
+static int mt6835_read_register(const struct device *dev, uint16_t reg, uint8_t *data)
+{
+	const struct mt6835_dev_config *dev_cfg = dev->config;
+	uint8_t tx_buf[3];
+	uint8_t rx_buf[3];
+	struct spi_buf spi_tx_buf = {
+		.buf = tx_buf,
+		.len = sizeof(tx_buf),
+	};
+	struct spi_buf spi_rx_buf = {
+		.buf = rx_buf,
+		.len = sizeof(rx_buf),
+	};
+	struct spi_buf_set tx = {
+		.buffers = &spi_tx_buf,
+		.count = 1,
+	};
+	struct spi_buf_set rx = {
+		.buffers = &spi_rx_buf,
+		.count = 1,
+	};
+
+	tx_buf[0] = MT6835_CMD_READ | ((reg >> 8) & 0x0F);
+	tx_buf[1] = reg & 0xFF;
+	tx_buf[2] = 0;
+
+	int ret = spi_transceive_dt(&dev_cfg->bus, &tx, &rx);
+	if (ret >= 0)
+	{
+		*data = rx_buf[2];
+	}
+
+	return ret;
+}
+
+static int mt6835_write_register(const struct device *dev, uint16_t reg, uint8_t value)
+{
+	const struct mt6835_dev_config *dev_cfg = dev->config;
+	uint8_t buf[3];
+	struct spi_buf tx_buf = {
+		.buf = buf,
+		.len = sizeof(buf),
+	};
+	struct spi_buf_set tx = {
+		.buffers = &tx_buf,
+		.count = 1,
+	};
+
+	buf[0] = MT6835_CMD_WRITE | ((reg >> 8) & 0x0F);
+	buf[1] = reg & 0xFF;
+	buf[2] = value;
+
+	return spi_write_dt(&dev_cfg->bus, &tx);
+}
+
+static int mt6835_read_angle(const struct device *dev, uint32_t *angle)
+{
+	const struct mt6835_dev_config *dev_cfg = dev->config;
+	uint8_t tx_buf[6];
+	uint8_t rx_buf[6];
+	struct spi_buf spi_tx_buf = {
+		.buf = tx_buf,
+		.len = sizeof(tx_buf),
+	};
+	struct spi_buf spi_rx_buf = {
+		.buf = rx_buf,
+		.len = sizeof(rx_buf),
+	};
+	struct spi_buf_set tx = {
+		.buffers = &spi_tx_buf,
+		.count = 1,
+	};
+	struct spi_buf_set rx = {
+		.buffers = &spi_rx_buf,
+		.count = 1,
+	};
+	tx_buf[0] = MT6835_CMD_ANGLE | ((MT6835_REG_ANGLE_H >> 8) & 0x0F);
+	tx_buf[1] = MT6835_REG_ANGLE_H & 0xFF;
+	tx_buf[2] = 0;
+	tx_buf[3] = 0;
+	tx_buf[4] = 0;
+	tx_buf[5] = 0;
+
+	int ret = spi_transceive_dt(&dev_cfg->bus, &tx, &rx);
+	if (ret == 0)
+	{
+		*angle = sys_get_be24(&rx_buf[2]) >> 3;
+	}
+	else
+	{
+		*angle = 0;
+	}
+
+	return ret;
+}
+
+static int mt6835_attr_set(const struct device *dev, enum sensor_channel chan,
+						   enum sensor_attribute attr, const struct sensor_value *val)
+{
+	int ret = 0;
+	uint8_t reg_val;
+
+	switch ((int)attr)
+	{
+	case MT6835_ATTR_ABZ_RESOLUTION:
+		/* Set ABZ resolution - val->val1 should be 0-3 for different PPR settings */
+		if (val->val1 < 0 || val->val1 > 3)
+		{
+			LOG_ERR("Invalid ABZ resolution value: %d", val->val1);
+			return -EINVAL;
+		}
+
+		/* Read current ABZ_RES1 register */
+		ret = mt6835_read_register(dev, MT6835_REG_ABZ_RES1, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+
+		/* Update resolution bits (bits 0-1) */
+		reg_val = (reg_val & 0xFC) | (val->val1 & 0x03);
+		ret = mt6835_write_register(dev, MT6835_REG_ABZ_RES1, reg_val);
+		break;
+
+	case MT6835_ATTR_ZERO_POSITION:
+		/* Set zero position - val->val1 is high byte, val->val2 is low byte */
+		ret = mt6835_write_register(dev, MT6835_REG_ZERO_POS_H, val->val1 & 0xFF);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		ret = mt6835_write_register(dev, MT6835_REG_ZERO_POS_L, val->val2 & 0xFF);
+		break;
+
+	case MT6835_ATTR_CALIBRATION:
+		/* Trigger auto-calibration process */
+		if (val->val1 == 1)
+		{
+			const struct mt6835_dev_config *config = dev->config;
+			uint8_t status_reg;
+			int timeout_count = 0;
+			const int max_timeout = 1000; /* 10 second timeout (10ms * 1000) */
+
+			LOG_INF("Starting auto-calibration process");
+
+			/* Assert CAL_EN pin to start calibration */
+			ret = gpio_pin_set_dt(&config->gpio_cal_en, 1);
+			if (ret < 0)
+			{
+				LOG_ERR("Failed to assert CAL_EN pin");
+				return ret;
+			}
+
+			/* Monitor calibration status via register 0x113 */
+			do
+			{
+				k_sleep(K_MSEC(10)); /* Small delay between status checks */
+
+				ret = mt6835_read_register(dev, MT6835_REG_CAL_STATUS, &status_reg);
+				if (ret < 0)
+				{
+					LOG_ERR("Failed to read calibration status register");
+					gpio_pin_set_dt(&config->gpio_cal_en, 0);
+					return ret;
+				}
+
+				/* Check calibration status bits [7:6] */
+				uint8_t cal_status = status_reg & MT6835_CAL_STATUS_MASK;
+
+				if (cal_status == MT6835_CAL_STATUS_NONE)
+				{
+					/* No calibration */
+					LOG_DBG("Calibration not started yet");
+				}
+				else if (cal_status == MT6835_CAL_STATUS_RUNNING)
+				{
+					/* Running auto calibration */
+					LOG_DBG("Auto-calibration in progress...");
+				}
+				else if (cal_status == MT6835_CAL_STATUS_FAILED)
+				{
+					/* Calibration failed */
+					LOG_ERR("Auto-calibration failed");
+					gpio_pin_set_dt(&config->gpio_cal_en, 0);
+					return -EIO;
+				}
+				else if (cal_status == MT6835_CAL_STATUS_SUCCESS)
+				{
+					/* Calibration successful */
+					LOG_INF("Auto-calibration completed successfully");
+					break;
+				}
+
+				timeout_count++;
+				if (timeout_count >= max_timeout)
+				{
+					LOG_ERR("Auto-calibration timeout after %d seconds", max_timeout / 100);
+					gpio_pin_set_dt(&config->gpio_cal_en, 0);
+					return -ETIMEDOUT;
+				}
+
+			} while (1);
+
+			/* Release CAL_EN pin after successful calibration */
+			ret = gpio_pin_set_dt(&config->gpio_cal_en, 0);
+			if (ret < 0)
+			{
+				LOG_ERR("Failed to release CAL_EN pin");
+				return ret;
+			}
+
+			/* Wait >6s before allowing other operations as per datasheet */
+			LOG_INF("Waiting 6 seconds before allowing other operations...");
+			k_sleep(K_SECONDS(6));
+
+			LOG_INF("Auto-calibration process completed");
+		}
+		break;
+
+	case MT6835_ATTR_OUTPUT_OPTIONS:
+		/* Set output options - configure Z_PHASE_UVW and PWM_NLC registers */
+		ret = mt6835_write_register(dev, MT6835_REG_Z_PHASE_UVW, val->val1 & 0xFF);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		ret = mt6835_write_register(dev, MT6835_REG_PWM_NLC, val->val2 & 0xFF);
+		break;
+
+	case MT6835_ATTR_AUTOCAL_FREQ:
+		/* Set auto-calibration rotation speed range - val->val1 should be 0-7 */
+		if (val->val1 < 0 || val->val1 > 7)
+		{
+			LOG_ERR("Invalid auto-calibration speed range value: %d", val->val1);
+			return -EINVAL;
+		}
+
+		/* Read current GPIO_AUTOCAL register */
+		ret = mt6835_read_register(dev, MT6835_REG_GPIO_AUTOCAL, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+
+		/* Update auto-calibration speed range bits (bits 2:0) */
+		reg_val = (reg_val & ~MT6835_AUTOCAL_FREQ_MASK) | (val->val1 & MT6835_AUTOCAL_FREQ_MASK);
+		ret = mt6835_write_register(dev, MT6835_REG_GPIO_AUTOCAL, reg_val);
+		break;
+
+	case MT6835_ATTR_ROTATION_DIRECTION:
+		/* Set rotation direction - val->val1 should be 0 (clockwise) or 1 (counter-clockwise) */
+		if (val->val1 < 0 || val->val1 > 1)
+		{
+			LOG_ERR("Invalid rotation direction value: %d", val->val1);
+			return -EINVAL;
+		}
+
+		/* Read current ROT_HYST register */
+		ret = mt6835_read_register(dev, MT6835_REG_ROT_HYST, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+
+		/* Update rotation direction bit (bit 7) */
+		if (val->val1 == 1)
+		{
+			reg_val |= MT6835_ROT_DIR_MASK; /* Set bit 7 for counter-clockwise */
+		}
+		else
+		{
+			reg_val &= ~MT6835_ROT_DIR_MASK; /* Clear bit 7 for clockwise */
+		}
+		ret = mt6835_write_register(dev, MT6835_REG_ROT_HYST, reg_val);
+		break;
+
+	case MT6835_ATTR_HYSTERESIS:
+		/* Set hysteresis - val->val1 should be 0-7 */
+		if (val->val1 < 0 || val->val1 > 7)
+		{
+			LOG_ERR("Invalid hysteresis value: %d", val->val1);
+			return -EINVAL;
+		}
+
+		/* Read current ROT_HYST register */
+		ret = mt6835_read_register(dev, MT6835_REG_ROT_HYST, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+
+		/* Update hysteresis bits (bits 2:0) */
+		reg_val = (reg_val & ~MT6835_HYST_MASK) | (val->val1 & MT6835_HYST_MASK);
+		ret = mt6835_write_register(dev, MT6835_REG_ROT_HYST, reg_val);
+		break;
+
+	default:
+		LOG_ERR("Unsupported sensor attribute: %d", attr);
+		return -ENOTSUP;
+	}
+
+	return ret;
+}
+
+static int mt6835_attr_get(const struct device *dev, enum sensor_channel chan,
+						   enum sensor_attribute attr, struct sensor_value *val)
+{
+	int ret = 0;
+	uint8_t reg_val;
+
+	switch ((int)attr)
+	{
+	case MT6835_ATTR_ABZ_RESOLUTION:
+		/* Get ABZ resolution setting */
+		ret = mt6835_read_register(dev, MT6835_REG_ABZ_RES1, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = reg_val & 0x03; /* Resolution bits 0-1 */
+		val->val2 = 0;
+		break;
+
+	case MT6835_ATTR_ZERO_POSITION:
+		/* Get zero position setting */
+		ret = mt6835_read_register(dev, MT6835_REG_ZERO_POS_H, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = reg_val;
+
+		ret = mt6835_read_register(dev, MT6835_REG_ZERO_POS_L, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val2 = reg_val;
+		break;
+
+	case MT6835_ATTR_OUTPUT_OPTIONS:
+		/* Get output options */
+		ret = mt6835_read_register(dev, MT6835_REG_Z_PHASE_UVW, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = reg_val;
+
+		ret = mt6835_read_register(dev, MT6835_REG_PWM_NLC, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val2 = reg_val;
+		break;
+
+	case MT6835_ATTR_AUTOCAL_FREQ:
+		/* Get auto-calibration rotation speed range setting */
+		ret = mt6835_read_register(dev, MT6835_REG_GPIO_AUTOCAL, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = reg_val & MT6835_AUTOCAL_FREQ_MASK; /* Auto-cal speed range bits 2:0 */
+		val->val2 = 0;
+		break;
+
+	case MT6835_ATTR_CAL_STATUS:
+		/* Get calibration status from register 0x113 */
+		ret = mt6835_read_register(dev, MT6835_REG_CAL_STATUS, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		/* Return calibration status bits [7:6] shifted to logical values (0-3) */
+		val->val1 = (reg_val & MT6835_CAL_STATUS_MASK) >> 6;
+		val->val2 = 0;
+		break;
+
+	case MT6835_ATTR_ROTATION_DIRECTION:
+		/* Get rotation direction setting */
+		ret = mt6835_read_register(dev, MT6835_REG_ROT_HYST, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = (reg_val & MT6835_ROT_DIR_MASK) ? 1 : 0; /* Check bit 7 */
+		val->val2 = 0;
+		break;
+
+	case MT6835_ATTR_HYSTERESIS:
+		/* Get hysteresis setting */
+		ret = mt6835_read_register(dev, MT6835_REG_ROT_HYST, &reg_val);
+		if (ret < 0)
+		{
+			return ret;
+		}
+		val->val1 = reg_val & MT6835_HYST_MASK; /* Hysteresis bits 2:0 */
+		val->val2 = 0;
+		break;
+
+	case SENSOR_ATTR_SAMPLING_FREQUENCY:
+		/* MT6835 doesn't have configurable sampling frequency - it's continuous */
+		val->val1 = 0;
+		val->val2 = 0;
+		break;
+
+	default:
+		LOG_ERR("Unsupported sensor attribute: %d", attr);
+		return -ENOTSUP;
+	}
+
+	return ret;
+}
+
+static int mt6835_sample_fetch(const struct device *dev, enum sensor_channel chan)
+{
+	struct mt6835_dev_data *dev_data = dev->data;
+	int retval;
+
+	/* Read the angle register */
+	retval = mt6835_read_angle(dev, &dev_data->position);
+	if (retval < 0)
+	{
+		LOG_ERR("Failed to read angle register");
+		return retval;
+	}
+
+	return 0;
+}
+
+static int mt6835_channel_get(const struct device *dev, enum sensor_channel chan,
+							  struct sensor_value *val)
+{
+	struct mt6835_dev_data *dev_data = dev->data;
+
+	switch (chan)
+	{
+	case SENSOR_CHAN_ROTATION:
+		val->val1 = ((int32_t)dev_data->position * MT6835_FULL_ANGLE) /
+					MT6835_PULSES_PER_REV;
+
+		val->val2 = (((int64_t)dev_data->position * MT6835_FULL_ANGLE * MT6835_MILLION_UNIT) /
+					 MT6835_PULSES_PER_REV) %
+					MT6835_MILLION_UNIT;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+
+static int mt6835_initialize(const struct device *dev)
+{
+	const struct mt6835_dev_config *config = dev->config;
+	struct mt6835_dev_data *const dev_data = dev->data;
+	int result;
+
+	if (!spi_is_ready_dt(&config->bus))
+	{
+		LOG_ERR("SPI dev %s not ready", config->bus.bus->name);
+		return -ENODEV;
+	}
+
+	result = gpio_pin_configure_dt(&config->gpio_cal_en, GPIO_OUTPUT_INACTIVE);
+	if (result != 0)
+	{
+		LOG_ERR("%s: failed to initialize GPIO for CAL_EN", dev->name);
+		return result;
+	}
+
+	dev_data->position = 0;
+
+	LOG_INF("Device %s: initialized", dev->name);
+
+	return 0;
+}
+
+static DEVICE_API(sensor, mt6835_driver_api) = {
+	.sample_fetch = mt6835_sample_fetch,
+	.channel_get = mt6835_channel_get,
+	.attr_set = mt6835_attr_set,
+	.attr_get = mt6835_attr_get,
+};
+
+#define MT6835_INIT(inst)                                                  \
+	static struct mt6835_dev_data mt6835_data##inst;                       \
+	static const struct mt6835_dev_config mt6835_cfg##inst = {             \
+		.bus = SPI_DT_SPEC_INST_GET(inst,                                  \
+									SPI_WORD_SET(8) |                      \
+										SPI_MODE_CPOL |                    \
+										SPI_MODE_CPHA,                     \
+									0),                                    \
+		.gpio_cal_en = GPIO_DT_SPEC_INST_GET(inst, cal_en_gpios),          \
+	};                                                                     \
+                                                                           \
+	SENSOR_DEVICE_DT_INST_DEFINE(inst, mt6835_initialize, NULL,            \
+								 &mt6835_data##inst, &mt6835_cfg##inst,    \
+								 POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, \
+								 &mt6835_driver_api);
+
+DT_INST_FOREACH_STATUS_OKAY(MT6835_INIT)

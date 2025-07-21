@@ -1,0 +1,12 @@
+# MT6835 magnetic encoder configuration option
+
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config MAGNTEK_MT6835
+	bool "MT6835 Magnetic Encoder"
+	default y
+	depends on DT_HAS_MAGNTEK_MT6835_ENABLED
+	select SPI
+	help
+	  Enable driver for MT6835 magnetic encoder.
