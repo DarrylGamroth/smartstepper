@@ -1,0 +1,312 @@
+/*
+ * Copyright (c) 2025 Darryl Gamroth
+ * Based on upstream STM32 SPI driver header pattern
+ * Clean RTIO-first implementation for STM32 SPI
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef ZEPHYR_DRIVERS_SPI_SPI_LL_STM32_H_
+#define ZEPHYR_DRIVERS_SPI_SPI_LL_STM32_H_
+
+#include "spi_context.h"
+#include <zephyr/drivers/spi/rtio.h>
+
+typedef void (*irq_config_func_t)(const struct device *port);
+
+/* This symbol takes the value 1 if one of the device instances */
+/* is configured in dts with a domain clock */
+#if STM32_DT_INST_DEV_DOMAIN_CLOCK_SUPPORT
+#define STM32_SPI_DOMAIN_CLOCK_SUPPORT 1
+#else
+#define STM32_SPI_DOMAIN_CLOCK_SUPPORT 0
+#endif
+
+/* STM32-specific DMA structures */
+#ifdef CONFIG_SPI_STM32_DMA
+struct spi_stm32_dma_stream {
+	const struct device *dma_dev;
+	uint32_t channel;
+	struct dma_config dma_cfg;
+	struct dma_block_config dma_blk_cfg;
+	uint8_t priority;
+	bool src_addr_increment;
+	bool dst_addr_increment;
+	int fifo_threshold;
+};
+
+#define SPI_STM32_DMA_ERROR_FLAG	0x01
+#define SPI_STM32_DMA_RX_DONE_FLAG	0x02
+#define SPI_STM32_DMA_TX_DONE_FLAG	0x04
+#define SPI_STM32_DMA_DONE_FLAG	\
+	(SPI_STM32_DMA_RX_DONE_FLAG | SPI_STM32_DMA_TX_DONE_FLAG)
+#endif
+
+/* STM32 SPI configuration structure */
+struct spi_stm32_config {
+	SPI_TypeDef *spi;
+	const struct pinctrl_dev_config *pcfg;
+	const struct stm32_pclken *pclken;
+	size_t pclk_len;
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+	irq_config_func_t irq_config_func;
+#endif
+	bool fifo_enabled;
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	int midi_clocks;
+	int mssi_clocks;
+#endif
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
+	bool use_subghzspi_nss;
+#endif
+#ifdef CONFIG_SPI_STM32_DMA
+	struct stm32_dma_spec dma_tx;
+	struct stm32_dma_spec dma_rx;
+#endif
+};
+
+/* STM32 SPI data structure - pure RTIO */
+struct spi_stm32_data {
+	struct spi_rtio *rtio_ctx;		/* Single RTIO context */
+	
+	/* STM32-specific state */
+	volatile int error_status;
+	bool pm_policy_state_on;
+	
+	/* For sync API compatibility (handled by spi_rtio.c) */
+	struct spi_context ctx;
+	
+	/* DMA state */
+#ifdef CONFIG_SPI_STM32_DMA
+	struct k_sem status_sem;
+	volatile uint32_t status_flags;
+	struct spi_stm32_dma_stream dma_rx;
+	struct spi_stm32_dma_stream dma_tx;
+#endif
+	
+	/* Current transaction state for polling mode */
+	const uint8_t *tx_buf;
+	uint8_t *rx_buf;
+	size_t tx_len;
+	size_t rx_len;
+	size_t tx_count;
+	size_t rx_count;
+};
+
+/* STM32-specific helper functions following upstream ll_func pattern */
+static inline uint32_t ll_func_tx_is_not_full(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	return LL_SPI_IsActiveFlag_TXP(spi);
+#else
+	return LL_SPI_IsActiveFlag_TXE(spi);
+#endif
+}
+
+static inline uint32_t ll_func_rx_is_not_empty(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	return LL_SPI_IsActiveFlag_RXP(spi);
+#else
+	return LL_SPI_IsActiveFlag_RXNE(spi);
+#endif
+}
+
+static inline void ll_func_enable_int_tx_empty(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_EnableIT_TXP(spi);
+#else
+	LL_SPI_EnableIT_TXE(spi);
+#endif
+}
+
+static inline void ll_func_enable_int_rx_not_empty(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_EnableIT_RXP(spi);
+#else
+	LL_SPI_EnableIT_RXNE(spi);
+#endif
+}
+
+static inline void ll_func_enable_int_errors(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_EnableIT_UDR(spi);
+	LL_SPI_EnableIT_OVR(spi);
+	LL_SPI_EnableIT_CRCERR(spi);
+	LL_SPI_EnableIT_FRE(spi);
+	LL_SPI_EnableIT_MODF(spi);
+#else
+	LL_SPI_EnableIT_ERR(spi);
+#endif
+}
+
+static inline void ll_func_disable_int_tx_empty(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_DisableIT_TXP(spi);
+#else
+	LL_SPI_DisableIT_TXE(spi);
+#endif
+}
+
+static inline void ll_func_disable_int_rx_not_empty(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_DisableIT_RXP(spi);
+#else
+	LL_SPI_DisableIT_RXNE(spi);
+#endif
+}
+
+static inline void ll_func_disable_int_errors(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_DisableIT_UDR(spi);
+	LL_SPI_DisableIT_OVR(spi);
+	LL_SPI_DisableIT_CRCERR(spi);
+	LL_SPI_DisableIT_FRE(spi);
+	LL_SPI_DisableIT_MODF(spi);
+#else
+	LL_SPI_DisableIT_ERR(spi);
+#endif
+}
+
+static inline bool ll_func_are_int_disabled(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	bool enabled = LL_SPI_IsEnabledIT_TXP(spi) || LL_SPI_IsEnabledIT_RXP(spi) ||
+		       LL_SPI_IsEnabledIT_UDR(spi) || LL_SPI_IsEnabledIT_OVR(spi) ||
+		       LL_SPI_IsEnabledIT_CRCERR(spi) || LL_SPI_IsEnabledIT_FRE(spi) ||
+		       LL_SPI_IsEnabledIT_MODF(spi);
+#else
+	bool enabled = LL_SPI_IsEnabledIT_ERR(spi) || LL_SPI_IsEnabledIT_TXE(spi) || 
+		       LL_SPI_IsEnabledIT_RXNE(spi);
+#endif
+	return !enabled;
+}
+
+static inline void ll_func_enable_int_eot(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_EnableIT_EOT(spi);
+#else
+	ARG_UNUSED(spi);
+#endif
+}
+
+static inline void ll_func_disable_int_eot(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_DisableIT_EOT(spi);
+#else
+	ARG_UNUSED(spi);
+#endif
+}
+
+static inline uint32_t ll_func_spi_is_busy(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (LL_SPI_GetTransferSize(spi) == 0) {
+		return LL_SPI_IsActiveFlag_TXC(spi) == 0;
+	} else {
+		return LL_SPI_IsActiveFlag_EOT(spi) == 0;
+	}
+#else
+	return LL_SPI_IsActiveFlag_BSY(spi);
+#endif
+}
+
+/* STM32H7 FIFO support helpers */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+static inline bool ll_func_has_fifo(const struct spi_stm32_config *cfg)
+{
+	return cfg->fifo_enabled;
+}
+
+static inline void ll_func_set_fifo_threshold_8bit(SPI_TypeDef *spi)
+{
+	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
+}
+
+static inline void ll_func_set_fifo_threshold_16bit(SPI_TypeDef *spi)
+{
+	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_02DATA);
+}
+
+static inline void ll_func_configure_fifo(SPI_TypeDef *spi, const struct spi_stm32_config *cfg)
+{
+	if (cfg->fifo_enabled) {
+		/* Configure FIFO thresholds for H7 */
+		LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
+	}
+}
+
+static inline uint32_t ll_func_get_fifo_size(const struct spi_stm32_config *cfg)
+{
+	return cfg->fifo_enabled ? 8 : 1; /* H7 has 8-level FIFO */
+}
+#else
+static inline bool ll_func_has_fifo(const struct spi_stm32_config *cfg)
+{
+	ARG_UNUSED(cfg);
+	return false;
+}
+
+static inline void ll_func_set_fifo_threshold_8bit(SPI_TypeDef *spi)
+{
+	ARG_UNUSED(spi);
+}
+
+static inline void ll_func_set_fifo_threshold_16bit(SPI_TypeDef *spi)
+{
+	ARG_UNUSED(spi);
+}
+
+static inline void ll_func_configure_fifo(SPI_TypeDef *spi, const struct spi_stm32_config *cfg)
+{
+	ARG_UNUSED(spi);
+	ARG_UNUSED(cfg);
+}
+
+static inline uint32_t ll_func_get_fifo_size(const struct spi_stm32_config *cfg)
+{
+	ARG_UNUSED(cfg);
+	return 1;
+}
+#endif
+
+/* STM32 SPI busy flag errata workaround */
+static inline bool ll_func_transfer_ongoing(SPI_TypeDef *spi)
+{
+#ifdef CONFIG_SPI_STM32_ERRATA_BUSY
+	/* 
+	 * Some STM32 chips have errata where busy flag is unreliable.
+	 * Use TX/RX buffer status instead for these cases.
+	 */
+	return (ll_func_tx_is_not_full(spi) == false) || 
+	       (ll_func_rx_is_not_empty(spi) == true);
+#else
+	return ll_func_spi_is_busy(spi);
+#endif
+}
+
+static inline void ll_func_disable_spi(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_fifo)
+	/* Flush RX buffer */
+	while (ll_func_rx_is_not_empty(spi)) {
+		(void) LL_SPI_ReceiveData8(spi);
+	}
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_fifo) */
+
+	LL_SPI_Disable(spi);
+
+	while (LL_SPI_IsEnabled(spi)) {
+		/* NOP */
+	}
+}
+
+#endif	/* ZEPHYR_DRIVERS_SPI_SPI_LL_STM32_H_ */

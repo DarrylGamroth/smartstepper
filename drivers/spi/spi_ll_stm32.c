@@ -39,7 +39,7 @@
 LOG_MODULE_REGISTER(spi_ll_stm32, CONFIG_SPI_LOG_LEVEL);
 
 /* STM32-specific compatibility includes for device tree variants */
-#include "spi_context.h"
+#include "spi_ll_stm32.h"
 
 /* STM32 SPI error mask - depends on SoC family */
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
@@ -57,141 +57,137 @@ LOG_MODULE_REGISTER(spi_ll_stm32, CONFIG_SPI_LOG_LEVEL);
 #endif
 #endif
 
-/* Domain clock support detection */
-#if STM32_DT_INST_DEV_DOMAIN_CLOCK_SUPPORT
-#define STM32_SPI_DOMAIN_CLOCK_SUPPORT 1
-#else
-#define STM32_SPI_DOMAIN_CLOCK_SUPPORT 0
-#endif
-
-/* STM32-specific DMA structures */
-#ifdef CONFIG_SPI_STM32_DMA
-struct spi_stm32_dma_stream {
-	const struct device *dma_dev;
-	uint32_t channel;
-	struct dma_config dma_cfg;
-	struct dma_block_config dma_blk_cfg;
-	uint8_t priority;
-	bool src_addr_increment;
-	bool dst_addr_increment;
-	int fifo_threshold;
-};
-
-#define SPI_STM32_DMA_ERROR_FLAG	0x01
-#define SPI_STM32_DMA_RX_DONE_FLAG	0x02
-#define SPI_STM32_DMA_TX_DONE_FLAG	0x04
-#define SPI_STM32_DMA_DONE_FLAG	\
-	(SPI_STM32_DMA_RX_DONE_FLAG | SPI_STM32_DMA_TX_DONE_FLAG)
-#endif
-
-/* STM32 SPI configuration structure */
-struct spi_stm32_config {
-	SPI_TypeDef *spi;
-	const struct pinctrl_dev_config *pcfg;
-	const struct stm32_pclken *pclken;
-	size_t pclk_len;
-	void (*irq_config_func)(const struct device *dev);
-	bool fifo_enabled;
-	
-	/* STM32-specific features */
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	int midi_clocks;
-	int mssi_clocks;
-#endif
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
-	bool use_subghzspi_nss;
-#endif
-#ifdef CONFIG_SPI_STM32_DMA
-	struct stm32_dma_spec dma_tx;
-	struct stm32_dma_spec dma_rx;
-#endif
-};
-
-/* STM32 SPI data structure - pure RTIO */
-struct spi_stm32_data {
-	struct spi_rtio *rtio_ctx;		/* Single RTIO context */
-	
-	/* STM32-specific state */
-	volatile int error_status;
-	bool pm_policy_state_on;
-	
-	/* For sync API compatibility (handled by spi_rtio.c) */
-	struct spi_context ctx;
-	
-	/* DMA state */
-#ifdef CONFIG_SPI_STM32_DMA
-	struct k_sem status_sem;
-	volatile uint32_t status_flags;
-	struct spi_stm32_dma_stream dma_rx;
-	struct spi_stm32_dma_stream dma_tx;
-#endif
-	
-	/* Current transaction state for polling mode */
-	const uint8_t *tx_buf;
-	uint8_t *rx_buf;
-	size_t tx_len;
-	size_t rx_len;
-	size_t tx_count;
-	size_t rx_count;
-};
-
 /* Forward declarations */
 static void spi_stm32_iodev_complete(const struct device *dev, int status);
 static int spi_stm32_configure(const struct device *dev, const struct spi_config *config);
 
-/* STM32-specific helper functions */
-static inline uint32_t spi_stm32_tx_is_not_full(SPI_TypeDef *spi)
+static inline bool spi_stm32_transmit_buffer(const struct device *dev)
 {
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	return LL_SPI_IsActiveFlag_TXP(spi);
-#else
-	return LL_SPI_IsActiveFlag_TXE(spi);
-#endif
+	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
+	
+	if (data->tx_buf == NULL) {
+		/* RX-only: send dummy data if needed */
+		size_t tx_target = data->rx_len;
+		if (data->tx_count < tx_target) {
+			if (word_size == 16) {
+				LL_SPI_TransmitData16(spi, 0xFFFF);
+				data->tx_count += 2;
+			} else {
+				LL_SPI_TransmitData8(spi, 0xFF);
+				data->tx_count++;
+			}
+		}
+		return data->tx_count >= tx_target;
+	} else {
+		/* TX operation: send real data */
+		if (data->tx_count < data->tx_len) {
+			if (word_size == 16) {
+				uint16_t tx_data = ((uint16_t *)data->tx_buf)[data->tx_count / 2];
+				LL_SPI_TransmitData16(spi, tx_data);
+				data->tx_count += 2;
+			} else {
+				LL_SPI_TransmitData8(spi, data->tx_buf[data->tx_count]);
+				data->tx_count++;
+			}
+		}
+		return data->tx_count >= data->tx_len;
+	}
 }
 
-static inline uint32_t spi_stm32_rx_is_not_empty(SPI_TypeDef *spi)
+static inline bool spi_stm32_receive_buffer(const struct device *dev)
 {
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	return LL_SPI_IsActiveFlag_RXP(spi);
-#else
-	return LL_SPI_IsActiveFlag_RXNE(spi);
-#endif
+	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
+	
+	if (data->rx_buf != NULL && data->rx_count < data->rx_len) {
+		/* Store received data */
+		if (word_size == 16) {
+			uint16_t rx_data = LL_SPI_ReceiveData16(spi);
+			((uint16_t *)data->rx_buf)[data->rx_count / 2] = rx_data;
+			data->rx_count += 2;
+		} else {
+			uint8_t rx_data = LL_SPI_ReceiveData8(spi);
+			data->rx_buf[data->rx_count] = rx_data;
+			data->rx_count++;
+		}
+	} else {
+		/* Discard received data (TX-only or buffer full) */
+		if (word_size == 16) {
+			(void)LL_SPI_ReceiveData16(spi);
+		} else {
+			(void)LL_SPI_ReceiveData8(spi);
+		}
+	}
+	
+	/* For TX-only operations, RX is always "complete" since we just discard data */
+	if (data->rx_buf == NULL) {
+		return true; /* TX-only: RX is always complete */
+	}
+	
+	/* For RX operations, check if we've received all expected data */
+	return data->rx_count >= data->rx_len;
 }
 
-static inline void spi_stm32_enable_int_tx_empty(SPI_TypeDef *spi)
+static inline void spi_stm32_discard_rx_data(const struct device *dev)
 {
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	LL_SPI_EnableIT_TXP(spi);
-#else
-	LL_SPI_EnableIT_TXE(spi);
-#endif
+	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
+	
+	while (ll_func_rx_is_not_empty(spi)) {
+		if (word_size == 16) {
+			(void)LL_SPI_ReceiveData16(spi);
+		} else {
+			(void)LL_SPI_ReceiveData8(spi);
+		}
+	}
 }
 
-static inline void spi_stm32_enable_int_rx_not_empty(SPI_TypeDef *spi)
+/* CS control function - matches upstream driver pattern */
+static void spi_stm32_cs_control(const struct device *dev, bool on)
 {
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	LL_SPI_EnableIT_RXP(spi);
-#else
-	LL_SPI_EnableIT_RXNE(spi);
-#endif
+	struct spi_stm32_data *data = dev->data;
+
+	spi_context_cs_control(&data->ctx, on);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
+	const struct spi_stm32_config *cfg = dev->config;
+
+	if (cfg->use_subghzspi_nss) {
+		if (on) {
+			LL_PWR_SelectSUBGHZSPI_NSS();
+		} else {
+			LL_PWR_UnselectSUBGHZSPI_NSS();
+		}
+	}
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz) */
 }
 
-static inline void spi_stm32_disable_int_tx_empty(SPI_TypeDef *spi)
+static int spi_stm32_wait_transfer_complete(SPI_TypeDef *spi)
 {
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	LL_SPI_DisableIT_TXP(spi);
-#else
-	LL_SPI_DisableIT_TXE(spi);
-#endif
-}
-
-static inline void spi_stm32_disable_int_rx_not_empty(SPI_TypeDef *spi)
-{
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	LL_SPI_DisableIT_RXP(spi);
-#else
-	LL_SPI_DisableIT_RXNE(spi);
-#endif
+	uint32_t timeout = 100000;
+	
+	/* Wait for transfer to complete */
+	while (ll_func_transfer_ongoing(spi) && timeout--) {
+		/* Small delay to avoid busy polling */
+		k_busy_wait(1);
+	}
+	
+	if (timeout == 0) {
+		LOG_ERR("SPI transfer timeout - busy flag stuck");
+		return -ETIMEDOUT;
+	}
+	
+	return 0;
 }
 
 /* Power management helpers */
@@ -227,7 +223,6 @@ static void spi_stm32_pm_policy_state_lock_put(const struct device *dev)
 	}
 }
 
-/* Clock control helpers */
 static int spi_stm32_clock_enable(const struct device *dev)
 {
 	const struct spi_stm32_config *cfg = dev->config;
@@ -274,7 +269,6 @@ static int spi_stm32_clock_disable(const struct device *dev)
 	return 0;
 }
 
-/* Basic SPI configuration function */
 static int spi_stm32_configure(const struct device *dev, const struct spi_config *config)
 {
 	const struct spi_stm32_config *cfg = dev->config;
@@ -291,18 +285,61 @@ static int spi_stm32_configure(const struct device *dev, const struct spi_config
 	};	
 	SPI_TypeDef *spi = cfg->spi;
 	LL_SPI_InitTypeDef spi_init;
-	uint32_t clock;
-	int br;	
 	int ret;
 
-	if (SPI_OP_MODE_GET(config->operation) & SPI_OP_MODE_SLAVE) {
-		LOG_ERR("Slave mode not supported yet");
-		return -ENOTSUP;
+	if (spi_context_configured(&data->ctx, config)) {
+		/* This configuration is already in use */
+		return 0;
 	}
 
-	/* Configure SPI for master mode */
 	LL_SPI_StructInit(&spi_init);
-	spi_init.Mode = LL_SPI_MODE_MASTER;
+	
+	if (SPI_OP_MODE_GET(config->operation) & SPI_OP_MODE_SLAVE) {
+		spi_init.Mode = LL_SPI_MODE_SLAVE;
+		
+		/* In slave mode, clock frequency is determined by master */
+		/* Use a default prescaler value */
+		spi_init.BaudRate = LL_SPI_BAUDRATEPRESCALER_DIV8;
+	} else {
+		spi_init.Mode = LL_SPI_MODE_MASTER;
+		
+		/* Master mode: calculate prescaler for desired frequency */
+		/* Get SPI clock source */
+		uint32_t clock;
+		int br;
+		
+		if (IS_ENABLED(STM32_SPI_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
+			if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+						   (clock_control_subsys_t) &cfg->pclken[1], &clock) < 0) {
+				LOG_ERR("Failed call clock_control_get_rate(pclk[1])");
+				return -EIO;
+			}
+		} else {
+			if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+						   (clock_control_subsys_t) &cfg->pclken[0], &clock) < 0) {
+				LOG_ERR("Failed call clock_control_get_rate(pclk[0])");
+				return -EIO;
+			}
+		}	
+
+		/* Configure baudrate */
+		for (br = 1 ; br <= ARRAY_SIZE(scaler) ; ++br) {
+			uint32_t clk = clock >> br;
+
+			if (clk <= config->frequency) {
+				break;
+			}
+		}
+
+		if (br > ARRAY_SIZE(scaler)) {
+			LOG_ERR("Unsupported frequency %uHz, max %uHz, min %uHz",
+				    config->frequency,
+				    clock >> 1,
+				    clock >> ARRAY_SIZE(scaler));
+			return -EINVAL;
+		}	
+		spi_init.BaudRate = scaler[br - 1];
+	}
 	
 	/* Configure clock polarity and phase */
 	if (SPI_MODE_GET(config->operation) & SPI_MODE_CPOL) {
@@ -335,48 +372,20 @@ static int spi_stm32_configure(const struct device *dev, const struct spi_config
 		spi_init.BitOrder = LL_SPI_MSB_FIRST;
 	}
 
-	/* Configure NSS (Chip Select) */
-	if (config->operation & SPI_CS_ACTIVE_HIGH) {
-		/* For now, we'll handle this with GPIO CS control */
+	if (spi_cs_is_gpio(config) || !IS_ENABLED(CONFIG_SPI_STM32_USE_HW_SS)) {
+		/* Use software NSS management (GPIO CS) */
 		spi_init.NSS = LL_SPI_NSS_SOFT;
 	} else {
-		spi_init.NSS = LL_SPI_NSS_SOFT;
+		/* Use hardware NSS control */
+		if (config->operation & SPI_CS_ACTIVE_HIGH) {
+			LOG_ERR("Hardware SS does not support active high CS");
+			return -ENOTSUP;
+		}
+		spi_init.NSS = LL_SPI_NSS_HARD_OUTPUT;
 	}
-
-	if (IS_ENABLED(STM32_SPI_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
-		if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-					   (clock_control_subsys_t) &cfg->pclken[1], &clock) < 0) {
-			LOG_ERR("Failed call clock_control_get_rate(pclk[1])");
-			return -EIO;
-		}
-	} else {
-		if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-					   (clock_control_subsys_t) &cfg->pclken[0], &clock) < 0) {
-			LOG_ERR("Failed call clock_control_get_rate(pclk[0])");
-			return -EIO;
-		}
-	}	
-
-	/* Configure baudrate */
-	for (br = 1 ; br <= ARRAY_SIZE(scaler) ; ++br) {
-		uint32_t clk = clock >> br;
-
-		if (clk <= config->frequency) {
-			break;
-		}
-	}
-
-	if (br > ARRAY_SIZE(scaler)) {
-		LOG_ERR("Unsupported frequency %uHz, max %uHz, min %uHz",
-			    config->frequency,
-			    clock >> 1,
-			    clock >> ARRAY_SIZE(scaler));
-		return -EINVAL;
-	}	
-	spi_init.BaudRate = scaler[br - 1];
 
 	/* Disable SPI before configuration */
-	LL_SPI_Disable(spi);
+	ll_func_disable_spi(spi);
 
 	/* Apply configuration */
 	ret = LL_SPI_Init(spi, &spi_init);
@@ -385,69 +394,145 @@ static int spi_stm32_configure(const struct device *dev, const struct spi_config
 		return -EINVAL;
 	}
 
-	/* Store current configuration for spi_context compatibility */
+	ll_func_configure_fifo(spi, cfg);
+
 	data->ctx.config = config;
 
 	return 0;
 }
 
-/* Polling mode transceive function - Phase 1A implementation */
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+static int spi_stm32_transceive_interrupt(const struct device *dev)
+{
+	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
+
+	/* Determine transfer type and configure accordingly */
+	if (data->tx_buf && data->rx_buf) {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_FULL_DUPLEX);
+	} else if (data->tx_buf) {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_TX);
+	} else {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_RX);
+	}
+
+	/* Reset counters for interrupt mode */
+	data->tx_count = 0;
+	data->rx_count = 0;
+	data->error_status = 0;
+
+	/* Start transmission with first byte/word */
+	if (data->tx_buf && data->tx_len > 0) {
+		/* Send real data for TX or TXRX operations */
+		if (word_size == 16) {
+			uint16_t tx_data = ((uint16_t *)data->tx_buf)[0];
+			LL_SPI_TransmitData16(spi, tx_data);
+			data->tx_count = 2;
+		} else {
+			LL_SPI_TransmitData8(spi, data->tx_buf[0]);
+			data->tx_count = 1;
+		}
+	} else if (data->rx_buf) {
+		/* Send dummy data for RX-only operations to generate clock */
+		if (word_size == 16) {
+			LL_SPI_TransmitData16(spi, 0xFFFF);
+			data->tx_count = 2;
+		} else {
+			LL_SPI_TransmitData8(spi, 0xFF);
+			data->tx_count = 1;
+		}
+	}
+
+	/* Enable interrupts */
+	ll_func_enable_int_tx_empty(spi);
+	ll_func_enable_int_rx_not_empty(spi);
+	ll_func_enable_int_errors(spi);
+
+	return 0; /* Non-blocking - completion handled in ISR */
+}
+
+#endif /* CONFIG_SPI_STM32_INTERRUPT */
+
 static int spi_stm32_transceive_polling(const struct device *dev)
 {
 	const struct spi_stm32_config *cfg = dev->config;
 	struct spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
-	size_t tx_count = 0, rx_count = 0;
-	uint32_t timeout = 100000; /* Simple timeout for polling */
+	uint32_t timeout = 100000;
+	const struct spi_config *config = data->ctx.config;
 
-	LOG_DBG("SPI transceive polling: tx_len=%zu, rx_len=%zu", data->tx_len, data->rx_len);
+	/* Determine transfer type and configure accordingly */
+	if (data->tx_buf && data->rx_buf) {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_FULL_DUPLEX);
+	} else if (data->tx_buf) {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_TX);
+	} else {
+		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_RX);
+	}
 
-	/* Simplified polling transceive - will be enhanced in later phases */
-	while ((tx_count < data->tx_len) || (rx_count < data->rx_len)) {
-		/* Send data if TX buffer available and SPI ready */
-		if ((tx_count < data->tx_len) && spi_stm32_tx_is_not_full(spi)) {
-			if (data->tx_buf) {
-				LL_SPI_TransmitData8(spi, data->tx_buf[tx_count]);
-			} else {
-				LL_SPI_TransmitData8(spi, 0xFF); /* Dummy data */
+	/* Reset counters for polling mode */
+	data->tx_count = 0;
+	data->rx_count = 0;
+
+	/* Main transfer loop */
+	while ((data->tx_count < (data->tx_buf ? data->tx_len : data->rx_len)) || 
+	       (data->rx_count < (data->rx_buf ? data->rx_len : 0))) {
+		
+		/* Check for SPI errors - Phase 2 enhanced error handling */
+		uint32_t sr = LL_SPI_ReadReg(spi, SR);
+		if (sr & SPI_STM32_ERR_MSK) {
+			LOG_ERR("SPI error detected: SR=0x%08x", sr);
+			
+			/* Detailed error logging */
+			if (sr & LL_SPI_SR_OVR) {
+				LOG_ERR("SPI overrun error");
 			}
-			tx_count++;
+			if (sr & LL_SPI_SR_MODF) {
+				LOG_ERR("SPI mode fault error");
+			}
+			if (sr & LL_SPI_SR_CRCERR) {
+				LOG_ERR("SPI CRC error");
+			}
+			
+			/* Clear error flags and attempt recovery */
+			LL_SPI_ClearFlag_OVR(spi);
+			LL_SPI_ClearFlag_MODF(spi);
+			LL_SPI_ClearFlag_CRCERR(spi);
+			
+			return -EIO;
 		}
 
-		/* Receive data if RX buffer available and data ready */
-		if ((rx_count < data->rx_len) && spi_stm32_rx_is_not_empty(spi)) {
-			uint8_t rx_data = LL_SPI_ReceiveData8(spi);
-			if (data->rx_buf) {
-				data->rx_buf[rx_count] = rx_data;
-			}
-			rx_count++;
+		/* Handle TX: Send data when TX buffer ready */
+		size_t tx_target = data->tx_buf ? data->tx_len : data->rx_len;
+		if ((data->tx_count < tx_target) && ll_func_tx_is_not_full(spi)) {
+			spi_stm32_transmit_buffer(dev);
 		}
 
-		/* Simple timeout check */
+		/* Handle RX: Receive data when available */
+		if (ll_func_rx_is_not_empty(spi)) {
+			spi_stm32_receive_buffer(dev);
+		}
+
 		if (--timeout == 0) {
-			LOG_ERR("SPI transaction timeout");
+			LOG_ERR("SPI polling timeout");
 			return -ETIMEDOUT;
 		}
 	}
 
-	/* Wait for SPI to become idle */
-	timeout = 10000;
-	while (LL_SPI_IsActiveFlag_BSY(spi)) {
-		if (--timeout == 0) {
-			LOG_ERR("SPI busy timeout");
-			return -ETIMEDOUT;
-		}
-		k_busy_wait(1);
+	int ret = spi_stm32_wait_transfer_complete(spi);
+	if (ret != 0) {
+		return ret;
 	}
+	
+	/* Discard any remaining RX data */
+	spi_stm32_discard_rx_data(dev);
 
-	data->tx_count = tx_count;
-	data->rx_count = rx_count;
-
-	LOG_DBG("SPI transceive complete: tx_count=%zu, rx_count=%zu", tx_count, rx_count);
 	return 0;
 }
 
-/* RTIO preparation function */
 static void spi_stm32_iodev_prepare_start(const struct device *dev)
 {
 	const struct spi_stm32_config *cfg = dev->config;
@@ -457,9 +542,8 @@ static void spi_stm32_iodev_prepare_start(const struct device *dev)
 	struct spi_config *spi_config = &spi_dt_spec->config;
 	int ret;
 
-	LOG_DBG("RTIO prepare start");
+	spi_stm32_pm_policy_state_lock_get(dev);
 
-	/* Configure SPI for this transaction */
 	ret = spi_stm32_configure(dev, spi_config);
 	if (ret) {
 		LOG_ERR("SPI configuration failed: %d", ret);
@@ -467,19 +551,11 @@ static void spi_stm32_iodev_prepare_start(const struct device *dev)
 		return;
 	}
 
-	/* Handle CS control */
-	if (spi_cs_is_gpio(spi_config)) {
-		spi_context_cs_control(&data->ctx, true);
-	}
+	spi_stm32_cs_control(dev, true);
 
-	/* Enable SPI for this transaction */
 	LL_SPI_Enable(cfg->spi);
-
-	/* Power management */
-	spi_stm32_pm_policy_state_lock_get(dev);
 }
 
-/* RTIO operation start function */
 static void spi_stm32_iodev_start(const struct device *dev)
 {
 	struct spi_stm32_data *data = dev->data;
@@ -487,48 +563,81 @@ static void spi_stm32_iodev_start(const struct device *dev)
 	struct rtio_sqe *sqe = &rtio_ctx->txn_curr->sqe;
 	int ret = 0;
 
-	LOG_DBG("RTIO operation start: op=%d", sqe->op);
-
-	/* Extract buffer information from RTIO operation */
+	/* Extract buffer information and execute appropriate operation */
 	switch (sqe->op) {
 	case RTIO_OP_RX:
+		/* RX-only: receive data while sending dummy bytes */
 		data->tx_buf = NULL;
-		data->tx_len = sqe->rx.buf_len;  /* Send dummy data */
+		data->tx_len = 0;
 		data->rx_buf = sqe->rx.buf;
 		data->rx_len = sqe->rx.buf_len;
+		
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+		ret = spi_stm32_transceive_interrupt(dev);
+#else
+		ret = spi_stm32_transceive_polling(dev);
+#endif
 		break;
+		
 	case RTIO_OP_TX:
+		/* TX-only: send data while discarding received bytes */
 		data->tx_buf = (const uint8_t *)sqe->tx.buf;
 		data->tx_len = sqe->tx.buf_len;
 		data->rx_buf = NULL;
 		data->rx_len = 0;
+		
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+		ret = spi_stm32_transceive_interrupt(dev);
+#else
+		ret = spi_stm32_transceive_polling(dev);
+#endif
 		break;
+		
 	case RTIO_OP_TINY_TX:
+		/* Small TX-only: send data while discarding received bytes */
 		data->tx_buf = (const uint8_t *)sqe->tiny_tx.buf;
 		data->tx_len = sqe->tiny_tx.buf_len;
 		data->rx_buf = NULL;
 		data->rx_len = 0;
+		
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+		ret = spi_stm32_transceive_interrupt(dev);
+#else
+		ret = spi_stm32_transceive_polling(dev);
+#endif
 		break;
+		
 	case RTIO_OP_TXRX:
+		/* Full-duplex: simultaneous send and receive */
 		data->tx_buf = (const uint8_t *)sqe->txrx.tx_buf;
 		data->tx_len = sqe->txrx.buf_len;
 		data->rx_buf = sqe->txrx.rx_buf;
 		data->rx_len = sqe->txrx.buf_len;
+		
+#ifdef CONFIG_SPI_STM32_INTERRUPT
+		ret = spi_stm32_transceive_interrupt(dev);
+#else
+		ret = spi_stm32_transceive_polling(dev);
+#endif
 		break;
+		
 	default:
 		LOG_ERR("Unsupported RTIO operation: %d", sqe->op);
-		spi_stm32_iodev_complete(dev, -EINVAL);
-		return;
+		ret = -EINVAL;
+		break;
 	}
 
-	/* Execute polling transceive for Phase 1A */
-	ret = spi_stm32_transceive_polling(dev);
-	
-	/* Complete the operation */
+	/* For polling mode, complete immediately. For interrupt mode, completion happens in ISR */
+#ifndef CONFIG_SPI_STM32_INTERRUPT
 	spi_stm32_iodev_complete(dev, ret);
+#else
+	/* For interrupt mode, only complete if there was an immediate error */
+	if (ret != 0) {
+		spi_stm32_iodev_complete(dev, ret);
+	}
+#endif
 }
 
-/* RTIO operation completion function */
 static void spi_stm32_iodev_complete(const struct device *dev, int status)
 {
 	const struct spi_stm32_config *cfg = dev->config;
@@ -537,29 +646,16 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 
 	LOG_DBG("RTIO operation complete: status=%d", status);
 
-	/* Disable SPI after transaction */
-	LL_SPI_Disable(cfg->spi);
-
-	/* Handle CS release and power management */
-	if (rtio_ctx->txn_curr) {
-		struct spi_dt_spec *spi_dt_spec = rtio_ctx->txn_curr->sqe.iodev->data;
-		struct spi_config *spi_config = &spi_dt_spec->config;
-
-		/* Release CS if GPIO controlled */
-		if (spi_cs_is_gpio(spi_config)) {
-			spi_context_cs_control(&data->ctx, false);
-		}
-	}
-
 	/* Handle transaction chaining if needed */
 	if (!status && rtio_ctx->txn_curr->sqe.flags & RTIO_SQE_TRANSACTION) {
 		rtio_ctx->txn_curr = rtio_txn_next(rtio_ctx->txn_curr);
 		spi_stm32_iodev_start(dev);
 	} else {
-		/* Release power management lock */
+		ll_func_disable_spi(cfg->spi);
+		spi_stm32_cs_control(dev, false);
+
 		spi_stm32_pm_policy_state_lock_put(dev);
 
-		/* Complete the RTIO transaction */
 		if (spi_rtio_complete(rtio_ctx, status)) {
 			/* Start next transaction if available */
 			spi_stm32_iodev_prepare_start(dev);
@@ -568,13 +664,10 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 	}
 }
 
-/* RTIO submit function - main entry point */
 static void spi_stm32_iodev_submit(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 {
 	struct spi_stm32_data *data = dev->data;
 	struct spi_rtio *rtio_ctx = data->rtio_ctx;
-
-	LOG_DBG("RTIO submit");
 
 	/* Submit to RTIO and start if this begins a new transaction */
 	if (spi_rtio_submit(rtio_ctx, iodev_sqe)) {
@@ -583,7 +676,6 @@ static void spi_stm32_iodev_submit(const struct device *dev, struct rtio_iodev_s
 	}
 }
 
-/* Standard SPI API functions (for compatibility via spi_rtio.c) */
 static int spi_stm32_transceive(const struct device *dev,
 				const struct spi_config *config,
 				const struct spi_buf_set *tx_bufs,
@@ -591,7 +683,6 @@ static int spi_stm32_transceive(const struct device *dev,
 {
 	struct spi_stm32_data *data = dev->data;
 
-	/* Use RTIO to handle the transceive operation */
 	return spi_rtio_transceive(data->rtio_ctx, config, tx_bufs, rx_bufs);
 }
 
@@ -601,7 +692,6 @@ static int spi_stm32_release(const struct device *dev, const struct spi_config *
 	return 0;
 }
 
-/* SubGHz SPI detection helper */
 static inline bool spi_stm32_is_subghzspi(const struct device *dev)
 {
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
@@ -626,8 +716,6 @@ static int spi_stm32_init(const struct device *dev)
 	const struct spi_stm32_config *cfg = dev->config;
 	struct spi_stm32_data *data = dev->data;
 	int ret;
-
-	LOG_DBG("Initializing STM32 SPI device");
 
 	/* Enable clocks */
 	ret = spi_stm32_clock_enable(dev);
@@ -674,11 +762,9 @@ static int spi_stm32_init(const struct device *dev)
 	/* Release spi context lock to allow operation */
 	spi_context_unlock_unconditionally(&data->ctx);
 
-	LOG_INF("STM32 SPI device initialized successfully");
 	return 0;
 }
 
-/* Power management functions */
 #ifdef CONFIG_PM_DEVICE
 static int spi_stm32_pm_action(const struct device *dev, enum pm_device_action action)
 {
@@ -725,12 +811,105 @@ static int spi_stm32_pm_action(const struct device *dev, enum pm_device_action a
 }
 #endif
 
-/* Placeholder ISR for interrupt support (Phase 3) */
+static inline int spi_stm32_handle_errors(SPI_TypeDef *spi)
+{
+	if (!LL_SPI_IsEnabledIT_ERR(spi)) {
+		return 0;
+	}
+
+	int err = 0;
+	
+	if (LL_SPI_IsActiveFlag_OVR(spi)) {
+		LL_SPI_ClearFlag_OVR(spi);
+		err = -EIO;
+	}
+	if (LL_SPI_IsActiveFlag_MODF(spi)) {
+		LL_SPI_ClearFlag_MODF(spi);
+		err = -EIO;
+	}
+	if (LL_SPI_IsActiveFlag_CRCERR(spi)) {
+		LL_SPI_ClearFlag_CRCERR(spi);
+		err = -EIO;
+	}
+#ifdef LL_SPI_SR_UDR
+	if (LL_SPI_IsActiveFlag_UDR(spi)) {
+		err = -EIO;
+	}
+#endif
+
+	return err;
+}
+
 #ifdef CONFIG_SPI_STM32_INTERRUPT
+static inline bool spi_stm32_handle_tx_interrupt(const struct device *dev)
+{
+	const struct spi_stm32_config *cfg = dev->config;
+	SPI_TypeDef *spi = cfg->spi;
+	
+	if (!ll_func_tx_is_not_full(spi)) {
+		return false; /* TX FIFO full, can't send */
+	}
+
+	return spi_stm32_transmit_buffer(dev);
+}
+
+static inline bool spi_stm32_handle_rx_interrupt(const struct device *dev)
+{
+	const struct spi_stm32_config *cfg = dev->config;
+	SPI_TypeDef *spi = cfg->spi;
+	
+	if (!ll_func_rx_is_not_empty(spi)) {
+		return false; /* No RX data available */
+	}
+
+	return spi_stm32_receive_buffer(dev);
+}
+
 static void spi_stm32_isr(const struct device *dev)
 {
-	/* Will be implemented in Phase 3 */
-	LOG_DBG("SPI ISR called (not implemented yet)");
+	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	bool tx_complete, rx_complete;
+	int rc;
+
+	if (ll_func_are_int_disabled(spi)) {
+		LOG_DBG("SPI interrupt received while interrupts are disabled");
+		return;
+	}
+
+	/* Check for spurious interrupts */
+	if (!LL_SPI_IsEnabled(spi)) {
+		LOG_DBG("SPI interrupt received while SPI is disabled");
+		return;
+	}
+
+	rc = spi_stm32_handle_errors(spi);
+	if (rc) {
+		LOG_ERR("SPI error detected");	
+		data->error_status = rc;
+		/* Disable all interrupts before completing */
+		ll_func_disable_int_tx_empty(spi);
+		ll_func_disable_int_rx_not_empty(spi);
+		ll_func_disable_int_errors(spi);
+		spi_stm32_iodev_complete(dev, rc);
+		return;
+	}
+
+	tx_complete = spi_stm32_handle_tx_interrupt(dev);
+	if (tx_complete) {
+		ll_func_disable_int_tx_empty(spi);
+	}
+
+	rx_complete = spi_stm32_handle_rx_interrupt(dev);
+	if (rx_complete) {
+		ll_func_disable_int_rx_not_empty(spi);
+	}
+
+	if (tx_complete && rx_complete) {
+		ll_func_disable_int_errors(spi);
+		spi_stm32_iodev_complete(dev, 0);
+	} 
 }
 #endif
 
