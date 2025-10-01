@@ -1,0 +1,165 @@
+#include <zephyr/dt-bindings/timer/stm32-timer.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <dt-bindings/pwm/stm32-mcpwm.h>
+
+&dmamux1 {
+	status = "okay";
+};
+
+&dma1 {
+	status = "okay";
+};
+
+&dma2 {
+	status = "okay";
+};
+
+&spi3 {
+	compatible = "rubus,stm32-spi";
+	status = "okay";
+
+	dmas = <&dmamux1 2 15 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
+		   <&dmamux1 3 14 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
+
+	dma-names = "tx", "rx";
+
+	mt6835: mt6835@0 {
+		compatible = "magntek,mt6835";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(12)>;
+		cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+	aeat9955: aeat9955@1 {
+		compatible = "brcm,aeat-9955";
+		reg = <1>;
+		spi-max-frequency = <DT_FREQ_M(4)>;
+		status = "okay";
+	};
+};
+
+/delete-node/ &pwm3;
+&timers3 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,master-mode;
+	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
+	st,master-mode-selection = <0x10>; // LL_TIM_TRGO_ENABLE
+
+	pwm3:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
+
+&timers1 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
+	st,master-mode;
+	st,slave-mode;
+	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
+	st,trigger-selection = <0x20>; // ITR2
+
+	st,master-mode-selection = <0x70>; // LL_TIM_TRGO_OC4REF
+
+	pwm1:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch4_pc3>;
+		pinctrl-names = "default";
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
+
+&timers8 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
+	st,slave-mode;
+	// st,slave-mode-selection = <0x4>; // LL_TIM_SLAVEMODE_RESET
+	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
+	st,trigger-selection = <0x20>; // ITR2
+
+	pwm8:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim8_ch1_pc6>;
+		pinctrl-names = "default";
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
+
+&timers5 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
+	st,slave-mode;
+	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
+	st,trigger-selection = <0x20>; // ITR2
+
+	pwm5:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim5_ch1_pb2>;
+		pinctrl-names = "default";
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
+
+/ {
+		/* Current sampler config, ADC channels */
+	/* FIXME: Add drv8328 driver */
+	/* drv8328 needs function to wiggle SLEEP to reset an error */
+	// Need to configure ADC trigger LL_TIM_CC_EnableChannel(config->timer, LL_TIM_CHANNEL_4)
+	control {
+		// ADC for current (A, B), bus voltage
+		// adc-channels = <&adc1 0>,
+		// 	<&adc1 1>,
+		// 	<&adc1 5>;
+		// current-sense-resistor-uohms = <10000>;
+		// current-sense-gain = <50>;
+		// phase-inductance-uh = <3400>;
+		// phase-resistance-mohms = <5600>;
+
+		current-sense-resistor-uohms = <10000>;
+		current-sense-gain = <50>;
+		phase-inductance-uh = <3000>;
+		phase-resistance-mohms = <1600>;
+
+		pwms = <&pwm1 4 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM2)>;
+		amp1 {
+			compatible = "ti,drv8328";
+
+			/* If FAULT interrupt is used instead of BRKIN */
+			/* Fault interrupt should turn off PWM */
+			// fault-gpios = <&gpioi 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+			// sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
+
+			pwms = <&pwm1 1 PWM_POLARITY_NORMAL>,
+				   <&pwm1 2 PWM_POLARITY_NORMAL>;
+		};
+
+		amp2 {
+			compatible = "ti,drv8328";
+
+			/* If FAULT interrupt is used instead of BRKIN */
+			// fault-gpios = <&gpiob 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+			// sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
+
+			pwms = <&pwm8 1 PWM_POLARITY_NORMAL>,
+				   <&pwm8 2 PWM_POLARITY_NORMAL>;
+		};
+	};
+};

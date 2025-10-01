@@ -14,7 +14,6 @@
 #include <soc.h>
 #include <stm32_ll_rcc.h>
 #include <stm32_ll_tim.h>
-#include <drivers/mcpwm.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/reset.h>
 #include <zephyr/device.h>
@@ -25,17 +24,16 @@
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/dt-bindings/pwm/stm32_pwm.h>
 
+#include <drivers/mcpwm.h>
+#include <dt-bindings/pwm/stm32-mcpwm.h>
+
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 
-LOG_MODULE_REGISTER(st_stm32_mcpwm, CONFIG_PWM_LOG_LEVEL);
+LOG_MODULE_REGISTER(DT_DRV_COMPAT, CONFIG_PWM_LOG_LEVEL);
 
 /* User break callback function pointer type */
 typedef void (*mcpwm_stm32_break_cb_t)(const struct device *dev, void *user_data);
-
-static inline int32_t __SMMULR(int32_t a, int32_t b) {
-    return (int32_t)(((int64_t)a * b + (1LL << 31)) >> 32);
-}
 
 /* L0 series MCUs only have 16-bit timers and don't have below macro defined */
 #ifndef IS_TIM_32B_COUNTER_INSTANCE
@@ -64,7 +62,8 @@ struct mcpwm_stm32_data
 	/** Timer clock (Hz). */
 	uint32_t tim_clk;
 	/** Calculated period cycles (adjusted for counter mode). */
-    int32_t period_cycles;
+	uint32_t period_cycles;
+	uint32_t period_cycles_x2;
 	/* Reset controller device configuration */
 	const struct reset_dt_spec reset;
 	/* User break callback */
@@ -81,6 +80,7 @@ struct mcpwm_stm32_config
 	uint32_t trigger_selection;
 	uint32_t master_mode_selection;
 	uint32_t slave_mode_selection;
+	uint32_t repetition_counter;
 	uint32_t ossr;
 	uint32_t ossi;
 	uint32_t dead_time;
@@ -88,6 +88,7 @@ struct mcpwm_stm32_config
 	uint32_t break_polarity;
 	uint32_t break2_polarity;
 	uint32_t period_ns;
+	bool master_mode;
 	bool slave_mode;
 	bool trigger_polarity;
 	bool one_pulse_mode;
@@ -136,7 +137,7 @@ static const uint32_t ch2ll_n[] = {
 
 /** Channel to compare set function mapping. */
 void (*const mcpwm_stm32_set_timer_compare[TIMER_MAX_CH])(TIM_TypeDef *,
-													 uint32_t) = {
+														  uint32_t) = {
 	LL_TIM_OC_SetCompareCH1, LL_TIM_OC_SetCompareCH2,
 	LL_TIM_OC_SetCompareCH3, LL_TIM_OC_SetCompareCH4,
 #if TIMER_HAS_6CH
@@ -159,6 +160,46 @@ static uint32_t get_polarity(mcpwm_flags_t flags)
 	}
 
 	return LL_TIM_OCPOLARITY_LOW;
+}
+
+/**
+ * Obtain LL output compare mode from PWM flags.
+ *
+ * @param flags PWM flags.
+ *
+ * @return LL output compare mode.
+ */
+static uint32_t get_output_compare_mode(mcpwm_flags_t flags)
+{
+	uint32_t mode_flags = flags & STM32_PWM_OC_MODE_MASK;
+
+	if (mode_flags == STM32_PWM_OC_MODE_PWM2)
+	{
+		return LL_TIM_OCMODE_PWM2;
+	}
+
+	/* Default to PWM1 mode */
+	return LL_TIM_OCMODE_PWM1;
+}
+
+/**
+ * Obtain LL idle state from PWM flags.
+ *
+ * @param flags PWM flags.
+ *
+ * @return LL idle state.
+ */
+static uint32_t get_idle_state(mcpwm_flags_t flags)
+{
+	uint32_t idle_flags = flags & STM32_PWM_IDLE_STATE_MASK;
+
+	if (idle_flags == STM32_PWM_IDLE_STATE_HIGH)
+	{
+		return LL_TIM_OCIDLESTATE_HIGH;
+	}
+
+	/* Default to low idle state */
+	return LL_TIM_OCIDLESTATE_LOW;
 }
 
 /**
@@ -330,98 +371,119 @@ static void mcpwm_stm32_brk_isr(const struct device *dev)
 #endif
 
 	/* Call user callback if break occurred and callback is registered */
-	if (break_occurred && data->user_break_cb != NULL) {
+	if (break_occurred && data->user_break_cb != NULL)
+	{
 		data->user_break_cb(dev, data->user_data);
 	}
 }
 
 static int mcpwm_stm32_configure(const struct device *dev, uint32_t channel, mcpwm_flags_t flags)
 {
-    const struct mcpwm_stm32_config *cfg = dev->config;
-    uint32_t ll_channel;
-    uint32_t current_ll_channel;
-    uint32_t negative_ll_channel = 0;
+	const struct mcpwm_stm32_config *cfg = dev->config;
+	uint32_t ll_channel;
+	uint32_t current_ll_channel;
+	uint32_t negative_ll_channel = 0;
 
-    if (channel < 1u || channel > TIMER_MAX_CH) {
-        LOG_ERR("Invalid channel (%d)", channel);
-        return -EINVAL;
-    }
+	if (channel < 1u || channel > TIMER_MAX_CH)
+	{
+		LOG_ERR("Invalid channel (%d)", channel);
+		return -EINVAL;
+	}
 
-    ll_channel = ch2ll[channel - 1u];
+	ll_channel = ch2ll[channel - 1u];
 
-    /* Get complementary channel if available */
-    if (channel <= ARRAY_SIZE(ch2ll_n)) {
-        negative_ll_channel = ch2ll_n[channel - 1u];
-    }
+	/* Get complementary channel if available */
+	if (channel <= ARRAY_SIZE(ch2ll_n))
+	{
+		negative_ll_channel = ch2ll_n[channel - 1u];
+	}
 
-    /* Determine which channel to configure based on flags */
-    if ((flags & STM32_PWM_COMPLEMENTARY_MASK) == STM32_PWM_COMPLEMENTARY) {
-        if (!negative_ll_channel) {
-            LOG_ERR("Channel %d has no complementary output", channel);
-            return -EINVAL;
-        }
-        current_ll_channel = negative_ll_channel;
-    } else {
-        current_ll_channel = ll_channel;
-    }
+	/* Determine which channel to configure based on flags */
+	if ((flags & STM32_PWM_COMPLEMENTARY_MASK) == STM32_PWM_COMPLEMENTARY)
+	{
+		if (!negative_ll_channel)
+		{
+			LOG_ERR("Channel %d has no complementary output", channel);
+			return -EINVAL;
+		}
+		current_ll_channel = negative_ll_channel;
+	}
+	else
+	{
+		current_ll_channel = ll_channel;
+	}
 
-    /* Only configure if channel is not already enabled */
-    if (!LL_TIM_CC_IsEnabledChannel(cfg->timer, current_ll_channel)) {
-        LL_TIM_OC_InitTypeDef oc_init;
+	/* Only configure if channel is not already enabled */
+	if (!LL_TIM_CC_IsEnabledChannel(cfg->timer, current_ll_channel))
+	{
+		LL_TIM_OC_InitTypeDef oc_init;
 
-        LL_TIM_OC_StructInit(&oc_init);
-        oc_init.OCMode = LL_TIM_OCMODE_PWM1;
-        oc_init.CompareValue = 0;
+		LL_TIM_OC_StructInit(&oc_init);
+		oc_init.OCMode = get_output_compare_mode(flags);
+		oc_init.CompareValue = 0;
+		oc_init.OCIdleState = get_idle_state(flags);
+		oc_init.OCNIdleState = get_idle_state(flags);
 
 #if defined(LL_TIM_CHANNEL_CH1N)
-        if ((flags & STM32_PWM_COMPLEMENTARY_MASK) == STM32_PWM_COMPLEMENTARY) {
-            /* Configuring complementary output */
-            oc_init.OCNState = LL_TIM_OCSTATE_ENABLE;
-            oc_init.OCNPolarity = get_polarity(flags);
+		if ((flags & STM32_PWM_COMPLEMENTARY_MASK) == STM32_PWM_COMPLEMENTARY)
+		{
+			/* Configuring complementary output */
+			oc_init.OCNState = LL_TIM_OCSTATE_ENABLE;
+			oc_init.OCNPolarity = get_polarity(flags);
 
-            /* Inherit polarity from positive output if it's already configured */
-            if (LL_TIM_CC_IsEnabledChannel(cfg->timer, ll_channel)) {
-                oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
-                oc_init.OCPolarity = LL_TIM_OC_GetPolarity(cfg->timer, ll_channel);
-            } else {
-                oc_init.OCState = LL_TIM_OCSTATE_DISABLE;
-                oc_init.OCPolarity = LL_TIM_OCPOLARITY_HIGH; /* Default */
-            }
-        } else {
-            /* Configuring positive output */
-            oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
-            oc_init.OCPolarity = get_polarity(flags);
+			/* Inherit polarity from positive output if it's already configured */
+			if (LL_TIM_CC_IsEnabledChannel(cfg->timer, ll_channel))
+			{
+				oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
+				oc_init.OCPolarity = LL_TIM_OC_GetPolarity(cfg->timer, ll_channel);
+			}
+			else
+			{
+				oc_init.OCState = LL_TIM_OCSTATE_DISABLE;
+				oc_init.OCPolarity = LL_TIM_OCPOLARITY_HIGH; /* Default */
+			}
+		}
+		else
+		{
+			/* Configuring positive output */
+			oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
+			oc_init.OCPolarity = get_polarity(flags);
 
-            /* Configure complementary output if it exists and isn't already configured */
-            if (negative_ll_channel) {
-                if (LL_TIM_CC_IsEnabledChannel(cfg->timer, negative_ll_channel)) {
-                    /* Inherit existing complementary settings */
-                    oc_init.OCNState = LL_TIM_OCSTATE_ENABLE;
-                    oc_init.OCNPolarity = LL_TIM_OC_GetPolarity(cfg->timer, negative_ll_channel);
-                } else {
-                    /* Disable complementary output by default */
-                    oc_init.OCNState = LL_TIM_OCSTATE_DISABLE;
-                    oc_init.OCNPolarity = LL_TIM_OCPOLARITY_HIGH; /* Default */
-                }
-            }
-        }
+			/* Configure complementary output if it exists and isn't already configured */
+			if (negative_ll_channel)
+			{
+				if (LL_TIM_CC_IsEnabledChannel(cfg->timer, negative_ll_channel))
+				{
+					/* Inherit existing complementary settings */
+					oc_init.OCNState = LL_TIM_OCSTATE_ENABLE;
+					oc_init.OCNPolarity = LL_TIM_OC_GetPolarity(cfg->timer, negative_ll_channel);
+				}
+				else
+				{
+					/* Disable complementary output by default */
+					oc_init.OCNState = LL_TIM_OCSTATE_DISABLE;
+					oc_init.OCNPolarity = LL_TIM_OCPOLARITY_HIGH; /* Default */
+				}
+			}
+		}
 #else
-        /* No complementary channels available */
-        oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
-        oc_init.OCPolarity = get_polarity(flags);
+		/* No complementary channels available */
+		oc_init.OCState = LL_TIM_OCSTATE_ENABLE;
+		oc_init.OCPolarity = get_polarity(flags);
 #endif
 
-        /* Initialize the output compare channel */
-        if (LL_TIM_OC_Init(cfg->timer, ll_channel, &oc_init) != SUCCESS) {
-            LOG_ERR("Could not initialize timer channel %u output", channel);
-            return -EIO;
-        }
+		/* Initialize the output compare channel */
+		if (LL_TIM_OC_Init(cfg->timer, ll_channel, &oc_init) != SUCCESS)
+		{
+			LOG_ERR("Could not initialize timer channel %u output", channel);
+			return -EIO;
+		}
 
-        /* Enable output compare preload for this channel */
-        LL_TIM_OC_EnablePreload(cfg->timer, ll_channel);
-    }
+		/* Enable output compare preload for this channel */
+		LL_TIM_OC_EnablePreload(cfg->timer, ll_channel);
+	}
 
-    return 0;
+	return 0;
 }
 
 static int mcpwm_stm32_enable(const struct device *dev, uint32_t channel)
@@ -436,10 +498,16 @@ static int mcpwm_stm32_enable(const struct device *dev, uint32_t channel)
 		return -EINVAL;
 	}
 	ll_channel = ch2ll[channel - 1u];
-	
+
 	/* Get complementary channel if available */
-	if (channel <= ARRAY_SIZE(ch2ll_n)) {
+	if (channel <= ARRAY_SIZE(ch2ll_n))
+	{
 		negative_ll_channel = ch2ll_n[channel - 1u];
+	}
+
+	if (channel == 4u)
+	{
+		LL_TIM_EnableDMAReq_CC4(cfg->timer);
 	}
 
 	/* Enable main channel and complementary channel (if it exists) */
@@ -460,9 +528,10 @@ static int mcpwm_stm32_disable(const struct device *dev, uint32_t channel)
 		return -EINVAL;
 	}
 	ll_channel = ch2ll[channel - 1u];
-	
+
 	/* Get complementary channel if available */
-	if (channel <= ARRAY_SIZE(ch2ll_n)) {
+	if (channel <= ARRAY_SIZE(ch2ll_n))
+	{
 		negative_ll_channel = ch2ll_n[channel - 1u];
 	}
 
@@ -473,38 +542,64 @@ static int mcpwm_stm32_disable(const struct device *dev, uint32_t channel)
 }
 
 static int mcpwm_stm32_set_duty_cycle(const struct device *dev, uint32_t channel,
-                                      q31_t duty_cycle)
+									  q31_t duty_cycle)
 {
-    const struct mcpwm_stm32_config *cfg = dev->config;
-    const struct mcpwm_stm32_data *data = dev->data;
-    
-    if (channel < 1u || channel > TIMER_MAX_CH) {
-        LOG_ERR("Invalid channel (%d)", channel);
-        return -EINVAL;
-    }
-    
-    uint32_t pulse_cycles = (uint32_t)__SMMULR(duty_cycle, data->period_cycles);
-    mcpwm_stm32_set_timer_compare[channel - 1u](cfg->timer, pulse_cycles);
-    return 0;
+	const struct mcpwm_stm32_config *cfg = dev->config;
+	const struct mcpwm_stm32_data *data = dev->data;
+
+	if (channel < 1u || channel > TIMER_MAX_CH)
+	{
+		LOG_ERR("Invalid channel (%d)", channel);
+		return -EINVAL;
+	}
+
+	uint32_t pulse_cycles = (int32_t)(((int64_t)duty_cycle * data->period_cycles + 0x80000000LL) >> 31);
+
+	mcpwm_stm32_set_timer_compare[channel - 1u](cfg->timer, pulse_cycles);
+	return 0;
 }
 
-static int mcpwm_stm32_register_break_callback(const struct device *dev, 
-                                            mcpwm_stm32_break_cb_t callback, 
-                                            void *user_data)
+static int mcpwm_stm32_register_break_callback(const struct device *dev,
+											   mcpwm_stm32_break_cb_t callback,
+											   void *user_data)
 {
-    struct mcpwm_stm32_data *data = dev->data;
-    
-    data->user_break_cb = callback;
-    data->user_data = user_data;
-    
-    LOG_DBG("User break callback registered for PWM device %s", dev->name);
-    return 0;
+	struct mcpwm_stm32_data *data = dev->data;
+
+	data->user_break_cb = callback;
+	data->user_data = user_data;
+
+	LOG_DBG("User break callback registered for PWM device %s", dev->name);
+	return 0;
+}
+
+static int mcpwm_stm32_start(const struct device *dev)
+{
+	const struct mcpwm_stm32_config *cfg = dev->config;
+
+	LL_TIM_SetCounter(cfg->timer, 0);
+	LL_TIM_GenerateEvent_UPDATE(cfg->timer);
+	LL_TIM_EnableCounter(cfg->timer);
+
+	LOG_DBG("Timer started for PWM device %s", dev->name);
+	return 0;
+}
+
+static int mcpwm_stm32_stop(const struct device *dev)
+{
+	const struct mcpwm_stm32_config *cfg = dev->config;
+
+	LL_TIM_DisableCounter(cfg->timer);
+
+	LOG_DBG("Timer stopped for PWM device %s", dev->name);
+	return 0;
 }
 
 static DEVICE_API(mcpwm, mcpwm_stm32_driver_api) = {
 	.configure = mcpwm_stm32_configure,
 	.enable = mcpwm_stm32_enable,
 	.disable = mcpwm_stm32_disable,
+	.start = mcpwm_stm32_start,
+	.stop = mcpwm_stm32_stop,
 	.set_duty_cycle = mcpwm_stm32_set_duty_cycle,
 };
 
@@ -543,26 +638,78 @@ static int mcpwm_stm32_init(const struct device *dev)
 	/* Reset timer to default state using RCC */
 	(void)reset_line_toggle_dt(&data->reset);
 
-	/* configure pinmux */
-	r = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
-	if (r < 0)
+	/* configure pinmux - only if pinctrl is provided */
+	if (cfg->pcfg != NULL)
 	{
-		LOG_ERR("PWM pinctrl setup failed (%d)", r);
-		return r;
+		r = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+		if (r < 0)
+		{
+			LOG_ERR("PWM pinctrl setup failed (%d)", r);
+			return r;
+		}
+		LOG_DBG("Pinctrl configured for timer %s", dev->name);
 	}
+	else
+	{
+		LOG_DBG("No pinctrl configured for timer %s (timer-only mode)", dev->name);
+	}
+
+	/* Protect against overflow */
+	if (cfg->period_ns > (UINT64_MAX / data->tim_clk))
+	{
+		LOG_ERR("Period too large, would cause overflow");
+		return -EINVAL;
+	}
+
+	uint64_t period_ns_calc = (uint64_t)data->tim_clk * cfg->period_ns;
+	uint32_t period_cycles = (uint32_t)DIV_ROUND_UP(period_ns_calc, NSEC_PER_SEC);
+
+	/* Adjust period based on counter mode */
+	if (is_center_aligned(cfg->countermode))
+	{
+		/* For center-aligned mode, period is divided by 2 */
+		period_cycles /= 2U;
+	}
+	else
+	{
+		/* For up/down-counting modes, ARR = period - 1 */
+		period_cycles -= 1U;
+	}
+
+	/* Validate period fits in timer */
+	if (!IS_TIM_32B_COUNTER_INSTANCE(cfg->timer) && period_cycles > UINT16_MAX)
+	{
+		LOG_ERR("Period too large for 16-bit timer: %u", period_cycles);
+		return -EINVAL;
+	}
+
+	/* Store the calculated period for later use */
+	data->period_cycles = period_cycles;
+	data->period_cycles_x2 = data->period_cycles * 2;
 
 	/* initialize timer */
 	LL_TIM_StructInit(&init);
 
 	init.Prescaler = cfg->prescaler;
 	init.CounterMode = cfg->countermode;
-	init.Autoreload = 0u;
+	init.Autoreload = period_cycles;
 	init.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
+	init.RepetitionCounter = cfg->repetition_counter;
 
 	if (LL_TIM_Init(cfg->timer, &init) != SUCCESS)
 	{
 		LOG_ERR("Could not initialize timer");
 		return -EIO;
+	}
+
+	/* Enable auto-reload preload (affects all channels) */
+	LL_TIM_EnableARRPreload(cfg->timer);
+
+	if (cfg->master_mode)
+	{
+		/* Configure Master/Slave Mode controller */
+		LL_TIM_SetTriggerOutput(cfg->timer, cfg->master_mode_selection);
+		LL_TIM_EnableMasterSlaveMode(cfg->timer);
 	}
 
 	/* Configure Master/Slave Mode controller */
@@ -578,23 +725,19 @@ static int mcpwm_stm32_init(const struct device *dev)
 			LL_TIM_ConfigETR(cfg->timer, cfg->trigger_polarity ? LL_TIM_ETR_POLARITY_INVERTED : LL_TIM_ETR_POLARITY_NONINVERTED,
 							 LL_TIM_ETR_PRESCALER_DIV1, LL_TIM_ETR_FILTER_FDIV1);
 		}
-
-		/* Only enable master-slave mode if this timer is also a master */
-		if (cfg->master_mode_selection != 0)
-		{
-			LL_TIM_EnableMasterSlaveMode(cfg->timer);
-		}
 	}
 
-	/* Configure master mode output (can be set regardless of slave mode) */
-	if (cfg->master_mode_selection != 0)
+	/* Configure one-pulse mode if enabled */
+	if (cfg->one_pulse_mode)
 	{
-		LL_TIM_SetTriggerOutput(cfg->timer, cfg->master_mode_selection);
-		if (!cfg->slave_mode)
-		{
-			LL_TIM_DisableMasterSlaveMode(cfg->timer);
-		}
+		LL_TIM_SetOnePulseMode(cfg->timer, LL_TIM_ONEPULSEMODE_SINGLE);
 	}
+	else
+	{
+		LL_TIM_SetOnePulseMode(cfg->timer, LL_TIM_ONEPULSEMODE_REPETITIVE);
+	}
+
+	LL_TIM_GenerateEvent_UPDATE(cfg->timer);
 
 #if !defined(CONFIG_SOC_SERIES_STM32L0X) && !defined(CONFIG_SOC_SERIES_STM32L1X)
 	if (IS_TIM_BREAK_INSTANCE(cfg->timer))
@@ -649,45 +792,9 @@ static int mcpwm_stm32_init(const struct device *dev)
 
 		cfg->irq_config_func(dev);
 
-		/* enable outputs and counter */
 		LL_TIM_EnableAllOutputs(cfg->timer);
 	}
 #endif
-
-	/* Protect against overflow */
-	if (cfg->period_ns > (UINT64_MAX / data->tim_clk)) {
-		LOG_ERR("Period too large, would cause overflow");
-		return -EINVAL;
-	}
-
-    uint64_t period_ns_calc = (uint64_t)data->tim_clk * cfg->period_ns;
-    uint32_t period_cycles = (uint32_t)DIV_ROUND_UP(period_ns_calc, NSEC_PER_SEC);
-
-    /* Adjust period based on counter mode */
-	if (is_center_aligned(cfg->countermode)) {
-		/* For center-aligned mode, period is divided by 2 */
-		period_cycles /= 2U;
-	} else {
-		/* For up/down-counting modes, ARR = period - 1 */
-		period_cycles -= 1U;
-	}
-
-    /* Validate period fits in timer */
-    if (!IS_TIM_32B_COUNTER_INSTANCE(cfg->timer) && period_cycles > UINT16_MAX) {
-        LOG_ERR("Period too large for 16-bit timer: %u", period_cycles);
-        return -EINVAL;
-    }
-
-    /* Store the calculated period for later use */
-    data->period_cycles = period_cycles + 1u;
-
-    /* Set the timer auto-reload register */
-    LL_TIM_SetAutoReload(cfg->timer, period_cycles);
-
-	/* Enable auto-reload preload (affects all channels) */
-	LL_TIM_EnableARRPreload(cfg->timer);
-
-	LL_TIM_EnableCounter(cfg->timer);
 
 	/* Initialize user callback fields */
 	data->user_break_cb = NULL;
@@ -698,28 +805,28 @@ static int mcpwm_stm32_init(const struct device *dev)
 
 #define PWM(index) DT_INST_PARENT(index)
 
-#define IRQ_CONNECT_AND_ENABLE_BY_NAME(index, name)                   \
-	{                                                                 \
-		IRQ_CONNECT(DT_IRQ_BY_NAME(PWM(index), name, irq),            \
-					DT_IRQ_BY_NAME(PWM(index), name, priority),       \
+#define IRQ_CONNECT_AND_ENABLE_BY_NAME(index, name)                     \
+	{                                                                   \
+		IRQ_CONNECT(DT_IRQ_BY_NAME(PWM(index), name, irq),              \
+					DT_IRQ_BY_NAME(PWM(index), name, priority),         \
 					mcpwm_stm32_brk_isr, DEVICE_DT_INST_GET(index), 0); \
-		irq_enable(DT_IRQ_BY_NAME(PWM(index), name, irq));            \
+		irq_enable(DT_IRQ_BY_NAME(PWM(index), name, irq));              \
 	}
 
-#define IRQ_CONNECT_AND_ENABLE_DEFAULT(index)                         \
-	{                                                                 \
-		IRQ_CONNECT(DT_IRQN(PWM(index)),                              \
-					DT_IRQ(PWM(index), priority),                     \
+#define IRQ_CONNECT_AND_ENABLE_DEFAULT(index)                           \
+	{                                                                   \
+		IRQ_CONNECT(DT_IRQN(PWM(index)),                                \
+					DT_IRQ(PWM(index), priority),                       \
 					mcpwm_stm32_brk_isr, DEVICE_DT_INST_GET(index), 0); \
-		irq_enable(DT_IRQN(PWM(index)));                              \
+		irq_enable(DT_IRQN(PWM(index)));                                \
 	}
 
-#define IRQ_CONFIG_FUNC(index)                                                  \
+#define IRQ_CONFIG_FUNC(index)                                                    \
 	static void mcpwm_stm32_brk_irq_config_func_##index(const struct device *dev) \
-	{                                                                           \
-		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), brk),                           \
-					(IRQ_CONNECT_AND_ENABLE_BY_NAME(index, brk)),               \
-					(IRQ_CONNECT_AND_ENABLE_DEFAULT(index)));                   \
+	{                                                                             \
+		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), brk),                             \
+					(IRQ_CONNECT_AND_ENABLE_BY_NAME(index, brk)),                 \
+					(IRQ_CONNECT_AND_ENABLE_DEFAULT(index)));                     \
 	}
 
 #define DT_INST_CLK(index, inst)                \
@@ -728,42 +835,46 @@ static int mcpwm_stm32_init(const struct device *dev)
 		.enr = DT_CLOCKS_CELL(PWM(index), bits)}
 
 #define PWM_DEVICE_INIT(index)                                                                 \
-	static struct mcpwm_stm32_data mcpwm_stm32_data_##index = {                                    \
+	static struct mcpwm_stm32_data mcpwm_stm32_data_##index = {                                \
 		.reset = RESET_DT_SPEC_GET(PWM(index)),                                                \
 	};                                                                                         \
                                                                                                \
 	IRQ_CONFIG_FUNC(index)                                                                     \
                                                                                                \
-	PINCTRL_DT_INST_DEFINE(index);                                                             \
+	COND_CODE_1(DT_INST_PINCTRL_HAS_NAME(index, default),                                      \
+				(PINCTRL_DT_INST_DEFINE(index);), ())                                          \
                                                                                                \
-	static const struct mcpwm_stm32_config mcpwm_stm32_config_##index = {                          \
+	static const struct mcpwm_stm32_config mcpwm_stm32_config_##index = {                      \
 		.timer = (TIM_TypeDef *)DT_REG_ADDR(PWM(index)),                                       \
 		.prescaler = DT_PROP(PWM(index), st_prescaler),                                        \
 		.countermode = DT_PROP(PWM(index), st_countermode),                                    \
+		.master_mode = DT_PROP_OR(PWM(index), st_master_mode, false),                          \
 		.slave_mode = DT_PROP_OR(PWM(index), st_slave_mode, false),                            \
 		.trigger_selection = DT_PROP_OR(PWM(index), st_trigger_selection, 0),                  \
 		.trigger_polarity = DT_PROP_OR(PWM(index), st_trigger_polarity, false),                \
 		.master_mode_selection = DT_PROP_OR(PWM(index), st_master_mode_selection, 0),          \
 		.slave_mode_selection = DT_PROP_OR(PWM(index), st_slave_mode_selection, 0),            \
+		.one_pulse_mode = DT_PROP_OR(PWM(index), st_one_pulse_mode, false),                    \
+		.repetition_counter = DT_PROP_OR(PWM(index), st_repetition_counter, 0),                \
 		.automatic_output = DT_INST_PROP_OR(index, st_automatic_output, true),                 \
 		.lock_level = DT_INST_PROP_OR(index, st_lock_level, 0),                                \
 		.ossr = DT_INST_PROP_OR(index, st_ossr, false),                                        \
 		.ossi = DT_INST_PROP_OR(index, st_ossi, false),                                        \
-		.one_pulse_mode = DT_INST_PROP_OR(index, st_one_pulse_mode, false),                    \
-		.period_ns = DT_INST_PROP(index, period),											   \
+		.period_ns = DT_INST_PROP(index, period),                                              \
 		.break_enable = DT_INST_PROP_OR(index, st_break_enable, false),                        \
 		.break_polarity = break_polarity[DT_INST_ENUM_IDX_OR(index, st_break_polarity, 0)],    \
 		.break2_enable = DT_INST_PROP_OR(index, st_break2_enable, false),                      \
 		.break2_polarity = break2_polarity[DT_INST_ENUM_IDX_OR(index, st_break2_polarity, 0)], \
 		.dead_time = DT_INST_PROP_OR(index, st_dead_time, 0),                                  \
 		.pclken = DT_INST_CLK(index, timer),                                                   \
-		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(index),                                         \
-		.irq_config_func = mcpwm_stm32_brk_irq_config_func_##index,                              \
+		.pcfg = COND_CODE_1(DT_INST_PINCTRL_HAS_NAME(index, default),                          \
+							(PINCTRL_DT_INST_DEV_CONFIG_GET(index)), (NULL)),                  \
+		.irq_config_func = mcpwm_stm32_brk_irq_config_func_##index,                            \
 	};                                                                                         \
                                                                                                \
-	DEVICE_DT_INST_DEFINE(index, &mcpwm_stm32_init, NULL,                                        \
-						  &mcpwm_stm32_data_##index,                                             \
-						  &mcpwm_stm32_config_##index, POST_KERNEL,                              \
+	DEVICE_DT_INST_DEFINE(index, &mcpwm_stm32_init, NULL,                                      \
+						  &mcpwm_stm32_data_##index,                                           \
+						  &mcpwm_stm32_config_##index, POST_KERNEL,                            \
 						  CONFIG_PWM_INIT_PRIORITY,                                            \
 						  &mcpwm_stm32_driver_api);
 

@@ -1,8 +1,8 @@
 # Copyright (c) 2021 Nordic Semiconductor ASA
 # SPDX-License-Identifier: Apache-2.0
 
-identifier: smartchopper
-name: Smart Chopper Controller
+identifier: smartstepper
+name: Smart Stepper Controller
 vendor: rubus
 type: mcu
 arch: arm

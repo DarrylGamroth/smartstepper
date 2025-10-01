@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2025 Darryl Gamroth
- * Based on upstream STM32 SPI driver header pattern
- * Clean RTIO-first implementation for STM32 SPI
+ * Copyright (c) 2025 Rubus Technologies Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,23 +21,49 @@ typedef void (*irq_config_func_t)(const struct device *port);
 #endif
 
 /* STM32-specific DMA structures */
-#ifdef CONFIG_SPI_STM32_DMA
-struct spi_stm32_dma_stream {
+#ifdef CONFIG_SPI_RUBUS_STM32_DMA
+/* DMA stream structure - matches upstream exactly */
+struct stream {
 	const struct device *dma_dev;
-	uint32_t channel;
+	uint32_t channel; /* stores the channel for dma or mux */
 	struct dma_config dma_cfg;
 	struct dma_block_config dma_blk_cfg;
 	uint8_t priority;
 	bool src_addr_increment;
 	bool dst_addr_increment;
 	int fifo_threshold;
+	bool configured;
+	uint16_t last_src_adj;
+	uint16_t last_dst_adj;
+	const void *last_checked_buf;
+	size_t last_checked_len;
 };
+
+/* DMA constants */
+#define SPI_STM32_DMA_TX	0x01
+#define SPI_STM32_DMA_RX	0x02
 
 #define SPI_STM32_DMA_ERROR_FLAG	0x01
 #define SPI_STM32_DMA_RX_DONE_FLAG	0x02
 #define SPI_STM32_DMA_TX_DONE_FLAG	0x04
 #define SPI_STM32_DMA_DONE_FLAG	\
 	(SPI_STM32_DMA_RX_DONE_FLAG | SPI_STM32_DMA_TX_DONE_FLAG)
+
+/* DMA register address helper - matches upstream */
+static inline uint32_t ll_func_dma_get_reg_addr(SPI_TypeDef *spi, uint32_t location)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (location == SPI_STM32_DMA_TX) {
+		/* use direct register location until the LL_SPI_DMA_GetTxRegAddr exists */
+		return (uint32_t)&(spi->TXDR);
+	}
+	/* use direct register location until the LL_SPI_DMA_GetRxRegAddr exists */
+	return (uint32_t)&(spi->RXDR);
+#else
+	ARG_UNUSED(location);
+	return (uint32_t)LL_SPI_DMA_GetRegAddr(spi);
+#endif /* st_stm32h7_spi */
+}
 #endif
 
 /* STM32 SPI configuration structure */
@@ -48,7 +72,7 @@ struct spi_stm32_config {
 	const struct pinctrl_dev_config *pcfg;
 	const struct stm32_pclken *pclken;
 	size_t pclk_len;
-#ifdef CONFIG_SPI_STM32_INTERRUPT
+#ifdef CONFIG_SPI_RUBUS_STM32_INTERRUPT
 	irq_config_func_t irq_config_func;
 #endif
 	bool fifo_enabled;
@@ -59,10 +83,7 @@ struct spi_stm32_config {
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
 	bool use_subghzspi_nss;
 #endif
-#ifdef CONFIG_SPI_STM32_DMA
-	struct stm32_dma_spec dma_tx;
-	struct stm32_dma_spec dma_rx;
-#endif
+	/* Note: DMA configuration comes from device tree macros, not stored in config */
 };
 
 /* STM32 SPI data structure - pure RTIO */
@@ -77,11 +98,10 @@ struct spi_stm32_data {
 	struct spi_context ctx;
 	
 	/* DMA state */
-#ifdef CONFIG_SPI_STM32_DMA
-	struct k_sem status_sem;
+#ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	volatile uint32_t status_flags;
-	struct spi_stm32_dma_stream dma_rx;
-	struct spi_stm32_dma_stream dma_tx;
+	struct stream dma_rx;
+	struct stream dma_tx;
 #endif
 	
 	/* Current transaction state for polling mode */

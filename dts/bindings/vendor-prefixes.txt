@@ -1,0 +1,5 @@
+# Vendor prefix definitions for custom devices
+# SPDX-License-Identifier: Apache-2.0
+
+magntek	MagnTek
+rubus	Rubus Technologies Inc.

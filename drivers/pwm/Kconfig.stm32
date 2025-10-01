@@ -1,10 +1,11 @@
 # STM32 PWM configuration options
 
 # Copyright (c) 2016 Linaro Limited.
+# Copyright (c) 2025 Rubus Technologies Inc.
 # SPDX-License-Identifier: Apache-2.0
 
 config PWM_STM32_MCPWM
-	bool "STM32 MCU PWM driver"
+	bool "STM32 MCU MC-PWM driver"
 	default y
 	depends on DT_HAS_ST_STM32_MCPWM_ENABLED
 	select USE_STM32_LL_TIM

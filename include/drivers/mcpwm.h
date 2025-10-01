@@ -359,6 +359,18 @@ typedef int (*mcpwm_enable_t)(const struct device *dev, uint32_t channel);
 typedef int (*mcpwm_disable_t)(const struct device *dev, uint32_t channel);
 
 /**
+ * @brief PWM driver API call to start PWM timer.
+ * @see mcpwm_start() for argument description.
+ */
+typedef int (*mcpwm_start_t)(const struct device *dev);
+
+/**
+ * @brief PWM driver API call to stop PWM timer.
+ * @see mcpwm_stop() for argument description.
+ */
+typedef int (*mcpwm_stop_t)(const struct device *dev);
+
+/**
  * @brief PWM driver API call to set duty cycle.
  * @see mcpwm_set_duty_cycle() for argument description.
  */
@@ -370,6 +382,8 @@ __subsystem struct mcpwm_driver_api {
 	mcpwm_configure_t configure;
 	mcpwm_enable_t enable;
 	mcpwm_disable_t disable;
+	mcpwm_start_t start;
+	mcpwm_stop_t stop;
 	mcpwm_set_duty_cycle_t set_duty_cycle;
 };
 /** @endcond */
@@ -390,10 +404,7 @@ __syscall int mcpwm_configure(const struct device *dev, uint32_t channel,
 static inline int z_impl_mcpwm_configure(const struct device *dev,
 					 uint32_t channel, mcpwm_flags_t flags)
 {
-	const struct mcpwm_driver_api *api =
-		(const struct mcpwm_driver_api *)dev->api;
-
-	return api->configure(dev, channel, flags);
+	return DEVICE_API_GET(mcpwm, dev)->configure(dev, channel, flags);
 }
 
 /**
@@ -410,10 +421,7 @@ __syscall int mcpwm_enable(const struct device *dev, uint32_t channel);
 static inline int z_impl_mcpwm_enable(const struct device *dev,
 				      uint32_t channel)
 {
-	const struct mcpwm_driver_api *api =
-		(const struct mcpwm_driver_api *)dev->api;
-
-	return api->enable(dev, channel);
+	return DEVICE_API_GET(mcpwm, dev)->enable(dev, channel);
 }
 
 /**
@@ -430,12 +438,8 @@ __syscall int mcpwm_disable(const struct device *dev, uint32_t channel);
 static inline int z_impl_mcpwm_disable(const struct device *dev,
 				       uint32_t channel)
 {
-	const struct mcpwm_driver_api *api =
-		(const struct mcpwm_driver_api *)dev->api;
-
-	return api->disable(dev, channel);
+	return DEVICE_API_GET(mcpwm, dev)->disable(dev, channel);
 }
-
 
 /**
  * @brief Set the duty cycle for a single PWM output.
@@ -464,10 +468,75 @@ __syscall int mcpwm_set_duty_cycle(const struct device *dev, uint32_t channel,
 static inline int z_impl_mcpwm_set_duty_cycle(const struct device *dev,
 					uint32_t channel, q31_t duty_cycle)
 {
-	const struct mcpwm_driver_api *api =
-		(const struct mcpwm_driver_api *)dev->api;
+	return DEVICE_API_GET(mcpwm, dev)->set_duty_cycle(dev, channel, duty_cycle);
+}
 
-	return api->set_duty_cycle(dev, channel, duty_cycle);
+/**
+ * @brief Start MCPWM timer(s)
+ *
+ * Start the MCPWM timer(s) for synchronized operation. This is useful
+ * for controlling timer startup timing in multi-timer configurations.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ *
+ * @retval 0 If successful.
+ * @retval -errno Negative errno code if failure.
+ */
+__syscall int mcpwm_start(const struct device *dev);
+
+static inline int z_impl_mcpwm_start(const struct device *dev)
+{
+	return DEVICE_API_GET(mcpwm, dev)->start(dev);
+}
+
+/**
+ * @brief Stop MCPWM timer(s)
+ *
+ * Stop the MCPWM timer(s). This is useful for controlling timer
+ * stop timing in multi-timer configurations and debugging.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ *
+ * @retval 0 If successful.
+ * @retval -errno Negative errno code if failure.
+ */
+__syscall int mcpwm_stop(const struct device *dev);
+
+static inline int z_impl_mcpwm_stop(const struct device *dev)
+{
+	return DEVICE_API_GET(mcpwm, dev)->stop(dev);
+}
+
+/**
+ * @brief Set the duty cycle for a single PWM output using floating point.
+ *
+ * This is a convenience function that converts a floating point duty cycle
+ * to the fixed-point Q31 format used by the underlying driver.
+ *
+ * @param[in] dev PWM device instance.
+ * @param channel PWM channel.
+ * @param duty_cycle Floating point duty cycle in range [0.0, 1.0]:
+ *                   - 0.0 =   0% duty cycle
+ *                   - 0.5 =  50% duty cycle  
+ *                   - 1.0 = 100% duty cycle
+ *
+ * @retval 0 If successful.
+ * @retval -errno Negative errno code on failure.
+ */
+static inline int mcpwm_set_duty_cycle_f32(const struct device *dev, uint32_t channel,
+					    float duty_cycle)
+{
+	/* Clamp duty cycle to valid range [0.0, 1.0] */
+	if (duty_cycle < 0.0f) {
+		duty_cycle = 0.0f;
+	} else if (duty_cycle > 1.0f) {
+		duty_cycle = 1.0f;
+	}
+	
+	/* Convert to Q31 format: multiply by 2^31 and round */
+	q31_t q31_duty = (q31_t)(duty_cycle * 2147483647.0f + 0.5f);
+	
+	return mcpwm_set_duty_cycle(dev, channel, q31_duty);
 }
 
 /**
@@ -478,7 +547,7 @@ static inline int z_impl_mcpwm_set_duty_cycle(const struct device *dev,
  *     mcpwm_set_duty_cycle(spec->dev, spec->channel, duty_cycle)
  *
  * @param[in] spec PWM specification from devicetree.
- * @param duty_cycle Fixed-point format [-1, 1) duty-cycle set to the PWM.
+ * @param duty_cycle Fixed-point format [0, 1) duty-cycle set to the PWM.
  *
  * @return A value from mcpwm_set_duty_cycle().
  *
@@ -488,6 +557,29 @@ static inline int mcpwm_set_duty_cycle_dt(const struct mcpwm_dt_spec *spec,
 				   q31_t duty_cycle)
 {
 	return mcpwm_set_duty_cycle(spec->dev, spec->channel, duty_cycle);
+}
+
+/**
+ * @brief Set duty cycle from a struct mcpwm_dt_spec using floating point.
+ *
+ * This is equivalent to:
+ *
+ *     mcpwm_set_duty_cycle_f32(spec->dev, spec->channel, duty_cycle)
+ *
+ * @param[in] spec PWM specification from devicetree.
+ * @param duty_cycle Floating point duty cycle in range [0.0, 1.0]:
+ *                   - 0.0 =   0% duty cycle
+ *                   - 0.5 =  50% duty cycle  
+ *                   - 1.0 = 100% duty cycle
+ *
+ * @return A value from mcpwm_set_duty_cycle_f32().
+ *
+ * @see mcpwm_set_duty_cycle_f32()
+ */
+static inline int mcpwm_set_duty_cycle_f32_dt(const struct mcpwm_dt_spec *spec,
+					       float duty_cycle)
+{
+	return mcpwm_set_duty_cycle_f32(spec->dev, spec->channel, duty_cycle);
 }
 
 /**
@@ -536,6 +628,38 @@ static inline int mcpwm_enable_dt(const struct mcpwm_dt_spec *spec)
 static inline int mcpwm_disable_dt(const struct mcpwm_dt_spec *spec)
 {
 	return mcpwm_disable(spec->dev, spec->channel);
+}
+
+/**
+ * @brief Start MCPWM timer from a struct mcpwm_dt_spec.
+ *
+ * This is equivalent to:
+ *
+ *     mcpwm_start(spec->dev)
+ *
+ * @param[in] spec PWM specification from devicetree.
+ *
+ * @return A value from mcpwm_start().
+ */
+static inline int mcpwm_start_dt(const struct mcpwm_dt_spec *spec)
+{
+	return mcpwm_start(spec->dev);
+}
+
+/**
+ * @brief Stop MCPWM timer from a struct mcpwm_dt_spec.
+ *
+ * This is equivalent to:
+ *
+ *     mcpwm_stop(spec->dev)
+ *
+ * @param[in] spec PWM specification from devicetree.
+ *
+ * @return A value from mcpwm_stop().
+ */
+static inline int mcpwm_stop_dt(const struct mcpwm_dt_spec *spec)
+{
+	return mcpwm_stop(spec->dev);
 }
 
 /**

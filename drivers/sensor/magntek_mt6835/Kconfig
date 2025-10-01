@@ -8,5 +8,7 @@ config MAGNTEK_MT6835
 	default y
 	depends on DT_HAS_MAGNTEK_MT6835_ENABLED
 	select SPI
+	select SPI_RTIO
+	select SENSOR_ASYNC_API
 	help
 	  Enable driver for MT6835 magnetic encoder.

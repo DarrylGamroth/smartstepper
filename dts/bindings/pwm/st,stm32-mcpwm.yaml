@@ -6,10 +6,15 @@ include: [pwm-controller.yaml, base.yaml, pinctrl-device.yaml]
 
 properties:
   pinctrl-0:
-    required: true
+    description: |
+      Optional pin control configuration for PWM outputs.
+      Required only when using PWM outputs. Can be omitted for timer-only mode
+      (e.g., for timer synchronization, trigger generation, or timing without PWM outputs).
 
   pinctrl-names:
-    required: true
+    description: |
+      Optional pin control state names.
+      Required only when pinctrl-0 is specified for PWM outputs.
 
   period:
     type: int
@@ -83,13 +88,6 @@ properties:
       Off-State Selection for Idle mode.
       When enabled, the timer outputs are forced to their inactive level
       when the MOE bit is reset (idle mode).
-
-  st,one-pulse-mode:
-    type: boolean
-    description: |
-      Enable the one pulse mode controller.
-      This mode is used to generate a single pulse on the output
-      when the timer is triggered.
 
   st,lock-level:
     type: int

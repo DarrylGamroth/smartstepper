@@ -22,7 +22,8 @@ manifest:
       import:
         # Please keep this list sorted alphabetically.
         name-whitelist:
-          - cmsis
+          # - cmsis
+          - cmsis_6
           - cmsis-dsp
             #- fatfs
           - hal_stm32

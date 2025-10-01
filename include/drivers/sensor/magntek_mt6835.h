@@ -13,10 +13,19 @@
 #define ZEPHYR_INCLUDE_DRIVERS_SENSOR_MAGNTEK_MT6835_H_
 
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/dsp/dsp.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief MT6835 Q31 sensor reading
+ */
+struct mt6835_q31_reading {
+	uint32_t timestamp_delta; /**< Time since base timestamp in nanoseconds */
+	q31_t value;              /**< Position in Q31 format for arm_sin_cos_q31 */
+};
 
 /**
  * @brief MT6835 specific sensor attributes
@@ -98,6 +107,15 @@ enum mt6835_sensor_attribute {
  */
 #define MT6835_HYSTERESIS_MIN  0  /**< Minimum hysteresis */
 #define MT6835_HYSTERESIS_MAX  7  /**< Maximum hysteresis */
+
+/**
+ * @brief Get the sensor decoder API for MT6835
+ * 
+ * @param dev MT6835 device instance
+ * @param decoder Pointer to store the decoder API
+ * @return 0 on success, negative error code on failure
+ */
+int mt6835_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
 
 #ifdef __cplusplus
 }

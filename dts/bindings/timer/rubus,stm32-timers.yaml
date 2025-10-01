@@ -1,0 +1,68 @@
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: STM32 timers
+
+compatible: "rubus,stm32-timers"
+
+include: st,stm32-timers.yaml
+
+properties:
+  st,master-mode:
+    type: boolean
+    description: |
+      Enable the master mode controller.
+      This mode is used to generate a trigger signal for slave timers
+      or to synchronize with other timers.
+
+  st,slave-mode:
+    type: boolean
+    description: |
+      Enable the slave mode controller.
+      This mode is used to synchronize the timer with another timer
+
+  st,trigger-selection:
+    type: int
+    description: |
+      Select the trigger source for the timer.
+      This is used to synchronize the timer with another timer
+      or external event. The value is a bitmask of the trigger sources
+      defined in the STM32 reference manual.
+
+  st,trigger-polarity:
+    type: int
+    description: |
+      Select the trigger polarity for the timer.
+      This is used to synchronize the timer with another timer
+      or external event. The value is a bitmask of the trigger polarities
+      defined in the STM32 reference manual.
+
+  st,master-mode-selection:
+    type: int
+    description: |
+      These bits allow to select the information to be sent in master mode
+      to slave timers for synchronization (TRGO).
+
+  st,slave-mode-selection:
+    type: int
+    description: |
+      When external signals are selected the active edge of the trigger
+      signal (TRGI) is linked to the polarity selected on the external input
+      (see Input Control register and Control register description).
+
+  st,one-pulse-mode:
+    type: boolean
+    description: |
+      Enable the one pulse mode controller.
+      This mode is used to generate a single pulse on the output
+      when the timer is triggered.
+
+  st,repetition-counter:
+    type: int
+    default: 0
+    description: |
+      Set the repetition counter value for the timer.
+      This is only available on advanced timers (TIM1, TIM8, TIM15, TIM16, TIM17, TIM20).
+      The repetition counter allows the timer to generate update events only after
+      a specified number of counting cycles, providing advanced PWM control.
+      Valid range is 0-255.

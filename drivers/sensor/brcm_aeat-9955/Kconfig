@@ -8,5 +8,7 @@ config BRCM_AEAT_9955
 	default y
 	depends on DT_HAS_BRCM_AEAT_9955_ENABLED
 	select SPI
+	select SPI_RTIO
+	select SENSOR_ASYNC_API	
 	help
 	  Enable driver for AEAT-9955 magnetic encoder.

@@ -1,0 +1,8 @@
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: STM32 SPI controller using timer-triggered DMA
+
+compatible: "st,stm32-spi-tt"
+
+include: st,stm32-spi-common.yaml

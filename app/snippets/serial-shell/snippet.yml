@@ -1,0 +1,3 @@
+name: serial-shell
+append:
+  EXTRA_CONF_FILE: serial-shell.conf

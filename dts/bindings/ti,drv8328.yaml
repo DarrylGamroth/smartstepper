@@ -1,0 +1,39 @@
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Bindings for the TI DRV8328 gate driver.
+
+include: base.yaml
+
+compatible: "ti,drv8328"
+
+properties:
+  sleep-gpios:
+    description: |
+        GPIO pin used to put the DRV8328B into sleep mode.
+    type: phandle-array
+
+  fault-gpios:
+    description: |
+        GPIO pin used to indicate a fault condition. Should be configured 
+        as an interrupt input to detect fault events immediately.
+    type: phandle-array
+
+  drvoff-gpios:
+    description: |
+        GPIO pin used to turn off the gate drivers on the DRV8328C and DRV8328D.
+    type: phandle-array
+
+  inlx-gpios:
+    description: |
+        GPIO pins connected to INLx inputs for forcing them high when 
+        controlling via INHx PWM signals. Optional for advanced control schemes.
+    type: phandle-array
+
+  pwms:
+    description: |
+        PWM signal used to control INHx inputs for motor control.
+        This property is required for the DRV8328B to function correctly.
+    type: phandle-array
+    required: true

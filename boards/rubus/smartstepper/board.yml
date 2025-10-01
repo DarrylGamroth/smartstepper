@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 board:
-  name: smartchopper
+  name: smartstepper
   vendor: rubus
   socs:
-    - name: STM32F407XE
+    - name: stm32f407xx

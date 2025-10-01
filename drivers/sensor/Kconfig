@@ -1,0 +1,7 @@
+# Copyright (c) 2021 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+if SENSOR
+rsource "magntek_mt6835/Kconfig"
+rsource "brcm_aeat-9955/Kconfig"
+endif # SENSOR
