@@ -14,6 +14,11 @@
 
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/dsp/dsp.h>
+#include <zephyr/sys/util.h>
+
+#if !IS_ENABLED(CONFIG_SENSOR)
+#error "CONFIG_SENSOR must be enabled to use the AEAT9955 driver"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,6 +112,29 @@ enum aeat9955_sensor_attribute {
  */
 #define AEAT9955_HYSTERESIS_MIN  0  /**< Minimum hysteresis */
 #define AEAT9955_HYSTERESIS_MAX  7  /**< Maximum hysteresis */
+
+/** Raw SPI frame size returned by the encoder. */
+#define AEAT9955_RAW_FRAME_SIZE 5U
+
+/** Status bit indicating a parity failure in the sensor response. */
+#define AEAT9955_STATUS_PARITY_BIT 0x80U
+/** Status bit indicating a sensor error in the response. */
+#define AEAT9955_STATUS_ERROR_BIT  0x40U
+
+/**
+ * @brief Metadata recorded for each AEAT-9955 RTIO submission.
+ */
+struct aeat9955_sample_header {
+	uint64_t timestamp_ns; /**< Capture timestamp in nanoseconds. */
+};
+
+/**
+ * @brief Buffer layout produced by the AEAT-9955 RTIO driver.
+ */
+struct aeat9955_sample {
+	struct aeat9955_sample_header header;
+	uint8_t raw[AEAT9955_RAW_FRAME_SIZE]; /**< Raw SPI response bytes. */
+};
 
 /**
  * @brief Get the sensor decoder API for AEAT9955

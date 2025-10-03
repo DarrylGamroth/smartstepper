@@ -108,6 +108,23 @@ enum mt6835_sensor_attribute {
 #define MT6835_HYSTERESIS_MIN  0  /**< Minimum hysteresis */
 #define MT6835_HYSTERESIS_MAX  7  /**< Maximum hysteresis */
 
+/** Raw SPI frame size returned by the encoder. */
+#define MT6835_RAW_FRAME_SIZE 6U
+
+/**
+ * @brief Metadata recorded for each MT6835 RTIO submission.
+ */
+struct mt6835_sample_header {
+	uint64_t timestamp_ns; /**< Capture timestamp in nanoseconds. */
+};
+
+/**
+ * @brief Buffer layout produced by the MT6835 RTIO driver.
+ */
+struct mt6835_sample {
+	struct mt6835_sample_header header;
+	uint8_t raw[MT6835_RAW_FRAME_SIZE]; /**< Raw SPI response bytes. */
+};
 /**
  * @brief Get the sensor decoder API for MT6835
  * 

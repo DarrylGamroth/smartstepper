@@ -7,6 +7,8 @@
 #define DT_DRV_COMPAT brcm_aeat_9955
 
 #include <errno.h>
+#include <stdbool.h>
+#include <string.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/device.h>
@@ -14,23 +16,22 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor_clock.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/linker/section_tags.h>
 #include <zephyr/kernel.h>
 #include <zephyr/rtio/rtio.h>
 #include <drivers/sensor/brcm_aeat9955.h>
 LOG_MODULE_REGISTER(brcm_aeat_9955, CONFIG_SENSOR_LOG_LEVEL);
 
-#define AEAT9955_CMD_READ_BIT   0x40U
-#define AEAT9955_CMD_WRITE_BIT  0x00U
-#define AEAT9955_CMD_PARITY_BIT 0x80U
-#define AEAT9955_CMD_ERROR_BIT  0x40U
-
-#define AEAT9955_CMD_READ  (0x03U << 4)
-#define AEAT9955_CMD_WRITE (0x06U << 4)
-#define AEAT9955_CMD_PROG  (0x0BU << 4)
-#define AEAT9955_CMD_ZERO  (0x05U << 4)
-#define AEAT9955_CMD_ANGLE (0x0AU << 4)
+#define AEAT9955_CMD_READ_BIT  0x40U
+#define AEAT9955_CMD_WRITE_BIT 0x00U
+#define AEAT9955_CMD_READ      (0x03U << 4)
+#define AEAT9955_CMD_WRITE     (0x06U << 4)
+#define AEAT9955_CMD_PROG      (0x0BU << 4)
+#define AEAT9955_CMD_ZERO      (0x05U << 4)
+#define AEAT9955_CMD_ANGLE     (0x0AU << 4)
 
 #define AEAT9955_REG_POS      0x3FU
 #define AEAT9955_REG_USER_ID  0x00U
@@ -53,39 +54,37 @@ LOG_MODULE_REGISTER(brcm_aeat_9955, CONFIG_SENSOR_LOG_LEVEL);
 #define AEAT9955_PULSES_PER_REV 262144
 #define AEAT9955_MILLION_UNIT   1000000
 
-struct aeat9955_encoded_data {
-	struct {
-		uint64_t timestamp_ns;
-	} header;
-	union {
-		uint8_t buf[5];
-		struct {
-			uint8_t blah;
-		} __packed;
-	} __packed;
-};
-
-struct aeat9955_dev_config {
+struct aeat9955_config {
 	struct spi_dt_spec bus;
 	const struct gpio_dt_spec gpio_zero;
 	const struct gpio_dt_spec gpio_error;
 };
 
-struct aeat9955_dev_data {
-	uint32_t position;
-	struct rtio_iodev_sqe *sqe;
+struct aeat9955_data {
 	struct rtio *rtio_ctx;
 	struct rtio_iodev *iodev;
+	struct gpio_callback error_cb;
+	uint32_t position;
 };
+
+static void aeat9955_error_gpio_callback(const struct device *port, struct gpio_callback *cb,
+					 gpio_port_pins_t pins)
+{
+	ARG_UNUSED(port);
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+
+	LOG_INF("error GPIO callback triggered");
+}
 
 inline static int aeat9955_parity(uint32_t value)
 {
 	return (POPCOUNT(value) & 1) << 7;
 }
 
-static int aeat9955_read_register(const struct device *dev, uint8_t reg, uint8_t *data)
+static int __unused aeat9955_read_register(const struct device *dev, uint8_t reg, uint8_t *data)
 {
-	const struct aeat9955_dev_config *dev_cfg = dev->config;
+	const struct aeat9955_config *cfg = dev->config;
 	uint8_t tx_buf[4];
 	uint8_t rx_buf[4];
 	struct spi_buf spi_tx_buf = {
@@ -110,7 +109,7 @@ static int aeat9955_read_register(const struct device *dev, uint8_t reg, uint8_t
 	tx_buf[2] = 0;
 	tx_buf[3] = 0;
 
-	int ret = spi_transceive_dt(&dev_cfg->bus, &tx, &rx);
+	int ret = spi_transceive_dt(&cfg->bus, &tx, &rx);
 	if (ret >= 0) {
 		*data = rx_buf[3];
 	}
@@ -118,9 +117,9 @@ static int aeat9955_read_register(const struct device *dev, uint8_t reg, uint8_t
 	return ret;
 }
 
-static int aeat9955_write_register(const struct device *dev, uint8_t reg, uint8_t value)
+static int __unused aeat9955_write_register(const struct device *dev, uint8_t reg, uint8_t value)
 {
-	const struct aeat9955_dev_config *dev_cfg = dev->config;
+	const struct aeat9955_config *cfg = dev->config;
 	uint8_t buf[4];
 	struct spi_buf tx_buf = {
 		.buf = buf,
@@ -136,12 +135,12 @@ static int aeat9955_write_register(const struct device *dev, uint8_t reg, uint8_
 	buf[2] = aeat9955_parity(value);
 	buf[3] = value;
 
-	return spi_write_dt(&dev_cfg->bus, &tx);
+	return spi_write_dt(&cfg->bus, &tx);
 }
 
 static int aeat9955_read_angle(const struct device *dev, uint32_t *angle)
 {
-	const struct aeat9955_dev_config *dev_cfg = dev->config;
+	const struct aeat9955_config *cfg = dev->config;
 	uint8_t tx_buf[5];
 	uint8_t rx_buf[5];
 	struct spi_buf spi_tx_buf = {
@@ -167,16 +166,15 @@ static int aeat9955_read_angle(const struct device *dev, uint32_t *angle)
 	tx_buf[3] = 0;
 	tx_buf[4] = 0;
 
-	int ret = spi_transceive_dt(&dev_cfg->bus, &tx, &rx);
+	int ret = spi_transceive_dt(&cfg->bus, &tx, &rx);
 	if (ret == 0) {
-		// Read the error and parity bits
-		if (rx_buf[2] & AEAT9955_CMD_ERROR_BIT) {
+		if (rx_buf[2] & AEAT9955_STATUS_ERROR_BIT) {
 			LOG_ERR("AEAT-9955 error bit set");
-			return -EIO; // Error reading angle
+			return -EIO;
 		}
-		if (rx_buf[2] & AEAT9955_CMD_PARITY_BIT) {
+		if (rx_buf[2] & AEAT9955_STATUS_PARITY_BIT) {
 			LOG_ERR("AEAT-9955 parity error");
-			return -EIO; // Parity error
+			return -EIO;
 		}
 		// AEAT-9955 returns 18-bit position data in bytes 2-4
 		// Use sys_get_be24 to extract and shift right by 6 to get 18-bit value
@@ -190,11 +188,11 @@ static int aeat9955_read_angle(const struct device *dev, uint32_t *angle)
 
 static int aeat9955_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
-	struct aeat9955_dev_data *dev_data = dev->data;
+	struct aeat9955_data *data = dev->data;
 	int retval;
 
 	/* Read the angle register */
-	retval = aeat9955_read_angle(dev, &dev_data->position);
+	retval = aeat9955_read_angle(dev, &data->position);
 	if (retval < 0) {
 		LOG_ERR("Failed to read angle register");
 		return retval;
@@ -206,17 +204,17 @@ static int aeat9955_sample_fetch(const struct device *dev, enum sensor_channel c
 static int aeat9955_channel_get(const struct device *dev, enum sensor_channel chan,
 				struct sensor_value *val)
 {
-	struct aeat9955_dev_data *dev_data = dev->data;
+	struct aeat9955_data *data = dev->data;
 
 	switch (chan) {
 	case SENSOR_CHAN_ROTATION:
-		val->val1 = ((int64_t)dev_data->position * AEAT9955_FULL_ANGLE) /
-			    AEAT9955_PULSES_PER_REV;
+		val->val1 =
+			((int64_t)data->position * AEAT9955_FULL_ANGLE) / AEAT9955_PULSES_PER_REV;
 
-		val->val2 = (((int64_t)dev_data->position * AEAT9955_FULL_ANGLE *
-			      AEAT9955_MILLION_UNIT) /
-			     AEAT9955_PULSES_PER_REV) %
-			    AEAT9955_MILLION_UNIT;
+		val->val2 =
+			(((int64_t)data->position * AEAT9955_FULL_ANGLE * AEAT9955_MILLION_UNIT) /
+			 AEAT9955_PULSES_PER_REV) %
+			AEAT9955_MILLION_UNIT;
 		break;
 	default:
 		return -ENOTSUP;
@@ -225,44 +223,8 @@ static int aeat9955_channel_get(const struct device *dev, enum sensor_channel ch
 	return 0;
 }
 
-static int aeat9955_encode(const struct device *dev, const struct sensor_chan_spec *const channels,
-			   size_t num_channels, uint8_t *buf)
-{
-	struct aeat9955_encoded_data *edata = (struct aeat9955_encoded_data *)buf;
-	uint64_t cycles;
-	int rc;
-
-	rc = sensor_clock_get_cycles(&cycles);
-	if (rc != 0) {
-		return rc;
-	}
-
-	// /* AEAT9955 only supports exactly one channel: SENSOR_CHAN_ROTATION */
-	// if (num_channels != 1) {
-	//     LOG_ERR("AEAT9955 supports exactly one channel, got %zu channels", num_channels);
-	//     return -ENOTSUP;
-	// }
-
-	// /* Validate the single channel is SENSOR_CHAN_ROTATION with index 0 */
-	// if (channels[0].chan_type != SENSOR_CHAN_ROTATION) {
-	//     LOG_ERR("Unsupported channel type: %d, only SENSOR_CHAN_ROTATION supported",
-	//             channels[0].chan_type);
-	//     return -ENOTSUP;
-	// }
-
-	// if (channels[0].chan_idx != 0) {
-	//     LOG_ERR("Invalid channel index: %d, only index 0 supported",
-	//             channels[0].chan_idx);
-	//     return -EINVAL;
-	// }
-
-	/* Initialize the sensor data header */
-	edata->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
-
-	return 0;
-}
-
-static void aeat9955_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res, void *arg0)
+static void aeat9955_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res,
+				     void *arg0)
 {
 	ARG_UNUSED(res);
 
@@ -287,31 +249,30 @@ static void aeat9955_complete_result(struct rtio *ctx, const struct rtio_sqe *sq
 
 static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 {
-	const struct sensor_read_config *cfg = iodev_sqe->sqe.iodev->data;
-	const struct sensor_chan_spec *const channels = cfg->channels;
-	struct aeat9955_dev_data *data = dev->data;
-	const size_t num_channels = cfg->count;
-	uint32_t min_buf_len = sizeof(struct aeat9955_encoded_data);
+	struct aeat9955_data *data = dev->data;
+	uint32_t min_buf_len = sizeof(struct aeat9955_sample);
+	uint64_t cycles;
 	int rc;
 	uint8_t *buf;
-	uint32_t buf_len;
-	struct aeat9955_encoded_data *edata;
+	struct aeat9955_sample *sample;
 
-	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, &buf_len);
+	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, NULL);
 	if (rc) {
 		LOG_ERR("Failed to get a read buffer of size %u bytes", min_buf_len);
 		rtio_iodev_sqe_err(iodev_sqe, rc);
 		return;
 	}
 
-	edata = (struct aeat9955_encoded_data *)buf;
+	sample = (struct aeat9955_sample *)buf;
 
-	rc = aeat9955_encode(dev, channels, num_channels, buf);
+	rc = sensor_clock_get_cycles(&cycles);
 	if (rc != 0) {
-		LOG_ERR("Failed to encode sensor data");
+		LOG_ERR("Failed to get sensor clock cycles");
 		rtio_iodev_sqe_err(iodev_sqe, rc);
 		return;
 	}
+
+	sample->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
 
 	struct rtio *ctx = data->rtio_ctx;
 	struct rtio_sqe *txrx_sqe = rtio_sqe_acquire(ctx);
@@ -323,17 +284,14 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 		return;
 	}
 
-	/* Prepare 6-byte TX buffer: command + dummy bytes */
-	static uint8_t tx_buf[] = {AEAT9955_CMD_READ_BIT, AEAT9955_REG_POS, 0x00, 0x00, 0x00};
+	static __nocache __aligned(4) uint8_t tx_buf[] = {AEAT9955_CMD_READ_BIT, AEAT9955_REG_POS,
+							  0x00, 0x00, 0x00};
 
-	/* Single transceive operation - matches your existing aeat9955_read_angle() */
-	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, edata->buf,
-				 sizeof(edata->buf), NULL);
+	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
+				 sizeof(sample->raw), (void *)dev);
 
-	/* Prepare completion callback */
 	rtio_sqe_prep_callback_no_cqe(complete_sqe, aeat9955_complete_result, iodev_sqe, NULL);
 
-	/* Submit the RTIO transaction chain */
 	rtio_submit(ctx, 0);
 }
 
@@ -351,8 +309,8 @@ void aeat9955_submit(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 
 static int aeat9955_initialize(const struct device *dev)
 {
-	const struct aeat9955_dev_config *config = dev->config;
-	struct aeat9955_dev_data *const dev_data = dev->data;
+	const struct aeat9955_config *config = dev->config;
+	struct aeat9955_data *const data = dev->data;
 	int result;
 
 	if (!spi_is_ready_dt(&config->bus)) {
@@ -371,14 +329,34 @@ static int aeat9955_initialize(const struct device *dev)
 
 	/* Configure ERROR GPIO if defined */
 	if (config->gpio_error.port != NULL) {
+		if (!gpio_is_ready_dt(&config->gpio_error)) {
+			LOG_ERR("%s: ERROR GPIO port not ready", dev->name);
+			return -ENODEV;
+		}
+
 		result = gpio_pin_configure_dt(&config->gpio_error, GPIO_INPUT);
 		if (result != 0) {
 			LOG_ERR("%s: failed to initialize GPIO for ERROR", dev->name);
 			return result;
 		}
+
+		gpio_init_callback(&data->error_cb, aeat9955_error_gpio_callback,
+				   BIT(config->gpio_error.pin));
+		result = gpio_add_callback(config->gpio_error.port, &data->error_cb);
+		if (result != 0) {
+			LOG_ERR("%s: failed to add ERROR GPIO callback", dev->name);
+			return result;
+		}
+
+		result = gpio_pin_interrupt_configure_dt(&config->gpio_error,
+							 GPIO_INT_EDGE_TO_ACTIVE);
+		if (result != 0) {
+			LOG_ERR("%s: failed to configure ERROR GPIO interrupt", dev->name);
+			return result;
+		}
 	}
 
-	dev_data->position = 0;
+	data->position = 0;
 
 	LOG_INF("Device %s: initialized", dev->name);
 
@@ -386,8 +364,8 @@ static int aeat9955_initialize(const struct device *dev)
 }
 
 static DEVICE_API(sensor, aeat9955_driver_api) = {
-	// .sample_fetch = aeat9955_sample_fetch,
-	// .channel_get = aeat9955_channel_get,
+	.sample_fetch = aeat9955_sample_fetch,
+	.channel_get = aeat9955_channel_get,
 #ifdef CONFIG_SENSOR_ASYNC_API
 	.submit = aeat9955_submit,
 	.get_decoder = aeat9955_get_decoder,
@@ -397,18 +375,18 @@ static DEVICE_API(sensor, aeat9955_driver_api) = {
 #define AEAT9955_SPI_CFG (SPI_WORD_SET(8) | SPI_MODE_CPHA)
 
 #define AEAT9955_RTIO_DEFINE(inst)                                                                 \
-	SPI_DT_IODEV_DEFINE(aeat9955_spi_iodev_##inst, DT_DRV_INST(inst), AEAT9955_SPI_CFG, 0U);   \
+	SPI_DT_IODEV_DEFINE(aeat9955_spi_iodev_##inst, DT_DRV_INST(inst), AEAT9955_SPI_CFG);       \
 	RTIO_DEFINE(aeat9955_rtio_ctx_##inst, 8, 8);
 
 #define AEAT9955_INIT(inst)                                                                        \
 	AEAT9955_RTIO_DEFINE(inst);                                                                \
                                                                                                    \
-	static struct aeat9955_dev_data aeat9955_data##inst = {                                    \
+	static struct aeat9955_data aeat9955_data##inst = {                                        \
 		.rtio_ctx = &aeat9955_rtio_ctx_##inst,                                             \
 		.iodev = &aeat9955_spi_iodev_##inst,                                               \
 	};                                                                                         \
-	static const struct aeat9955_dev_config aeat9955_cfg##inst = {                             \
-		.bus = SPI_DT_SPEC_INST_GET(inst, AEAT9955_SPI_CFG, 0),             \
+	static const struct aeat9955_config aeat9955_cfg##inst = {                                 \
+		.bus = SPI_DT_SPEC_INST_GET(inst, AEAT9955_SPI_CFG),                               \
 		.gpio_zero = GPIO_DT_SPEC_INST_GET_OR(inst, zero_gpios, {0}),                      \
 		.gpio_error = GPIO_DT_SPEC_INST_GET_OR(inst, error_gpios, {0}),                    \
 	};                                                                                         \

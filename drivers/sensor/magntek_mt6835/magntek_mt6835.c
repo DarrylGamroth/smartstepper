@@ -63,29 +63,21 @@ LOG_MODULE_REGISTER(magntek_mt6835, CONFIG_SENSOR_LOG_LEVEL);
 #define MT6835_PULSES_PER_REV 2097152
 #define MT6835_MILLION_UNIT   1000000
 
-struct mt6835_encoded_data {
-	struct {
-		uint64_t timestamp_ns;
-	} header;
-	uint8_t buf[6]; /* 6 bytes: 2 command + 3 angle data + 1 extra */
-};
-
-struct mt6835_dev_config {
+struct mt6835_config {
 	struct spi_dt_spec bus;
 	const struct gpio_dt_spec gpio_cal_en;
 };
 
 /* Device run time data */
-struct mt6835_dev_data {
-	uint32_t position;
-	struct rtio_iodev_sqe *sqe;
+struct mt6835_data {
 	struct rtio *rtio_ctx;
 	struct rtio_iodev *iodev;
+	uint32_t position;
 };
 
 static int mt6835_read_register(const struct device *dev, uint16_t reg, uint8_t *data)
 {
-	const struct mt6835_dev_config *dev_cfg = dev->config;
+	const struct mt6835_config *dev_cfg = dev->config;
 	uint8_t tx_buf[3];
 	uint8_t rx_buf[3];
 	struct spi_buf spi_tx_buf = {
@@ -119,7 +111,7 @@ static int mt6835_read_register(const struct device *dev, uint16_t reg, uint8_t 
 
 static int mt6835_write_register(const struct device *dev, uint16_t reg, uint8_t value)
 {
-	const struct mt6835_dev_config *dev_cfg = dev->config;
+	const struct mt6835_config *dev_cfg = dev->config;
 	uint8_t buf[3];
 	struct spi_buf tx_buf = {
 		.buf = buf,
@@ -139,7 +131,7 @@ static int mt6835_write_register(const struct device *dev, uint16_t reg, uint8_t
 
 static int mt6835_read_angle(const struct device *dev, uint32_t *angle)
 {
-	const struct mt6835_dev_config *dev_cfg = dev->config;
+	const struct mt6835_config *dev_cfg = dev->config;
 	uint8_t tx_buf[6];
 	uint8_t rx_buf[6];
 	struct spi_buf spi_tx_buf = {
@@ -212,7 +204,7 @@ static int mt6835_attr_set(const struct device *dev, enum sensor_channel chan,
 	case MT6835_ATTR_CALIBRATION:
 		/* Trigger auto-calibration process */
 		if (val->val1 == 1) {
-			const struct mt6835_dev_config *config = dev->config;
+			const struct mt6835_config *config = dev->config;
 			uint8_t status_reg;
 			int timeout_count = 0;
 			const int max_timeout = 1000; /* 10 second timeout (10ms * 1000) */
@@ -463,7 +455,7 @@ static int mt6835_attr_get(const struct device *dev, enum sensor_channel chan,
 
 static int mt6835_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
-	struct mt6835_dev_data *dev_data = dev->data;
+	struct mt6835_data *dev_data = dev->data;
 	int retval;
 
 	/* Read the angle register */
@@ -479,7 +471,7 @@ static int mt6835_sample_fetch(const struct device *dev, enum sensor_channel cha
 static int mt6835_channel_get(const struct device *dev, enum sensor_channel chan,
 			      struct sensor_value *val)
 {
-	struct mt6835_dev_data *dev_data = dev->data;
+	struct mt6835_data *dev_data = dev->data;
 
 	switch (chan) {
 	case SENSOR_CHAN_ROTATION:
@@ -498,44 +490,8 @@ static int mt6835_channel_get(const struct device *dev, enum sensor_channel chan
 	return 0;
 }
 
-static int mt6835_encode(const struct device *dev, const struct sensor_chan_spec *const channels,
-			 size_t num_channels, uint8_t *buf)
-{
-	struct mt6835_encoded_data *edata = (struct mt6835_encoded_data *)buf;
-	uint64_t cycles;
-	int rc;
-
-	rc = sensor_clock_get_cycles(&cycles);
-	if (rc != 0) {
-		return rc;
-	}
-
-	// /* MT6835 only supports exactly one channel: SENSOR_CHAN_ROTATION */
-	// if (num_channels != 1) {
-	//     LOG_ERR("MT6835 supports exactly one channel, got %zu channels", num_channels);
-	//     return -ENOTSUP;
-	// }
-
-	// /* Validate the single channel is SENSOR_CHAN_ROTATION with index 0 */
-	// if (channels[0].chan_type != SENSOR_CHAN_ROTATION) {
-	//     LOG_ERR("Unsupported channel type: %d, only SENSOR_CHAN_ROTATION supported",
-	//             channels[0].chan_type);
-	//     return -ENOTSUP;
-	// }
-
-	// if (channels[0].chan_idx != 0) {
-	//     LOG_ERR("Invalid channel index: %d, only index 0 supported",
-	//             channels[0].chan_idx);
-	//     return -EINVAL;
-	// }
-
-	/* Initialize the sensor data header */
-	edata->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
-
-	return 0;
-}
-
-static void mt6835_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res, void *arg0)
+static void mt6835_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res,
+				   void *arg0)
 {
 	ARG_UNUSED(res);
 
@@ -560,31 +516,30 @@ static void mt6835_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe,
 
 static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 {
-	const struct sensor_read_config *cfg = iodev_sqe->sqe.iodev->data;
-	const struct sensor_chan_spec *const channels = cfg->channels;
-	struct mt6835_dev_data *data = dev->data;
-	const size_t num_channels = cfg->count;
-	uint32_t min_buf_len = sizeof(struct mt6835_encoded_data);
+	struct mt6835_data *data = dev->data;
+	uint32_t min_buf_len = sizeof(struct mt6835_sample);
+	uint64_t cycles;
 	int rc;
 	uint8_t *buf;
-	uint32_t buf_len;
-	struct mt6835_encoded_data *edata;
+	struct mt6835_sample *sample;
 
-	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, &buf_len);
+	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, NULL);
 	if (rc) {
 		LOG_ERR("Failed to get a read buffer of size %u bytes", min_buf_len);
 		rtio_iodev_sqe_err(iodev_sqe, rc);
 		return;
 	}
 
-	edata = (struct mt6835_encoded_data *)buf;
+	sample = (struct mt6835_sample *)buf;
 
-	rc = mt6835_encode(dev, channels, num_channels, buf);
+	rc = sensor_clock_get_cycles(&cycles);
 	if (rc != 0) {
-		LOG_ERR("Failed to encode sensor data");
+		LOG_ERR("Failed to get sensor clock cycles");
 		rtio_iodev_sqe_err(iodev_sqe, rc);
 		return;
 	}
+
+	sample->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
 
 	struct rtio *ctx = data->rtio_ctx;
 	struct rtio_sqe *txrx_sqe = rtio_sqe_acquire(ctx);
@@ -597,25 +552,19 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 	}
 
 	/* Prepare 6-byte TX buffer: command + dummy bytes */
-	static uint8_t tx_buf[6] = {MT6835_CMD_ANGLE | ((MT6835_REG_ANGLE_H >> 8) & 0x0F),
-				    MT6835_REG_ANGLE_H & 0xFF,
-				    0x00, /* Dummy bytes to clock out response */
-				    0x00,
-				    0x00,
-				    0x00};
+	static __nocache __aligned(4) uint8_t tx_buf[] = {
+		MT6835_CMD_ANGLE | ((MT6835_REG_ANGLE_H >> 8) & 0x0F),
+		MT6835_REG_ANGLE_H & 0xFF,
+		0x00,
+		0x00,
+		0x00,
+		0x00};
 
-	/* Single transceive operation - matches your existing mt6835_read_angle() */
-	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH,
-				 tx_buf,
-				 edata->buf,
-				 sizeof(edata->buf), NULL);
-	/* There is only a single command so RTIO_SQE_TRANSACTION is not needed */
-	// txrx_sqe->flags |= RTIO_SQE_TRANSACTION;
+	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
+				 sizeof(sample->raw), (void *)dev);
 
-	/* Prepare completion callback */
 	rtio_sqe_prep_callback_no_cqe(complete_sqe, mt6835_complete_result, iodev_sqe, NULL);
 
-	/* Submit the RTIO transaction chain */
 	rtio_submit(ctx, 0);
 }
 
@@ -633,8 +582,8 @@ void mt6835_submit(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 
 static int mt6835_initialize(const struct device *dev)
 {
-	const struct mt6835_dev_config *config = dev->config;
-	struct mt6835_dev_data *const dev_data = dev->data;
+	const struct mt6835_config *config = dev->config;
+	struct mt6835_data *const dev_data = dev->data;
 	int result;
 
 	if (!spi_is_ready_dt(&config->bus)) {
@@ -656,8 +605,8 @@ static int mt6835_initialize(const struct device *dev)
 }
 
 static DEVICE_API(sensor, mt6835_driver_api) = {
-	// .sample_fetch = mt6835_sample_fetch,
-	// .channel_get = mt6835_channel_get,
+	.sample_fetch = mt6835_sample_fetch,
+	.channel_get = mt6835_channel_get,
 	.attr_set = mt6835_attr_set,
 	.attr_get = mt6835_attr_get,
 #ifdef CONFIG_SENSOR_ASYNC_API
@@ -669,18 +618,18 @@ static DEVICE_API(sensor, mt6835_driver_api) = {
 #define MT6835_SPI_CFG (SPI_WORD_SET(8) | SPI_MODE_CPOL | SPI_MODE_CPHA)
 
 #define MT6835_RTIO_DEFINE(inst)                                                                   \
-	SPI_DT_IODEV_DEFINE(mt6835_spi_iodev_##inst, DT_DRV_INST(inst), MT6835_SPI_CFG, 0U);       \
+	SPI_DT_IODEV_DEFINE(mt6835_spi_iodev_##inst, DT_DRV_INST(inst), MT6835_SPI_CFG);           \
 	RTIO_DEFINE(mt6835_rtio_ctx_##inst, 8, 8);
 
 #define MT6835_INIT(inst)                                                                          \
 	MT6835_RTIO_DEFINE(inst);                                                                  \
                                                                                                    \
-	static struct mt6835_dev_data mt6835_data##inst = {                                        \
+	static struct mt6835_data mt6835_data##inst = {                                            \
 		.rtio_ctx = &mt6835_rtio_ctx_##inst,                                               \
 		.iodev = &mt6835_spi_iodev_##inst,                                                 \
 	};                                                                                         \
-	static const struct mt6835_dev_config mt6835_cfg##inst = {                                 \
-		.bus = SPI_DT_SPEC_INST_GET(inst, MT6835_SPI_CFG, 0),                              \
+	static const struct mt6835_config mt6835_cfg##inst = {                                     \
+		.bus = SPI_DT_SPEC_INST_GET(inst, MT6835_SPI_CFG),                                 \
 		.gpio_cal_en = GPIO_DT_SPEC_INST_GET(inst, cal_en_gpios),                          \
 	};                                                                                         \
                                                                                                    \
