@@ -9,6 +9,8 @@
 
 #include "spi_context.h"
 #include <zephyr/drivers/spi/rtio.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/util.h>
 
 typedef void (*irq_config_func_t)(const struct device *port);
 
@@ -48,6 +50,7 @@ struct stream {
 #define SPI_STM32_DMA_TX_DONE_FLAG	0x04
 #define SPI_STM32_DMA_DONE_FLAG	\
 	(SPI_STM32_DMA_RX_DONE_FLAG | SPI_STM32_DMA_TX_DONE_FLAG)
+#define SPI_STM32_EOT_DONE_FLAG	0x08
 
 /* DMA register address helper - matches upstream */
 static inline uint32_t ll_func_dma_get_reg_addr(SPI_TypeDef *spi, uint32_t location)
@@ -102,6 +105,10 @@ struct spi_stm32_data {
 	volatile uint32_t status_flags;
 	struct stream dma_rx;
 	struct stream dma_tx;
+	bool dma_active;
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	bool waiting_eot;
+#endif
 #endif
 	
 	/* Current transaction state for polling mode */
@@ -328,5 +335,84 @@ static inline void ll_func_disable_spi(SPI_TypeDef *spi)
 		/* NOP */
 	}
 }
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+static inline uint32_t spi_stm32_bytes_per_frame(const struct spi_config *config)
+{
+	return SPI_WORD_SIZE_GET(config->operation) / 8U;
+}
+
+static inline uint32_t spi_stm32_count_frames(uint32_t len_bytes, const struct spi_config *config)
+{
+	uint32_t bytes_per_frame = spi_stm32_bytes_per_frame(config);
+
+	if (bytes_per_frame == 0U) {
+		return 0U;
+	}
+
+	return len_bytes / bytes_per_frame;
+}
+
+static inline uint32_t spi_stm32_compute_total_frames(const struct spi_stm32_data *data)
+{
+	const struct spi_config *config = data->ctx.config;
+	uint32_t tx_frames = spi_stm32_count_frames(data->tx_len, config);
+	uint32_t rx_frames = spi_stm32_count_frames(data->rx_len, config);
+
+	if (tx_frames == 0U && rx_frames == 0U) {
+		return 0U;
+	}
+
+	return MAX(tx_frames, rx_frames);
+}
+
+static inline void spi_stm32_program_h7_transfer(SPI_TypeDef *spi,
+			       const struct spi_stm32_data *data)
+{
+	uint32_t total_frames = spi_stm32_compute_total_frames(data);
+
+	if (total_frames > 0U) {
+		LL_SPI_SetTransferSize(spi, total_frames);
+	}
+}
+
+static inline void spi_stm32_start_h7_master(SPI_TypeDef *spi)
+{
+	if (LL_SPI_GetMode(spi) == LL_SPI_MODE_MASTER) {
+		LL_SPI_StartMasterTransfer(spi);
+		while (!LL_SPI_IsActiveMasterTransfer(spi)) {
+			/* NOP */
+		}
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+		/* Errata ES0392 recommends a 1us delay after enabling */
+		k_busy_wait(1);
+#endif
+	}
+}
+
+static inline void spi_stm32_update_fifo_threshold(const struct spi_stm32_config *cfg,
+			       SPI_TypeDef *spi,
+			       uint8_t word_size,
+			       bool use_dma)
+{
+	if (!cfg->fifo_enabled) {
+		return;
+	}
+
+	if (use_dma) {
+		if (word_size == 16U) {
+			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_04DATA);
+		} else {
+			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_08DATA);
+		}
+	} else {
+		if (word_size == 16U) {
+			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_02DATA);
+		} else {
+			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_04DATA);
+		}
+	}
+}
+#endif /* st_stm32h7_spi */
 
 #endif	/* ZEPHYR_DRIVERS_SPI_SPI_LL_STM32_H_ */

@@ -41,6 +41,7 @@ LOG_MODULE_REGISTER(DT_DRV_COMPAT, CONFIG_SPI_LOG_LEVEL);
 /* Forward declarations */
 static void spi_stm32_iodev_complete(const struct device *dev, int status);
 static int spi_stm32_configure(const struct device *dev, const struct spi_config *config);
+static void spi_stm32_try_finalize(const struct device *dev);
 
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 /* Nocache dummy buffer for DMA operations when no buffer provided */
@@ -48,19 +49,18 @@ static __aligned(32) uint32_t dummy_rx_tx_buffer __nocache;
 
 /* DMA callback function - executed in interrupt context */
 static void dma_callback(const struct device *dma_dev, void *arg,
-			 uint32_t channel, int status)
+		 uint32_t channel, int status)
 {
 	ARG_UNUSED(dma_dev);
 	
 	/* arg contains the SPI device pointer */
 	const struct device *dev = arg;
 	struct spi_stm32_data *data = dev->data;
-	int completion_status = 0;
 	
 	if (status < 0) {
 		LOG_ERR("DMA callback error with channel %d", channel);
 		data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
-		completion_status = -EIO;
+		data->error_status = -EIO;
 	} else {
 		/* Identify which DMA channel completed */
 		if (channel == data->dma_tx.channel) {
@@ -70,16 +70,12 @@ static void dma_callback(const struct device *dma_dev, void *arg,
 		} else {
 			LOG_ERR("DMA callback channel %d is not valid", channel);
 			data->status_flags |= SPI_STM32_DMA_ERROR_FLAG;
-			completion_status = -EIO;
+			data->error_status = -EIO;
 		}
 	}
 	
-	/* Check if both TX and RX DMA are complete (or if error occurred) */
-	if ((data->status_flags & SPI_STM32_DMA_DONE_FLAG) == SPI_STM32_DMA_DONE_FLAG ||
-	    (data->status_flags & SPI_STM32_DMA_ERROR_FLAG)) {
-		/* Both DMA channels complete or error - complete the RTIO operation */
-		spi_stm32_iodev_complete(dev, completion_status);
-	}
+	/* Evaluate completion conditions */
+	spi_stm32_try_finalize(dev);
 }
 #endif /* CONFIG_SPI_RUBUS_STM32_DMA */
 
@@ -109,19 +105,24 @@ static int spi_stm32_dma_tx_load(const struct device *dev, const uint8_t *buf, s
 		stream->last_checked_buf = NULL;
 		stream->last_checked_len = 0;
 	} else {
-		/* Validate buffer is in DMA-safe memory region (warn once per buffer/length) */
-		if (IS_ENABLED(CONFIG_DCACHE)) {
-			if (stream->last_checked_buf != buf || stream->last_checked_len != len) {
-				if (!stm32_buf_in_nocache((uintptr_t)buf, len)) {
-					LOG_WRN("TX buffer not in nocache region - potential cache coherency issues");
-				}
-				stream->last_checked_buf = buf;
-				stream->last_checked_len = len;
-			}
-		}
 		src_addr = (uint32_t)buf;
 		src_adj = stream->src_addr_increment ?
 			DMA_ADDR_ADJ_INCREMENT : DMA_ADDR_ADJ_NO_CHANGE;
+#ifdef CONFIG_DCACHE
+		if (IS_ENABLED(CONFIG_DCACHE) && len > 0U) {
+			const void *prev_buf = stream->last_checked_buf;
+			size_t prev_len = stream->last_checked_len;
+			bool cached = !stm32_buf_in_nocache((uintptr_t)buf, len);
+			if (cached) {
+				sys_cache_data_flush_range((void *)buf, len);
+				if (prev_buf != buf || prev_len != len) {
+					LOG_DBG("Flushed TX buffer for DMA coherency");
+				}
+			}
+		}
+#endif
+		stream->last_checked_buf = buf;
+		stream->last_checked_len = len;
 	}
 
 	dest_adj = stream->dst_addr_increment ?
@@ -186,19 +187,24 @@ static int spi_stm32_dma_rx_load(const struct device *dev, uint8_t *buf, size_t 
 		stream->last_checked_buf = NULL;
 		stream->last_checked_len = 0;
 	} else {
-		/* Validate buffer is in DMA-safe memory region (warn once per buffer/length) */
-		if (IS_ENABLED(CONFIG_DCACHE)) {
-			if (stream->last_checked_buf != buf || stream->last_checked_len != len) {
-				if (!stm32_buf_in_nocache((uintptr_t)buf, len)) {
-					LOG_WRN("RX buffer not in nocache region - potential cache coherency issues");
-				}
-				stream->last_checked_buf = buf;
-				stream->last_checked_len = len;
-			}
-		}
 		dest_addr = (uint32_t)buf;
 		dest_adj = stream->dst_addr_increment ?
 			DMA_ADDR_ADJ_INCREMENT : DMA_ADDR_ADJ_NO_CHANGE;
+#ifdef CONFIG_DCACHE
+		if (IS_ENABLED(CONFIG_DCACHE) && len > 0U) {
+			const void *prev_buf = stream->last_checked_buf;
+			size_t prev_len = stream->last_checked_len;
+			bool cached = !stm32_buf_in_nocache((uintptr_t)buf, len);
+			if (cached) {
+				sys_cache_data_flush_range((void *)buf, len);
+				if (prev_buf != buf || prev_len != len) {
+					LOG_DBG("Flushed RX buffer before DMA");
+				}
+			}
+		}
+#endif
+		stream->last_checked_buf = buf;
+		stream->last_checked_len = len;
 	}
 
 	src_adj = stream->src_addr_increment ?
@@ -242,6 +248,43 @@ static int spi_stm32_dma_rx_load(const struct device *dev, uint8_t *buf, size_t 
 	return dma_start(stream->dma_dev, stream->channel);
 }
 #endif /* CONFIG_SPI_RUBUS_STM32_DMA */
+
+static void spi_stm32_try_finalize(const struct device *dev)
+{
+	struct spi_stm32_data *data = dev->data;
+	int status = data->error_status;
+
+#ifdef CONFIG_SPI_RUBUS_STM32_DMA
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	bool wait_eot = data->waiting_eot;
+#endif
+
+	if (!data->dma_active) {
+		return;
+	}
+
+	if (data->status_flags & SPI_STM32_DMA_ERROR_FLAG) {
+		if (status == 0) {
+			status = -EIO;
+		}
+	} else {
+		if ((data->status_flags & SPI_STM32_DMA_DONE_FLAG) != SPI_STM32_DMA_DONE_FLAG) {
+			return;
+		}
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+		if (IS_ENABLED(CONFIG_SPI_RUBUS_STM32_INTERRUPT) && wait_eot) {
+			if ((data->status_flags & SPI_STM32_EOT_DONE_FLAG) == 0U) {
+				return;
+			}
+		}
+#endif
+	}
+
+	spi_stm32_iodev_complete(dev, status);
+#else
+	spi_stm32_iodev_complete(dev, status);
+#endif
+}
 
 /* STM32 SPI error mask - depends on SoC family */
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
@@ -350,12 +393,15 @@ static inline void spi_stm32_discard_rx_data(const struct device *dev)
 	}
 }
 
+
 /* CS control function - matches upstream driver pattern */
 static void spi_stm32_cs_control(const struct device *dev, bool on)
 {
+#ifndef DT_SPI_CTX_HAS_NO_CS_GPIOS
 	struct spi_stm32_data *data = dev->data;
 
 	spi_context_cs_control(&data->ctx, on);
+#endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
 	const struct spi_stm32_config *cfg = dev->config;
@@ -598,6 +644,17 @@ static int spi_stm32_configure(const struct device *dev, const struct spi_config
 
 	ll_func_configure_fifo(spi, cfg);
 
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (LL_SPI_GetMode(spi) == LL_SPI_MODE_MASTER) {
+		if (cfg->mssi_clocks > 0) {
+			LL_SPI_SetMasterSSIdleness(spi, cfg->mssi_clocks);
+		}
+		if (cfg->midi_clocks > 0) {
+			LL_SPI_SetInterDataIdleness(spi, (cfg->midi_clocks << SPI_CFG2_MIDI_Pos));
+		}
+	}
+#endif
+
 	data->ctx.config = config;
 
 	return 0;
@@ -620,6 +677,13 @@ static int spi_stm32_transceive_interrupt(const struct device *dev)
 	} else {
 		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_RX);
 	}
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_update_fifo_threshold(cfg, spi,
+					  SPI_WORD_SIZE_GET(config->operation), true);
+#endif
+
+	LL_SPI_Enable(spi);
 
 	/* Reset counters for interrupt mode */
 	data->tx_count = 0;
@@ -653,6 +717,10 @@ static int spi_stm32_transceive_interrupt(const struct device *dev)
 	ll_func_enable_int_rx_not_empty(spi);
 	ll_func_enable_int_tx_empty(spi);
 
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_start_h7_master(spi);
+#endif
+
 	return 0; /* Non-blocking - completion handled in ISR */
 }
 
@@ -664,6 +732,8 @@ static int spi_stm32_transceive_dma(const struct device *dev)
 	const struct spi_stm32_config *cfg = dev->config;
 	struct spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
 	size_t dma_len_tx, dma_len_rx;
 	int ret;
 
@@ -682,8 +752,25 @@ static int spi_stm32_transceive_dma(const struct device *dev)
 		dma_len_rx = data->rx_len;
 	}
 
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_update_fifo_threshold(cfg, spi, word_size, true);
+#else
+	ARG_UNUSED(word_size);
+#endif
+
 	/* Reset DMA status flags */
 	data->status_flags = 0;
+	data->dma_active = true;
+	data->error_status = 0;
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (IS_ENABLED(CONFIG_SPI_RUBUS_STM32_INTERRUPT)) {
+		data->waiting_eot = true;
+		LL_SPI_ClearFlag_EOT(spi);
+		ll_func_enable_int_eot(spi);
+	} else {
+		data->waiting_eot = false;
+	}
+#endif
 
 	/* Start RX DMA first (peripheral -> memory) */
 	if (data->rx_buf || !data->tx_buf) {
@@ -727,6 +814,12 @@ static int spi_stm32_transceive_dma(const struct device *dev)
 		LL_SPI_EnableDMAReq_TX(spi);
 	}
 
+	LL_SPI_Enable(spi);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_start_h7_master(spi);
+#endif
+
 	return 0; /* Non-blocking - completion handled via DMA callbacks */
 }
 #endif /* CONFIG_SPI_RUBUS_STM32_DMA */
@@ -737,6 +830,8 @@ static int spi_stm32_transceive_polling(const struct device *dev)
 	const struct spi_stm32_config *cfg = dev->config;
 	struct spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
+	const struct spi_config *config = data->ctx.config;
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
 	uint32_t timeout = 100000;
 
 	/* Determine transfer type and configure accordingly */
@@ -747,6 +842,16 @@ static int spi_stm32_transceive_polling(const struct device *dev)
 	} else {
 		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_RX);
 	}
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_update_fifo_threshold(cfg, spi, word_size, false);
+#endif
+
+	LL_SPI_Enable(spi);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_start_h7_master(spi);
+#endif
 
 	/* Reset counters for polling mode */
 	data->tx_count = 0;
@@ -811,7 +916,6 @@ static int spi_stm32_transceive_polling(const struct device *dev)
 
 static void spi_stm32_iodev_prepare_start(const struct device *dev)
 {
-	const struct spi_stm32_config *cfg = dev->config;
 	struct spi_stm32_data *data = dev->data;
 	struct spi_rtio *rtio_ctx = data->rtio_ctx;
 	struct spi_dt_spec *spi_dt_spec = rtio_ctx->txn_curr->sqe.iodev->data;
@@ -828,8 +932,6 @@ static void spi_stm32_iodev_prepare_start(const struct device *dev)
 	}
 
 	spi_stm32_cs_control(dev, true);
-
-	LL_SPI_Enable(cfg->spi);
 }
 
 static void spi_stm32_iodev_start(const struct device *dev)
@@ -838,6 +940,15 @@ static void spi_stm32_iodev_start(const struct device *dev)
 	struct spi_rtio *rtio_ctx = data->rtio_ctx;
 	struct rtio_sqe *sqe = &rtio_ctx->txn_curr->sqe;
 	int ret = 0;
+
+	data->error_status = 0;
+#ifdef CONFIG_SPI_RUBUS_STM32_DMA
+	data->status_flags = 0;
+	data->dma_active = false;
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	data->waiting_eot = false;
+#endif
+#endif
 
 	/* Extract buffer information and execute appropriate operation */
 	switch (sqe->op) {
@@ -879,29 +990,35 @@ static void spi_stm32_iodev_start(const struct device *dev)
 		goto complete_immediate;
 	}
 
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	const struct spi_stm32_config *cfg = dev->config;
+	spi_stm32_program_h7_transfer(cfg->spi, data);
+#endif
+
 	/* Determine transfer mode: DMA -> Interrupt -> Polling (in order of preference) */
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	/* Check transfer size first - only proceed with DMA checks for larger transfers */
-	size_t total_len = data->tx_len + data->rx_len;
+	size_t total_len = MAX(data->tx_len, data->rx_len);
 	
 	if (total_len >= CONFIG_SPI_RUBUS_STM32_DMA_MIN_LEN) {
 		/* Large transfer - check if DMA is available and buffers are DMA-safe */
 		bool use_dma = false;
 		
 		if (data->dma_tx.dma_dev && data->dma_rx.dma_dev) {
-			/* Check if buffers are in DMA-safe memory regions */
-			bool tx_dma_safe = (data->tx_buf == NULL) || 
-					   !IS_ENABLED(CONFIG_DCACHE) || 
-					   stm32_buf_in_nocache((uintptr_t)data->tx_buf, data->tx_len);
-			bool rx_dma_safe = (data->rx_buf == NULL) || 
-					   !IS_ENABLED(CONFIG_DCACHE) || 
-					   stm32_buf_in_nocache((uintptr_t)data->rx_buf, data->rx_len);
-			
-			if (tx_dma_safe && rx_dma_safe) {
-				use_dma = true;
-			} else {
-				LOG_DBG("Buffers not in DMA-safe memory, falling back to interrupt/polling");
+			use_dma = true;
+
+#ifdef CONFIG_DCACHE
+			if (IS_ENABLED(CONFIG_DCACHE)) {
+				bool tx_cached = (data->tx_buf != NULL) && (data->tx_len > 0) &&
+						!stm32_buf_in_nocache((uintptr_t)data->tx_buf, data->tx_len);
+				bool rx_cached = (data->rx_buf != NULL) && (data->rx_len > 0) &&
+						!stm32_buf_in_nocache((uintptr_t)data->rx_buf, data->rx_len);
+
+				if (tx_cached || rx_cached) {
+					LOG_DBG("DMA buffers cached - performing cache maintenance");
+				}
 			}
+#endif
 		}
 		
 		if (use_dma) {
@@ -939,6 +1056,13 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 	struct spi_stm32_data *data = dev->data;
 	struct spi_rtio *rtio_ctx = data->rtio_ctx;
 
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (IS_ENABLED(CONFIG_SPI_RUBUS_STM32_INTERRUPT)) {
+		ll_func_disable_int_eot(cfg->spi);
+		LL_SPI_ClearFlag_EOT(cfg->spi);
+	}
+#endif
+
 	/* Clean up DMA if it was used */
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	if (data->dma_tx.dma_dev != NULL && data->dma_rx.dma_dev != NULL) {
@@ -950,6 +1074,22 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 		dma_stop(data->dma_tx.dma_dev, data->dma_tx.channel);
 		dma_stop(data->dma_rx.dma_dev, data->dma_rx.channel);
 	}
+
+#if defined(CONFIG_DCACHE)
+	if (IS_ENABLED(CONFIG_DCACHE) &&
+	    (data->status_flags & SPI_STM32_DMA_RX_DONE_FLAG) != 0 &&
+	    data->rx_buf != NULL && data->rx_len > 0 &&
+	    !stm32_buf_in_nocache((uintptr_t)data->rx_buf, data->rx_len)) {
+		sys_cache_data_invd_range(data->rx_buf, data->rx_len);
+	}
+#endif /* CONFIG_DCACHE */
+#endif
+
+#ifdef CONFIG_SPI_RUBUS_STM32_DMA
+	data->dma_active = false;
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	data->waiting_eot = false;
+#endif
 #endif
 
 	/* Handle transaction chaining if needed */
@@ -1134,9 +1274,25 @@ static int spi_stm32_pm_action(const struct device *dev, enum pm_device_action a
 }
 #endif
 
+static inline bool spi_stm32_error_irq_enabled(SPI_TypeDef *spi)
+{
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	bool enabled = LL_SPI_IsEnabledIT_OVR(spi) || LL_SPI_IsEnabledIT_MODF(spi) ||
+		       LL_SPI_IsEnabledIT_CRCERR(spi) || LL_SPI_IsEnabledIT_FRE(spi);
+#ifdef LL_SPI_IsEnabledIT_UDR
+	enabled = enabled || LL_SPI_IsEnabledIT_UDR(spi);
+#endif
+	return enabled;
+#elif defined(LL_SPI_IsEnabledIT_ERR)
+	return LL_SPI_IsEnabledIT_ERR(spi);
+#else
+	return true;
+#endif
+}
+
 static inline int spi_stm32_handle_errors(SPI_TypeDef *spi)
 {
-	if (!LL_SPI_IsEnabledIT_ERR(spi)) {
+	if (!spi_stm32_error_irq_enabled(spi)) {
 		return 0;
 	}
 
@@ -1206,6 +1362,16 @@ static void spi_stm32_isr(const struct device *dev)
 		LOG_DBG("SPI interrupt received while SPI is disabled: %p", spi);
 		// return;
 	}
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	if (data->waiting_eot && LL_SPI_IsEnabledIT_EOT(spi) && LL_SPI_IsActiveFlag_EOT(spi)) {
+		LL_SPI_ClearFlag_EOT(spi);
+		ll_func_disable_int_eot(spi);
+		data->status_flags |= SPI_STM32_EOT_DONE_FLAG;
+		spi_stm32_try_finalize(dev);
+		return;
+	}
+#endif
 
 	rc = spi_stm32_handle_errors(spi);
 	if (rc) {
