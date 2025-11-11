@@ -42,6 +42,7 @@ LOG_MODULE_REGISTER(DT_DRV_COMPAT, CONFIG_SPI_LOG_LEVEL);
 static void spi_stm32_iodev_complete(const struct device *dev, int status);
 static int spi_stm32_configure(const struct device *dev, const struct spi_config *config);
 static void spi_stm32_try_finalize(const struct device *dev);
+static inline int spi_stm32_handle_errors(SPI_TypeDef *spi);
 
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 /* Nocache dummy buffer for DMA operations when no buffer provided */
@@ -678,17 +679,16 @@ static int spi_stm32_transceive_interrupt(const struct device *dev)
 		LL_SPI_SetTransferDirection(spi, LL_SPI_HALF_DUPLEX_RX);
 	}
 
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	spi_stm32_update_fifo_threshold(cfg, spi,
-					  SPI_WORD_SIZE_GET(config->operation), true);
-#endif
-
-	LL_SPI_Enable(spi);
-
 	/* Reset counters for interrupt mode */
 	data->tx_count = 0;
 	data->rx_count = 0;
 	data->error_status = 0;
+
+	LL_SPI_Enable(spi);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	spi_stm32_start_h7_master(spi);
+#endif
 
 	/* Start transmission with first byte/word */
 	if (data->tx_buf && data->tx_len > 0) {
@@ -716,10 +716,6 @@ static int spi_stm32_transceive_interrupt(const struct device *dev)
 	ll_func_enable_int_errors(spi);
 	ll_func_enable_int_rx_not_empty(spi);
 	ll_func_enable_int_tx_empty(spi);
-
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	spi_stm32_start_h7_master(spi);
-#endif
 
 	return 0; /* Non-blocking - completion handled in ISR */
 }
@@ -861,28 +857,10 @@ static int spi_stm32_transceive_polling(const struct device *dev)
 	while ((data->tx_count < (data->tx_buf ? data->tx_len : data->rx_len)) || 
 	       (data->rx_count < (data->rx_buf ? data->rx_len : 0))) {
 		
-		/* Check for SPI errors - Phase 2 enhanced error handling */
-		uint32_t sr = LL_SPI_ReadReg(spi, SR);
-		if (sr & SPI_STM32_ERR_MSK) {
-			LOG_ERR("SPI error detected: SR=0x%08x", sr);
-			
-			/* Detailed error logging */
-			if (sr & LL_SPI_SR_OVR) {
-				LOG_ERR("SPI overrun error");
-			}
-			if (sr & LL_SPI_SR_MODF) {
-				LOG_ERR("SPI mode fault error");
-			}
-			if (sr & LL_SPI_SR_CRCERR) {
-				LOG_ERR("SPI CRC error");
-			}
-			
-			/* Clear error flags and attempt recovery */
-			LL_SPI_ClearFlag_OVR(spi);
-			LL_SPI_ClearFlag_MODF(spi);
-			LL_SPI_ClearFlag_CRCERR(spi);
-			
-			return -EIO;
+		/* Check for errors using unified handler */
+		int err = spi_stm32_handle_errors(spi);
+		if (err) {
+			return err;
 		}
 
 		/* Handle TX: Send data when TX buffer ready */
@@ -945,9 +923,6 @@ static void spi_stm32_iodev_start(const struct device *dev)
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	data->status_flags = 0;
 	data->dma_active = false;
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	data->waiting_eot = false;
-#endif
 #endif
 
 	/* Extract buffer information and execute appropriate operation */
@@ -989,11 +964,6 @@ static void spi_stm32_iodev_start(const struct device *dev)
 		ret = -EINVAL;
 		goto complete_immediate;
 	}
-
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	const struct spi_stm32_config *cfg = dev->config;
-	spi_stm32_program_h7_transfer(cfg->spi, data);
-#endif
 
 	/* Determine transfer mode: DMA -> Interrupt -> Polling (in order of preference) */
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
@@ -1056,13 +1026,6 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 	struct spi_stm32_data *data = dev->data;
 	struct spi_rtio *rtio_ctx = data->rtio_ctx;
 
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	if (IS_ENABLED(CONFIG_SPI_RUBUS_STM32_INTERRUPT)) {
-		ll_func_disable_int_eot(cfg->spi);
-		LL_SPI_ClearFlag_EOT(cfg->spi);
-	}
-#endif
-
 	/* Clean up DMA if it was used */
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	if (data->dma_tx.dma_dev != NULL && data->dma_rx.dma_dev != NULL) {
@@ -1087,9 +1050,9 @@ static void spi_stm32_iodev_complete(const struct device *dev, int status)
 
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	data->dma_active = false;
+#endif
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
 	data->waiting_eot = false;
-#endif
 #endif
 
 	/* Handle transaction chaining if needed */
@@ -1290,33 +1253,65 @@ static inline bool spi_stm32_error_irq_enabled(SPI_TypeDef *spi)
 #endif
 }
 
+/* Unified error handler - checks and clears SPI error flags based on SPI_STM32_ERR_MSK */
 static inline int spi_stm32_handle_errors(SPI_TypeDef *spi)
 {
-	if (!spi_stm32_error_irq_enabled(spi)) {
+	uint32_t sr = LL_SPI_ReadReg(spi, SR);
+	
+	if (!(sr & SPI_STM32_ERR_MSK)) {
 		return 0;
 	}
-
-	int err = 0;
 	
-	if (LL_SPI_IsActiveFlag_OVR(spi)) {
+	LOG_ERR("SPI error detected: SR=0x%08x", sr);
+	
+	/* Clear error flags based on what's in SPI_STM32_ERR_MSK */
+	if (sr & LL_SPI_SR_OVR) {
 		LL_SPI_ClearFlag_OVR(spi);
-		err = -EIO;
+		LOG_ERR("SPI overrun error");
 	}
-	if (LL_SPI_IsActiveFlag_MODF(spi)) {
+	if (sr & LL_SPI_SR_MODF) {
 		LL_SPI_ClearFlag_MODF(spi);
-		err = -EIO;
+		LOG_ERR("SPI mode fault error");
 	}
-	if (LL_SPI_IsActiveFlag_CRCERR(spi)) {
+	
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	/* H7 uses CRCE flag (not CRCERR) */
+	if (sr & LL_SPI_SR_CRCE) {
 		LL_SPI_ClearFlag_CRCERR(spi);
-		err = -EIO;
+		LOG_ERR("SPI CRC error");
 	}
-#ifdef LL_SPI_SR_UDR
-	if (LL_SPI_IsActiveFlag_UDR(spi)) {
-		err = -EIO;
+	/* H7 has TIFRE (TI Frame Error) flag */
+	if (sr & LL_SPI_SR_TIFRE) {
+		LL_SPI_ClearFlag_FRE(spi);
+		LOG_ERR("SPI TI frame error");
+	}
+	/* H7 has UDR (Underrun) flag */
+	if (sr & LL_SPI_SR_UDR) {
+		/* UDR cannot be cleared, only by disabling SPI */
+		LOG_ERR("SPI underrun error");
+	}
+#else
+	/* Non-H7 platforms use CRCERR flag */
+	if (sr & LL_SPI_SR_CRCERR) {
+		LL_SPI_ClearFlag_CRCERR(spi);
+		LOG_ERR("SPI CRC error");
+	}
+#if defined(LL_SPI_SR_UDR)
+	/* Some platforms have UDR flag */
+	if (sr & LL_SPI_SR_UDR) {
+		LOG_ERR("SPI underrun error");
 	}
 #endif
+#if defined(LL_SPI_SR_FRE)
+	/* Some platforms have FRE flag */
+	if (sr & LL_SPI_SR_FRE) {
+		LL_SPI_ClearFlag_FRE(spi);
+		LOG_ERR("SPI frame error");
+	}
+#endif
+#endif
 
-	return err;
+	return -EIO;
 }
 
 #ifdef CONFIG_SPI_RUBUS_STM32_INTERRUPT
@@ -1360,24 +1355,16 @@ static void spi_stm32_isr(const struct device *dev)
 	/* Check for spurious interrupts */
 	if (!LL_SPI_IsEnabled(spi)) {
 		LOG_DBG("SPI interrupt received while SPI is disabled: %p", spi);
-		// return;
-	}
-
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	if (data->waiting_eot && LL_SPI_IsEnabledIT_EOT(spi) && LL_SPI_IsActiveFlag_EOT(spi)) {
-		LL_SPI_ClearFlag_EOT(spi);
-		ll_func_disable_int_eot(spi);
-		data->status_flags |= SPI_STM32_EOT_DONE_FLAG;
-		spi_stm32_try_finalize(dev);
 		return;
 	}
-#endif
 
-	rc = spi_stm32_handle_errors(spi);
-	if (rc) {
-		LOG_ERR("SPI error detected");	
-		data->error_status = rc;
-		goto complete;
+	/* Check for errors using unified handler (only if error interrupts enabled) */
+	if (spi_stm32_error_irq_enabled(spi)) {
+		rc = spi_stm32_handle_errors(spi);
+		if (rc) {
+			data->error_status = rc;
+			goto complete;
+		}
 	}
 
 	tx_complete = spi_stm32_handle_tx_interrupt(dev);
@@ -1393,6 +1380,8 @@ static void spi_stm32_isr(const struct device *dev)
 	if (!tx_complete || !rx_complete) {
 		return;
 	}
+	
+	rc = 0;
 complete:
 	ll_func_disable_int_tx_empty(spi);
 	ll_func_disable_int_rx_not_empty(spi);

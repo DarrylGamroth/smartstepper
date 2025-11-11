@@ -22,7 +22,10 @@ typedef void (*irq_config_func_t)(const struct device *port);
 #define STM32_SPI_DOMAIN_CLOCK_SUPPORT 0
 #endif
 
-/* STM32-specific DMA structures */
+/* DMA constants - needed even when DMA not enabled for helper functions */
+#define SPI_STM32_DMA_TX	0x01
+#define SPI_STM32_DMA_RX	0x02
+
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 /* DMA stream structure - matches upstream exactly */
 struct stream {
@@ -41,16 +44,12 @@ struct stream {
 	size_t last_checked_len;
 };
 
-/* DMA constants */
-#define SPI_STM32_DMA_TX	0x01
-#define SPI_STM32_DMA_RX	0x02
-
+/* DMA status flags */
 #define SPI_STM32_DMA_ERROR_FLAG	0x01
 #define SPI_STM32_DMA_RX_DONE_FLAG	0x02
 #define SPI_STM32_DMA_TX_DONE_FLAG	0x04
 #define SPI_STM32_DMA_DONE_FLAG	\
 	(SPI_STM32_DMA_RX_DONE_FLAG | SPI_STM32_DMA_TX_DONE_FLAG)
-#define SPI_STM32_EOT_DONE_FLAG	0x08
 
 /* DMA register address helper - matches upstream */
 static inline uint32_t ll_func_dma_get_reg_addr(SPI_TypeDef *spi, uint32_t location)
@@ -67,6 +66,11 @@ static inline uint32_t ll_func_dma_get_reg_addr(SPI_TypeDef *spi, uint32_t locat
 	return (uint32_t)LL_SPI_DMA_GetRegAddr(spi);
 #endif /* st_stm32h7_spi */
 }
+#endif /* CONFIG_SPI_RUBUS_STM32_DMA */
+
+/* H7 EOT flag - needed for both DMA and interrupt modes */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+#define SPI_STM32_EOT_DONE_FLAG	0x08
 #endif
 
 /* STM32 SPI configuration structure */
@@ -106,9 +110,12 @@ struct spi_stm32_data {
 	struct stream dma_rx;
 	struct stream dma_tx;
 	bool dma_active;
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-	bool waiting_eot;
 #endif
+	
+	/* H7 EOT handling (needed for both DMA and interrupt modes) */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	volatile uint32_t status_flags;  /* Also used for interrupt mode EOT tracking */
+	bool waiting_eot;
 #endif
 	
 	/* Current transaction state for polling mode */
