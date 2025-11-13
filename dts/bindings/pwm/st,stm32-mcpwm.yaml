@@ -75,6 +75,14 @@ properties:
     description: |
       Set the dead time value for the timer.
 
+  st,cc-dma-channels:
+    type: array
+    description: |
+      Optional list of 1-based compare channels that should assert DMA requests
+      when the corresponding PWM output is enabled. Channels not listed keep
+      their DMA request masked. This allows firmware to arm DMA only for the
+      flows that require it while leaving other channels serviced by interrupts.
+
   st,ossr:
     type: boolean
     description: |

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT brcm_aeat_9955
+#include "brcm_aeat9955.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -22,37 +22,8 @@
 #include <zephyr/linker/section_tags.h>
 #include <zephyr/kernel.h>
 #include <zephyr/rtio/rtio.h>
-#include <drivers/sensor/brcm_aeat9955.h>
+
 LOG_MODULE_REGISTER(brcm_aeat_9955, CONFIG_SENSOR_LOG_LEVEL);
-
-#define AEAT9955_CMD_READ_BIT  0x40U
-#define AEAT9955_CMD_WRITE_BIT 0x00U
-#define AEAT9955_CMD_READ      (0x03U << 4)
-#define AEAT9955_CMD_WRITE     (0x06U << 4)
-#define AEAT9955_CMD_PROG      (0x0BU << 4)
-#define AEAT9955_CMD_ZERO      (0x05U << 4)
-#define AEAT9955_CMD_ANGLE     (0x0AU << 4)
-
-#define AEAT9955_REG_POS      0x3FU
-#define AEAT9955_REG_USER_ID  0x00U
-#define AEAT9955_REG_ANGLE_H  0x03U
-#define AEAT9955_REG_ANGLE_M  0x04U
-#define AEAT9955_REG_ANGLE_L  0x05U
-#define AEAT9955_REG_CRC      0x06U
-#define AEAT9955_REG_ABZ_RES1 0x07U
-#define AEAT9955_REG_ABZ_RES2 0x08U
-#define AEAT9955_REG_ZERO1    0x09U
-#define AEAT9955_REG_ZERO2    0x0AU
-#define AEAT9955_REG_OPTS0    0x0AU
-#define AEAT9955_REG_OPTS1    0x0BU
-#define AEAT9955_REG_OPTS2    0x0CU
-#define AEAT9955_REG_OPTS3    0x0DU
-#define AEAT9955_REG_OPTS4    0x0EU
-#define AEAT9955_REG_OPTS5    0x11U
-
-#define AEAT9955_FULL_ANGLE     360
-#define AEAT9955_PULSES_PER_REV 262144
-#define AEAT9955_MILLION_UNIT   1000000
 
 struct aeat9955_config {
 	struct spi_dt_spec bus;
@@ -254,16 +225,8 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 	uint64_t cycles;
 	int rc;
 	uint8_t *buf;
+	uint32_t buf_len;
 	struct aeat9955_sample *sample;
-
-	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, NULL);
-	if (rc) {
-		LOG_ERR("Failed to get a read buffer of size %u bytes", min_buf_len);
-		rtio_iodev_sqe_err(iodev_sqe, rc);
-		return;
-	}
-
-	sample = (struct aeat9955_sample *)buf;
 
 	rc = sensor_clock_get_cycles(&cycles);
 	if (rc != 0) {
@@ -271,6 +234,23 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 		rtio_iodev_sqe_err(iodev_sqe, rc);
 		return;
 	}
+
+	struct rtio_sqe *sqe = (struct rtio_sqe *)&iodev_sqe->sqe;
+
+	if (sqe->rx.buf != NULL && sqe->rx.buf_len >= min_buf_len) {
+		buf = sqe->rx.buf;
+		buf_len = sqe->rx.buf_len;
+		/* caller provided storage */
+	} else {
+		rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, &buf_len);
+		if (rc) {
+			LOG_ERR("Failed to get a read buffer of size %u bytes", min_buf_len);
+			rtio_iodev_sqe_err(iodev_sqe, rc);
+			return;
+		}
+	}
+
+	sample = (struct aeat9955_sample *)buf;
 
 	sample->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
 
@@ -288,7 +268,7 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 							  0x00, 0x00, 0x00};
 
 	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
-				 sizeof(sample->raw), (void *)dev);
+				 sizeof(sample->raw), NULL);
 
 	rtio_sqe_prep_callback_no_cqe(complete_sqe, aeat9955_complete_result, iodev_sqe, NULL);
 

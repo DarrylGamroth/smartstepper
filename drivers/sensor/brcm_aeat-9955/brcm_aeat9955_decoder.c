@@ -10,13 +10,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/dsp/dsp.h>
 #include <string.h>
-#include <drivers/sensor/brcm_aeat9955.h>
 
-LOG_MODULE_DECLARE(brcm_aeat9955, CONFIG_SENSOR_LOG_LEVEL);
+#include "brcm_aeat9955.h"
 
-/* AEAT9955 has 18-bit resolution (2^18 = 262144 counts per revolution) */
-#define AEAT9955_RESOLUTION_BITS 18
-#define AEAT9955_MAX_COUNT       (1U << AEAT9955_RESOLUTION_BITS)
+LOG_MODULE_DECLARE(brcm_aeat_9955, CONFIG_SENSOR_LOG_LEVEL);
 
 /**
  * @brief Convert AEAT9955 raw position to Q31 angle for arm_sin_cos_q31

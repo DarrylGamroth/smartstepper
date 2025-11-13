@@ -56,6 +56,27 @@ extern "C" {
 typedef uint16_t mcpwm_flags_t;
 
 /**
+ * @brief MCPWM compare event callback signature.
+ *
+ * Invoked from ISR context whenever a channel raises an output compare event.
+ *
+ * @param dev PWM device instance that generated the event.
+ * @param channel Channel index [1..N] associated with the event.
+ * @param user_data Pointer supplied during callback registration.
+ */
+typedef void (*mcpwm_compare_cb_t)(const struct device *dev, uint32_t channel, void *user_data);
+
+/**
+ * @brief MCPWM break fault callback signature.
+ *
+ * Called from ISR context when a break or break2 fault is latched.
+ *
+ * @param dev PWM device instance that detected the break.
+ * @param user_data Pointer supplied during callback registration.
+ */
+typedef void (*mcpwm_break_cb_t)(const struct device *dev, void *user_data);
+
+/**
  * @brief Container for PWM information specified in devicetree.
  *
  * This type contains a pointer to a PWM device, channel number (controlled by
@@ -377,6 +398,12 @@ typedef int (*mcpwm_stop_t)(const struct device *dev);
 typedef int (*mcpwm_set_duty_cycle_t)(const struct device *dev,
 					uint32_t channel, q31_t duty_cycle);
 
+typedef int (*mcpwm_set_compare_callback_t)(const struct device *dev, uint32_t channel,
+					mcpwm_compare_cb_t cb, void *user_data);
+
+typedef int (*mcpwm_set_break_callback_t)(const struct device *dev, mcpwm_break_cb_t cb,
+					void *user_data);
+
 /** @brief PWM driver API definition. */
 __subsystem struct mcpwm_driver_api {
 	mcpwm_configure_t configure;
@@ -385,6 +412,8 @@ __subsystem struct mcpwm_driver_api {
 	mcpwm_start_t start;
 	mcpwm_stop_t stop;
 	mcpwm_set_duty_cycle_t set_duty_cycle;
+	mcpwm_set_compare_callback_t set_compare_callback;
+	mcpwm_set_break_callback_t set_break_callback;
 };
 /** @endcond */
 
@@ -644,6 +673,53 @@ static inline int mcpwm_disable_dt(const struct mcpwm_dt_spec *spec)
 static inline int mcpwm_start_dt(const struct mcpwm_dt_spec *spec)
 {
 	return mcpwm_start(spec->dev);
+}
+
+/**
+ * @brief Register or clear a callback for a channel compare event.
+ *
+ * @param dev PWM device instance.
+ * @param channel Channel index to associate with the callback.
+ * @param cb Function to invoke from ISR context, or NULL to unregister.
+ * @param user_data Pointer passed to the callback when invoked.
+ *
+ * @retval 0 If successful.
+ * @retval -ENOTSUP If the driver does not implement compare callbacks.
+ * @retval -errno Negative errno code on other failures.
+ */
+static inline int mcpwm_set_compare_callback(const struct device *dev, uint32_t channel,
+					mcpwm_compare_cb_t cb, void *user_data)
+{
+	const struct mcpwm_driver_api *api = DEVICE_API_GET(mcpwm, dev);
+
+	if (api->set_compare_callback == NULL) {
+		return -ENOTSUP;
+	}
+
+	return api->set_compare_callback(dev, channel, cb, user_data);
+}
+
+/**
+ * @brief Register or clear the break fault callback.
+ *
+ * @param dev PWM device instance.
+ * @param cb Function to invoke from ISR context when a break fault occurs, or NULL.
+ * @param user_data Pointer passed to the callback when invoked.
+ *
+ * @retval 0 If successful.
+ * @retval -ENOTSUP If the driver does not implement break callbacks.
+ * @retval -errno Negative errno code on other failures.
+ */
+static inline int mcpwm_set_break_callback(const struct device *dev, mcpwm_break_cb_t cb,
+					void *user_data)
+{
+	const struct mcpwm_driver_api *api = DEVICE_API_GET(mcpwm, dev);
+
+	if (api->set_break_callback == NULL) {
+		return -ENOTSUP;
+	}
+
+	return api->set_break_callback(dev, cb, user_data);
 }
 
 /**

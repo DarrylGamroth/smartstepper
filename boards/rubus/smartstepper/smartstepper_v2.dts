@@ -1,0 +1,406 @@
+/*
+ * Copyright (c) 2025 Rubus Technologies Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <st/h7/stm32h743Xi.dtsi>
+#include <st/h7/stm32h743zitx-pinctrl.dtsi>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/timer/stm32-timer.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <dt-bindings/pwm/stm32-mcpwm.h>
+
+/ {
+	model = "Smart Stepper Controller V2";
+	compatible = "rubus,smartstepper_v2";
+
+	chosen {
+		// zephyr,console = &usart1;
+		// zephyr,shell-uart = &usart1;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,ccm = &ccm0;
+		zephyr,canbus = &fdcan1;
+		zephyr,code-partition = &slot0_partition;
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+		user_button: button {
+			label = "User";
+			gpios = <&gpiod 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		watchdog0 = &iwdg;
+		sw0 = &user_button;	
+		// encoder0 = &mt6835;
+		die-temp0 = &die_temp;
+		volt-sensor0 = &vref;
+	};
+
+	vbus {
+		compatible = "voltage-divider";
+		io-channels = <&adc1 10>;
+		output-ohms = <10000>;
+		full-ohms = <(191000 + 10000)>;
+	};
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hsi {
+	status = "disabled";
+};
+
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(25)>;
+	hse-bypass;
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
+&pll {
+	div-m = <5>;
+	mul-n = <192>;
+	div-p = <2>;
+	div-q = <5>;    /* 192 MHz */
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&pll2 {
+	div-m = <5>;
+	mul-n = <48>;
+	div-p = <2>;
+	div-q = <3>; /* gives 80 MHz to the FDCAN */
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(480)>;
+	d1cpre = <1>;
+	hpre = <2>;
+	d1ppre = <2>;
+	d2ppre1 = <2>;
+	d2ppre2 = <2>;
+	d3ppre = <2>;
+};
+
+&rtc {
+	clocks = <&rcc STM32_CLOCK(APB4, 16)>,
+		 <&rcc STM32_SRC_LSI RTC_SEL(2)>;
+	status = "okay";
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
+
+&mco2 {
+	clocks = <&rcc STM32_SRC_HSE MCO2_SEL(MCO2_SEL_HSE)>;
+	prescaler = <MCO2_PRE(MCO_PRE_DIV_1)>;
+	pinctrl-0 = <&rcc_mco_2_pc9>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&dmamux1 {
+	status = "okay";
+};
+
+&dma1 {
+	status = "okay";
+};
+
+&dma2 {
+	status = "okay";
+};
+
+&mac {
+	status = "okay";
+	pinctrl-0 = <&eth_rxd0_pc4
+		     &eth_rxd1_pc5
+		     &eth_ref_clk_pa1
+		     &eth_crs_dv_pa7
+		     &eth_tx_en_pb11
+		     &eth_txd0_pb12
+		     &eth_txd1_pb13>;
+	pinctrl-names = "default";
+	phy-connection-type = "rmii";
+	phy-handle = <&eth_phy>;
+};
+
+&mdio {
+	status = "okay";
+	pinctrl-0 = <&eth_mdio_pa2 &eth_mdc_pc1>;
+	pinctrl-names = "default";
+
+	eth_phy: ethernet-phy@0 {
+		status = "okay";
+		compatible = "ti,dp83825";
+		reg = <0>;
+		reset-gpios = <&gpiob 15 GPIO_ACTIVE_LOW>;
+		int-gpios = <&gpiob 14 GPIO_ACTIVE_LOW>;
+		ti,interface-type = "rmii-25MHz";
+	};
+
+	// eth_phy: ethernet-phy@0 {
+	// 	status = "okay";
+	// 	compatible = "ethernet-phy";
+	// 	reg = <0x00>;
+	// };
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "disabled";
+};
+
+&i2c3 {
+	pinctrl-0 = <&i2c3_scl_ph7 &i2c3_sda_ph8>;
+	pinctrl-names = "default";
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	tmp1075: tmp1075@48 {
+		compatible = "ti,tmp1075";
+		reg = <0x48>;
+		conversion-rate = <220000>;
+		consecutive-fault-measurements = <4>;
+		status = "okay";
+	};
+
+	eeprom: eeprom@50 {
+		compatible = "st,m24c16", "st,m24xxx", "atmel,at24";
+		reg = <0x50>;
+		size = <DT_SIZE_K(2)>;
+		pagesize = <16>;
+		address-width = <8>;
+		timeout = <5>;
+		status = "okay";
+	};
+
+};
+
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pb6 &usart1_rx_pb7>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "disabled";
+};
+
+&quadspi {
+	pinctrl-0 = <&quadspi_bk1_io0_pd11 &quadspi_bk1_io1_pd12 &quadspi_bk1_io2_pe2
+		     &quadspi_bk1_io3_pd13 &quadspi_clk_pf10 &quadspi_bk1_ncs_pg6>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	w25q128: w25q128@0 {
+		compatible = "st,stm32-qspi-nor";
+		reg = <0>;
+		size = <DT_SIZE_M(128)>;	/* 128 Mbits (16 MB) */
+		jedec-id = [ef 40 18];
+		qspi-max-frequency = <DT_FREQ_M(100)>;
+		cs-high-time = <2>;
+		status = "okay";
+		spi-bus-width = <4>;
+		writeoc = "PP_1_4_4";
+		reset-cmd;
+		reset-cmd-wait = <2000>;		
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = < 1 >;
+			#size-cells = < 1 >;
+
+			storage_partition: partition@0 {
+				label = "storage";
+				reg=< 0x0 DT_SIZE_K(1024) >;
+			};
+		};
+	};
+};
+
+&spi2 {
+	pinctrl-0 = <&spi2_sck_pi1 &spi2_miso_pi2 &spi2_mosi_pi3>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioi 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	status = "okay";
+
+	mt6835: mt6835@0 {
+		compatible = "magntek,mt6835";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(12)>;
+		cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};
+
+&spi3 {
+	pinctrl-0 = <&spi3_sck_pc10 &spi3_miso_pc11 &spi3_mosi_pc12>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	status = "disabled";
+};
+
+&fdcan1 {
+	clocks = <&rcc STM32_CLOCK(APB1_2, 8)>,
+		 <&rcc STM32_SRC_PLL2_Q FDCAN_SEL(2)>;
+	pinctrl-0 = <&fdcan1_rx_pb8 &fdcan1_tx_pb9>;
+	pinctrl-names = "default";
+	status = "disabled";
+};
+
+zephyr_udc0: &usbotg_fs {
+	pinctrl-0 = <&usb_otg_fs_dm_pb14 &usb_otg_fs_dp_pb15>;
+	pinctrl-names = "default";
+	status = "disabled";
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* 128KB for bootloader */
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 DT_SIZE_K(128)>;
+			read-only;
+		};
+
+		/* application image slot: 256KB */
+		slot0_partition: partition@20000 {
+			label = "image-0";
+			reg = <0x00020000 DT_SIZE_K(256)>;
+		};
+
+		/* backup slot: 256KB */
+		slot1_partition: partition@60000 {
+			label = "image-1";
+			reg = <0x00060000 DT_SIZE_K(256)>;
+		};
+
+		// /* storage: 256KB for settings */
+		// storage_partition: partition@a0000 {
+		// 	label = "storage";
+		// 	reg = <0x000a0000 DT_SIZE_K(256)>;
+		// };
+	};
+};
+
+&timers1 {
+	compatible = "rubus,stm32-timers";
+
+	pwm1:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch1n_pe8 &tim1_ch2_pa9 &tim1_ch2n_pb0 &tim1_bkin_pe15>;
+		pinctrl-names = "default";
+		st,break-enable;
+		st,break-polarity = "low";
+		st,dead-time = <0>;
+		status = "disabled";
+		#pwm-cells = <2>;
+	};
+};
+
+&timers8 {
+	compatible = "rubus,stm32-timers";
+
+	pwm8:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch1n_ph13 &tim8_ch2_pc7 &tim8_ch2n_ph14 &tim8_bkin_pi4>;
+		pinctrl-names = "default";
+		st,break-enable;
+		st,break-polarity = "low";
+		st,dead-time = <0>;
+		status = "disabled";
+		#pwm-cells = <2>;
+	};
+};
+
+// &timers4 {
+// 	status = "okay";
+
+// 	pwm4: pwm {
+// 		status = "disabled";
+// 		pinctrl-0 = <&tim4_ch1_pd12 &tim4_ch2_pd13 &tim4_ch3_pd14 &tim4_ch4_pd15>;
+// 		pinctrl-names = "default";
+// 	};
+// };
+
+&pinctrl {
+    tim1_bkin_pe15: tim1_bkin_pe15 {
+        bias-pull-up;
+    };
+	tim8_bkin_pi4: tim8_bkin_pi4 {
+		bias-pull-up;
+	};
+};
+
+&adc1 {
+	pinctrl-0 = <&adc1_inp15_pa3 &adc1_inp12_pc2 &adc1_inp10_pc0 >;
+	pinctrl-names = "default";
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	status = "okay";
+
+	// 	  adc-trigger = <STM32_ADC_INJ_TRIG_TIM1_TRGO>;
+
+	vref-mv = <3000>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
+	};
+
+	channel@C {
+		reg = <12>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
+	};
+
+	channel@A {
+		reg = <10>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
+	};
+};
+
+&die_temp {
+	status = "okay";
+};
+
+&vref {
+	status = "okay";
+};

@@ -3,3 +3,8 @@
 
 add_subdirectory_ifdef(CONFIG_MAGNTEK_MT6835 magntek_mt6835)
 add_subdirectory_ifdef(CONFIG_BRCM_AEAT_9955 brcm_aeat-9955)
+
+zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/drivers/sensor.h)
+
+zephyr_library()
+zephyr_library_property(ALLOW_EMPTY TRUE)

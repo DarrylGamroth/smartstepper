@@ -2,6 +2,12 @@
 #include <zephyr/dt-bindings/pwm/pwm.h>
 #include <dt-bindings/pwm/stm32-mcpwm.h>
 
+/ {
+	aliases {
+		encoder1 = &aeat9955;
+	};
+};
+
 &dmamux1 {
 	status = "okay";
 };
@@ -15,13 +21,12 @@
 };
 
 &spi3 {
-	compatible = "rubus,stm32-spi";
 	status = "okay";
+	fifo-enable;
 
-	dmas = <&dmamux1 2 15 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
-		   <&dmamux1 3 14 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
-
-	dma-names = "tx", "rx";
+	pinctrl-0 = <&spi3_sck_pb3 &spi3_miso_pb4 &spi3_mosi_pb5 &spi3_nss_pa15>;
+	// cs-gpios = <&gpioa 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	pinctrl-names = "default";
 
 	mt6835: mt6835@0 {
 		compatible = "magntek,mt6835";
@@ -38,81 +43,111 @@
 	};
 };
 
-/delete-node/ &pwm3;
-&timers3 {
-	compatible = "rubus,stm32-timers";
-	st,prescaler = <0>;
-	status = "okay";
-	st,master-mode;
-	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
-	st,master-mode-selection = <0x10>; // LL_TIM_TRGO_ENABLE
-
-	pwm3:mcpwm {
-		compatible = "st,stm32-mcpwm";
-		period = <PWM_KHZ(20)>;
-		status = "okay";
-		#pwm-cells = <2>;
-	};
-};
-
+// TIM1 is master for TIM3 and TIM8 synchronization
 &timers1 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;
 	status = "okay";
 	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
 	st,master-mode;
-	st,slave-mode;
-	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
-
-	st,master-mode-selection = <0x70>; // LL_TIM_TRGO_OC4REF
+	st,master-mode-selection = <0x10>; // LL_TIM_TRGO_ENABLE - sync TIM3 and TIM8
 
 	pwm1:mcpwm {
 		compatible = "st,stm32-mcpwm";
-		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch4_pc3>;
+		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch2_pa9 &tim1_ch4_pe14>;
 		pinctrl-names = "default";
 		period = <PWM_KHZ(20)>;
 		status = "okay";
+		st,cc-dma-channels = <4>;
 		#pwm-cells = <2>;
 	};
 };
 
-&timers8 {
-	compatible = "rubus,stm32-timers";
-	st,prescaler = <0>;
-	status = "okay";
-	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
-	st,slave-mode;
-	// st,slave-mode-selection = <0x4>; // LL_TIM_SLAVEMODE_RESET
-	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
-
-	pwm8:mcpwm {
-		compatible = "st,stm32-mcpwm";
-		pinctrl-0 = <&tim8_ch1_pc6>;
-		pinctrl-names = "default";
-		period = <PWM_KHZ(20)>;
-		status = "okay";
-		#pwm-cells = <2>;
-	};
-};
-
-&timers5 {
+// TIM3 is slave of TIM1
+&timers3 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;
 	status = "okay";
 	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
 	st,slave-mode;
 	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
+	st,trigger-selection = <0x00>; // ITR0 = TIM1
 
-	pwm5:mcpwm {
+	pwm3:mcpwm {
 		compatible = "st,stm32-mcpwm";
-		pinctrl-0 = <&tim5_ch1_pb2>;
+		pinctrl-0 = <&tim3_ch1_pc6>;
 		pinctrl-names = "default";
 		period = <PWM_KHZ(20)>;
 		status = "okay";
 		#pwm-cells = <2>;
+	};
+};
+
+// TIM8 is slave of TIM1
+&timers8 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
+	st,slave-mode;
+	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
+	st,trigger-selection = <0x00>; // ITR0 = TIM1
+
+	pwm8:mcpwm {
+		compatible = "st,stm32-mcpwm";
+		pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch2_pc7>;
+		pinctrl-names = "default";
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
+
+// &pinctrl {
+//     tim1_bkin_pe15: tim1_bkin_pe15 {
+//         bias-pull-up;
+//     };
+// 	tim8_bkin_pi4: tim8_bkin_pi4 {
+// 		bias-pull-up;
+// 	};
+// };
+
+&adc1 {
+	pinctrl-0 = <&adc1_inp15_pa3 &adc1_inp11_pc1 &adc1_inp10_pc0 >;
+	pinctrl-names = "default";
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	status = "okay";
+
+	// adc-trigger = <STM32_ADC_INJ_TRIG_TIM1_TRGO>;
+
+	// vref-mv = <3000>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
+	};
+
+	channel@C {
+		reg = <12>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
+	};
+
+	channel@A {
+		reg = <10>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <16>;
 	};
 };
 

@@ -27,7 +27,6 @@ typedef void (*irq_config_func_t)(const struct device *port);
 #define SPI_STM32_DMA_RX	0x02
 
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
-/* DMA stream structure - matches upstream exactly */
 struct stream {
 	const struct device *dma_dev;
 	uint32_t channel; /* stores the channel for dma or mux */
@@ -77,33 +76,34 @@ static inline uint32_t ll_func_dma_get_reg_addr(SPI_TypeDef *spi, uint32_t locat
 struct spi_stm32_config {
 	SPI_TypeDef *spi;
 	const struct pinctrl_dev_config *pcfg;
-	const struct stm32_pclken *pclken;
-	size_t pclk_len;
 #ifdef CONFIG_SPI_RUBUS_STM32_INTERRUPT
 	irq_config_func_t irq_config_func;
 #endif
-	bool fifo_enabled;
+#ifdef CONFIG_SOC_SERIES_STM32H7X
+	uint32_t irq_line;
+#endif /* CONFIG_SOC_SERIES_STM32H7X */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
+	bool use_subghzspi_nss;
+#endif
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
 	int midi_clocks;
 	int mssi_clocks;
 #endif
-#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_subghz)
-	bool use_subghzspi_nss;
-#endif
+	const struct stm32_pclken *pclken;
+	size_t pclk_len;
+	bool fifo_enabled: 1;
+	bool ioswp: 1;
 	/* Note: DMA configuration comes from device tree macros, not stored in config */
 };
 
 /* STM32 SPI data structure - pure RTIO */
 struct spi_stm32_data {
-	struct spi_rtio *rtio_ctx;		/* Single RTIO context */
+	struct spi_rtio *rtio_ctx;
+	struct spi_context ctx;
 	
 	/* STM32-specific state */
 	volatile int error_status;
-	bool pm_policy_state_on;
-	
-	/* For sync API compatibility (handled by spi_rtio.c) */
-	struct spi_context ctx;
-	
+
 	/* DMA state */
 #ifdef CONFIG_SPI_RUBUS_STM32_DMA
 	volatile uint32_t status_flags;
@@ -111,7 +111,8 @@ struct spi_stm32_data {
 	struct stream dma_tx;
 	bool dma_active;
 #endif
-	
+	bool pm_policy_state_on;
+
 	/* H7 EOT handling (needed for both DMA and interrupt modes) */
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
 	volatile uint32_t status_flags;  /* Also used for interrupt mode EOT tracking */
@@ -214,7 +215,7 @@ static inline bool ll_func_are_int_disabled(SPI_TypeDef *spi)
 	bool enabled = LL_SPI_IsEnabledIT_TXP(spi) || LL_SPI_IsEnabledIT_RXP(spi) ||
 		       LL_SPI_IsEnabledIT_UDR(spi) || LL_SPI_IsEnabledIT_OVR(spi) ||
 		       LL_SPI_IsEnabledIT_CRCERR(spi) || LL_SPI_IsEnabledIT_FRE(spi) ||
-		       LL_SPI_IsEnabledIT_MODF(spi);
+		       LL_SPI_IsEnabledIT_MODF(spi) || LL_SPI_IsEnabledIT_EOT(spi);
 #else
 	bool enabled = LL_SPI_IsEnabledIT_ERR(spi) || LL_SPI_IsEnabledIT_TXE(spi) || 
 		       LL_SPI_IsEnabledIT_RXNE(spi);
@@ -253,64 +254,28 @@ static inline uint32_t ll_func_spi_is_busy(SPI_TypeDef *spi)
 #endif
 }
 
-/* STM32H7 FIFO support helpers */
+/* Header is compiled first, this switch avoid the compiler to lookup for
+ * non-existing LL FIFO functions for SoC without SPI FIFO
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_spi_fifo)
+static inline void ll_func_set_fifo_threshold_8bit(SPI_TypeDef *spi)
+{
 #if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
-static inline bool ll_func_has_fifo(const struct spi_stm32_config *cfg)
-{
-	return cfg->fifo_enabled;
-}
-
-static inline void ll_func_set_fifo_threshold_8bit(SPI_TypeDef *spi)
-{
 	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
-}
-
-static inline void ll_func_set_fifo_threshold_16bit(SPI_TypeDef *spi)
-{
-	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_02DATA);
-}
-
-static inline void ll_func_configure_fifo(SPI_TypeDef *spi, const struct spi_stm32_config *cfg)
-{
-	if (cfg->fifo_enabled) {
-		/* Configure FIFO thresholds for H7 */
-		LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
-	}
-}
-
-static inline uint32_t ll_func_get_fifo_size(const struct spi_stm32_config *cfg)
-{
-	return cfg->fifo_enabled ? 8 : 1; /* H7 has 8-level FIFO */
-}
 #else
-static inline bool ll_func_has_fifo(const struct spi_stm32_config *cfg)
-{
-	ARG_UNUSED(cfg);
-	return false;
-}
-
-static inline void ll_func_set_fifo_threshold_8bit(SPI_TypeDef *spi)
-{
-	ARG_UNUSED(spi);
+	LL_SPI_SetRxFIFOThreshold(spi, LL_SPI_RX_FIFO_TH_QUARTER);
+#endif /* st_stm32h7_spi */
 }
 
 static inline void ll_func_set_fifo_threshold_16bit(SPI_TypeDef *spi)
 {
-	ARG_UNUSED(spi);
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32h7_spi)
+	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_02DATA);
+#else
+	LL_SPI_SetRxFIFOThreshold(spi, LL_SPI_RX_FIFO_TH_HALF);
+#endif /* st_stm32h7_spi */
 }
-
-static inline void ll_func_configure_fifo(SPI_TypeDef *spi, const struct spi_stm32_config *cfg)
-{
-	ARG_UNUSED(spi);
-	ARG_UNUSED(cfg);
-}
-
-static inline uint32_t ll_func_get_fifo_size(const struct spi_stm32_config *cfg)
-{
-	ARG_UNUSED(cfg);
-	return 1;
-}
-#endif
+#endif /* st_stm32_spi_fifo */
 
 /* STM32 SPI busy flag errata workaround */
 static inline bool ll_func_transfer_ongoing(SPI_TypeDef *spi)
@@ -371,54 +336,6 @@ static inline uint32_t spi_stm32_compute_total_frames(const struct spi_stm32_dat
 	}
 
 	return MAX(tx_frames, rx_frames);
-}
-
-static inline void spi_stm32_program_h7_transfer(SPI_TypeDef *spi,
-			       const struct spi_stm32_data *data)
-{
-	uint32_t total_frames = spi_stm32_compute_total_frames(data);
-
-	if (total_frames > 0U) {
-		LL_SPI_SetTransferSize(spi, total_frames);
-	}
-}
-
-static inline void spi_stm32_start_h7_master(SPI_TypeDef *spi)
-{
-	if (LL_SPI_GetMode(spi) == LL_SPI_MODE_MASTER) {
-		LL_SPI_StartMasterTransfer(spi);
-		while (!LL_SPI_IsActiveMasterTransfer(spi)) {
-			/* NOP */
-		}
-#if defined(CONFIG_SOC_SERIES_STM32H7X)
-		/* Errata ES0392 recommends a 1us delay after enabling */
-		k_busy_wait(1);
-#endif
-	}
-}
-
-static inline void spi_stm32_update_fifo_threshold(const struct spi_stm32_config *cfg,
-			       SPI_TypeDef *spi,
-			       uint8_t word_size,
-			       bool use_dma)
-{
-	if (!cfg->fifo_enabled) {
-		return;
-	}
-
-	if (use_dma) {
-		if (word_size == 16U) {
-			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_04DATA);
-		} else {
-			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_08DATA);
-		}
-	} else {
-		if (word_size == 16U) {
-			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_02DATA);
-		} else {
-			LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_04DATA);
-		}
-	}
 }
 #endif /* st_stm32h7_spi */
 
