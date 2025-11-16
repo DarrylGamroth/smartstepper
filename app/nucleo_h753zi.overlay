@@ -113,13 +113,14 @@
 // };
 
 &adc1 {
+	compatible = "st,stm32-adc-injected";
 	pinctrl-0 = <&adc1_inp15_pa3 &adc1_inp11_pc1 &adc1_inp10_pc0 >;
 	pinctrl-names = "default";
 	st,adc-clock-source = "SYNC";
 	st,adc-prescaler = <4>;
 	status = "okay";
 
-	// adc-trigger = <STM32_ADC_INJ_TRIG_TIM1_TRGO>;
+	st,adc-trigger-source = "tim1_cc4";
 
 	// vref-mv = <3000>;
 

@@ -1,0 +1,47 @@
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32 ADC Injected Channel Driver
+  
+  This is a specialized driver for ultra low-latency motor control applications
+  using hardware-triggered injected channel conversions. It is NOT compatible
+  with the standard Zephyr ADC API.
+  
+  Inherits all base ADC properties from st,stm32-adc.yaml including clock
+  configuration, pinctrl, resolution, etc.
+
+compatible: "st,stm32-adc-injected"
+
+include: st,stm32-adc.yaml
+
+properties:
+  st,adc-trigger-source:
+    type: string
+    required: true
+    description: |
+      External trigger source for injected channel conversions.
+      Valid values depend on the specific STM32 family (F4 vs H7).
+    enum:
+      - "tim1_trgo"
+      - "tim1_cc4"
+      - "tim2_trgo"
+      - "tim2_cc1"
+      - "tim3_cc2"
+      - "tim3_cc4"
+      - "tim3_trgo"
+      - "tim4_trgo"
+      - "tim5_trgo"
+      - "tim8_cc2"
+      - "tim8_cc4"
+      - "tim8_trgo"
+  
+  st,adc-trigger-edge:
+    type: string
+    default: "rising"
+    description: |
+      Edge sensitivity for external trigger.
+    enum:
+      - "rising"
+      - "falling"
+      - "both"

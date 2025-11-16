@@ -13,7 +13,7 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/pwm.h>
 #include <drivers/mcpwm.h>
-#include <drivers/spi_tt.h>
+#include <drivers/adc_injected.h>
 #include <dt-bindings/pwm/stm32-mcpwm.h>
 
 #include <drivers/pwm/mcpwm_stm32.h>
@@ -22,6 +22,7 @@ const struct device *const pwm1 = DEVICE_DT_GET(DT_NODELABEL(pwm1));
 const struct device *const pwm8 = DEVICE_DT_GET(DT_NODELABEL(pwm8));
 const struct device *const pwm3 = DEVICE_DT_GET(DT_NODELABEL(pwm3));
 const struct device *const aeat9955 = DEVICE_DT_GET(DT_NODELABEL(aeat9955));
+const struct device *const adc1 = DEVICE_DT_GET(DT_NODELABEL(adc1));
 
 SENSOR_DT_READ_IODEV(aeat_iodev, DT_NODELABEL(aeat9955), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(rtio_ctx, 8, 8, 16, 16, sizeof(void *));
@@ -34,7 +35,10 @@ static void mcpwm_callback(const struct device *dev, uint32_t channel, void *use
 }
 
 /* ADC ISR callback - process completed sensor reads */
-static void adc_callback(const struct device *dev, void *user_data)
+static void adc_callback(const struct device *dev,
+					const q31_t *values,
+					uint8_t count,
+					void *user_data)
 {
 	struct rtio_cqe *cqe;
 	uint8_t *buf;
@@ -103,6 +107,13 @@ int main(void)
 		printk("AEAT9955 device is not ready\n");
 		return 0;
 	}
+	if (!device_is_ready(adc1)) {
+		printk("ADC1 device is not ready\n");
+        return 0;
+    }
+
+	adc_injected_set_callback(adc1, adc_callback, NULL);
+	adc_injected_enable(adc1);
 
 	mcpwm_set_compare_callback(pwm3, 1, mcpwm_callback, NULL);
 

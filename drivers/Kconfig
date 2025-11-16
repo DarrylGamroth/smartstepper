@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 menu "Drivers"
+rsource "adc/Kconfig"
 rsource "gate_driver/Kconfig"
 rsource "pwm/Kconfig"
 rsource "sensor/Kconfig"
