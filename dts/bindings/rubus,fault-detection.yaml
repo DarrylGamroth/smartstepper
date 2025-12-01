@@ -1,0 +1,23 @@
+# Copyright (c) 2025 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+description: Motor fault detection parameters
+
+compatible: "rubus,fault-detection"
+
+properties:
+  encoder-fault-threshold:
+    type: int
+    required: true
+    description: |
+      Number of consecutive encoder read failures before triggering encoder fault.
+      Higher values reduce false positives from occasional SPI glitches.
+      At 20kHz control loop: 100 = 5ms, 200 = 10ms.
+
+  overcurrent-threshold-ma:
+    type: int
+    required: true
+    description: |
+      Overcurrent detection threshold in milliamps.
+      Typically set to 120-150% of motor max current rating.
+      Must account for transient current spikes during acceleration.

@@ -112,13 +112,14 @@ static inline void mcpwm_stm32_set_duty_cycle_fast_f32(const struct device *dev,
 }
 
 /**
- * @brief Fast inline two-phase PWM duty cycle setting
+ * @brief Fast inline dual-channel PWM duty cycle setting
  *
- * Optimized for FOC motor control - sets both phases in minimal time.
+ * Sets two PWM channels (half-bridges) in minimal time.
+ * Optimized for H-bridge or dual half-bridge control.
  *
  * @param dev PWM device
- * @param duty_a Phase A duty cycle (q31_t)
- * @param duty_b Phase B duty cycle (q31_t)
+ * @param duty_a Channel 1 duty cycle (q31_t)
+ * @param duty_b Channel 2 duty cycle (q31_t)
  */
 static inline void mcpwm_stm32_set_duty_cycle_2phase(const struct device *dev,
                                                     q31_t duty_a,
@@ -148,14 +149,14 @@ static inline void mcpwm_stm32_set_duty_cycle_2phase(const struct device *dev,
 }
 
 /**
- * @brief Fast inline two-phase PWM duty cycle setting using floating point
+ * @brief Fast inline dual-channel PWM duty cycle setting using floating point
  *
- * Optimized for FOC motor control - sets both phases in minimal time using
- * floating point duty cycle values.
+ * Sets two PWM channels (half-bridges) in minimal time using floating point duty cycle values.
+ * Optimized for H-bridge or dual half-bridge control.
  *
  * @param dev PWM device
- * @param duty_a Phase A duty cycle (0.0 to 1.0)
- * @param duty_b Phase B duty cycle (0.0 to 1.0)
+ * @param duty_a Channel 1 duty cycle (0.0 to 1.0)
+ * @param duty_b Channel 2 duty cycle (0.0 to 1.0)
  */
 static inline void mcpwm_stm32_set_duty_cycle_2phase_f32(const struct device *dev,
                                                          float duty_a,

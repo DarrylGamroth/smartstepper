@@ -100,7 +100,7 @@ static inline float32_t pi_get_kp(const struct pi_f32 *pi)
  * @param out_min Pointer to store minimum output value
  * @param out_max Pointer to store maximum output value
  */
-static inline void pi_get_min_fmaxf(const struct pi_f32 *pi, float32_t *out_min,
+static inline void pi_get_min_max(const struct pi_f32 *pi, float32_t *out_min,
 				  float32_t *out_max)
 {
 	*out_min = pi->out_min;
@@ -113,7 +113,7 @@ static inline void pi_get_min_fmaxf(const struct pi_f32 *pi, float32_t *out_min,
  * @param pi PI controller instance
  * @return Maximum output value
  */
-static inline float32_t pi_get_out_fmaxf(const struct pi_f32 *pi)
+static inline float32_t pi_get_out_max(const struct pi_f32 *pi)
 {
 	return pi->out_max;
 }
@@ -225,7 +225,7 @@ static inline void pi_set_kp(struct pi_f32 *pi, float32_t kp)
  * @param out_min Minimum output value
  * @param out_max Maximum output value
  */
-static inline void pi_set_min_fmaxf(struct pi_f32 *pi, float32_t out_min, float32_t out_max)
+static inline void pi_set_min_max(struct pi_f32 *pi, float32_t out_min, float32_t out_max)
 {
 	pi->out_min = out_min;
 	pi->out_max = out_max;
@@ -237,7 +237,7 @@ static inline void pi_set_min_fmaxf(struct pi_f32 *pi, float32_t out_min, float3
  * @param pi PI controller instance
  * @param out_max Maximum output value
  */
-static inline void pi_set_out_fmaxf(struct pi_f32 *pi, float32_t out_max)
+static inline void pi_set_out_max(struct pi_f32 *pi, float32_t out_max)
 {
 	pi->out_max = out_max;
 }

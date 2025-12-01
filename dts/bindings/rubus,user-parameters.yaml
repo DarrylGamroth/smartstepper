@@ -50,3 +50,43 @@ properties:
     type: int
     required: true
     description: Maximum voltage magnitude in milli-per-unit (1000 = 1.0 pu)
+
+  roverl-est-current-ma:
+    type: int
+    required: true
+    description: RoverL estimation current amplitude in milliamps (10-20% of rated)
+
+  roverl-est-freq-hz:
+    type: int
+    required: true
+    description: RoverL estimation frequency in Hz (default 100 Hz, increase if motor twitches)
+
+  roverl-est-settling-ms:
+    type: int
+    required: true
+    description: RoverL PI controller settling time before measurements in milliseconds (default 50 ms)
+
+  roverl-est-duration-ms:
+    type: int
+    required: true
+    description: RoverL estimation duration in milliseconds (default 5000 ms)
+
+  rs-est-current-ma:
+    type: int
+    required: true
+    description: Rs estimation DC current in milliamps (same as RoverL, 10-20% rated)
+
+  rs-est-rampup-ms:
+    type: int
+    required: true
+    description: Rs estimation ramp-up time in milliseconds (default 1000 ms)
+
+  rs-est-coarse-ms:
+    type: int
+    required: true
+    description: Rs estimation coarse measurement time in milliseconds (default 2000 ms)
+
+  rs-est-fine-ms:
+    type: int
+    required: true
+    description: Rs estimation fine measurement time in milliseconds (default 4000 ms)

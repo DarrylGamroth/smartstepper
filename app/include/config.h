@@ -12,6 +12,8 @@
 #include "pi.h"
 #include "filter_fo.h"
 #include "angle_observer.h"
+#include "rs_online.h"
+#include "traj.h"
 
 /* Motor control parameters structure */
 struct motor_parameters {
@@ -20,18 +22,32 @@ struct motor_parameters {
 	struct pi_f32 pi_Iq;
 	struct filter_fo_f32 filter_Ia;
 	struct filter_fo_f32 filter_Ib;
+	struct filter_fo_f32 filter_rs_est_V;  /* Rs EST voltage filter */
+	struct filter_fo_f32 filter_rs_est_I;  /* Rs EST current filter */
 	float32_t Ia_offset;
 	float32_t Ib_offset;
 	float32_t Id_setpoint_A;
 	float32_t Iq_setpoint_A;
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;
+	float32_t Vd_ref_V;
+	float32_t Vq_ref_V;
 	float32_t maxVsMag_pu;
 	float32_t maxVsMag_V;
 	float32_t Vd_V;
 	float32_t Vq_V;
 	struct angle_observer_state observer;
+	struct rs_online_estimator rs_est;
+	struct traj_f32 traj_Id;
+	float32_t RoverL_measured;
+	float32_t L_measured;
+	float32_t Rs_measured;
+	float32_t roverl_sum_Vd_Id;
+	float32_t roverl_sum_Vq_Id;
+	float32_t roverl_sum_Id2;
+	float32_t roverl_phase_deg;
 	uint32_t state_counter;
+	uint32_t encoder_fault_counter;
 	int error_code;
 };
 
@@ -50,6 +66,15 @@ struct motor_parameters {
 #define ALIGN_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, align_duration_ms) / 1000.0f)
 #define BRAKE_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, brake_current_ma) / 1000.0f)
 #define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_vs_mpu) / 1000.0f)
+#define ROVERL_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma) / 1000.0f)
+#define ROVERL_EST_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_freq_hz))
+#define ROVERL_EST_SETTLING_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms) / 1000.0f)
+#define ROVERL_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms) / 1000.0f)
+#define RS_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_current_ma) / 1000.0f)
+#define RS_EST_RAMPUP_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms) / 1000.0f)
+#define RS_EST_COARSE_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_coarse_ms) / 1000.0f)
+#define RS_EST_FINE_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_fine_ms) / 1000.0f)
+#define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
 
 #define VBUS_SENSE_NODE DT_PATH(vbus_sense)
 #define VBUS_CHANNEL DT_PROP(VBUS_SENSE_NODE, channel)
@@ -82,6 +107,10 @@ struct motor_parameters {
 
 #define ANGLE_OBSERVER_NODE DT_PATH(angle_observer)
 #define ANGLE_OBSERVER_BANDWIDTH_HZ ((float32_t)DT_PROP(ANGLE_OBSERVER_NODE, bandwidth_hz))
+
+#define FAULT_DETECT_NODE DT_PATH(fault_detection)
+#define ENCODER_FAULT_THRESHOLD DT_PROP(FAULT_DETECT_NODE, encoder_fault_threshold)
+#define OVERCURRENT_THRESHOLD_A ((float32_t)DT_PROP(FAULT_DETECT_NODE, overcurrent_threshold_ma) / 1000.0f)
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes

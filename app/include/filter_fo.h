@@ -9,6 +9,7 @@
 #define CHOPPER_FILTER_FO_H_
 
 #include <zephyr/dsp/types.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
