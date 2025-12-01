@@ -13,6 +13,7 @@
 #define ZEPHYR_INCLUDE_DRIVERS_SENSOR_BRCM_AEAT9955_H_
 
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/dsp/dsp.h>
 #include <zephyr/sys/util.h>
 
@@ -60,6 +61,16 @@ enum aeat9955_sensor_attribute {
 	/** Hysteresis setting (0-7 for different hysteresis levels) */
 	AEAT9955_ATTR_HYSTERESIS,
 };
+
+/**
+ * @brief AEAT9955 encoder resolution
+ */
+#define AEAT9955_RESOLUTION_BITS 18  /**< 18-bit encoder (262144 counts per revolution) */
+
+/**
+ * @brief AEAT9955 angle conversion constants
+ */
+#define AEAT9955_COUNTS_TO_DEGREES (360.0f / (float)(1U << AEAT9955_RESOLUTION_BITS))  /**< Multiply factor: counts to degrees */
 
 /**
  * @brief ABZ Resolution values
@@ -144,6 +155,54 @@ struct aeat9955_sample {
  * @return 0 on success, negative error code on failure
  */
 int aeat9955_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
+
+/**
+ * @brief Fast inline position decode for ISR use (Q31 format)
+ *
+ * Optimized for zero-latency ISR - bypasses all validation and API overhead.
+ * Decodes raw AEAT9955 RTIO buffer directly to Q31 angle format.
+ *
+ * @warning This function assumes:
+ * - buffer points to valid aeat9955_sample structure
+ * - No status/parity error checking (use only for trusted data paths)
+ * - Caller handles error detection separately if needed
+ *
+ * @param buffer Pointer to aeat9955_sample from RTIO completion
+ * @return Position in Q31 format [-2^31, 2^31-1] for arm_sin_cos_q31
+ *         Maps 0° to 360° encoder range to -180° to +180° Q31 range
+ */
+static inline q31_t aeat9955_decode_position_q31(const uint8_t *buffer)
+{
+	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
+	/* Extract 18-bit position from bytes [2:4], bits [17:0] after status bits */
+	uint32_t position = sys_get_be24(&sample->raw[2]) >> 6;
+	/* Convert to Q31 centered at 0: maps [0, 262143] to [-2^31, 2^31-1] */
+	return (q31_t)((position << (32 - AEAT9955_RESOLUTION_BITS)) - 0x80000000UL);
+}
+
+/**
+ * @brief Fast inline position decode for ISR use (float32 degrees)
+ *
+ * Optimized for zero-latency ISR - bypasses all validation and API overhead.
+ * Decodes raw AEAT9955 RTIO buffer directly to float angle in degrees.
+ *
+ * @warning This function assumes:
+ * - buffer points to valid aeat9955_sample structure
+ * - No status/parity error checking (use only for trusted data paths)
+ * - Caller handles error detection separately if needed
+ *
+ * @param buffer Pointer to aeat9955_sample from RTIO completion
+ * @return Position in degrees [-180.0f, +180.0f)
+ *         Maps 0° to 360° encoder range to -180° to +180° degrees
+ */
+static inline float aeat9955_decode_position_f32(const uint8_t *buffer)
+{
+	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
+	/* Extract 18-bit position from bytes [2:4], bits [17:0] after status bits */
+	int32_t position = (int32_t)(sys_get_be24(&sample->raw[2]) >> 6);
+	/* Convert to degrees centered at 0: [0, 262143] -> [-180.0, +180.0) */
+	return (float)(position - (1 << (AEAT9955_RESOLUTION_BITS - 1))) * AEAT9955_COUNTS_TO_DEGREES;
+}
 
 #ifdef __cplusplus
 }

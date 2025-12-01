@@ -6,6 +6,11 @@
 	aliases {
 		encoder1 = &aeat9955;
 	};
+
+	chosen {
+    	zephyr,itcm = &itcm;
+		zephyr,dtcm = &dtcm;
+	};
 };
 
 &dmamux1 {
@@ -103,15 +108,6 @@
 	};
 };
 
-// &pinctrl {
-//     tim1_bkin_pe15: tim1_bkin_pe15 {
-//         bias-pull-up;
-//     };
-// 	tim8_bkin_pi4: tim8_bkin_pi4 {
-// 		bias-pull-up;
-// 	};
-// };
-
 &adc1 {
 	compatible = "st,stm32-adc-injected";
 	pinctrl-0 = <&adc1_inp15_pa3 &adc1_inp11_pc1 &adc1_inp10_pc0 >;
@@ -121,8 +117,6 @@
 	status = "okay";
 
 	st,adc-trigger-source = "tim1_cc4";
-
-	// vref-mv = <3000>;
 
 	#address-cells = <1>;
 	#size-cells = <0>;

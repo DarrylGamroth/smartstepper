@@ -20,44 +20,9 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/kernel.h>
 #include <zephyr/rtio/rtio.h>
-#include <drivers/sensor/magntek_mt6835.h>
+#include "magntek_mt6835.h"
+
 LOG_MODULE_REGISTER(magntek_mt6835, CONFIG_SENSOR_LOG_LEVEL);
-
-#define MT6835_CMD_READ  (0x03U << 4)
-#define MT6835_CMD_WRITE (0x06U << 4)
-#define MT6835_CMD_PROG  (0x0BU << 4)
-#define MT6835_CMD_ZERO  (0x05U << 4)
-#define MT6835_CMD_ANGLE (0x0AU << 4)
-
-#define MT6835_REG_USER_ID      0x0000U
-#define MT6835_REG_ANGLE_H      0x0003U
-#define MT6835_REG_ANGLE_M      0x0004U
-#define MT6835_REG_ANGLE_L      0x0005U
-#define MT6835_REG_CRC          0x0006U
-#define MT6835_REG_ABZ_RES1     0x0007U
-#define MT6835_REG_ABZ_RES2     0x0008U
-#define MT6835_REG_ZERO_POS_H   0x0009U
-#define MT6835_REG_ZERO_POS_L   0x000AU
-#define MT6835_REG_Z_PHASE_UVW  0x000BU
-#define MT6835_REG_PWM_NLC      0x000CU
-#define MT6835_REG_ROT_HYST     0x000DU
-#define MT6835_REG_GPIO_AUTOCAL 0x000EU
-#define MT6835_REG_OPTS5        0x0011U
-#define MT6835_REG_CAL_STATUS   0x0113U
-
-/* AUTOCAL_FREQ register bit definitions */
-#define MT6835_AUTOCAL_FREQ_MASK 0x07 /* Bits 2:0: Auto-calibration rotation speed range */
-
-/* STATUS register bit definitions (0x0005) */
-#define MT6835_REG_STATUS  0x0005U
-#define MT6835_STATUS_MASK 0x07
-
-/* Calibration status register bit definitions (0x0113) */
-#define MT6835_CAL_STATUS_MASK 0xC0
-
-/* ROT_HYST register bit definitions (0x000D) */
-#define MT6835_ROT_DIR_MASK 0x80 /* Bit 7: Rotation direction */
-#define MT6835_HYST_MASK    0x07 /* Bits 2:0: Hysteresis */
 
 #define MT6835_FULL_ANGLE     360
 #define MT6835_PULSES_PER_REV 2097152
@@ -552,7 +517,7 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 	}
 
 	/* Prepare 6-byte TX buffer: command + dummy bytes */
-	static __nocache __aligned(4) uint8_t tx_buf[] = {
+	static uint8_t __aligned(32) tx_buf[] = {
 		MT6835_CMD_ANGLE | ((MT6835_REG_ANGLE_H >> 8) & 0x0F),
 		MT6835_REG_ANGLE_H & 0xFF,
 		0x00,

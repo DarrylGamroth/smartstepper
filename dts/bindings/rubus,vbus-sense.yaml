@@ -1,0 +1,27 @@
+# Copyright (c) 2024 Rubus Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: DC bus voltage sensing configuration
+
+compatible: "rubus,vbus-sense"
+
+properties:
+  channel:
+    type: int
+    required: true
+    description: ADC channel number
+
+  vref-mv:
+    type: int
+    required: true
+    description: ADC reference voltage in millivolts
+
+  output-ohms:
+    type: int
+    required: true
+    description: Resistance from Vbus to ADC input in ohms
+
+  full-ohms:
+    type: int
+    required: true
+    description: Total resistance from Vbus to ground in ohms

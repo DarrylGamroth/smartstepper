@@ -1,0 +1,52 @@
+# Copyright (c) 2024 Rubus Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: User-configurable motor control parameters
+
+compatible: "rubus,user-parameters"
+
+properties:
+  nominal_voltage-mv:
+    type: int
+    required: true
+    description: Nominal DC bus voltage in millivolts
+
+  pwm-frequency-hz:
+    type: int
+    required: true
+    description: PWM switching frequency in Hz
+
+  control-loop-frequency-hz:
+    type: int
+    required: true
+    description: Current control loop frequency in Hz
+
+  current-loop-bandwidth-hz:
+    type: int
+    required: true
+    description: Current controller bandwidth in Hz
+
+  offset-pole-hz:
+    type: int
+    required: true
+    description: Current offset filter pole frequency in Hz
+
+  align-current-ma:
+    type: int
+    required: true
+    description: Rotor alignment current in milliamps
+
+  align-duration-ms:
+    type: int
+    required: true
+    description: Rotor alignment duration in milliseconds
+
+  brake-current-ma:
+    type: int
+    required: true
+    description: Braking current in milliamps
+
+  max-vs-mpu:
+    type: int
+    required: true
+    description: Maximum voltage magnitude in milli-per-unit (1000 = 1.0 pu)

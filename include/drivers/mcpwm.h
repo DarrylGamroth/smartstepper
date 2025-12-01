@@ -47,7 +47,7 @@ extern "C" {
  * The lower 8 bits are used for standard PWM flags from pwm.h:
  * - PWM_POLARITY_NORMAL: Active-high pulse
  * - PWM_POLARITY_INVERTED: Active-low pulse
- * 
+ *
  * The upper 8 bits are reserved for SoC specific flags.
  *
  * @see zephyr/dt-bindings/pwm/pwm.h
@@ -485,7 +485,7 @@ static inline int z_impl_mcpwm_disable(const struct device *dev,
  * @param channel PWM channel.
  * @param duty_cycle Fixed-point q31_t format duty cycle:
  *                   - 0x00000000 =   0% duty cycle
- *                   - 0x40000000 =  50% duty cycle  
+ *                   - 0x40000000 =  50% duty cycle
  *                   - 0x7FFFFFFF = ~100% duty cycle
  *
  * @retval 0 If successful.
@@ -546,7 +546,7 @@ static inline int z_impl_mcpwm_stop(const struct device *dev)
  * @param channel PWM channel.
  * @param duty_cycle Floating point duty cycle in range [0.0, 1.0]:
  *                   - 0.0 =   0% duty cycle
- *                   - 0.5 =  50% duty cycle  
+ *                   - 0.5 =  50% duty cycle
  *                   - 1.0 = 100% duty cycle
  *
  * @retval 0 If successful.
@@ -555,16 +555,17 @@ static inline int z_impl_mcpwm_stop(const struct device *dev)
 static inline int mcpwm_set_duty_cycle_f32(const struct device *dev, uint32_t channel,
 					    float duty_cycle)
 {
-	/* Clamp duty cycle to valid range [0.0, 1.0] */
-	if (duty_cycle < 0.0f) {
-		duty_cycle = 0.0f;
-	} else if (duty_cycle > 1.0f) {
-		duty_cycle = 1.0f;
+	q31_t q31_duty;
+
+	/* Convert to Q31 format with saturation at edges */
+	if (duty_cycle >= 1.0f) {
+		q31_duty = INT32_MAX;
+	} else if (duty_cycle <= 0.0f) {
+		q31_duty = 0;
+	} else {
+		q31_duty = (q31_t)(duty_cycle * 2147483648.0f);
 	}
-	
-	/* Convert to Q31 format: multiply by 2^31 and round */
-	q31_t q31_duty = (q31_t)(duty_cycle * 2147483647.0f + 0.5f);
-	
+
 	return mcpwm_set_duty_cycle(dev, channel, q31_duty);
 }
 
@@ -598,7 +599,7 @@ static inline int mcpwm_set_duty_cycle_dt(const struct mcpwm_dt_spec *spec,
  * @param[in] spec PWM specification from devicetree.
  * @param duty_cycle Floating point duty cycle in range [0.0, 1.0]:
  *                   - 0.0 =   0% duty cycle
- *                   - 0.5 =  50% duty cycle  
+ *                   - 0.5 =  50% duty cycle
  *                   - 1.0 = 100% duty cycle
  *
  * @return A value from mcpwm_set_duty_cycle_f32().

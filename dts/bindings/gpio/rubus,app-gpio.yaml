@@ -1,0 +1,12 @@
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Simple GPIO output for application use
+
+compatible: "rubus,app-gpio"
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: GPIO pin specification

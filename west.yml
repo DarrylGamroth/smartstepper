@@ -27,7 +27,7 @@ manifest:
           - cmsis-dsp
             #- fatfs
           - hal_stm32
-            #- littlefs
+          - littlefs
           - mbedtls
           - mcuboot
           - mcumgr

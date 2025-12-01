@@ -292,7 +292,7 @@ static int drv8328_get_fault_status(const struct device *dev, bool *fault)
     return 0;
 }
 
-static int drv8328_set_gate_drivers(const struct device *dev, bool enable)
+static int drv8328_enable_gate_drivers(const struct device *dev, bool enable)
 {
     const struct drv8328_config *config = dev->config;
     int ret;

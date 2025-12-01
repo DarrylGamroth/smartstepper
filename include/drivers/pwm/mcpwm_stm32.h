@@ -76,7 +76,7 @@ static inline void mcpwm_stm32_set_duty_cycle_fast(const struct device *dev,
     __asm__("smmulr %0, %1, %2" : "=r"(pulse_cycles) : "r"(duty_cycle), "r"(period));
 #else
     /* Fallback to 64-bit arithmetic for processors without DSP */
-    uint32_t pulse_cycles = ((int64_t)duty_cycle * data->period_cycles + 0x80000000LL) >> 31;
+    uint32_t pulse_cycles = ((int64_t)duty_cycle * data->period_cycles + 0x40000000LL) >> 31;
 #endif
 
     mcpwm_stm32_set_timer_compare[channel - 1u](cfg->timer, pulse_cycles);
@@ -106,7 +106,8 @@ static inline void mcpwm_stm32_set_duty_cycle_fast_f32(const struct device *dev,
     const struct mcpwm_stm32_config *cfg = (const struct mcpwm_stm32_config *)dev->config;
     const struct mcpwm_stm32_data *data = (const struct mcpwm_stm32_data *)dev->data;
 
-    uint32_t pulse_cycles = duty_cycle * data->period_cycles;
+    int32_t pulse_i = (int32_t)(duty_cycle * data->period_cycles);
+    uint32_t pulse_cycles = CLAMP(pulse_i, 0, (int32_t)data->period_cycles);
     mcpwm_stm32_set_timer_compare[channel - 1u](cfg->timer, pulse_cycles);
 }
 
@@ -137,8 +138,8 @@ static inline void mcpwm_stm32_set_duty_cycle_2phase(const struct device *dev,
 #else
     /* Fallback to 64-bit arithmetic for processors without DSP */
     int32_t period = (int32_t)(data->period_cycles);
-    const uint32_t pulse_a = ((int64_t)duty_a * period + 0x80000000LL) >> 31;
-    const uint32_t pulse_b = ((int64_t)duty_b * period + 0x80000000LL) >> 31;
+    const uint32_t pulse_a = ((int64_t)duty_a * period + 0x40000000LL) >> 31;
+    const uint32_t pulse_b = ((int64_t)duty_b * period + 0x40000000LL) >> 31;
 #endif
 
     /* Direct register writes for minimum latency */
@@ -165,9 +166,11 @@ static inline void mcpwm_stm32_set_duty_cycle_2phase_f32(const struct device *de
     TIM_TypeDef *timer = cfg->timer;
     int32_t period = data->period_cycles;
 
-    /* Calculate pulse cycles directly from float duty cycle */
-    uint32_t pulse_a = duty_a * period;
-    uint32_t pulse_b = duty_b * period;
+    /* Calculate and clamp pulse cycles from float duty cycle */
+    int32_t pulse_a_i = (int32_t)(duty_a * period);
+    int32_t pulse_b_i = (int32_t)(duty_b * period);
+    uint32_t pulse_a = CLAMP(pulse_a_i, 0, period);
+    uint32_t pulse_b = CLAMP(pulse_b_i, 0, period);
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);
@@ -203,9 +206,9 @@ static inline void mcpwm_stm32_set_duty_cycle_3phase(const struct device *dev,
 #else
     /* Fallback to 64-bit arithmetic for processors without DSP */
     int32_t period = (int32_t)(data->period_cycles);
-    uint32_t pulse_a = ((int64_t)duty_a * period + 0x80000000LL) >> 31;
-    uint32_t pulse_b = ((int64_t)duty_b * period + 0x80000000LL) >> 31;
-    uint32_t pulse_c = ((int64_t)duty_c * period + 0x80000000LL) >> 31;
+    uint32_t pulse_a = ((int64_t)duty_a * period + 0x40000000LL) >> 31;
+    uint32_t pulse_b = ((int64_t)duty_b * period + 0x40000000LL) >> 31;
+    uint32_t pulse_c = ((int64_t)duty_c * period + 0x40000000LL) >> 31;
 #endif
 
     /* Direct register writes for minimum latency */
@@ -235,10 +238,13 @@ static inline void mcpwm_stm32_set_duty_cycle_3phase_f32(const struct device *de
     TIM_TypeDef *timer = cfg->timer;
     int32_t period = data->period_cycles;
 
-    /* Calculate pulse cycles directly from float duty cycle */
-    uint32_t pulse_a = duty_a * period;
-    uint32_t pulse_b = duty_b * period;
-    uint32_t pulse_c = duty_c * period;
+    /* Calculate and clamp pulse cycles from float duty cycle */
+    int32_t pulse_a_i = (int32_t)(duty_a * period);
+    int32_t pulse_b_i = (int32_t)(duty_b * period);
+    int32_t pulse_c_i = (int32_t)(duty_c * period);
+    uint32_t pulse_a = CLAMP(pulse_a_i, 0, period);
+    uint32_t pulse_b = CLAMP(pulse_b_i, 0, period);
+    uint32_t pulse_c = CLAMP(pulse_c_i, 0, period);
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);

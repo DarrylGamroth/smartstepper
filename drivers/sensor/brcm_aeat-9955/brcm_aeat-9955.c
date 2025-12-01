@@ -264,8 +264,8 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 		return;
 	}
 
-	static __nocache __aligned(4) uint8_t tx_buf[] = {AEAT9955_CMD_READ_BIT, AEAT9955_REG_POS,
-							  0x00, 0x00, 0x00};
+	static uint8_t __aligned(32) tx_buf[] = {AEAT9955_CMD_READ_BIT, AEAT9955_REG_POS,
+						  0x00, 0x00, 0x00};
 
 	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
 				 sizeof(sample->raw), NULL);

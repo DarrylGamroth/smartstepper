@@ -16,8 +16,6 @@
 	compatible = "rubus,smartstepper";
 
 	chosen {
-		// zephyr,console = &usart1;
-		// zephyr,shell-uart = &usart1;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,ccm = &ccm0;
@@ -37,14 +35,14 @@
 	aliases {
 		watchdog0 = &iwdg;
 		sw0 = &user_button;	
-		// encoder0 = &mt6835;
+		encoder0 = &mt6835;
 		die-temp0 = &die_temp;
 		volt-sensor0 = &vref;
 	};
 
 	vbus {
 		compatible = "voltage-divider";
-		io-channels = <&adc1 10>;
+		io-channels = <&adc3 10>;
 		output-ohms = <10000>;
 		full-ohms = <(191000 + 10000)>;
 	};
@@ -113,20 +111,11 @@
 /* See reference manual (RM0385):
  *   0b10: HSE oscillator clock selected
  */
- #define MCO2_SEL_PLLI2S 1
  #define MCO2_SEL_HSE 2
 
-// &mco2 {
-// 	clocks = <&rcc STM32_SRC_HSE MCO2_SEL(MCO2_SEL_HSE)>;
-// 	prescaler = <MCO2_PRE(MCO_PRE_DIV_1)>;
-// 	pinctrl-0 = <&rcc_mco_2_pc9>;
-// 	pinctrl-names = "default";
-// 	status = "okay";
-// };
-
 &mco2 {
-	clocks = <&rcc STM32_SRC_PLLI2S_R MCO2_SEL(MCO2_SEL_PLLI2S)>;
-	prescaler = <MCO2_PRE(MCO_PRE_DIV_2)>;
+	clocks = <&rcc STM32_SRC_HSE MCO2_SEL(MCO2_SEL_HSE)>;
+	prescaler = <MCO2_PRE(MCO_PRE_DIV_1)>;
 	pinctrl-0 = <&rcc_mco_2_pc9>;
 	pinctrl-names = "default";
 	status = "okay";
@@ -167,12 +156,6 @@
 		int-gpios = <&gpiob 14 GPIO_ACTIVE_LOW>;
 		ti,interface-type = "rmii-25MHz";
 	};
-
-	// eth_phy: ethernet-phy@0 {
-	// 	status = "okay";
-	// 	compatible = "ethernet-phy";
-	// 	reg = <0x00>;
-	// };
 };
 
 &i2c1 {
@@ -221,14 +204,14 @@
 	cs-gpios = <&gpioa 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	status = "okay";
 
-// 	dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
-// 		<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
+	dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
+		<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
 
-// 	dma-names = "tx", "rx";
+	dma-names = "tx", "rx";
 
 	w25q128: w25q128@0 {
 		compatible ="jedec,spi-nor";
-		size = <DT_SIZE_M(16)>;
+		size = <DT_SIZE_M(128)>;
 		reg = <0>;
 		spi-max-frequency = <DT_FREQ_M(50)>;
 		status = "okay";
@@ -239,23 +222,19 @@
 			#address-cells = < 1 >;
 			#size-cells = < 1 >;
 
-			storage_partition: partition@0 {
-				label = "storage";
-				reg=< 0x0 DT_SIZE_K(1024) >;
+			filesystem: partition@0 {
+				label = "filesystem";
+				reg=< 0x0 DT_SIZE_M(16) >;
 			};
 		};
 	};
 };
 
 &spi2 {
-	pinctrl-0 = <&spi2_sck_pi1 &spi2_miso_pi2 &spi2_mosi_pi3>;
+	pinctrl-0 = <&spi2_sck_pi1 &spi2_miso_pi2 &spi2_mosi_pi3 &spi2_nss_pi0>;
 	pinctrl-names = "default";
-	cs-gpios = <&gpioi 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	// cs-gpios = <&gpioi 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	status = "okay";
-
-	// dmas = <&dma2 4 6 STM32_DMA_PERIPH_TX STM32_DMA_FIFO_FULL>,
-	// 	   <&dma1 3 0 STM32_DMA_PERIPH_RX STM32_DMA_FIFO_FULL>;
-	// dma-names = "tx", "rx";
 
 	mt6835: mt6835@0 {
 		compatible = "magntek,mt6835";
@@ -267,9 +246,9 @@
 };
 
 &spi3 {
-	pinctrl-0 = <&spi3_sck_pc10 &spi3_miso_pc11 &spi3_mosi_pc12>;
+	pinctrl-0 = <&spi3_sck_pc10 &spi3_miso_pc11 &spi3_mosi_pc12 &spi3_nss_pa15>;
 	pinctrl-names = "default";
-	cs-gpios = <&gpioa 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	// cs-gpios = <&gpioa 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	status = "disabled";
 };
 
@@ -349,6 +328,7 @@ zephyr_udc0: &usbotg_fs {
 // 	};
 // };
 
+/* Enable pull-ups on BKIN pins */
 &pinctrl {
     tim1_bkin_pe15: tim1_bkin_pe15 {
         bias-pull-up;
@@ -365,13 +345,12 @@ zephyr_udc0: &usbotg_fs {
 	st,adc-prescaler = <2>;
 	status = "okay";
 
-	// 	  adc-trigger = <STM32_ADC_INJ_TRIG_TIM1_TRGO>;
-
 	vref-mv = <3000>;
 
 	#address-cells = <1>;
 	#size-cells = <0>;
 
+	/* I_SENSE_B */
 	channel@3 {
 		reg = <3>;
 		zephyr,gain = "ADC_GAIN_1";
@@ -380,7 +359,8 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,resolution = <12>;
 	};
 
-	channel@C {
+	/* I_SENSE_A */
+	channel@c {
 		reg = <12>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
@@ -388,7 +368,8 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,resolution = <12>;
 	};
 
-	channel@A {
+	/* VINSENSE */
+	channel@a {
 		reg = <10>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
@@ -397,10 +378,22 @@ zephyr_udc0: &usbotg_fs {
 	};
 };
 
-&die_temp {
+&adc3 {
+	compatible = "st,stm32f4-adc", "st,stm32-adc";
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <2>;
 	status = "okay";
-};
 
-&vref {
-	status = "okay";
+	vref-mv = <3000>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@a {
+		reg = <10>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};	
 };

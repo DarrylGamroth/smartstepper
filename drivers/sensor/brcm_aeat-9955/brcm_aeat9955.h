@@ -52,19 +52,7 @@ extern "C" {
 #define AEAT9955_FULL_ANGLE     360
 #define AEAT9955_PULSES_PER_REV 262144
 #define AEAT9955_MILLION_UNIT   1000000
-
-/* AEAT9955 has 18-bit resolution (2^18 = 262144 counts per revolution) */
-#define AEAT9955_RESOLUTION_BITS 18
 #define AEAT9955_MAX_COUNT       (1U << AEAT9955_RESOLUTION_BITS)
-
-/**
- * @brief Get the sensor decoder API for AEAT9955
- * 
- * @param dev AEAT9955 device instance
- * @param decoder Pointer to store the decoder API
- * @return 0 on success, negative error code on failure
- */
-int aeat9955_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
 
 #ifdef __cplusplus
 }

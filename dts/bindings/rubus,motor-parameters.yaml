@@ -1,0 +1,47 @@
+# Copyright (c) 2024 Rubus Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Motor electrical parameters
+
+compatible: "rubus,motor-parameters"
+
+properties:
+  inductance-d-uh:
+    type: int
+    required: true
+    description: D-axis inductance in microhenries
+
+  inductance-q-uh:
+    type: int
+    required: true
+    description: Q-axis inductance in microhenries
+
+  resistance-mohms:
+    type: int
+    required: true
+    description: Phase resistance in milliohms
+
+  flux_linkage_mvphz:
+    type: int
+    required: true
+    description: Permanent magnet flux linkage in millivolt-seconds per Hz
+
+  pole-pairs:
+    type: int
+    required: true
+    description: Number of motor pole pairs
+
+  max-current-ma:
+    type: int
+    required: true
+    description: Maximum phase current in milliamps
+
+  inertia-mgcm2:
+    type: int
+    required: true
+    description: Rotor inertia in milligram-cm²
+
+  max-speed-hz:
+    type: int
+    required: true
+    description: Maximum mechanical speed in Hz

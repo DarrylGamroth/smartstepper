@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/dt-bindings/dma/stm32_dma.h>
-
 // / {
 // 		/* Current sampler config, ADC channels */
 // 	/* FIXME: Add drv8328 driver */
@@ -54,21 +52,98 @@
 // 	};
 // };
 
+/ {
+	user_parameters {
+		nominal_voltage-mv = <24000>;
+		pwm-frequency-hz = <PWM_KHZ(20)>;
+		control-loop-frequency-hz = <10000>;
+		offset-pole-hz = <30000>;
+		align-current-ma = <500>;
+		align-duration-ms = <1000>;
+		brake-current-ma = <1000>;
+		max-vs-mpu = <570>;
+	};
+
+	vbus_sense {
+		channel = <0>;
+		full_scale_voltage-mv = <((191000 + 10000) / 10000 * 3000)>;
+	};
+
+	current_sense1 {
+		channel = <1>;
+		current-sense-resistor-uohms = <10000>;
+		current-sense-gain = <50>;
+		full-scale-current-ma = <3000>;
+		offset-calibration-ma = <1500>;
+	};
+
+	current_sense2 {
+		channel = <2>;
+		current-sense-resistor-uohms = <10000>;
+		current-sense-gain = <50>;
+		full-scale-current-ma = <3000>;
+		offset-calibration-ma = <1500>;
+	};	
+
+	motor_parameters {
+		inductance-d-uh = <3400>;
+		inductance-q-uh = <3400>;
+		resistance-mohms = <5600>;
+		flux_linkage_mvphz = <15000>;
+		pole-pairs = <50>;
+		max-current-ma = <3000>;
+		inertia-mgcm2 = <9000>;
+		max-speed-hz = <400>;
+		max-current-ma = <670>;
+	};
+};
 
 / {
 	model = "Smart Stepper Controller";
 	compatible = "rubus,smartstepper";
 
+	chosen {
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+	};
+
 	aliases {
 		encoder1 = &aeat9955;
 	};
-};
-// &spi1 {
-// 	dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
-// 		<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
 
-// 	dma-names = "tx", "rx";
+	photo_interruptor_enable {
+		compatible = "rubus,app-gpio";
+		gpios = <&gpioe 1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};	
+};
+
+// / {
+// 	fstab {
+// 		compatible = "zephyr,fstab";
+// 		lfs1: lfs1 {
+// 			compatible = "zephyr,fstab,littlefs";
+// 			read-size = <32>;
+// 			prog-size = <32>;
+// 			cache-size = <256>;
+// 			lookahead-size = <64>;
+// 			block-cycles = <512>;
+// 			partition = <&filesystem>;
+// 			mount-point = "/lfs1";
+// 		};
+// 	};
 // };
+
+&usart1 {
+	status = "okay";
+};
+
+&spi1 {
+	// dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
+	// 	<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
+
+	// dma-names = "tx", "rx";
+};
 
 &dma1 {
 	status = "okay";
@@ -79,22 +154,11 @@
 };
 
 &spi2 {
-	compatible = "rubus,stm32-spi";
 	status = "okay";
-
-	dmas = <&dma2 4 6 STM32_DMA_PERIPH_TX STM32_DMA_FIFO_FULL>,
-		   <&dma1 3 0 STM32_DMA_PERIPH_RX STM32_DMA_FIFO_FULL>;
-	dma-names = "tx", "rx";
 };
 
 &spi3 {
-	compatible = "rubus,stm32-spi";
 	status = "okay";
-
-	// dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS) STM32_DMA_FIFO_FULL>,
-	//    <&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS) STM32_DMA_FIFO_FULL>;
-
-	// dma-names = "tx", "rx";
 
 	aeat9955: aeat9955@0 {
 		compatible = "brcm,aeat-9955";
@@ -104,41 +168,31 @@
 	};
 };
 
-// &timers1 {
-// 	compatible = "rubus,stm32-timers";
-// 	st,prescaler = <0>;
-// 	status = "okay";
-// 	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
-// 	st,master-mode-selection = <0x70>; // LL_TIM_TRGO_OC4REF
+// TIM1 is master for TIM3 and TIM8 synchronization
+&timers1 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
+	st,master-mode;
+	st,master-mode-selection = <0x10>; // LL_TIM_TRGO_ENABLE - sync TIM3 and TIM8
 
-// 	pwm1:mcpwm {
-// 		period = <PWM_KHZ(20)>;
-// 		status = "okay";
-// 	};
-// };
+	pwm1:mcpwm {
+		period = <PWM_KHZ(20)>;
+		status = "okay";
+		#pwm-cells = <2>;
+	};
+};
 
-// &timers8 {
-// 	compatible = "rubus,stm32-timers";
-// 	st,prescaler = <0>;
-// 	status = "okay";
-// 	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
-// 	st,slave-mode;
-// 	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-// 	st,trigger-selection = <0>; // ITR0
-
-// 	pwm8:mcpwm {
-// 		period = <PWM_KHZ(20)>;
-// 		status = "okay";
-// 	};
-// };
-
+// TIM3 is slave of TIM1
 &timers3 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;
 	status = "okay";
-	st,master-mode;
 	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
-	st,master-mode-selection = <0x10>; // LL_TIM_TRGO_ENABLE
+	st,slave-mode;
+	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
+	st,trigger-selection = <0x00>; // ITR0 = TIM1
 
 	pwm3:mcpwm {
 		compatible = "st,stm32-mcpwm";
@@ -148,57 +202,42 @@
 	};
 };
 
-&timers1 {
-	compatible = "rubus,stm32-timers";
-	st,prescaler = <0>;
-	status = "okay";
-	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
-	st,master-mode;
-	st,slave-mode;
-	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
-
-	st,master-mode-selection = <0x70>; // LL_TIM_TRGO_OC4REF
-
-	pwm1:mcpwm {
-		period = <PWM_KHZ(20)>;
-		st,cc-dma-channels = <4>;
-		status = "okay";
-		// #pwm-cells = <2>;
-	};
-};
-
+// TIM8 is slave of TIM1
 &timers8 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;
 	status = "okay";
 	st,countermode = <STM32_TIM_COUNTERMODE_CENTER_UP_DOWN>;
 	st,slave-mode;
-	// st,slave-mode-selection = <0x4>; // LL_TIM_SLAVEMODE_RESET
 	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
+	st,trigger-selection = <0x00>; // ITR0 = TIM1
 
 	pwm8:mcpwm {
 		compatible = "st,stm32-mcpwm";
 		period = <PWM_KHZ(20)>;
 		status = "okay";
-		// #pwm-cells = <2>;
+		#pwm-cells = <2>;
 	};
 };
 
-&timers5 {
+// Timer 4 is used for input capture of clock generator and photo-interrupter
+&timers4 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;
 	status = "okay";
+	st,master-mode;
 	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
-	st,slave-mode;
-	st,slave-mode-selection = <0x6>; // LL_TIM_SLAVEMODE_TRIGGER
-	st,trigger-selection = <0x20>; // ITR2
 
-	pwm5:mcpwm {
-		compatible = "st,stm32-mcpwm";
-		period = <PWM_KHZ(20)>;
+	triggers: triggers {
+		compatible = "st,stm32-timer-ic";
+		pinctrl-0 = <&tim4_ch1_pd12 &tim4_ch2_pd13>;
+		pinctrl-names = "default";
 		status = "okay";
-		#pwm-cells = <2>;
 	};
+};
+
+&adc1 {
+	compatible = "st,stm32-adc-injected";
+	status = "okay";
+	st,adc-trigger-source = "tim1_cc4";
 };

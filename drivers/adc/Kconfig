@@ -14,13 +14,11 @@ config ADC_STM32_INJECTED
 	default y
 	depends on DT_HAS_ST_STM32_ADC_INJECTED_ENABLED
 	select PINCTRL
-	help
-	  Enable the driver implementation for the stm32xx ADC
 
-config ADC_STM32WB0
+config ADC_STM32WB0_INJECTED
 	bool "STM32WB0 ADC driver"
 	default y
-	depends on DT_HAS_ST_STM32WB0_ADC_ENABLED
+	depends on DT_HAS_ST_STM32WB0_ADC_INJECTED_ENABLED
 	select PINCTRL
 	help
 	  Enable the driver implementation for the STM32WB0 series ADC

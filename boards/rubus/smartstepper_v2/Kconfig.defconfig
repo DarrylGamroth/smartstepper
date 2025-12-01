@@ -1,0 +1,12 @@
+# Smart Stepper board configuration
+
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_SMARTSTEPPER_V2
+
+config SPI_STM32_INTERRUPT
+	default y
+	depends on SPI
+
+endif # BOARD_SMARTSTEPPER_V2

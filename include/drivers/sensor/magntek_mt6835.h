@@ -13,7 +13,9 @@
 #define ZEPHYR_INCLUDE_DRIVERS_SENSOR_MAGNTEK_MT6835_H_
 
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/dsp/dsp.h>
+#include <zephyr/sys/util.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +65,16 @@ enum mt6835_sensor_attribute {
 #define MT6835_ABZ_RES_2048_PPR   1  /**< 2048 pulses per revolution */
 #define MT6835_ABZ_RES_4096_PPR   2  /**< 4096 pulses per revolution */
 #define MT6835_ABZ_RES_8192_PPR   3  /**< 8192 pulses per revolution */
+
+/**
+ * @brief MT6835 encoder resolution
+ */
+#define MT6835_RESOLUTION_BITS 21  /**< 21-bit encoder (2097152 counts per revolution) */
+
+/**
+ * @brief MT6835 angle conversion constants
+ */
+#define MT6835_COUNTS_TO_DEGREES (360.0f / (float)(1U << MT6835_RESOLUTION_BITS))  /**< Multiply factor: counts to degrees */
 
 /**
  * @brief Auto-calibration rotation speed range values
@@ -133,6 +145,54 @@ struct mt6835_sample {
  * @return 0 on success, negative error code on failure
  */
 int mt6835_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
+
+/**
+ * @brief Fast inline position decode for ISR use (Q31 format)
+ *
+ * Optimized for zero-latency ISR - bypasses all validation and API overhead.
+ * Decodes raw MT6835 RTIO buffer directly to Q31 angle format.
+ *
+ * @warning This function assumes:
+ * - buffer points to valid mt6835_sample structure
+ * - No status/parity error checking (use only for trusted data paths)
+ * - Caller handles error detection separately if needed
+ *
+ * @param buffer Pointer to mt6835_sample from RTIO completion
+ * @return Position in Q31 format [-2^31, 2^31-1] for arm_sin_cos_q31
+ *         Maps 0° to 360° encoder range to -180° to +180° Q31 range
+ */
+static inline q31_t mt6835_decode_position_q31(const uint8_t *buffer)
+{
+	const struct mt6835_sample *sample = (const struct mt6835_sample *)buffer;
+	/* Extract 21-bit position from bytes [2:4], bits [20:0] after status bits */
+	uint32_t position = sys_get_be24(&sample->raw[2]) >> 3;
+	/* Convert to Q31 centered at 0: maps [0, 2097151] to [-2^31, 2^31-1] */
+	return (q31_t)((position << (32 - MT6835_RESOLUTION_BITS)) - 0x80000000UL);
+}
+
+/**
+ * @brief Fast inline position decode for ISR use (float32 degrees)
+ *
+ * Optimized for zero-latency ISR - bypasses all validation and API overhead.
+ * Decodes raw MT6835 RTIO buffer directly to float angle in degrees.
+ *
+ * @warning This function assumes:
+ * - buffer points to valid mt6835_sample structure
+ * - No status/parity error checking (use only for trusted data paths)
+ * - Caller handles error detection separately if needed
+ *
+ * @param buffer Pointer to mt6835_sample from RTIO completion
+ * @return Position in degrees [-180.0f, +180.0f)
+ *         Maps 0° to 360° encoder range to -180° to +180° degrees
+ */
+static inline float mt6835_decode_position_f32(const uint8_t *buffer)
+{
+	const struct mt6835_sample *sample = (const struct mt6835_sample *)buffer;
+	/* Extract 21-bit position from bytes [2:4], bits [20:0] after status bits */
+	int32_t position = (int32_t)(sys_get_be24(&sample->raw[2]) >> 3);
+	/* Convert to degrees centered at 0: [0, 2097151] -> [-180.0, +180.0) */
+	return (float)(position - (1 << (MT6835_RESOLUTION_BITS - 1))) * MT6835_COUNTS_TO_DEGREES;
+}
 
 #ifdef __cplusplus
 }

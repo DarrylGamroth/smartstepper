@@ -186,7 +186,7 @@ static void (*const disable_cc_dma[])(TIM_TypeDef *) = {
 	LL_TIM_DisableDMAReq_CC4
 };
 
-static bool mcpwm_stm32_clear_cc_flag(TIM_TypeDef *timer, uint32_t channel)
+static inline bool mcpwm_stm32_clear_cc_flag(TIM_TypeDef *timer, uint32_t channel)
 {
 	uint32_t index = channel - 1U;
 
@@ -268,25 +268,6 @@ static inline bool is_center_aligned(const uint32_t ll_countermode)
 	return ((ll_countermode == LL_TIM_COUNTERMODE_CENTER_DOWN) ||
 		(ll_countermode == LL_TIM_COUNTERMODE_CENTER_UP) ||
 		(ll_countermode == LL_TIM_COUNTERMODE_CENTER_UP_DOWN));
-}
-
-static void mcpwm_stm32_isr(const struct device *dev)
-{
-	const struct mcpwm_stm32_config *cfg = dev->config;
-	struct mcpwm_stm32_data *data = dev->data;
-	TIM_TypeDef *timer = cfg->timer;
-
-	for (uint32_t channel = 1U; channel <= TIMER_MAX_CH; ++channel) {
-		mcpwm_compare_cb_t cb = data->compare_cb[channel - 1U];
-
-		if (cb == NULL) {
-			continue;
-		}
-
-		if (mcpwm_stm32_clear_cc_flag(timer, channel)) {
-			cb(dev, channel, data->compare_user_data[channel - 1U]);
-		}
-	}
 }
 
 static void mcpwm_stm32_brk_isr(const struct device *dev)
@@ -433,7 +414,7 @@ static int mcpwm_stm32_set_duty_cycle(const struct device *dev, uint32_t channel
 	}
 
 	uint32_t pulse_cycles =
-		(int32_t)(((int64_t)duty_cycle * data->period_cycles + 0x80000000LL) >> 31);
+		(int32_t)(((int64_t)duty_cycle * data->period_cycles + 0x40000000LL) >> 31);
 
 	set_timer_compare[channel - 1u](cfg->timer, pulse_cycles);
 	return 0;
@@ -733,22 +714,52 @@ static int mcpwm_stm32_init(const struct device *dev)
 
 #define PWM(index) DT_INST_PARENT(index)
 
-#define IRQ_CONNECT_AND_ENABLE_BY_NAME(index, name, handler)                                        \
+#define IRQ_CONNECT_AND_ENABLE_BY_NAME_BRK(index)                                               \
 	do {                                                                                         \
-		IRQ_CONNECT(DT_IRQ_BY_NAME(PWM(index), name, irq),                                 \
-			    DT_IRQ_BY_NAME(PWM(index), name, priority), handler,                  \
-			    DEVICE_DT_INST_GET(index), 0);                                                 \
-		irq_enable(DT_IRQ_BY_NAME(PWM(index), name, irq));                                 \
+		IRQ_CONNECT(DT_IRQ_BY_NAME(PWM(index), brk, irq),                                  \
+			    DT_IRQ_BY_NAME(PWM(index), brk, priority),                         \
+			    mcpwm_stm32_brk_isr, DEVICE_DT_INST_GET(index), 0);                \
+		irq_enable(DT_IRQ_BY_NAME(PWM(index), brk, irq));                                  \
 	} while (0)
 
-#define IRQ_CONNECT_AND_ENABLE_DEFAULT(index)                                                      \
-	do {                                                                                         \
-		IRQ_CONNECT(DT_IRQN(PWM(index)), DT_IRQ(PWM(index), priority),                     \
-			    mcpwm_stm32_isr, DEVICE_DT_INST_GET(index), 0);                     \
-		irq_enable(DT_IRQN(PWM(index)));                                                   \
-	} while (0)
+#define MCPWM_ISR_HANDLER(index)                                                                 \
+	ISR_DIRECT_DECLARE(mcpwm_stm32_isr_##index)                                                  \
+	{                                                                                            \
+		const struct device *dev = DEVICE_DT_INST_GET(index);                                \
+		const struct mcpwm_stm32_config *cfg = dev->config;                                  \
+		struct mcpwm_stm32_data *data = dev->data;                                           \
+		TIM_TypeDef *timer = cfg->timer;                                                     \
+		                                                                                     \
+		for (uint32_t channel = 1U; channel <= TIMER_MAX_CH; ++channel) {                    \
+			mcpwm_compare_cb_t cb = data->compare_cb[channel - 1U];                      \
+			                                                                             \
+			if (cb == NULL) {                                                            \
+				continue;                                                            \
+			}                                                                            \
+			                                                                             \
+			if (mcpwm_stm32_clear_cc_flag(timer, channel)) {                             \
+				cb(dev, channel, data->compare_user_data[channel - 1U]);             \
+			}                                                                            \
+		}                                                                                    \
+		                                                                                     \
+		return 0;                                                                            \
+	}                                                                                            \
+	                                                                                             \
+	static void mcpwm_stm32_isr_##index##_init(void)                                             \
+	{                                                                                            \
+		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), cc),                                         \
+			    (IRQ_DIRECT_CONNECT(DT_IRQ_BY_NAME(PWM(index), cc, irq),                 \
+						DT_IRQ_BY_NAME(PWM(index), cc, priority),        \
+						mcpwm_stm32_isr_##index, IRQ_ZERO_LATENCY);      \
+			     irq_enable(DT_IRQ_BY_NAME(PWM(index), cc, irq));),                      \
+			    (IRQ_DIRECT_CONNECT(DT_IRQN(PWM(index)),                                 \
+						DT_IRQ(PWM(index), priority),                    \
+						mcpwm_stm32_isr_##index, IRQ_ZERO_LATENCY);      \
+			     irq_enable(DT_IRQN(PWM(index)));))                                      \
+	}
 
 #define IRQ_CONFIG_FUNC(index)                                                                     \
+	MCPWM_ISR_HANDLER(index)                                                                   \
 	static void mcpwm_stm32_irq_config_func_##index(const struct device *dev)                \
 	{                                                                                          \
 		struct mcpwm_stm32_data *data = dev->data;                                      \
@@ -759,10 +770,8 @@ static int mcpwm_stm32_init(const struct device *dev)
 			data->compare_user_data[i] = NULL;                                       \
 		}                                                                             \
 		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), brk),                                   \
-			    (IRQ_CONNECT_AND_ENABLE_BY_NAME(index, brk, mcpwm_stm32_brk_isr);), ()); \
-		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), cc),                                    \
-			    (IRQ_CONNECT_AND_ENABLE_BY_NAME(index, cc, mcpwm_stm32_isr);),         \
-			    (IRQ_CONNECT_AND_ENABLE_DEFAULT(index);));                               \
+			    (IRQ_CONNECT_AND_ENABLE_BY_NAME_BRK(index);), ());                      \
+		mcpwm_stm32_isr_##index##_init();                                                   \
 	}
 
 #define STM32_CC_DMA_MASK_BIT(node_id, prop, idx)                                                     \

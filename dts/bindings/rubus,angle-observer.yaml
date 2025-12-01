@@ -1,0 +1,12 @@
+# Copyright (c) 2024 Rubus Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Angle observer configuration
+
+compatible: "rubus,angle-observer"
+
+properties:
+  bandwidth-hz:
+    type: int
+    required: true
+    description: Observer bandwidth in Hz (position tracking)

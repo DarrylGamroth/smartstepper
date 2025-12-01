@@ -9,13 +9,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/dsp/dsp.h>
 #include <string.h>
-#include <drivers/sensor/magntek_mt6835.h>
+#include "magntek_mt6835.h"
 
 LOG_MODULE_DECLARE(magntek_mt6835, CONFIG_SENSOR_LOG_LEVEL);
-
-/* MT6835 has 21-bit resolution (2^21 = 2097152 counts per revolution) */
-#define MT6835_RESOLUTION_BITS 21
-#define MT6835_MAX_COUNT       (1U << MT6835_RESOLUTION_BITS)
 
 /**
  * @brief Convert MT6835 raw position to Q31 angle for arm_sin_cos_q31
