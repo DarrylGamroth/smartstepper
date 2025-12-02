@@ -12,9 +12,13 @@ project(app LANGUAGES C)
 target_sources(app PRIVATE 
 	src/main.c
 	src/config.c
-  src/angle_observer.c
-  src/rs_online.c
-  src/shell_commands.c
+	src/angle_observer.c
+	src/rs_online.c
+	src/shell_commands.c
+	src/motor_control_api.c
+	src/motor_isr.c
+	src/motor_states.c
+	src/motor_hardware.c
 )
 target_include_directories(app PRIVATE include)
 

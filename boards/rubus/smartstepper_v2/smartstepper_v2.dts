@@ -22,6 +22,7 @@
 		zephyr,itcm = &itcm;
 		zephyr,dtcm = &dtcm;
 		zephyr,code-partition = &slot0_partition;
+		zephyr,settings-partition = &settings_partition;
 	};
 
 	gpio_keys {
@@ -35,7 +36,7 @@
 
 	aliases {
 		watchdog0 = &iwdg;
-		sw0 = &user_button;	
+		sw0 = &user_button;
 		encoder0 = &mt6835;
 		die-temp0 = &die_temp;
 		volt-sensor0 = &vref;
@@ -208,6 +209,24 @@
 		address-width = <8>;
 		timeout = <5>;
 		status = "okay";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/* Reserve 1KB for motor parameter settings */
+			settings_partition: partition@0 {
+				label = "settings_storage";
+				reg = <0x0000 0x0400>;  /* 1KB at start of EEPROM */
+			};
+
+			/* Remaining 1KB available for calibration data, logs, etc. */
+			user_data: partition@400 {
+				label = "user_data";
+				reg = <0x0400 0x0400>;  /* 1KB remaining */
+			};
+		};
 	};
 
 };
@@ -237,7 +256,7 @@
 		spi-bus-width = <4>;
 		writeoc = "PP_1_1_4";
 		reset-cmd;
-		reset-cmd-wait = <2000>;		
+		reset-cmd-wait = <2000>;
 
 		partitions {
 			compatible = "fixed-partitions";
@@ -427,7 +446,7 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <16>;
-	};	
+	};
 };
 
 &die_temp {

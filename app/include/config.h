@@ -48,7 +48,7 @@ struct motor_parameters {
 	/* PI controllers (stateful - NOT double buffered) */
 	struct pi_f32 pi_Id;
 	struct pi_f32 pi_Iq;
-	float32_t maxVsMag_pu;  /* Max voltage magnitude in per-unit */
+	float32_t max_modulation_index;  /* Maximum modulation index (0.0 to ~0.907) */
 
 	/* Current sensing filters and offsets */
 	struct filter_fo_f32 filter_Ia;
@@ -67,7 +67,7 @@ struct motor_parameters {
 	/* Voltage references (computed by PI controllers) */
 	float32_t Vd_ref_V;
 	float32_t Vq_ref_V;
-	float32_t maxVsMag_V;
+	float32_t max_voltage_magnitude_V;
 
 	/* Applied voltages (after SVPWM limiting) */
 	float32_t Vd_V;
@@ -79,15 +79,15 @@ struct motor_parameters {
 	struct traj_f32 traj_Id;
 
 	/* Measured parameters (from calibration) */
-	float32_t RoverL_measured;
-	float32_t L_measured;
-	float32_t Rs_measured;
+	float32_t R_over_L_measured;
+	float32_t Ls_measured_H;
+	float32_t Rs_measured_ohm;
 
 	/* R/L estimation accumulators */
-	float32_t roverl_sum_Vd_Id;
-	float32_t roverl_sum_Vq_Id;
-	float32_t roverl_sum_Id2;
-	float32_t roverl_phase_deg;
+	float32_t roverl_accumulator_Vd_Id;
+	float32_t roverl_accumulator_Vq_Id;
+	float32_t roverl_accumulator_Id2;
+	float32_t roverl_phase_degrees;
 
 	/* Telemetry and diagnostics */
 	uint32_t state_counter;
