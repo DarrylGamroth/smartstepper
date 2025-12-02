@@ -16,6 +16,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
+#include <zephyr/timing/timing.h>
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
 #include <dt-bindings/pwm/stm32-mcpwm.h>
@@ -29,6 +30,7 @@
 #include "pwmgen.h"
 #include <string.h>
 #include "angle_observer.h"
+#include "shell_commands.h"
 
 /* Include encoder-specific headers based on devicetree */
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -81,20 +83,20 @@ enum motor_error {
 };
 
 /* Forward declarations */
-static const struct smf_state motor_states[];
+const struct smf_state motor_states[];  /* Exported for shell access */
 static inline int read_encoder(struct rtio* ctx, float32_t* angle);
 
 /* Break interrupt handler - hardware fault protection */
 static void break_interrupt_handler(const struct device *dev, void *user_data)
 {
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
-	
+
 	/* Hardware has already disabled PWM via break input
 	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault)
 	 */
 	params->error_code = ERROR_HARDWARE_BREAK;
 	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
-	
+
 	LOG_ERR("Hardware break interrupt - PWM disabled by hardware");
 }
 
@@ -105,6 +107,23 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	gpio_pin_set_dt(&trig, 1);
 
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
+
+	/* Start ISR cycle counter */
+	timing_t cycles_start = timing_counter_get();
+
+	/* Double-buffer swap: atomically toggle index between 0 and 1
+	 * Shell writes to ctrl_buf[ctrl_index^1], ISR reads from ctrl_buf[ctrl_index].
+	 * XOR toggle is single instruction - minimal ISR overhead.
+	 */
+	if (params->ctrl_swap_pending) {
+		params->ctrl_index ^= 1;
+		params->ctrl_swap_pending = false;
+		params->buffer_swap_count++;
+	}
+
+	/* Increment control loop counter */
+	params->control_loop_count++;
+
 	float32_t angle_raw = 0;
 	float32_t sinval, cosval;
 	float32_t Ia, Ib;
@@ -116,7 +135,7 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Da_high, Da_low, Db_high, Db_low;
 	float32_t out_max;
 	float32_t Id_ref_A, Iq_ref_A;
-	
+
 	q31_t *adc_values[3];
 	adc_values[0] = (q31_t *)&values[0]; /* I_b */
 	adc_values[1] = (q31_t *)&values[1]; /* I_a */
@@ -126,7 +145,7 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	if (read_encoder(&encoder_rtio_ctx, &angle_raw) < 0) {
 		/* No new encoder data, use previous estimate */
 		params->encoder_fault_counter++;
-		
+
 		/* Fault detection: Too many consecutive encoder failures */
 		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
 			params->error_code = ERROR_ENCODER_FAULT;
@@ -140,7 +159,7 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 		angle_observer_update(&params->observer, angle_raw);
 		/* Reset fault counter on successful read */
 		params->encoder_fault_counter = 0;
-	}	
+	}
 
 	Ia = adc_to_current(values[1]);
 	Ib = adc_to_current(values[0]);
@@ -173,43 +192,44 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
 		LOG_ERR("Overcurrent fault: Ia=%.2fA, Ib=%.2fA", (double)Ia, (double)Ib);
 		goto isr_done;
-	}	
+	}
 
 	/* RoverL measurement: rotate current reference and accumulate V/I in rotating frame */
 	if (params->smf.current == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
 		params->state_counter++;
-		
+
 		/* Ramp up current amplitude smoothly (TI method) */
 		traj_run(&params->traj_Id);
 		float32_t roverl_amplitude_A = traj_get_int_value(&params->traj_Id);
-		
+
 		/* Advance excitation phase at configured frequency */
 		float32_t phase_increment_deg = 360.0f * ROVERL_EST_FREQ_HZ / CONTROL_LOOP_FREQUENCY_HZ;
 		params->roverl_phase_deg += phase_increment_deg;
 		if (params->roverl_phase_deg >= 360.0f) {
 			params->roverl_phase_deg -= 360.0f;
 		}
-		
+
 		/* Rotate ramped amplitude by roverl_phase to create rotating vector
 		 * Inverse Park: (Id, Iq) = (I_amplitude * cos(θ), I_amplitude * sin(θ))
+		 * Write to double buffer (state machine has write access)
 		 */
 		float32_t sin_roverl, cos_roverl;
 		arm_sin_cos_f32(params->roverl_phase_deg, &sin_roverl, &cos_roverl);
 		params->Id_ref_A = roverl_amplitude_A * cos_roverl;
 		params->Iq_ref_A = roverl_amplitude_A * sin_roverl;
-		
+
 		/* Wait for PI settling before accumulating measurements */
 		uint32_t settling_samples = (uint32_t)(ROVERL_EST_SETTLING_S * CONTROL_LOOP_FREQUENCY_HZ);
 		if (params->state_counter > settling_samples) {
 			/* Transform to rotating frame aligned with excitation */
 			float32_t Id_meas, Iq_meas;
 			arm_park_f32(Ia, Ib, &Id_meas, &Iq_meas, sin_roverl, cos_roverl);
-			
+
 			/* Transform actual voltage outputs for phase calculation */
 			float32_t Vd_meas, Vq_meas;
 			arm_park_f32(params->Vd_V, params->Vq_V, &Vd_meas, &Vq_meas,
 			             sin_roverl, cos_roverl);
-			
+
 			/* Accumulate for R/L extraction */
 			params->roverl_sum_Vd_Id += Vd_meas * Id_meas;
 			params->roverl_sum_Vq_Id += Vq_meas * Id_meas;
@@ -220,17 +240,17 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	/* Rs EST: filter V/I in d-axis for DC resistance */
 	if (params->smf.current == &motor_states[MOTOR_STATE_RS_EST]) {
 		params->state_counter++;
-		
+
 		uint32_t rampup_samples = (uint32_t)(RS_EST_RAMPUP_S * CONTROL_LOOP_FREQUENCY_HZ);
-		
+
 		/* Transform to stationary dq (0°) for measurement */
 		float32_t Id_meas, Iq_meas;
 		arm_park_f32(Ia, Ib, &Id_meas, &Iq_meas, 0.0f, 1.0f);
-		
+
 		/* Run trajectory (clamps at target after rampup) */
 		traj_run(&params->traj_Id);
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
-		
+
 		/* After rampup: filter voltage and current measurements */
 		if (params->state_counter >= rampup_samples) {
 			filter_fo_run(&params->filter_rs_est_V, params->Vd_V);
@@ -241,7 +261,7 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	/* ALIGN: ramp alignment current smoothly */
 	if (params->smf.current == &motor_states[MOTOR_STATE_ALIGN]) {
 		params->state_counter++;
-		
+
 		/* Run trajectory for smooth current ramp */
 		traj_run(&params->traj_Id);
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -262,6 +282,16 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 
 	arm_park_f32(Ia, Ib, &Id, &Iq, sinval, cosval);
 
+	/* Update telemetry snapshot (convert from deg/Hz to rad/rad_s) */
+	params->position_rad = angle_observer_get_mech_angle_deg(&params->observer) * (PI_F32 / 180.0f);
+	params->velocity_rad_s = angle_observer_get_mech_speed_hz(&params->observer) * (2.0f * PI_F32);
+	params->Id_A = Id;
+	params->Iq_A = Iq;
+	params->Ia_A = Ia;
+	params->Ib_A = Ib;
+	params->elec_angle_rad = elec_angle_deg * (PI_F32 / 180.0f);
+	params->dc_bus_voltage_V = Vbus;
+
 	params->maxVsMag_V = params->maxVsMag_pu * Vbus;
 	pi_set_min_max(&params->pi_Id, -params->maxVsMag_V, params->maxVsMag_V);
 	pi_run_series(&params->pi_Id, Id_ref_A, Id, 0.0f, &params->Vd_V);
@@ -275,6 +305,10 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	arm_sin_cos_f32(elec_angle_pred_deg, &sinval, &cosval);
 
 	arm_inv_park_f32(params->Vd_V, params->Vq_V, &Va, &Vb, sinval, cosval);
+
+	/* Update voltage telemetry snapshot */
+	params->Va_V = Va;
+	params->Vb_V = Vb;
 
 	/* Normalize voltage commands to available bus voltage */
 	Ua = Va * InvVbus;
@@ -293,13 +327,13 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	// Braking occurs when torque opposes motion (Iq and speed have opposite signs)
 	float32_t speed_hz = angle_observer_get_mech_speed_hz(&params->observer);
 	bool is_braking = (params->Iq_ref_A * speed_hz) < 0.0f;  // Opposite signs = braking
-	
+
 	if (is_braking && fabsf(speed_hz) > 0.1f) {  // Braking mode (ignore near-zero speeds)
 		if (Vbus > VBUS_REGEN_LIMIT_V) {
 			// Calculate short-circuit duty based on overvoltage
 			float32_t overvoltage = Vbus - VBUS_REGEN_LIMIT_V;
 			float32_t short_duty = fminf(1.0f, overvoltage * VBUS_VOLTAGE_MARGIN_INV);
-			
+
 			// Blend: reduce regen FOC PWM, increase short-circuit (both low-side ON)
 			float32_t regen_duty = 1.0f - short_duty;
 			Da_high = Da * regen_duty;
@@ -315,6 +349,14 @@ static void adc_callback(const struct device *dev, const q31_t *values,
 	mcpwm_stm32_set_duty_cycle_2phase(pwm1, Da_high, Da_low);
 	mcpwm_stm32_set_duty_cycle_2phase(pwm8, Db_high, Db_low);
 isr_done:
+	/* Measure ISR execution time */
+	timing_t cycles_end = timing_counter_get();
+	uint64_t cycles_elapsed = timing_cycles_get(&cycles_start, &cycles_end);
+	params->total_isr_cycles += (uint32_t)cycles_elapsed;
+	if (cycles_elapsed > params->max_isr_cycles) {
+		params->max_isr_cycles = (uint32_t)cycles_elapsed;
+	}
+
 	gpio_pin_set_dt(&trig, 0);
 
 }
@@ -386,7 +428,8 @@ static void motor_state_error_entry(void *obj);
 static enum smf_state_result motor_state_error_run(void *obj);
 
 /* State machine table */
-static const struct smf_state motor_states[] = {
+/* State machine table - exported for shell access */
+const struct smf_state motor_states[] = {
 	[MOTOR_STATE_HW_INIT] = SMF_CREATE_STATE(motor_state_hw_init_entry,
 						  motor_state_hw_init_run,
 						  NULL, NULL, NULL),
@@ -452,6 +495,10 @@ static void motor_state_hw_init_entry(void *obj)
 	/* Set up ADC callback */
 	adc_injected_set_callback(adc1, adc_callback, params);
 	adc_injected_enable(adc1);
+
+	/* Initialize timing subsystem for ISR performance measurement */
+	timing_init();
+	timing_start();
 
 	/* Start master PWM timer */
 	mcpwm_start(pwm1);
@@ -550,14 +597,14 @@ static void motor_state_roverl_meas_entry(void *obj)
 	/* TI RoverL uses small sinusoidal current excitation
 	 * Target: 10-20% of rated current
 	 * Method: Apply rotating voltage vector, measure phase lag
-	 * 
+	 *
 	 * Voltage equation: V = R*I + L*dI/dt
 	 * For I = I0*sin(ωt):
 	 *   V_in_phase = R*I0        → gives R
 	 *   V_quadrature = ωL*I0     → gives L
 	 *   Time constant: τ = L/R
 	 */
-	
+
 	/* Configure trajectory to ramp rotating current amplitude smoothly
 	 * This allows PI controllers to settle before measurements begin
 	 */
@@ -588,14 +635,14 @@ static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 
 	if (params->state_counter >= total_samples) {
 		/* Extract R and ωL from accumulated phase components
-		 * 
+		 *
 		 * From least-squares fit of V = R*I + jωL*I:
 		 *   R = sum(Vd*Id) / sum(Id^2)
 		 *   ωL = sum(Vq*Id) / sum(Id^2)
 		 *   L = (ωL) / ω
 		 *   τ = L/R
 		 */
-		
+
 		float32_t R_est = params->roverl_sum_Vd_Id / params->roverl_sum_Id2;
 		float32_t omega_L_est = params->roverl_sum_Vq_Id / params->roverl_sum_Id2;
 		float32_t omega_roverl = 2.0f * PI_F32 * ROVERL_EST_FREQ_HZ;
@@ -648,11 +695,11 @@ static void motor_state_rs_est_entry(void *obj)
 	 * Two phases:
 	 *   1. RampUp (1s): Gradually ramp current to avoid transients
 	 *   2. Measurement (6s): Filter voltage and current for accurate Rs
-	 * 
+	 *
 	 * Total time: 7 seconds (default)
 	 * PI controller automatically generates voltage needed: V = I*R
 	 */
-	
+
 	/* Configure trajectory for smooth current ramp */
 	traj_set_target_value(&params->traj_Id, RS_EST_CURRENT_A);
 	traj_set_int_value(&params->traj_Id, 0.0f);
@@ -798,7 +845,12 @@ static void motor_state_offline_entry(void *obj)
 
 static enum smf_state_result motor_state_offline_run(void *obj)
 {
-	/* Run open-loop control */
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	/* Copy setpoints to references for open-loop control */
+	uint8_t write_index = params->ctrl_index ^ 1;
+	params->Id_ref_A = params->ctrl_buf[write_index].Id_setpoint_A;
+	params->Iq_ref_A = params->ctrl_buf[write_index].Iq_setpoint_A;
 
 	return SMF_EVENT_HANDLED;
 }
@@ -811,7 +863,12 @@ static void motor_state_online_entry(void *obj)
 
 static enum smf_state_result motor_state_online_run(void *obj)
 {
-	/* Closed-loop control happens in ADC ISR */
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	/* Copy setpoints to references for closed-loop control */
+	uint8_t write_index = params->ctrl_index ^ 1;
+	params->Id_ref_A = params->ctrl_buf[write_index].Id_setpoint_A;
+	params->Iq_ref_A = params->ctrl_buf[write_index].Iq_setpoint_A;
 
 	return SMF_EVENT_HANDLED;
 }
@@ -828,7 +885,7 @@ static void motor_state_error_entry(void *obj)
 	 * - Dynamic braking from engaging (Vbus spike during fault)
 	 * - PI controllers from continuing to drive motor
 	 * - Current references from being acted upon
-	 * 
+	 *
 	 * Hardware faults (overcurrent, break interrupt) may have already
 	 * disabled PWM via hardware or ISR - this ensures software faults
 	 * also result in safe motor shutdown.
@@ -837,7 +894,7 @@ static void motor_state_error_entry(void *obj)
 	mcpwm_disable(pwm1, 2);
 	mcpwm_disable(pwm8, 1);
 	mcpwm_disable(pwm8, 2);
-	
+
 	/* Clear current references for good measure */
 	params->Id_ref_A = 0.0f;
 	params->Iq_ref_A = 0.0f;
@@ -853,18 +910,37 @@ static enum smf_state_result motor_state_error_run(void *obj)
 int main(void)
 {
 	static struct motor_parameters motor_params = {
+		/* Double-buffered control parameters (two identical buffers) */
+		.ctrl_buf = {
+			{
+				.Id_setpoint_A = 0.0f,
+				.Iq_setpoint_A = 0.0f,
+			},
+			{
+				.Id_setpoint_A = 0.0f,
+				.Iq_setpoint_A = 0.0f,
+		},
+	},
+	.ctrl_index = 0,     /* ISR reads buf[0], shell writes buf[1] */
+	.ctrl_swap_pending = false,
+
+		/* PI controllers (initialized by config_init_pi_controllers) */
+		.maxVsMag_pu = MAX_VS_MPU,
+
+		/* Current sensing */
 		.Ia_offset = 0.0f,
 		.Ib_offset = 0.0f,
-		.Id_setpoint_A = 0.0f,
-		.Iq_setpoint_A = 0.0f,
+
+		/* References */
 		.Id_ref_A = 0.0f,
 		.Iq_ref_A = 0.0f,
 		.Vd_ref_V = 0.0f,
 		.Vq_ref_V = 0.0f,
-		.maxVsMag_pu = MAX_VS_MPU,
 		.maxVsMag_V = 0.0f,
 		.Vd_V = 0.0f,
 		.Vq_V = 0.0f,
+
+		/* Measured parameters */
 		.RoverL_measured = 0.0f,
 		.L_measured = 0.0f,
 		.Rs_measured = 0.0f,
@@ -872,13 +948,41 @@ int main(void)
 		.roverl_sum_Vq_Id = 0.0f,
 		.roverl_sum_Id2 = 0.0f,
 		.roverl_phase_deg = 0.0f,
+
+		/* Counters and diagnostics */
 		.state_counter = 0,
 		.encoder_fault_counter = 0,
+		.control_loop_count = 0,
+		.adc_conversion_count = 0,
+		.max_isr_cycles = 0,
+		.total_isr_cycles = 0,
+		.buffer_swap_count = 0,
+		.overrun_count = 0,
 		.error_code = ERROR_NONE,
+
+		/* Live telemetry */
+		.position_rad = 0.0f,
+		.velocity_rad_s = 0.0f,
+		.Id_A = 0.0f,
+		.Iq_A = 0.0f,
+		.Ia_A = 0.0f,
+		.Ib_A = 0.0f,
+		.Va_V = 0.0f,
+		.Vb_V = 0.0f,
+		.elec_angle_rad = 0.0f,
+		.dc_bus_voltage_V = 0.0f,
 	};
 
 	/* Print configuration parameters */
 	config_print_parameters();
+
+	/* Initialize shell access to motor parameters */
+	shell_set_motor_params(&motor_params);
+
+	/* Double-buffer index initialized to 0 above
+	 * ISR reads ctrl_buf[0], shell writes ctrl_buf[1]
+	 * (PI controllers initialized by config_init_pi_controllers during HW_INIT state)
+	 */
 
 	/* Configure GPIOs */
 	if (!gpio_is_ready_dt(&pi_enable)) {

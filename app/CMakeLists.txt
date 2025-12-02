@@ -14,6 +14,7 @@ target_sources(app PRIVATE
 	src/config.c
   src/angle_observer.c
   src/rs_online.c
+  src/shell_commands.c
 )
 target_include_directories(app PRIVATE include)
 

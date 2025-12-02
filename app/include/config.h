@@ -15,40 +15,102 @@
 #include "rs_online.h"
 #include "traj.h"
 
-/* Motor control parameters structure */
-struct motor_parameters {
-	struct smf_ctx smf;
-	struct pi_f32 pi_Id;
-	struct pi_f32 pi_Iq;
-	struct filter_fo_f32 filter_Ia;
-	struct filter_fo_f32 filter_Ib;
-	struct filter_fo_f32 filter_rs_est_V;  /* Rs EST voltage filter */
-	struct filter_fo_f32 filter_rs_est_I;  /* Rs EST current filter */
-	float32_t Ia_offset;
-	float32_t Ib_offset;
+/**
+ * @brief Double-buffered motor control parameters
+ *
+ * Shell-writable STATELESS parameters that can be modified at runtime without
+ * disrupting the control loop. ISR reads from read_buffer, shell writes
+ * to write_buffer, and swap is atomic.
+ *
+ * IMPORTANT: Only put stateless values here (setpoints, references).
+ * Do NOT put stateful objects (PI controllers with integrators, filters).
+ */
+struct motor_control_params {
 	float32_t Id_setpoint_A;
 	float32_t Iq_setpoint_A;
+};
+
+/**
+ * @brief Main motor control parameters structure
+ *
+ * Contains all state needed for motor control including SMF state machine,
+ * control parameters (double-buffered), filters, observers, and telemetry.
+ */
+struct motor_parameters {
+	/* State machine */
+	struct smf_ctx smf;
+
+	/* Double-buffered control parameters (index-based for minimal overhead) */
+	struct motor_control_params ctrl_buf[2];     /* Two buffers */
+	volatile uint8_t ctrl_index;                 /* ISR reads ctrl_buf[ctrl_index], shell writes ctrl_buf[ctrl_index^1] */
+	volatile bool ctrl_swap_pending;             /* Set by shell, cleared by ISR */
+
+	/* PI controllers (stateful - NOT double buffered) */
+	struct pi_f32 pi_Id;
+	struct pi_f32 pi_Iq;
+	float32_t maxVsMag_pu;  /* Max voltage magnitude in per-unit */
+
+	/* Current sensing filters and offsets */
+	struct filter_fo_f32 filter_Ia;
+	struct filter_fo_f32 filter_Ib;
+	float32_t Ia_offset;
+	float32_t Ib_offset;
+
+	/* Rs estimation filters */
+	struct filter_fo_f32 filter_rs_est_V;
+	struct filter_fo_f32 filter_rs_est_I;
+
+	/* Current references (computed by control loop) */
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;
+
+	/* Voltage references (computed by PI controllers) */
 	float32_t Vd_ref_V;
 	float32_t Vq_ref_V;
-	float32_t maxVsMag_pu;
 	float32_t maxVsMag_V;
+
+	/* Applied voltages (after SVPWM limiting) */
 	float32_t Vd_V;
 	float32_t Vq_V;
+
+	/* Observers and estimators */
 	struct angle_observer_state observer;
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
+
+	/* Measured parameters (from calibration) */
 	float32_t RoverL_measured;
 	float32_t L_measured;
 	float32_t Rs_measured;
+
+	/* R/L estimation accumulators */
 	float32_t roverl_sum_Vd_Id;
 	float32_t roverl_sum_Vq_Id;
 	float32_t roverl_sum_Id2;
 	float32_t roverl_phase_deg;
+
+	/* Telemetry and diagnostics */
 	uint32_t state_counter;
 	uint32_t encoder_fault_counter;
+	uint32_t control_loop_count;
+	uint32_t adc_conversion_count;
+	uint32_t max_isr_cycles;
+	uint32_t total_isr_cycles;
+	uint32_t buffer_swap_count;
+	uint32_t overrun_count;
 	int error_code;
+
+	/* Live telemetry snapshot (updated in ISR) */
+	float32_t position_rad;
+	float32_t velocity_rad_s;
+	float32_t Id_A;
+	float32_t Iq_A;
+	float32_t Ia_A;
+	float32_t Ib_A;
+	float32_t Va_V;
+	float32_t Vb_V;
+	float32_t elec_angle_rad;
+	float32_t dc_bus_voltage_V;
 };
 
 /* M_PI is not guaranteed by C standard, define float version */
@@ -114,7 +176,7 @@ struct motor_parameters {
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
- * 
+ *
  * @param q31_value Q31 format ADC reading (-1.0 to +1.0 represented as int32)
  * @return Current in Amperes
  */
@@ -126,7 +188,7 @@ static inline float32_t adc_to_current(q31_t q31_value)
 
 /**
  * @brief Convert Q31 ADC value to bus voltage in Volts
- * 
+ *
  * @param q31_value Q31 format ADC reading (0.0 to +1.0 represented as int32)
  * @return Bus voltage in Volts
  */
@@ -138,14 +200,14 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 
 /**
  * @brief Initialize filters with devicetree parameters
- * 
+ *
  * @param params Motor parameters structure containing filters
  */
 void config_init_filters(struct motor_parameters *params);
 
 /**
  * @brief Initialize PI controllers with devicetree parameters
- * 
+ *
  * @param params Motor parameters structure containing PI controllers
  */
 void config_init_pi_controllers(struct motor_parameters *params);
