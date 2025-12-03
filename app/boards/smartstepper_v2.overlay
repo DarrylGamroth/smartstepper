@@ -12,7 +12,7 @@
 // 	control {
 
 // 		// ADC for current (A, B), bus voltage
-// 		adc-channels = <&adc1 0xc>, <&adc1 0x3>, <&adc1 0xa>;		
+// 		adc-channels = <&adc1 0xc>, <&adc1 0x3>, <&adc1 0xa>;
 
 // 		amp1 {
 // 			compatible = "ti,drv8328";
@@ -52,15 +52,14 @@
 		align-current-ma = <100>;
 		align-duration-ms = <100>;
 		brake-current-ma = <1000>;
-		max-vs-mpu = <570>;
+		max-modulation-index-mpu = <570>;  /* 0.57 = sqrt(3)/2/sqrt(2), max for SVPWM linear region */
 		roverl-est-current-ma = <200>;  /* 10-20% of rated (2A motor) */
 		roverl-est-freq-hz = <100>;     /* Increase if motor twitches */
 		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
 		roverl-est-duration-ms = <5000>; /* TI default: 5 seconds */
 		rs-est-current-ma = <200>;      /* Same as RoverL */
-		rs-est-rampup-ms = <1000>;      /* TI default: 1 second */
-		rs-est-coarse-ms = <2000>;      /* TI default: 2 seconds */
-		rs-est-fine-ms = <4000>;        /* TI default: 4 seconds */
+		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
+		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
 	};
 
 	vbus_sense: vbus_sense {
@@ -77,7 +76,7 @@
 		current-sense-resistor-uohms = <10000>;
 		current-sense-gain = <50>;
 		vref-mv = <3000>;
-	};	
+	};
 
 	motor_parameters: motor_parameters {
 		compatible = "rubus,motor-parameters";
@@ -125,12 +124,11 @@
 		status = "okay";
 	};
 
-
 	trig {
 		compatible = "rubus,app-gpio";
 		gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};	
+	};
 };
 
 // / {

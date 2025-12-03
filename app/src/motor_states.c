@@ -396,7 +396,7 @@ static void motor_state_rs_est_entry(void *obj)
 
 	LOG_INF("Rs EST: I_target=%.2fA, rampup=%.1fs, measurement=%.1fs",
 		(double)RS_EST_CURRENT_A,
-		(double)RS_EST_RAMPUP_S, (double)(RS_EST_COARSE_S + RS_EST_FINE_S));
+		(double)RS_EST_RAMPUP_S, (double)RS_EST_DURATION_S);
 }
 
 static enum smf_state_result motor_state_rs_est_run(void *obj)
@@ -405,7 +405,7 @@ static enum smf_state_result motor_state_rs_est_run(void *obj)
 
 	/* Calculate phase boundaries */
 	uint32_t rampup_samples = (uint32_t)(RS_EST_RAMPUP_S * CONTROL_LOOP_FREQUENCY_HZ);
-	uint32_t measurement_samples = (uint32_t)((RS_EST_COARSE_S + RS_EST_FINE_S) * CONTROL_LOOP_FREQUENCY_HZ);
+	uint32_t measurement_samples = (uint32_t)(RS_EST_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
 	uint32_t total_samples = rampup_samples + measurement_samples;
 
 	if (params->state_counter >= total_samples) {

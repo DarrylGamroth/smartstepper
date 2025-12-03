@@ -53,39 +53,44 @@
 // };
 
 / {
-	user_parameters {
+	user_parameters: user_parameters {
+		compatible = "rubus,user-parameters";
 		nominal_voltage-mv = <24000>;
-		pwm-frequency-hz = <PWM_KHZ(20)>;
-		control-loop-frequency-hz = <10000>;
-		offset-pole-hz = <30000>;
-		align-current-ma = <500>;
-		align-duration-ms = <1000>;
+		pwm-frequency-hz = <20000>;
+		control-loop-frequency-hz = <20000>;
+		current-loop-bandwidth-hz = <150>;
+		offset-pole-hz = <300>;
+		align-current-ma = <100>;
+		align-duration-ms = <100>;
 		brake-current-ma = <1000>;
-		max-vs-mpu = <570>;
+		max-modulation-index-mpu = <570>;  /* 0.57 = sqrt(3)/2/sqrt(2), max for SVPWM linear region */
+		roverl-est-current-ma = <200>;  /* 10-20% of rated (2A motor) */
+		roverl-est-freq-hz = <100>;     /* Increase if motor twitches */
+		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
+		roverl-est-duration-ms = <5000>; /* TI default: 5 seconds */
+		rs-est-current-ma = <200>;      /* Same as RoverL */
+		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
+		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
 	};
 
-	vbus_sense {
+	vbus_sense: vbus_sense {
+		compatible = "rubus,vbus-sense";
 		channel = <0>;
-		full_scale_voltage-mv = <((191000 + 10000) / 10000 * 3000)>;
+		vref-mv = <3000>;
+		output-ohms = <10000>;
+		full-ohms = <(191000 + 10000)>;
 	};
 
-	current_sense1 {
-		channel = <1>;
+	current_sense: current_sense {
+		compatible = "rubus,current-sense";
+		channels = <1>, <2>;
 		current-sense-resistor-uohms = <10000>;
 		current-sense-gain = <50>;
-		full-scale-current-ma = <3000>;
-		offset-calibration-ma = <1500>;
+		vref-mv = <3000>;
 	};
 
-	current_sense2 {
-		channel = <2>;
-		current-sense-resistor-uohms = <10000>;
-		current-sense-gain = <50>;
-		full-scale-current-ma = <3000>;
-		offset-calibration-ma = <1500>;
-	};	
-
-	motor_parameters {
+	motor_parameters: motor_parameters {
+		compatible = "rubus,motor-parameters";
 		inductance-d-uh = <3400>;
 		inductance-q-uh = <3400>;
 		resistance-mohms = <5600>;
@@ -94,7 +99,20 @@
 		max-current-ma = <3000>;
 		inertia-mgcm2 = <9000>;
 		max-speed-hz = <400>;
-		max-current-ma = <670>;
+	};
+
+	angle_observer: angle_observer {
+		compatible = "rubus,angle-observer";
+		/* Observer bandwidth in Hz (position tracking) */
+		bandwidth-hz = <200>;
+	};
+
+	fault_detection: fault_detection {
+		compatible = "rubus,fault-detection";
+		/* Consecutive encoder read failures before triggering fault */
+		encoder-fault-threshold = <100>;
+		/* Overcurrent threshold in milliamps (typically 120% of max) */
+		overcurrent-threshold-ma = <3600>;  /* 120% of 3A max current */
 	};
 };
 
@@ -115,7 +133,13 @@
 		compatible = "rubus,app-gpio";
 		gpios = <&gpioe 1 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};	
+	};
+
+	trig {
+		compatible = "rubus,app-gpio";
+		gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 };
 
 // / {

@@ -127,15 +127,14 @@ struct motor_parameters {
 #define ALIGN_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, align_current_ma) / 1000.0f)
 #define ALIGN_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, align_duration_ms) / 1000.0f)
 #define BRAKE_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, brake_current_ma) / 1000.0f)
-#define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_vs_mpu) / 1000.0f)
+#define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) / 1000.0f)
 #define ROVERL_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma) / 1000.0f)
 #define ROVERL_EST_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_freq_hz))
 #define ROVERL_EST_SETTLING_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms) / 1000.0f)
 #define ROVERL_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms) / 1000.0f)
 #define RS_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_current_ma) / 1000.0f)
 #define RS_EST_RAMPUP_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms) / 1000.0f)
-#define RS_EST_COARSE_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_coarse_ms) / 1000.0f)
-#define RS_EST_FINE_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_fine_ms) / 1000.0f)
+#define RS_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms) / 1000.0f)
 #define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
 
 #define VBUS_SENSE_NODE DT_PATH(vbus_sense)

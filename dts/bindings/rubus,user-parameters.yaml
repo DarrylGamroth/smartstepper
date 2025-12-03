@@ -46,10 +46,10 @@ properties:
     required: true
     description: Braking current in milliamps
 
-  max-vs-mpu:
+  max-modulation-index-mpu:
     type: int
     required: true
-    description: Maximum voltage magnitude in milli-per-unit (1000 = 1.0 pu)
+    description: Maximum modulation index in milli-per-unit (570 mpu = 0.57, typical max for SVPWM)
 
   roverl-est-current-ma:
     type: int
@@ -81,12 +81,7 @@ properties:
     required: true
     description: Rs estimation ramp-up time in milliseconds (default 1000 ms)
 
-  rs-est-coarse-ms:
+  rs-est-duration-ms:
     type: int
     required: true
-    description: Rs estimation coarse measurement time in milliseconds (default 2000 ms)
-
-  rs-est-fine-ms:
-    type: int
-    required: true
-    description: Rs estimation fine measurement time in milliseconds (default 4000 ms)
+    description: Rs estimation measurement duration in milliseconds (default 6000 ms)
