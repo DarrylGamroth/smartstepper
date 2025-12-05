@@ -312,7 +312,8 @@ zephyr_udc0: &usbotg_fs {
 
 	pwm1:mcpwm {
 		compatible = "st,stm32-mcpwm";
-		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch1n_pe8 &tim1_ch2_pa9 &tim1_ch2n_pb0 &tim1_bkin_pe15>;
+		// pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch1n_pe8 &tim1_ch2_pa9 &tim1_ch2n_pb0 &tim1_bkin_pe15>;
+		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch2_pa9 &tim1_bkin_pe15>;
 		pinctrl-names = "default";
 		st,break-enable;
 		st,break-polarity = "low";
@@ -327,7 +328,8 @@ zephyr_udc0: &usbotg_fs {
 
 	pwm8:mcpwm {
 		compatible = "st,stm32-mcpwm";
-		pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch1n_ph13 &tim8_ch2_pc7 &tim8_ch2n_ph14 &tim8_bkin_pi4>;
+		// pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch1n_ph13 &tim8_ch2_pc7 &tim8_ch2n_ph14 &tim8_bkin_pi4>;
+		pinctrl-0 = <&tim8_ch1_pc6 &tim8_ch2_pc7 &tim8_bkin_pi4>;
 		pinctrl-names = "default";
 		st,break-enable;
 		st,break-polarity = "low";

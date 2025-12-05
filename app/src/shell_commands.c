@@ -173,6 +173,21 @@ static int cmd_motor_state_stop(const struct shell *sh, size_t argc, char **argv
 	return 0;
 }
 
+/* motor state calibrate */
+static int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (motor_api_request_calibrate() == 0) {
+		shell_print(sh, "Calibration sequence started");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to start calibration");
+		return -EIO;
+	}
+}
+
 /* motor state status */
 static int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 {
@@ -437,6 +452,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(start, NULL, "Start motor", cmd_motor_state_start),
 	SHELL_CMD(stop, NULL, "Stop motor", cmd_motor_state_stop),
+	SHELL_CMD(calibrate, NULL, "Run calibration sequence", cmd_motor_state_calibrate),
 	SHELL_CMD(status, NULL, "Show motor status", cmd_motor_state_status),
 	SHELL_SUBCMD_SET_END
 );

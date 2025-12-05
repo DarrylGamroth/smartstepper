@@ -9,6 +9,7 @@
 
 #include <zephyr/kernel.h>
 #include <stdint.h>
+#include "config.h"
 
 /* Forward declaration */
 struct motor_parameters;
@@ -23,26 +24,8 @@ struct motor_parameters;
  * serialized through the state machine thread to avoid race conditions.
  */
 
-/* Motor control event types */
-enum motor_event_type {
-	MOTOR_EVENT_START_REQUEST,       /* Request to start motor */
-	MOTOR_EVENT_STOP_REQUEST,        /* Request to stop motor */
-	MOTOR_EVENT_CALIBRATE_REQUEST,   /* Request calibration sequence */
-	MOTOR_EVENT_PARAM_UPDATE,        /* Update control parameter */
-	MOTOR_EVENT_CLEAR_ERROR,         /* Clear error condition */
-	MOTOR_EVENT_EMERGENCY_STOP,      /* Emergency stop (immediate) */
-};
-
-/* Motor control event message */
-struct motor_event {
-	enum motor_event_type type;
-	union {
-		struct {
-			uint16_t param_offset;   /* Offset into motor_control_params */
-			float value;
-		} param_update;
-	};
-};
+/* Motor event queue - exposed for main loop access */
+extern struct k_msgq motor_event_queue;
 
 /**
  * @brief Initialize motor control API
@@ -179,6 +162,17 @@ int motor_api_clear_error(void);
 int motor_api_emergency_stop(void);
 
 /**
+ * @brief Post error event from ISR (non-blocking)
+ * 
+ * Posts emergency stop event with specific error code to the message queue.
+ * Safe to call from ISR context. Non-blocking.
+ * 
+ * @param error_code Error code to post (from motor_error enum)
+ * @return 0 on success, negative errno if queue is full
+ */
+int motor_api_post_error(uint32_t error_code);
+
+/**
  * @brief Get current motor state (thread-safe read-only)
  * 
  * Reads current state machine state. This is safe because it's a read-only
@@ -189,9 +183,12 @@ int motor_api_emergency_stop(void);
 int motor_api_get_state(void);
 
 /**
- * @brief Get current error code (thread-safe read-only)
+ * @brief Get last error code (thread-safe read-only)
  * 
- * @return Current error code, or 0 if no error
+ * Returns the error code that caused the last transition to ERROR state.
+ * Only updated when entering ERROR state, not on every error event.
+ * 
+ * @return Last error code, or ERROR_NONE if no error has occurred
  */
 int motor_api_get_error(void);
 
@@ -236,9 +233,10 @@ int motor_api_peek_event(struct motor_event *evt);
  * 
  * Writes the parameter value to the shadow buffer and signals the ISR
  * to swap buffers. Only valid when current event is MOTOR_EVENT_PARAM_UPDATE.
- * Must be called before motor_api_consume_event().
+ * 
+ * @param params Pointer to motor_parameters containing the current event
  */
-void motor_api_apply_param_update(void);
+void motor_api_apply_param_update(struct motor_parameters *params);
 
 /**
  * @brief Consume current event

@@ -18,8 +18,8 @@
 
 #include "motor_states.h"
 #include "motor_isr.h"
-#include "motor_math.h"
 #include "motor_control_api.h"
+#include "motor_hardware.h"
 #include "config.h"
 #include "pi.h"
 #include "filter_fo.h"
@@ -28,20 +28,49 @@
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
+static struct motor_parameters motor_params;
+K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
+
+/* Timer callback for state timeouts - posts timeout event */
+static void state_timer_expiry(struct k_timer *timer)
+{
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_TIMEOUT,
+	};
+
+	/* Post timeout event to state machine queue */
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		LOG_ERR("Failed to post timeout event: queue full");
+	}
+}
+
+/* State machine thread stack and data */
+#define MOTOR_SM_THREAD_STACK_SIZE 4096
+#define MOTOR_SM_THREAD_PRIORITY 5
+
+K_THREAD_STACK_DEFINE(motor_sm_thread_stack, MOTOR_SM_THREAD_STACK_SIZE);
+
+static struct k_thread motor_sm_thread_data;
+static k_tid_t motor_sm_thread_tid;
+
 /* Forward declarations of state functions */
 static void motor_state_hw_init_entry(void *obj);
 static enum smf_state_result motor_state_hw_init_run(void *obj);
 static void motor_state_ctrl_init_entry(void *obj);
 static enum smf_state_result motor_state_ctrl_init_run(void *obj);
+static void motor_state_calibration_entry(void *obj);
+static enum smf_state_result motor_state_calibration_run(void *obj);
+static void motor_state_calibration_exit(void *obj);
 static void motor_state_offset_meas_entry(void *obj);
 static enum smf_state_result motor_state_offset_meas_run(void *obj);
 static void motor_state_offset_meas_exit(void *obj);
-static void motor_state_roverl_meas_entry(void *obj);
-static enum smf_state_result motor_state_roverl_meas_run(void *obj);
-static void motor_state_roverl_meas_exit(void *obj);
 static void motor_state_rs_est_entry(void *obj);
 static enum smf_state_result motor_state_rs_est_run(void *obj);
 static void motor_state_rs_est_exit(void *obj);
+static void motor_state_roverl_meas_entry(void *obj);
+static enum smf_state_result motor_state_roverl_meas_run(void *obj);
+static void motor_state_roverl_meas_exit(void *obj);
 static void motor_state_align_entry(void *obj);
 static enum smf_state_result motor_state_align_run(void *obj);
 static void motor_state_align_exit(void *obj);
@@ -62,15 +91,26 @@ const struct smf_state motor_states[] = {
 	[MOTOR_STATE_CTRL_INIT] = SMF_CREATE_STATE(motor_state_ctrl_init_entry,
 						    motor_state_ctrl_init_run,
 						    NULL, NULL, NULL),
+	[MOTOR_STATE_CALIBRATION] = SMF_CREATE_STATE(motor_state_calibration_entry,
+						      motor_state_calibration_run,
+						      motor_state_calibration_exit,
+						      NULL,
+						      &motor_states[MOTOR_STATE_OFFSET_MEAS]),
 	[MOTOR_STATE_OFFSET_MEAS] = SMF_CREATE_STATE(motor_state_offset_meas_entry,
-					       motor_state_offset_meas_run,
-					       motor_state_offset_meas_exit, NULL, NULL),
-	[MOTOR_STATE_ROVERL_MEAS] = SMF_CREATE_STATE(motor_state_roverl_meas_entry,
-					  motor_state_roverl_meas_run,
-					  motor_state_roverl_meas_exit, NULL, NULL),
+				       motor_state_offset_meas_run,
+				       motor_state_offset_meas_exit,
+				       &motor_states[MOTOR_STATE_CALIBRATION],
+				       NULL),
 	[MOTOR_STATE_RS_EST] = SMF_CREATE_STATE(motor_state_rs_est_entry,
-					  motor_state_rs_est_run,
-					  motor_state_rs_est_exit, NULL, NULL),
+				  motor_state_rs_est_run,
+				  motor_state_rs_est_exit,
+				  &motor_states[MOTOR_STATE_CALIBRATION],
+				  NULL),
+	[MOTOR_STATE_ROVERL_MEAS] = SMF_CREATE_STATE(motor_state_roverl_meas_entry,
+				  motor_state_roverl_meas_run,
+				  motor_state_roverl_meas_exit,
+				  &motor_states[MOTOR_STATE_CALIBRATION],
+				  NULL),
 	[MOTOR_STATE_ALIGN] = SMF_CREATE_STATE(motor_state_align_entry,
 					motor_state_align_run,
 					motor_state_align_exit, NULL, NULL),
@@ -93,16 +133,16 @@ int motor_states_get_current(const struct motor_parameters *params)
 	if (!params) {
 		return -1;
 	}
-	
+
 	const struct smf_state *current = params->smf.current;
-	
+
 	/* Find which state we're in by comparing pointers */
 	for (int i = 0; i <= MOTOR_STATE_ERROR; i++) {
 		if (current == &motor_states[i]) {
 			return i;
 		}
 	}
-	
+
 	return -1;  /* Unknown state */
 }
 
@@ -111,9 +151,10 @@ const char *motor_state_to_string(int state)
 	switch (state) {
 	case MOTOR_STATE_HW_INIT:      return "HW_INIT";
 	case MOTOR_STATE_CTRL_INIT:    return "CTRL_INIT";
+	case MOTOR_STATE_CALIBRATION:  return "CALIBRATION";
 	case MOTOR_STATE_OFFSET_MEAS:  return "OFFSET_MEAS";
-	case MOTOR_STATE_ROVERL_MEAS:  return "ROVERL_MEAS";
 	case MOTOR_STATE_RS_EST:       return "RS_EST";
+	case MOTOR_STATE_ROVERL_MEAS:  return "ROVERL_MEAS";
 	case MOTOR_STATE_ALIGN:        return "ALIGN";
 	case MOTOR_STATE_IDLE:         return "IDLE";
 	case MOTOR_STATE_OFFLINE:      return "OFFLINE";
@@ -143,6 +184,22 @@ static void motor_state_hw_init_entry(void *obj)
 
 	LOG_INF("Entering HW_INIT state");
 
+	/* Initialize hardware GPIO */
+	if (motor_hardware_init_gpio() < 0) {
+		LOG_ERR("Failed to initialize GPIO");
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		return;
+	}
+
+	/* Check device readiness */
+	if (motor_hardware_check_devices() < 0) {
+		LOG_ERR("Device readiness check failed");
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		return;
+	}
+
 	/* Initialize PWM channels */
 	mcpwm_configure(pwm1, 1, 0);
 	mcpwm_configure(pwm1, 2, 0);
@@ -163,8 +220,8 @@ static void motor_state_hw_init_entry(void *obj)
 	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, NULL);
 
 	/* Set up break interrupt handler for hardware fault protection */
-	mcpwm_set_break_callback(pwm1, break_interrupt_handler, params);
-	mcpwm_set_break_callback(pwm8, break_interrupt_handler, params);
+	mcpwm_set_break_callback(pwm1, pwm_break_callback, params);
+	mcpwm_set_break_callback(pwm8, pwm_break_callback, params);
 
 	/* Set up ADC callback */
 	adc_injected_set_callback(adc1, adc_callback, params);
@@ -195,6 +252,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	LOG_INF("Entering CTRL_INIT state");
 
+	config_print_parameters();
+
 	/* Initialize filters and PI controllers from devicetree parameters */
 	config_init_filters(params);
 	config_init_pi_controllers(params);
@@ -209,17 +268,40 @@ static void motor_state_ctrl_init_entry(void *obj)
 	traj_init(&params->traj_Id);
 	traj_set_min_value(&params->traj_Id, 0.0f);
 	traj_set_max_value(&params->traj_Id, MOTOR_MAX_CURRENT_A);
-	/* Max delta will be set by each state that uses it */
 }
 
 static enum smf_state_result motor_state_ctrl_init_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Transition to offset measurement */
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_OFFSET_MEAS]);
+	/* Transition to calibration parent state (will start with OFFSET_MEAS) */
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 
 	return SMF_EVENT_HANDLED;
+}
+
+/* State: CALIBRATION - Hierarchical parent state for all calibration sub-states */
+static void motor_state_calibration_entry(void *obj)
+{
+	LOG_INF("=== Starting Motor Calibration Sequence ===");
+}
+
+static enum smf_state_result motor_state_calibration_run(void *obj)
+{
+	/* Parent state run - events propagate to child states.
+	 * Initial transition to OFFSET_MEAS handled by SMF engine.
+	 */
+	return SMF_EVENT_PROPAGATE;
+}
+
+static void motor_state_calibration_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("=== Calibration Complete ===");
+	LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
+	LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
+	LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
 }
 
 /* State: OFFSET_MEAS - Measure current sensor offsets */
@@ -228,10 +310,12 @@ static void motor_state_offset_meas_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering OFFSET_MEAS state");
-	params->state_counter = 0;
 
 	filter_fo_set_initial_conditions(&params->filter_Ia, 0.0f, 0.0f);
 	filter_fo_set_initial_conditions(&params->filter_Ib, 0.0f, 0.0f);
+
+	/* Start timer for offset measurement duration (1 second) */
+	k_timer_start(&params->state_timer, K_SECONDS(1), K_NO_WAIT);
 }
 
 static void motor_state_offset_meas_exit(void *obj)
@@ -252,10 +336,16 @@ static enum smf_state_result motor_state_offset_meas_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Wait for sufficient samples to be collected (done in ADC callback) */
-	if (params->state_counter >= 1000) {
-		/* Transition to Rs measurement */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_TIMEOUT:
+		/* Offset measurement complete - transition to Rs estimation */
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_RS_EST]);
+		break;
+
+	default:
+		/* Ignore other events during calibration */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
@@ -288,8 +378,7 @@ static void motor_state_roverl_meas_entry(void *obj)
 	traj_set_max_delta(&params->traj_Id, roverl_ramp_rate);
 	params->Iq_ref_A = 0.0f;
 
-	/* Reset state counter, accumulators, and phase */
-	params->state_counter = 0;
+	/* Reset accumulators and phase */
 	params->roverl_accumulator_Vd_Id = 0.0f;
 	params->roverl_accumulator_Vq_Id = 0.0f;
 	params->roverl_accumulator_Id2 = 0.0f;
@@ -298,16 +387,18 @@ static void motor_state_roverl_meas_entry(void *obj)
 	LOG_INF("RoverL: %.0fHz excitation for %.1fs (I_amplitude=%.2fA)",
 		(double)ROVERL_EST_FREQ_HZ, (double)ROVERL_EST_DURATION_S,
 		(double)ROVERL_EST_CURRENT_A);
+
+	/* Start timer for total R/L estimation duration */
+	k_timer_start(&params->state_timer, K_MSEC((uint32_t)(ROVERL_EST_DURATION_S * 1000)), K_NO_WAIT);
 }
 
 static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Total measurement time from devicetree */
-	uint32_t total_samples = (uint32_t)(ROVERL_EST_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
-
-	if (params->state_counter >= total_samples) {
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_TIMEOUT:
 		/* Extract R and ωL from accumulated phase components
 		 *
 		 * From least-squares fit of V = R*I + jωL*I:
@@ -339,8 +430,13 @@ static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 		 * This will be done when PI controllers are reconfigured
 		 */
 
-		/* Transition to Rs estimation */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_RS_EST]);
+		/* Calibration sequence complete - exit to parent, which exits to IDLE */
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		break;
+
+	default:
+		/* Ignore other events during calibration */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
@@ -382,7 +478,6 @@ static void motor_state_rs_est_entry(void *obj)
 	params->Iq_ref_A = 0.0f;
 
 	/* Initialize filters for measurement */
-	params->state_counter = 0;
 	float32_t a1 = expf(-2.0f * PI_F32 * RS_EST_FILTER_BW_HZ / CONTROL_LOOP_FREQUENCY_HZ);
 	float32_t b0 = 1.0f - a1;
 	filter_fo_init(&params->filter_rs_est_V);
@@ -397,18 +492,19 @@ static void motor_state_rs_est_entry(void *obj)
 	LOG_INF("Rs EST: I_target=%.2fA, rampup=%.1fs, measurement=%.1fs",
 		(double)RS_EST_CURRENT_A,
 		(double)RS_EST_RAMPUP_S, (double)RS_EST_DURATION_S);
+
+	/* Start timer for total Rs estimation duration (rampup + measurement) */
+	float32_t total_duration_s = RS_EST_RAMPUP_S + RS_EST_DURATION_S;
+	k_timer_start(&params->state_timer, K_MSEC((uint32_t)(total_duration_s * 1000)), K_NO_WAIT);
 }
 
 static enum smf_state_result motor_state_rs_est_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Calculate phase boundaries */
-	uint32_t rampup_samples = (uint32_t)(RS_EST_RAMPUP_S * CONTROL_LOOP_FREQUENCY_HZ);
-	uint32_t measurement_samples = (uint32_t)(RS_EST_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
-	uint32_t total_samples = rampup_samples + measurement_samples;
-
-	if (params->state_counter >= total_samples) {
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_TIMEOUT:
 		/* Get final filtered values */
 		float32_t V_est = filter_fo_get_y1(&params->filter_rs_est_V);
 		float32_t I_est = filter_fo_get_y1(&params->filter_rs_est_I);
@@ -420,8 +516,13 @@ static enum smf_state_result motor_state_rs_est_run(void *obj)
 		/* Update stored Rs value */
 		params->Rs_measured_ohm = Rs_est;
 
-		/* Transition to alignment */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
+		/* Transition to R/L measurement (next calibration step) */
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
+		break;
+
+	default:
+		/* Ignore other events during calibration */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
@@ -452,20 +553,20 @@ static void motor_state_align_entry(void *obj)
 	traj_set_max_delta(&params->traj_Id, align_ramp_rate);
 	params->Iq_ref_A = 0.0f;
 
-	/* Reset alignment timer */
-	params->state_counter = 0;
-
 	LOG_INF("Applying alignment current: Id=%.3fA for %.1fs",
 		(double)ALIGN_CURRENT_A, (double)ALIGN_DURATION_S);
+
+	/* Start timer for alignment duration */
+	k_timer_start(&params->state_timer, K_MSEC((uint32_t)(ALIGN_DURATION_S * 1000)), K_NO_WAIT);
 }
 
 static enum smf_state_result motor_state_align_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Check if alignment duration has elapsed */
-	uint32_t align_samples = (uint32_t)(ALIGN_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
-	if (params->state_counter >= align_samples) {
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_TIMEOUT:
 		/* Get the current mechanical angle from the observer */
 		float32_t mech_angle_deg = angle_observer_get_mech_angle_deg(&params->observer);
 
@@ -481,6 +582,11 @@ static enum smf_state_result motor_state_align_run(void *obj)
 
 		/* Transition to IDLE */
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		break;
+
+	default:
+		/* Ignore other events during alignment */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
@@ -507,34 +613,27 @@ static void motor_state_idle_entry(void *obj)
 static enum smf_state_result motor_state_idle_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	struct motor_event evt;
 
-	/* Check for pending events */
-	if (motor_api_peek_event(&evt) == 0) {
-		switch (evt.type) {
-		case MOTOR_EVENT_START_REQUEST:
-			motor_api_consume_event();
-			LOG_INF("Start request received, transitioning to ONLINE");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
-			break;
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_START_REQUEST:
+		LOG_INF("Start request received, transitioning to ONLINE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		break;
 
-		case MOTOR_EVENT_CALIBRATE_REQUEST:
-			motor_api_consume_event();
-			LOG_INF("Calibrate request received, restarting calibration sequence");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_OFFSET_MEAS]);
-			break;
+	case MOTOR_EVENT_CALIBRATE_REQUEST:
+		LOG_INF("Calibrate request received, starting calibration sequence");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		break;
 
-		case MOTOR_EVENT_PARAM_UPDATE:
-			/* Explicitly apply parameter update to shadow buffer */
-			motor_api_apply_param_update();
-			motor_api_consume_event();
-			break;
+	case MOTOR_EVENT_PARAM_UPDATE:
+		/* Apply parameter update to shadow buffer */
+		motor_api_apply_param_update(params);
+		break;
 
-		default:
-			/* Ignore other events in IDLE state */
-			motor_api_consume_event();
-			break;
-		}
+	default:
+		/* Ignore other events in IDLE state */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
@@ -549,35 +648,27 @@ static void motor_state_offline_entry(void *obj)
 static enum smf_state_result motor_state_offline_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	struct motor_event evt;
 
-	/* Check for pending events */
-	if (motor_api_peek_event(&evt) == 0) {
-		switch (evt.type) {
-		case MOTOR_EVENT_STOP_REQUEST:
-			motor_api_consume_event();
-			LOG_INF("Stop request received, transitioning to IDLE");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-			return SMF_EVENT_HANDLED;
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_STOP_REQUEST:
+		LOG_INF("Stop request received, transitioning to IDLE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		break;
 
-		case MOTOR_EVENT_EMERGENCY_STOP:
-			motor_api_consume_event();
-			params->error_code = ERROR_EMERGENCY_STOP;
-			LOG_WRN("Emergency stop request, transitioning to ERROR");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
-			return SMF_EVENT_HANDLED;
+	case MOTOR_EVENT_ERROR:
+		LOG_WRN("Emergency stop event received, code: %d, transitioning to ERROR", params->event.error_code);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		break;
 
-		case MOTOR_EVENT_PARAM_UPDATE:
-			/* Explicitly apply parameter update to shadow buffer */
-			motor_api_apply_param_update();
-			motor_api_consume_event();
-			break;
+	case MOTOR_EVENT_PARAM_UPDATE:
+		/* Apply parameter update to shadow buffer */
+		motor_api_apply_param_update(params);
+		break;
 
-		default:
-			/* Ignore other events */
-			motor_api_consume_event();
-			break;
-		}
+	default:
+		/* Ignore other events */
+		break;
 	}
 
 	/* Setpoints are managed by ISR reading from ctrl_buf[ctrl_index]
@@ -596,35 +687,27 @@ static void motor_state_online_entry(void *obj)
 static enum smf_state_result motor_state_online_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	struct motor_event evt;
 
-	/* Check for pending events */
-	if (motor_api_peek_event(&evt) == 0) {
-		switch (evt.type) {
-		case MOTOR_EVENT_STOP_REQUEST:
-			motor_api_consume_event();
-			LOG_INF("Stop request received, transitioning to IDLE");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-			return SMF_EVENT_HANDLED;
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_STOP_REQUEST:
+		LOG_INF("Stop request received, transitioning to IDLE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		break;
 
-		case MOTOR_EVENT_EMERGENCY_STOP:
-			motor_api_consume_event();
-			params->error_code = ERROR_EMERGENCY_STOP;
-			LOG_WRN("Emergency stop request, transitioning to ERROR");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
-			return SMF_EVENT_HANDLED;
+	case MOTOR_EVENT_ERROR:
+		LOG_WRN("Emergency stop event received, code: %d, transitioning to ERROR", params->event.error_code);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		break;
 
-		case MOTOR_EVENT_PARAM_UPDATE:
-			/* Explicitly apply parameter update to shadow buffer */
-			motor_api_apply_param_update();
-			motor_api_consume_event();
-			break;
+	case MOTOR_EVENT_PARAM_UPDATE:
+		/* Apply parameter update to shadow buffer */
+		motor_api_apply_param_update(params);
+		break;
 
-		default:
-			/* Ignore other events */
-			motor_api_consume_event();
-			break;
-		}
+	default:
+		/* Ignore other events */
+		break;
 	}
 
 	/* Setpoints are managed by ISR reading from ctrl_buf[ctrl_index]
@@ -639,7 +722,10 @@ static void motor_state_error_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_ERR("Entering ERROR state, code: %d", params->error_code);
+	/* Store the error code that triggered this state */
+	params->last_error_code = params->event.error_code;
+
+	LOG_ERR("Entering ERROR state, code: %d", params->last_error_code);
 
 	/* Immediately disable PWM outputs to prevent damage
 	 * This prevents:
@@ -664,24 +750,85 @@ static void motor_state_error_entry(void *obj)
 static enum smf_state_result motor_state_error_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	struct motor_event evt;
 
-	/* Check for pending events */
-	if (motor_api_peek_event(&evt) == 0) {
-		switch (evt.type) {
-		case MOTOR_EVENT_CLEAR_ERROR:
-			motor_api_consume_event();
-			LOG_INF("Error cleared, transitioning to IDLE");
-			params->error_code = ERROR_NONE;
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-			break;
+	/* Process current event */
+	switch (params->event.type) {
+	case MOTOR_EVENT_CLEAR_ERROR:
+		LOG_INF("Error cleared, transitioning to IDLE");
+		params->last_error_code = ERROR_NONE;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		break;
 
-		default:
-			/* Ignore all other events in ERROR state */
-			motor_api_consume_event();
-			break;
-		}
+	default:
+		/* Ignore all other events in ERROR state */
+		break;
 	}
 
 	return SMF_EVENT_HANDLED;
+}
+
+/* State machine thread function */
+static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
+{
+	int rc;
+
+	/* Initialize motor control API first (zeros the struct, sets defaults) */
+	if (motor_control_api_init(&motor_params) < 0) {
+		LOG_ERR("Failed to initialize motor control API");
+		return;
+	}
+
+	/* Initialize state timer */
+	k_timer_init(&motor_params.state_timer, state_timer_expiry, NULL);
+
+	/* Initialize state machine */
+	smf_set_initial(SMF_CTX(&motor_params), &motor_states[MOTOR_STATE_HW_INIT]);
+
+	/* Event-driven state machine loop */
+	while (1) {
+		rc = k_msgq_get(&motor_event_queue, &motor_params.event, K_MSEC(10));
+
+		if (rc == 0) {
+			/* Run state machine with event */
+			rc = smf_run_state(SMF_CTX(&motor_params));
+
+			if (rc) {
+				/* State machine terminated */
+				LOG_ERR("State machine terminated with code %d", rc);
+				break;
+			}
+		} else if (rc == -EAGAIN) {
+			/* No event received within timeout - run state machine with no event */
+			struct motor_event evt = {
+				.type = MOTOR_EVENT_NONE,
+			};
+			motor_params.event = evt;
+			rc = smf_run_state(SMF_CTX(&motor_params));
+			if (rc) {
+				/* State machine terminated */
+				LOG_ERR("State machine terminated with code %d", rc);
+				break;
+			}
+		}
+	}
+}
+
+void motor_sm_thread_run(void)
+{
+	motor_sm_thread_tid = k_thread_create(
+		&motor_sm_thread_data,
+		motor_sm_thread_stack,
+		K_THREAD_STACK_SIZEOF(motor_sm_thread_stack),
+		motor_sm_thread,
+		NULL, NULL, NULL,
+		MOTOR_SM_THREAD_PRIORITY,
+		0,
+		K_NO_WAIT);
+
+	k_thread_name_set(motor_sm_thread_tid, "motor_sm");
+}
+
+struct motor_parameters *motor_sm_get_params(void)
+{
+	return &motor_params;
 }

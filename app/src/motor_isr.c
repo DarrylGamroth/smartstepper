@@ -19,15 +19,39 @@
 #include <drivers/adc_injected.h>
 #include <drivers/pwm/mcpwm_stm32.h>
 
+#include "motor_control_api.h"
 #include "motor_isr.h"
 #include "motor_states.h"
-#include "motor_math.h"
 #include "config.h"
 #include "pi.h"
 #include "filter_fo.h"
 #include "traj.h"
 #include "pwmgen.h"
 #include "angle_observer.h"
+
+/**
+ * @brief Convert Q31 ADC value to current in Amperes
+ *
+ * @param q31_value Q31 format ADC reading (-1.0 to +1.0 represented as int32)
+ * @return Current in Amperes
+ */
+static inline float32_t adc_to_current(q31_t q31_value)
+{
+	float32_t normalized = (float32_t)q31_value / (float32_t)(1U << 31);
+	return normalized * CURRENT_SENSE_FULL_SCALE_A;
+}
+
+/**
+ * @brief Convert Q31 ADC value to bus voltage in Volts
+ *
+ * @param q31_value Q31 format ADC reading (0.0 to +1.0 represented as int32)
+ * @return Bus voltage in Volts
+ */
+static inline float32_t adc_to_vbus_v(q31_t q31_value)
+{
+	float32_t normalized = (float32_t)q31_value / (float32_t)(1U << 31);
+	return normalized * VBUS_FULL_SCALE_V;
+}
 
 /* Include encoder-specific headers based on devicetree */
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -80,17 +104,12 @@ static inline int encoder_read(struct rtio *ctx, float32_t *angle)
 	return 0;
 }
 
-void break_interrupt_handler(const struct device *dev, void *user_data)
+void pwm_break_callback(const struct device *dev, void *user_data)
 {
-	struct motor_parameters *params = (struct motor_parameters *)user_data;
-
 	/* Hardware has already disabled PWM via break input
 	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault)
 	 */
-	params->error_code = ERROR_HARDWARE_BREAK;
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
-
-	LOG_ERR("Hardware break interrupt - PWM disabled by hardware");
+	motor_api_post_error(ERROR_HARDWARE_BREAK);
 }
 
 void adc_callback(const struct device *dev, const q31_t *values,
@@ -140,8 +159,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 		/* Fault detection: Too many consecutive encoder failures */
 		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-			params->error_code = ERROR_ENCODER_FAULT;
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+			motor_api_post_error(ERROR_ENCODER_FAULT);
 			goto isr_done;
 		}
 	} else {
@@ -158,8 +176,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Fault detection: Check for overvoltage */
 	if (Vbus_V > VBUS_MAX_V) {
-		params->error_code = ERROR_OVERVOLTAGE;
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		motor_api_post_error(ERROR_OVERVOLTAGE);
 		goto isr_done;
 	}
 
@@ -167,7 +184,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	if (params->smf.current == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
 		filter_fo_run(&params->filter_Ia, Ia_A);
 		filter_fo_run(&params->filter_Ib, Ib_A);
-		params->state_counter++;
 		goto isr_done;
 	}
 
@@ -177,15 +193,12 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Fault detection: Check for overcurrent after offset removal */
 	if (fabsf(Ia_A) > OVERCURRENT_THRESHOLD_A || fabsf(Ib_A) > OVERCURRENT_THRESHOLD_A) {
-		params->error_code = ERROR_OVERCURRENT;
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		motor_api_post_error(ERROR_OVERCURRENT);
 		goto isr_done;
 	}
 
 	/* R/L measurement: rotate current reference and accumulate V/I in rotating frame */
 	if (params->smf.current == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
-		params->state_counter++;
-
 		/* Ramp up current amplitude smoothly (TI method) */
 		traj_run(&params->traj_Id);
 		float32_t roverl_amplitude_A = traj_get_int_value(&params->traj_Id);
@@ -206,9 +219,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		params->Id_ref_A = roverl_amplitude_A * cos_roverl;
 		params->Iq_ref_A = roverl_amplitude_A * sin_roverl;
 
-		/* Wait for PI settling before accumulating measurements */
-		uint32_t settling_samples = (uint32_t)(ROVERL_EST_SETTLING_S * CONTROL_LOOP_FREQUENCY_HZ);
-		if (params->state_counter > settling_samples) {
+		/* Check if settling period complete using trajectory target */
+		if (traj_is_at_target(&params->traj_Id)) {
 			/* Transform to rotating frame aligned with excitation */
 			float32_t Id_meas, Iq_meas;
 			arm_park_f32(Ia_A, Ib_A, &Id_meas, &Iq_meas, sin_roverl, cos_roverl);
@@ -227,10 +239,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Rs EST: filter V/I in d-axis for DC resistance */
 	if (params->smf.current == &motor_states[MOTOR_STATE_RS_EST]) {
-		params->state_counter++;
-
-		uint32_t rampup_samples = (uint32_t)(RS_EST_RAMPUP_S * CONTROL_LOOP_FREQUENCY_HZ);
-
 		/* Transform to stationary dq (0°) for measurement */
 		float32_t Id_meas, Iq_meas;
 		arm_park_f32(Ia_A, Ib_A, &Id_meas, &Iq_meas, 0.0f, 1.0f);
@@ -239,8 +247,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		traj_run(&params->traj_Id);
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
 
-		/* After rampup: filter voltage and current measurements */
-		if (params->state_counter >= rampup_samples) {
+		/* After rampup complete: filter voltage and current measurements */
+		if (traj_is_at_target(&params->traj_Id)) {
 			filter_fo_run(&params->filter_rs_est_V, params->Vd_V);
 			filter_fo_run(&params->filter_rs_est_I, Id_meas);
 		}
@@ -248,8 +256,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* ALIGN: ramp alignment current smoothly */
 	if (params->smf.current == &motor_states[MOTOR_STATE_ALIGN]) {
-		params->state_counter++;
-
 		/* Run trajectory for smooth current ramp */
 		traj_run(&params->traj_Id);
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -336,8 +342,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	 * Winding A: pwm1 ch1 and ch2 drive the two sides of H-bridge A
 	 * Winding B: pwm8 ch1 and ch2 drive the two sides of H-bridge B
 	 */
-	mcpwm_stm32_set_duty_cycle_2phase(pwm1, Da_high_pu, Da_low_pu);
-	mcpwm_stm32_set_duty_cycle_2phase(pwm8, Db_high_pu, Db_low_pu);
+	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1, Da_high_pu, Da_low_pu);
+	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, Db_high_pu, Db_low_pu);
 
 isr_done:
 	/* Measure ISR execution time */

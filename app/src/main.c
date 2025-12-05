@@ -30,52 +30,16 @@ const struct device *const adc1 = DEVICE_DT_GET(DT_NODELABEL(adc1));
 
 int main(void)
 {
-	/* Motor parameters structure - initialized by motor_control_api_init() */
-	static struct motor_parameters motor_params;
+	/* Get motor parameters pointer from state machine */
+	struct motor_parameters *params = motor_sm_get_params();
 
-	/* Print configuration parameters */
-	config_print_parameters();
+	/* Set shell access to motor parameters */
+	shell_set_motor_params(params);
 
-	/* Initialize motor control API and shell access to motor parameters */
-	if (motor_control_api_init(&motor_params) < 0) {
-		LOG_ERR("Failed to initialize motor control API");
-		return 0;
-	}
-	shell_set_motor_params(&motor_params);
+	/* Create and start state machine thread */
+	motor_sm_thread_run();
 
-	/* Initialize hardware */
-	if (motor_hardware_init_gpio() < 0) {
-		LOG_ERR("Failed to initialize GPIO");
-		return 0;
-	}
-
-	if (motor_hardware_check_devices() < 0) {
-		LOG_ERR("Device readiness check failed");
-		return 0;
-	}
-
-	/* Initialize state machine */
-	smf_set_initial(SMF_CTX(&motor_params), &motor_states[MOTOR_STATE_HW_INIT]);
-
-	/* Main control loop */
-	while (1) {
-		/* Check for pending events from API (Shell, MODBUS, CAN, etc.)
-		 * Events are peeked (not consumed) so state machine can examine them.
-		 * State run() functions should call motor_api_consume_event() after handling.
-		 */
-		struct motor_event evt;
-		if (motor_api_peek_event(&evt) == 0) {
-			LOG_DBG("Event pending: type=%d", evt.type);
-		}
-
-		/* Run state machine (states will check for and handle events) */
-		if (smf_run_state(SMF_CTX(&motor_params)) < 0) {
-			LOG_ERR("State machine error");
-			break;
-		}
-
-		k_sleep(K_MSEC(100));
-	}
+	LOG_INF("Motor state machine thread started");
 
 	return 0;
 }

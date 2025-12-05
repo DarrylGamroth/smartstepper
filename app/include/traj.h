@@ -86,6 +86,17 @@ static inline float32_t traj_get_target_value(const struct traj_f32 *traj)
 }
 
 /**
+ * @brief Check if trajectory has reached its target
+ *
+ * @param traj Trajectory instance
+ * @return true if intermediate value equals target value, false otherwise
+ */
+static inline bool traj_is_at_target(const struct traj_f32 *traj)
+{
+	return traj->int_value == traj->target_value;
+}
+
+/**
  * @brief Initialize the trajectory generator
  *
  * @param traj Trajectory instance to initialize

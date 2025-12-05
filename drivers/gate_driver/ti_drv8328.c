@@ -337,11 +337,6 @@ static int drv8328_set_inlx_state(const struct device *dev, bool state)
     return 0;
 }
 
-static int drv8328_force_inlx_high(const struct device *dev)
-{
-    return drv8328_set_inlx_state(dev, true);
-}
-
 static int drv8328_register_fault_callback(const struct device *dev, 
                                           drv8328_fault_cb_t callback, 
                                           void *user_data)

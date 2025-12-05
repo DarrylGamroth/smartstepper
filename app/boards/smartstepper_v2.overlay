@@ -53,11 +53,11 @@
 		align-duration-ms = <100>;
 		brake-current-ma = <1000>;
 		max-modulation-index-mpu = <570>;  /* 0.57 = sqrt(3)/2/sqrt(2), max for SVPWM linear region */
-		roverl-est-current-ma = <200>;  /* 10-20% of rated (2A motor) */
+		roverl-est-current-ma = <67>;   /* 10-20% of rated (0.67A motor) */
 		roverl-est-freq-hz = <100>;     /* Increase if motor twitches */
 		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
-		roverl-est-duration-ms = <5000>; /* TI default: 5 seconds */
-		rs-est-current-ma = <200>;      /* Same as RoverL */
+		roverl-est-duration-ms = <5000>;
+		rs-est-current-ma = <67>;       /* Same as RoverL */
 		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
 		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
 	};

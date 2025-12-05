@@ -14,6 +14,7 @@
 #include "angle_observer.h"
 #include "rs_online.h"
 #include "traj.h"
+#include "motor_events.h"
 
 /**
  * @brief Double-buffered motor control parameters
@@ -39,6 +40,8 @@ struct motor_control_params {
 struct motor_parameters {
 	/* State machine */
 	struct smf_ctx smf;
+	struct motor_event event;  /* Current event being processed */
+	struct k_timer state_timer;  /* Timer for state timeouts */
 
 	/* Double-buffered control parameters (index-based for minimal overhead) */
 	struct motor_control_params ctrl_buf[2];     /* Two buffers */
@@ -98,7 +101,9 @@ struct motor_parameters {
 	uint32_t total_isr_cycles;
 	uint32_t buffer_swap_count;
 	uint32_t overrun_count;
-	int error_code;
+
+	/* Error tracking */
+	uint32_t last_error_code;  /* Last error that caused ERROR state entry */
 
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
@@ -172,30 +177,6 @@ struct motor_parameters {
 #define FAULT_DETECT_NODE DT_PATH(fault_detection)
 #define ENCODER_FAULT_THRESHOLD DT_PROP(FAULT_DETECT_NODE, encoder_fault_threshold)
 #define OVERCURRENT_THRESHOLD_A ((float32_t)DT_PROP(FAULT_DETECT_NODE, overcurrent_threshold_ma) / 1000.0f)
-
-/**
- * @brief Convert Q31 ADC value to current in Amperes
- *
- * @param q31_value Q31 format ADC reading (-1.0 to +1.0 represented as int32)
- * @return Current in Amperes
- */
-static inline float32_t adc_to_current(q31_t q31_value)
-{
-	float32_t normalized = (float32_t)q31_value / (float32_t)(1U << 31);
-	return normalized * CURRENT_SENSE_FULL_SCALE_A;
-}
-
-/**
- * @brief Convert Q31 ADC value to bus voltage in Volts
- *
- * @param q31_value Q31 format ADC reading (0.0 to +1.0 represented as int32)
- * @return Bus voltage in Volts
- */
-static inline float32_t adc_to_vbus_v(q31_t q31_value)
-{
-	float32_t normalized = (float32_t)q31_value / (float32_t)(1U << 31);
-	return normalized * VBUS_FULL_SCALE_V;
-}
 
 /**
  * @brief Initialize filters with devicetree parameters

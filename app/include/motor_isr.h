@@ -64,7 +64,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
  * @param dev PWM device that triggered the break
  * @param user_data Pointer to motor_parameters struct
  */
-void break_interrupt_handler(const struct device *dev, void *user_data);
+void pwm_break_callback(const struct device *dev, void *user_data);
 
 /**
  * @brief Encoder timer compare callback - triggers encoder read

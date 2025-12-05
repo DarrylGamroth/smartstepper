@@ -63,7 +63,6 @@
 		pinctrl-names = "default";
 		period = <PWM_KHZ(20)>;
 		status = "okay";
-		st,cc-dma-channels = <4>;
 		#pwm-cells = <2>;
 	};
 };

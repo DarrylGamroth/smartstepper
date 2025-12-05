@@ -74,14 +74,6 @@ int drv8328_set_gate_drivers(const struct device *dev, bool enable);
 int drv8328_set_inlx_state(const struct device *dev, bool state);
 
 /**
- * @brief Force INLx pins high (convenience function)
- * 
- * @param dev DRV8328 device instance
- * @return 0 on success, negative errno on failure
- */
-int drv8328_force_inlx_high(const struct device *dev);
-
-/**
  * @brief Register user fault callback
  * 
  * Registers a callback function that will be called when a fault interrupt

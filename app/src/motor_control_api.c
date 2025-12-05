@@ -12,12 +12,6 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(motor_api, CONFIG_APP_LOG_LEVEL);
 
-/* Message queue for motor control events
- * Size: 16 messages (enough for burst commands from protocols)
- * Alignment: 4 bytes (default)
- */
-K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
-
 /* Global motor parameters pointer (set during init) */
 static struct motor_parameters *g_motor_params = NULL;
 
@@ -58,8 +52,6 @@ int motor_control_api_init(struct motor_parameters *params)
 
 	g_motor_params = params;
 	
-	/* Message queue is statically defined, just verify it's ready */
-	LOG_INF("Motor control API initialized (queue depth: %d)", 16);
 	return 0;
 }
 
@@ -231,18 +223,35 @@ int motor_api_clear_error(void)
 int motor_api_emergency_stop(void)
 {
 	struct motor_event evt = {
-		.type = MOTOR_EVENT_EMERGENCY_STOP,
+		.type = MOTOR_EVENT_ERROR,
+		.error_code = ERROR_EMERGENCY_STOP,
 	};
 	
 	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = k_msgq_put_front(&motor_event_queue, &evt);
 	if (ret != 0) {
-		LOG_ERR("Failed to post emergency stop: queue full");
+		LOG_ERR("Failed to post error event: queue full");
 		return -ENOMEM;
 	}
 	
-	LOG_WRN("Emergency stop posted");
-	return 0;
+	return ret;
+}
+
+int motor_api_post_error(uint32_t error_code)
+{
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_ERROR,
+		.error_code = error_code,
+	};
+	
+	/* Non-blocking post to queue */
+	int ret = k_msgq_put_front(&motor_event_queue, &evt);
+	if (ret != 0) {
+		LOG_ERR("Failed to post error event: queue full");
+		return -ENOMEM;
+	}
+	
+	return ret;
 }
 
 int motor_api_get_state(void)
@@ -258,11 +267,11 @@ int motor_api_get_state(void)
 int motor_api_get_error(void)
 {
 	if (!g_motor_params) {
-		return 0;
+		return ERROR_NONE;
 	}
 	
-	/* Safe read-only access: error_code is written by ISR, read by protocols */
-	return g_motor_params->error_code;
+	/* Read-only access to last error that caused ERROR state entry */
+	return g_motor_params->last_error_code;
 }
 
 void motor_api_get_telemetry(float *id_meas, float *iq_meas, 
@@ -313,32 +322,32 @@ int motor_api_peek_event(struct motor_event *evt)
 	return -ENOMSG;
 }
 
-void motor_api_apply_param_update(void)
+void motor_api_apply_param_update(struct motor_parameters *params)
 {
-	if (!event_cached || cached_event.type != MOTOR_EVENT_PARAM_UPDATE) {
-		LOG_WRN("No parameter update event to apply");
+	if (!params) {
+		LOG_ERR("NULL motor_parameters pointer");
 		return;
 	}
 
-	if (!g_motor_params) {
-		LOG_ERR("Motor parameters not initialized");
+	if (params->event.type != MOTOR_EVENT_PARAM_UPDATE) {
+		LOG_WRN("Current event is not a parameter update");
 		return;
 	}
 
 	/* Write to shadow buffer (write index = ctrl_index XOR 1) */
-	uint8_t write_idx = g_motor_params->ctrl_index ^ 1;
-	uint8_t *shadow_base = (uint8_t *)&g_motor_params->ctrl_buf[write_idx];
+	uint8_t write_idx = params->ctrl_index ^ 1;
+	uint8_t *shadow_base = (uint8_t *)&params->ctrl_buf[write_idx];
 
 	/* Direct offset write */
-	*(float *)(shadow_base + cached_event.param_update.param_offset) = 
-		cached_event.param_update.value;
+	*(float *)(shadow_base + params->event.param_update.param_offset) = 
+		params->event.param_update.value;
 
 	/* Signal ISR to swap buffers on next control cycle */
-	g_motor_params->ctrl_swap_pending = true;
+	params->ctrl_swap_pending = true;
 
 	LOG_DBG("Parameter updated: offset=%u, value=%.6f", 
-	        cached_event.param_update.param_offset, 
-	        (double)cached_event.param_update.value);
+	        params->event.param_update.param_offset, 
+	        (double)params->event.param_update.value);
 }
 
 void motor_api_consume_event(void)
