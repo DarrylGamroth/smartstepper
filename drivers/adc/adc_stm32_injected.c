@@ -92,8 +92,8 @@ LOG_MODULE_REGISTER(adc_stm32_injected);
 	(DT_INST_FOREACH_STATUS_OKAY_VARGS(IS_EQ_PROP_OR, st_adc_has_differential_support, 0, 1) 0)
 
 #define ANY_NUM_COMMON_SAMPLING_TIME_CHANNELS_IS(value)                                            \
-	(DT_INST_FOREACH_STATUS_OKAY_VARGS(IS_EQ_PROP_OR,                                          \
-					   num_sampling_time_common_channels, 0, value) 0)
+	(DT_INST_FOREACH_STATUS_OKAY_VARGS(IS_EQ_PROP_OR, num_sampling_time_common_channels, 0,    \
+					   value) 0)
 
 #define ANY_CHILD_NODE_IS_DIFFERENTIAL(inst)                                                       \
 	(DT_INST_FOREACH_CHILD_VARGS(inst, IS_EQ_NODE_PROP_OR, zephyr_differential, 0, 1) 0)
@@ -111,23 +111,31 @@ LOG_MODULE_REGISTER(adc_stm32_injected);
 #define STM32_NB_SAMPLING_TIME 8
 
 /* Max number of injected channels  */
-#define STM32_NB_INJECTED_CHANNELS	4
+#define STM32_NB_INJECTED_CHANNELS 4
+
+/* This macro, coupled with listify, creates an array containing values LL_ADC_INJ_RANK_x,
+ * where x ranges from 1 to STM32_NB_INJECTED_CHANNELS
+ */
+#define INJ_RANK(i, _) CONCAT(LL_ADC_INJ_RANK_, UTIL_INC(i))
+static const uint32_t table_inj_rank[] = {LISTIFY(STM32_NB_INJECTED_CHANNELS, INJ_RANK, (,)) };
+
+/* This macro, coupled with listify, creates an array containing values
+ * LL_ADC_INJ_SEQ_SCAN_ENABLE_x_RANKS, where x ranges from 2 to STM32_NB_INJECTED_CHANNELS
+ */
+#define INJ_SEQ_LEN(i, _) CONCAT(LL_ADC_INJ_SEQ_SCAN_ENABLE_, UTIL_INC(UTIL_INC(i)), RANKS)
+/* Length of this array signifies the maximum sequence length */
+static const uint32_t table_inj_seq_len[] = {
+	LL_ADC_INJ_SEQ_SCAN_DISABLE,
+	LISTIFY(UTIL_DEC(STM32_NB_INJECTED_CHANNELS), INJ_SEQ_LEN, (,)) };
 
 struct adc_stm32_data {
 	const struct device *dev;
-	uint8_t resolution;
-
-	/* Injected-specific fields */
 	adc_injected_callback_t callback;
 	void *user_data;
-
-	/* Error callback (optional) */
 	adc_injected_error_callback_t error_callback;
 	void *error_user_data;
-
-	volatile q31_t inj_values[STM32_NB_INJECTED_CHANNELS]; /* Converted Q31 values */
-
-	/* Acquisition time tracking for common sampling time channels */
+	q31_t inj_values[STM32_NB_INJECTED_CHANNELS];
+	uint8_t resolution;
 	int8_t acq_time_index[2];
 };
 
@@ -149,23 +157,19 @@ struct adc_stm32_cfg {
 	bool has_channel_preselection: 1;
 	bool has_differential_support: 1;
 	bool differential_channels_used: 1;
-	/* Injected-specific config fields (before flexible array) */
-	uint8_t num_channels;          /* Number of injected channels (1-4) */
-	uint32_t channel_ranks[STM32_NB_INJECTED_CHANNELS];     /* LL_ADC_INJ_RANK_1..4 for each channel */
-	uint32_t channel_ids[STM32_NB_INJECTED_CHANNELS];       /* ADC channel numbers (0-19) */
-	uint32_t channel_acq_times[STM32_NB_INJECTED_CHANNELS]; /* Acquisition time for each channel */
-	bool channel_differential[STM32_NB_INJECTED_CHANNELS];  /* Differential mode flags */
-	uint32_t trigger_source;       /* LL_ADC_INJ_TRIG_xxx constant */
-	uint32_t trigger_edge;         /* LL_ADC_INJ_TRIG_EXT_xxx constant */
+	uint8_t num_channels;
+	uint32_t channel_ids[STM32_NB_INJECTED_CHANNELS];
+	uint32_t channel_acq_times[STM32_NB_INJECTED_CHANNELS];
+	bool channel_differential[STM32_NB_INJECTED_CHANNELS];
+	uint32_t trigger_source;
+	uint32_t trigger_edge;
 	int8_t res_table_size;
 	const uint32_t res_table[];
 };
 
-/* Forward declarations for injected configuration functions */
 static int adc_stm32_configure_injected_channels(const struct device *dev);
 static int adc_stm32_configure_injected_trigger(const struct device *dev);
-static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id,
-					 uint16_t acq_time);
+static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id, uint16_t acq_time);
 
 /*
  * Enable ADC peripheral, and wait until ready if required by SOC.
@@ -212,47 +216,63 @@ static int adc_stm32_enable(ADC_TypeDef *adc)
 	return 0;
 }
 
-/*
- * Disable ADC peripheral, and wait until it is disabled
+/* If force is true, this function will disable ADC peripheral (forcefully stopping on-going
+ * conversions, if any), and wait until it is disabled before returning 0.
+ * If force is false and there is no on-going conversion, the ADC will be disabled, and the
+ * function will wait until it is disabled before returning 0.
+ * If force is false but there is an on-going conversion, then the ADC won't be disabled, and the
+ * function returns -EBUSY.
  */
-static void adc_stm32_disable(ADC_TypeDef *adc)
+static int adc_stm32_disable(ADC_TypeDef *adc, bool force)
 {
-	if (LL_ADC_IsEnabled(adc) != 1UL) {
-		return;
-	}
+	int err = 0;
 
-	/* Stop ongoing conversion if any
-	 * Software must poll ADSTART (or JADSTART) until the bit is reset before assuming
-	 * the ADC is completely stopped.
-	 */
+	if (LL_ADC_IsEnabled(adc) != 1UL) {
+		return 0;
+	}
 
 #if !defined(STM32F1XX_ADC) && !defined(STM32F4XX_ADC)
 	if (LL_ADC_REG_IsConversionOngoing(adc)) {
-		LL_ADC_REG_StopConversion(adc);
-		while (LL_ADC_REG_IsConversionOngoing(adc)) {
+		if (force) {
+			LL_ADC_REG_StopConversion(adc);
+			while (LL_ADC_REG_IsConversionOngoing(adc)) {
+			}
+		} else {
+			err = -EBUSY;
 		}
+	}
+#else
+	if ((stm32_reg_read(&adc->SR) & LL_ADC_FLAG_STRT) == LL_ADC_FLAG_STRT && !force) {
+		err = -EBUSY;
 	}
 #endif
 
-#if !defined(CONFIG_SOC_SERIES_STM32C0X) && !defined(CONFIG_SOC_SERIES_STM32F0X) &&                \
-	!defined(STM32F1XX_ADC) && !defined(STM32F4XX_ADC) &&                                      \
-	!defined(CONFIG_SOC_SERIES_STM32G0X) && !defined(CONFIG_SOC_SERIES_STM32L0X) &&            \
-	!defined(CONFIG_SOC_SERIES_STM32U0X) && !defined(CONFIG_SOC_SERIES_STM32WBAX) &&           \
-	!defined(CONFIG_SOC_SERIES_STM32WLX)
+#if !defined(STM32F1XX_ADC) && !defined(STM32F4XX_ADC)
 	if (LL_ADC_INJ_IsConversionOngoing(adc)) {
-		LL_ADC_INJ_StopConversion(adc);
-		while (LL_ADC_INJ_IsConversionOngoing(adc)) {
+		if (force) {
+			LL_ADC_INJ_StopConversion(adc);
+			while (LL_ADC_INJ_IsConversionOngoing(adc)) {
+			}
+		} else {
+			err = -EBUSY;
 		}
+	}
+#else
+	if ((stm32_reg_read(&adc->SR) & LL_ADC_FLAG_JSTRT) == LL_ADC_FLAG_JSTRT && !force) {
+		err = -EBUSY;
 	}
 #endif
 
-	LL_ADC_Disable(adc);
-
-	/* Wait ADC is fully disabled so that we don't leave the driver into intermediate state
-	 * which could prevent enabling the peripheral
-	 */
-	while (LL_ADC_IsEnabled(adc) == 1UL) {
+	if (err == 0) {
+		LL_ADC_Disable(adc);
+		/* Wait ADC is fully disabled so that we don't leave the driver into intermediate
+		 * state which could prevent enabling the peripheral
+		 */
+		while (LL_ADC_IsEnabled(adc) == 1UL) {
+		}
 	}
+
+	return err;
 }
 
 #if !defined(STM32F4XX_ADC)
@@ -370,7 +390,7 @@ static void adc_stm32_calibration_start(const struct device *dev, bool single_en
 			stm32_reg_modify_bits(&adc->CALFACT2, 0xFFFFFF00UL, 0x03021100UL);
 			__DMB();
 			stm32_reg_set_bits(&adc->CALFACT, ADC_CALFACT_LATCH_COEF);
-			adc_stm32_disable(adc);
+			adc_stm32_disable(adc, true);
 		}
 	}
 	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET);
@@ -397,14 +417,17 @@ static void adc_stm32_calibration_start(const struct device *dev, bool single_en
 	}
 }
 
-static int adc_stm32_calibrate(const struct device *dev)
+static int adc_stm32_calibrate(const struct device *dev, bool force)
 {
 	const struct adc_stm32_cfg *config = (const struct adc_stm32_cfg *)dev->config;
 	ADC_TypeDef *adc = config->base;
 	int err;
 
 #if !defined(STM32F1XX_ADC) && !defined(CONFIG_SOC_SERIES_STM32N6X)
-	adc_stm32_disable(adc);
+	err = adc_stm32_disable(adc, force);
+	if (err < 0) {
+		return err;
+	}
 	adc_stm32_calibration_start(dev, true);
 	if (config->differential_channels_used) {
 		adc_stm32_calibration_start(dev, false);
@@ -479,6 +502,7 @@ static int set_resolution(const struct device *dev, uint8_t resolution)
 	uint8_t res_shift = 0;
 	uint8_t res_mask = 0;
 	uint8_t res_reg_val = 0;
+	int err = 0;
 	int i;
 
 	for (i = 0; i < config->res_table_size; i++) {
@@ -514,12 +538,14 @@ static int set_resolution(const struct device *dev, uint8_t resolution)
 			 * Writing ADC_CFGR1 register while ADEN bit is set
 			 * resets RES[1:0] bitfield. We need to disable and enable adc.
 			 */
-			adc_stm32_disable(adc);
-			set_reg_value(dev, res_reg_addr, res_shift, res_mask, res_reg_val);
+			err = adc_stm32_disable(adc, false);
+			if (err == 0) {
+				set_reg_value(dev, res_reg_addr, res_shift, res_mask, res_reg_val);
+			}
 		}
 	}
 
-	return 0;
+	return err;
 }
 
 #if defined(CONFIG_SOC_SERIES_STM32C0X) || defined(CONFIG_SOC_SERIES_STM32G0X) ||                  \
@@ -790,8 +816,7 @@ static int adc_stm32_init(const struct device *dev)
 	}
 
 #if defined(HAS_CALIBRATION)
-	adc_stm32_calibrate(dev);
-	LL_ADC_REG_SetTriggerSource(adc, LL_ADC_REG_TRIG_SOFTWARE);
+	adc_stm32_calibrate(dev, false);
 #endif /* HAS_CALIBRATION */
 
 	/* Set resolution from config table (use first/default resolution) */
@@ -812,8 +837,11 @@ static int adc_stm32_init(const struct device *dev)
 		data->resolution = 12;
 	}
 
-	/* Configure injected channels if available */
+	/* Configure injected channels if available (must be done BEFORE enabling ADC) */
 	if (config->num_channels > 0) {
+		/* Ensure ADC is disabled for configuration (required for differential mode) */
+		adc_stm32_disable(adc, false);
+
 		/* Configure injected channels */
 		err = adc_stm32_configure_injected_channels(dev);
 		if (err < 0) {
@@ -825,6 +853,13 @@ static int adc_stm32_init(const struct device *dev)
 		err = adc_stm32_configure_injected_trigger(dev);
 		if (err < 0) {
 			LOG_ERR("Failed to configure injected trigger: %d", err);
+			return err;
+		}
+
+		/* Re-enable ADC after configuration */
+		err = adc_stm32_enable(adc);
+		if (err < 0) {
+			LOG_ERR("Failed to enable ADC after injected config: %d", err);
 			return err;
 		}
 	}
@@ -841,7 +876,7 @@ static int adc_stm32_suspend_setup(const struct device *dev)
 	int err;
 
 	/* Disable ADC */
-	adc_stm32_disable(adc);
+	adc_stm32_disable(adc, true);
 
 #if ANY_ADC_INTERNAL_REGULATOR_TYPE_IS(INTERNAL_REGULATOR_STARTUP_SW_DELAY) ||                     \
 	ANY_ADC_INTERNAL_REGULATOR_TYPE_IS(INTERNAL_REGULATOR_STARTUP_HW_STATUS)
@@ -975,6 +1010,8 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 	ADC_TypeDef *adc = config->base;
 	int err;
 
+	LL_ADC_INJ_SetSequencerLength(adc, table_inj_seq_len[config->num_channels - 1]);
+
 	/* Configure each injected channel */
 	for (uint8_t i = 0; i < config->num_channels; i++) {
 		uint32_t channel = __LL_ADC_DECIMAL_NB_TO_CHANNEL(config->channel_ids[i]);
@@ -999,11 +1036,8 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 #endif
 
 		/* Set the channel to the appropriate rank in injected sequence */
-		LL_ADC_INJ_SetSequencerRanks(adc, config->channel_ranks[i], channel);
+		LL_ADC_INJ_SetSequencerRanks(adc, table_inj_rank[i], channel);
 	}
-
-	/* Configure injected sequence length */
-	LL_ADC_INJ_SetSequencerLength(adc, config->num_channels - 1);
 
 	return 0;
 }
@@ -1035,8 +1069,7 @@ static int adc_stm32_configure_injected_trigger(const struct device *dev)
  */
 static int adc_stm32_sampling_time_check(const struct device *dev, uint16_t acq_time)
 {
-	const struct adc_stm32_cfg *config =
-		(const struct adc_stm32_cfg *)dev->config;
+	const struct adc_stm32_cfg *config = (const struct adc_stm32_cfg *)dev->config;
 
 	if (acq_time == ADC_ACQ_TIME_DEFAULT) {
 		return 0;
@@ -1052,8 +1085,7 @@ static int adc_stm32_sampling_time_check(const struct device *dev, uint16_t acq_
 	}
 
 	for (int i = 0; i < STM32_NB_SAMPLING_TIME; i++) {
-		if (acq_time == ADC_ACQ_TIME(ADC_ACQ_TIME_TICKS,
-					     config->sampling_time_table[i])) {
+		if (acq_time == ADC_ACQ_TIME(ADC_ACQ_TIME_TICKS, config->sampling_time_table[i])) {
 			return i;
 		}
 	}
@@ -1062,11 +1094,9 @@ static int adc_stm32_sampling_time_check(const struct device *dev, uint16_t acq_
 	return -EINVAL;
 }
 
-static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id,
-					 uint16_t acq_time)
+static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id, uint16_t acq_time)
 {
-	const struct adc_stm32_cfg *config =
-		(const struct adc_stm32_cfg *)dev->config;
+	const struct adc_stm32_cfg *config = (const struct adc_stm32_cfg *)dev->config;
 	ADC_TypeDef *adc = config->base;
 	__maybe_unused struct adc_stm32_data *data = dev->data;
 
@@ -1086,8 +1116,7 @@ static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id,
 	switch (config->num_sampling_time_common_channels) {
 	case 0:
 #if ANY_NUM_COMMON_SAMPLING_TIME_CHANNELS_IS(0)
-		LL_ADC_SetChannelSamplingTime(adc,
-					      __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
+		LL_ADC_SetChannelSamplingTime(adc, __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
 					      (uint32_t)acq_time_index);
 #endif
 		break;
@@ -1097,11 +1126,10 @@ static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id,
 		 * The first one we find is used, all others must match.
 		 */
 		if ((data->acq_time_index[0] == -1) ||
-			(acq_time_index == data->acq_time_index[0])) {
+		    (acq_time_index == data->acq_time_index[0])) {
 			/* Reg is empty or value matches */
 			data->acq_time_index[0] = acq_time_index;
-			LL_ADC_SetSamplingTimeCommonChannels(adc,
-							     (uint32_t)acq_time_index);
+			LL_ADC_SetSamplingTimeCommonChannels(adc, (uint32_t)acq_time_index);
 		} else {
 			/* Reg is used and value does not match */
 			LOG_ERR("Multiple sampling times not supported");
@@ -1115,24 +1143,20 @@ static int adc_stm32_sampling_time_setup(const struct device *dev, uint8_t id,
 		 * The first two we find are used, all others must match either one.
 		 */
 		if ((data->acq_time_index[0] == -1) ||
-			(acq_time_index == data->acq_time_index[0])) {
+		    (acq_time_index == data->acq_time_index[0])) {
 			/* 1st reg is empty or value matches 1st reg */
 			data->acq_time_index[0] = acq_time_index;
-			LL_ADC_SetChannelSamplingTime(adc,
-						      __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
+			LL_ADC_SetChannelSamplingTime(adc, __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
 						      LL_ADC_SAMPLINGTIME_COMMON_1);
-			LL_ADC_SetSamplingTimeCommonChannels(adc,
-							     LL_ADC_SAMPLINGTIME_COMMON_1,
+			LL_ADC_SetSamplingTimeCommonChannels(adc, LL_ADC_SAMPLINGTIME_COMMON_1,
 							     (uint32_t)acq_time_index);
 		} else if ((data->acq_time_index[1] == -1) ||
-			(acq_time_index == data->acq_time_index[1])) {
+			   (acq_time_index == data->acq_time_index[1])) {
 			/* 2nd reg is empty or value matches 2nd reg */
 			data->acq_time_index[1] = acq_time_index;
-			LL_ADC_SetChannelSamplingTime(adc,
-						      __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
+			LL_ADC_SetChannelSamplingTime(adc, __LL_ADC_DECIMAL_NB_TO_CHANNEL(id),
 						      LL_ADC_SAMPLINGTIME_COMMON_2);
-			LL_ADC_SetSamplingTimeCommonChannels(adc,
-							     LL_ADC_SAMPLINGTIME_COMMON_2,
+			LL_ADC_SetSamplingTimeCommonChannels(adc, LL_ADC_SAMPLINGTIME_COMMON_2,
 							     (uint32_t)acq_time_index);
 		} else {
 			/* Both regs are used, value does not match any of them */
@@ -1254,8 +1278,6 @@ static DEVICE_API(adc_injected, api_stm32_driver_api) = {
  * Macro for generating code for the common ISRs (by looping of all
  * ADC instances that share the same IRQn as that of the given device
  * by index) and the function for setting up the ISR.
- *
- * For injected ADC, we use zero-latency ISR_DIRECT for motor control.
  */
 
 /* Helper macro for H7 overrun check - conditionally included */
@@ -1290,18 +1312,12 @@ static DEVICE_API(adc_injected, api_stm32_driver_api) = {
                                                                                                    \
 		/* Check JEOS flag */                                                              \
 		if (LL_ADC_IsActiveFlag_JEOS(adc)) {                                               \
-			uint32_t num_channels = LL_ADC_INJ_GetSequencerLength(adc) + 1;            \
-                                                                                                   \
-			/* Injected rank constants for reading in order */                         \
-			static const uint32_t ranks[STM32_NB_INJECTED_CHANNELS] = {                \
-				LL_ADC_INJ_RANK_1, LL_ADC_INJ_RANK_2,                              \
-				LL_ADC_INJ_RANK_3, LL_ADC_INJ_RANK_4                               \
-			};                                                                         \
+			uint32_t num_channels = config->num_channels;                              \
                                                                                                    \
 			/* Read all injected conversions in rank order and convert to Q31 */       \
 			for (uint32_t i = 0; i < num_channels; i++) {                              \
-				uint32_t raw_value = LL_ADC_INJ_ReadConversionData32(              \
-					adc, ranks[i]);                                            \
+				uint32_t raw_value =                                               \
+					LL_ADC_INJ_ReadConversionData32(adc, table_inj_rank[i]);   \
                                                                                                    \
 				/* Convert to Q31 (single-ended: 0 to +full_scale) */              \
 				data->inj_values[i] =                                              \
@@ -1380,13 +1396,6 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
  * Each channel child node has: reg (channel number), zephyr,acquisition-time, etc.
  */
 
-/* Helper to get injected rank for channel index (0-3 -> LL_ADC_INJ_RANK_1..4) */
-#define ADC_INJ_RANK_FOR_INDEX(i)                                                                  \
-	((i) == 0   ? LL_ADC_INJ_RANK_1                                                            \
-	 : (i) == 1 ? LL_ADC_INJ_RANK_2                                                            \
-	 : (i) == 2 ? LL_ADC_INJ_RANK_3                                                            \
-		    : LL_ADC_INJ_RANK_4)
-
 /* Count child channel nodes - for injected ADC, we expect 1-4 channels */
 #define ADC_INJ_NUM_CHANNELS(inst) DT_INST_CHILD_NUM_STATUS_OKAY(inst)
 
@@ -1411,9 +1420,6 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 #define ADC_INJ_INIT_CHANNEL_ACQ(child) ADC_INJ_CHANNEL_ACQ_TIME(child)
 
 #define ADC_INJ_INIT_CHANNEL_DIFF(child) ADC_INJ_CHANNEL_IS_DIFF(child)
-
-/* Rank is just the index (1-based for STM32) */
-#define ADC_INJ_INIT_CHANNEL_RANK(child) ADC_INJ_RANK_FOR_INDEX(DT_NODE_CHILD_IDX(child))
 
 /* Build the injected config structure if we have trigger source defined */
 #define ADC_INJ_HAS_CONFIG(inst) DT_INST_NODE_HAS_PROP(inst, st_adc_trigger_source)
@@ -1455,10 +1461,6 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 		    .channel_ids = {					\
 			DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\
 				ADC_INJ_INIT_CHANNEL_ID, (,))		\
-		    },							\
-		    .channel_ranks = {					\
-			DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\
-				ADC_INJ_INIT_CHANNEL_RANK, (,))		\
 		    },							\
 		    .channel_acq_times = {				\
 			DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\

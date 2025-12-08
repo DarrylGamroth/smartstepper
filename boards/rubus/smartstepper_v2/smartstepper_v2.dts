@@ -40,6 +40,8 @@
 		encoder0 = &mt6835;
 		die-temp0 = &die_temp;
 		volt-sensor0 = &vref;
+		gate-driver-a = &drv8328_a;
+		gate-driver-b = &drv8328_b;		
 	};
 
 	vbus {
@@ -49,18 +51,34 @@
 		full-ohms = <(191000 + 10000)>;
 	};
 
-	i_a_sense {
-		compatible = "current-sense-amplifier";
-		io-channels = <&adc1 15>;
-		sense-resistor-milli-ohms = <10>;
-		sense-gain-mult = <50>;
+	drv8328_a: drv8328_a {
+		compatible = "ti,drv8328";
+		status = "okay";
+		
+		mode = "3x";
+		
+		pwms = <&pwm1 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
+		       <&pwm1 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
+		
+		inl-gpios = <&gpioe 8 GPIO_ACTIVE_HIGH>,
+		            <&gpiob 0 GPIO_ACTIVE_HIGH>;
+		
+		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
 	};
-
-	i_b_sense {
-		compatible = "current-sense-amplifier";
-		io-channels = <&adc1 12>;
-		sense-resistor-milli-ohms = <10>;
-		sense-gain-mult = <50>;
+	
+	drv8328_b: drv8328_b {
+		compatible = "ti,drv8328";
+		status = "okay";
+		
+		mode = "3x";
+		
+		pwms = <&pwm8 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
+		       <&pwm8 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
+		
+		inl-gpios = <&gpioh 13 GPIO_ACTIVE_HIGH>,
+		            <&gpioh 14 GPIO_ACTIVE_HIGH>;
+		
+		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
 	};
 };
 
@@ -313,20 +331,17 @@ zephyr_udc0: &usbotg_fs {
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		/* 128KB for bootloader */
 		boot_partition: partition@0 {
 			label = "mcuboot";
 			reg = <0x00000000 DT_SIZE_K(128)>;
 			read-only;
 		};
 
-		/* application image slot: 256KB */
 		slot0_partition: partition@20000 {
 			label = "image-0";
 			reg = <0x00020000 DT_SIZE_K(256)>;
 		};
 
-		/* backup slot: 256KB */
 		slot1_partition: partition@60000 {
 			label = "image-1";
 			reg = <0x00060000 DT_SIZE_K(256)>;
@@ -393,23 +408,28 @@ zephyr_udc0: &usbotg_fs {
 	st,adc-prescaler = <4>;
 	status = "okay";
 
+    // clocks = <&rcc STM32_CLOCK(AHB1, 5)>,
+    //          <&rcc STM32_SRC_PLL2_P ADC_SEL(2)>;
+    // clock-names = "adcx", "adc_ker";
+    // st,adc-clock-source = "ASYNC";	
+
 	vref-mv = <3000>;
 
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	/* I_SENSE_B */
-	channel@c {
-		reg = <12>;
+	/* I_SENSE_A */
+	channel@f {
+		reg = <15>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <12>;
 	};
 
-	/* I_SENSE_A */
-	channel@f {
-		reg = <15>;
+	/* I_SENSE_B */
+	channel@c {
+		reg = <12>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
@@ -441,7 +461,7 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <16>;
+		zephyr,resolution = <12>;
 	};
 };
 

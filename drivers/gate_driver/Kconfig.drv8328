@@ -1,0 +1,11 @@
+# Gate Drivers
+
+# Copyright (c) 2025 Rubus Technologies Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config GATE_DRIVER_TI_DRV8328
+	bool "TI DRV8328 Gate Driver"
+	default y
+	depends on DT_HAS_TI_DRV8328_ENABLED
+	help
+	  Enable driver for TI DRV8328 gate driver.

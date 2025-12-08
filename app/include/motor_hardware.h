@@ -9,6 +9,15 @@
 
 #include <zephyr/device.h>
 
+/* Hardware device handles */
+extern const struct device *const pwm1;
+extern const struct device *const pwm8;
+extern const struct device *const pwm3;
+extern const struct device *const encoder1;
+extern const struct device *const adc1;
+extern const struct device *const gate_driver_a;
+extern const struct device *const gate_driver_b;
+
 /**
  * @brief Initialize GPIO pins for motor control
  * 

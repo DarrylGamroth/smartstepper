@@ -19,6 +19,7 @@
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,ccm = &ccm0;
+		// zephyr,dtcm = &ccm0;
 		zephyr,canbus = &can1;
 		zephyr,code-partition = &slot0_partition;
 		zephyr,settings-partition = &settings_partition;
@@ -35,10 +36,12 @@
 
 	aliases {
 		watchdog0 = &iwdg;
-		sw0 = &user_button;	
+		sw0 = &user_button;
 		encoder0 = &mt6835;
 		die-temp0 = &die_temp;
 		volt-sensor0 = &vref;
+		gate-driver-a = &drv8328_a;
+		gate-driver-b = &drv8328_b;		
 	};
 
 	vbus {
@@ -46,6 +49,36 @@
 		io-channels = <&adc3 10>;
 		output-ohms = <10000>;
 		full-ohms = <(191000 + 10000)>;
+	};
+
+	drv8328_a: drv8328_a {
+		compatible = "ti,drv8328";
+		status = "okay";
+		
+		mode = "3x";
+		
+		pwms = <&pwm1 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
+		       <&pwm1 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
+		
+		inl-gpios = <&gpioe 8 GPIO_ACTIVE_HIGH>,
+		            <&gpiob 0 GPIO_ACTIVE_HIGH>;
+		
+		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
+	};
+	
+	drv8328_b: drv8328_b {
+		compatible = "ti,drv8328";
+		status = "okay";
+		
+		mode = "3x";
+		
+		pwms = <&pwm8 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
+		       <&pwm8 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
+		
+		inl-gpios = <&gpioh 13 GPIO_ACTIVE_HIGH>,
+		            <&gpioh 14 GPIO_ACTIVE_HIGH>;
+		
+		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
 	};
 };
 
@@ -96,7 +129,7 @@
 };
 
 &rtc {
-	clocks = <&rcc STM32_CLOCK_BUS_APB1 0x10000000>,
+	clocks = <&rcc STM32_CLOCK(APB1, 28)>,
 		 <&rcc STM32_SRC_LSI RTC_SEL(2)>;
 	status = "okay";
 };
@@ -351,10 +384,10 @@ zephyr_udc0: &usbotg_fs {
 
 /* Enable pull-ups on BKIN pins */
 &pinctrl {
-    tim1_bkin_pe15: tim1_bkin_pe15 {
+    /omit-if-no-ref/ tim1_bkin_pe15: tim1_bkin_pe15 {
         bias-pull-up;
     };
-	tim8_bkin_pi4: tim8_bkin_pi4 {
+	/omit-if-no-ref/ tim8_bkin_pi4: tim8_bkin_pi4 {
 		bias-pull-up;
 	};
 };
@@ -371,7 +404,7 @@ zephyr_udc0: &usbotg_fs {
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	/* I_SENSE_B */
+	/* I_SENSE_A */
 	channel@3 {
 		reg = <3>;
 		zephyr,gain = "ADC_GAIN_1";
@@ -380,7 +413,7 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,resolution = <12>;
 	};
 
-	/* I_SENSE_A */
+	/* I_SENSE_B */
 	channel@c {
 		reg = <12>;
 		zephyr,gain = "ADC_GAIN_1";

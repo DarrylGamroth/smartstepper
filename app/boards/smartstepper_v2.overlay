@@ -5,42 +5,6 @@
 
 #include <zephyr/dt-bindings/dma/stm32_dma.h>
 
-// / {
-// 		/* Current sampler config, ADC channels */
-// 	/* FIXME: Add drv8328 driver */
-// 	/* drv8328 needs function to wiggle SLEEP to reset an error */
-// 	control {
-
-// 		// ADC for current (A, B), bus voltage
-// 		adc-channels = <&adc1 0xc>, <&adc1 0x3>, <&adc1 0xa>;
-
-// 		amp1 {
-// 			compatible = "ti,drv8328";
-
-// 			/* If FAULT interrupt is used instead of BRKIN */
-// 			/* Fault interrupt should turn off PWM */
-// 			// fault-gpios = <&gpioi 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-
-// 			sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
-
-// 			pwms = <&pwm1 1 PWM_POLARITY_NORMAL>,
-// 				   <&pwm1 2 PWM_POLARITY_NORMAL>;
-// 		};
-
-// 		amp2 {
-// 			compatible = "ti,drv8328";
-
-// 			/* If FAULT interrupt is used instead of BRKIN */
-// 			// fault-gpios = <&gpiob 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-
-// 			sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
-
-// 			pwms = <&pwm8 1 PWM_POLARITY_NORMAL>,
-// 				   <&pwm8 2 PWM_POLARITY_NORMAL>;
-// 		};
-// 	};
-// };
-
 / {
 	user_parameters: user_parameters {
 		compatible = "rubus,user-parameters";
@@ -85,7 +49,7 @@
 		resistance-mohms = <5600>;
 		flux_linkage_mvphz = <15000>;
 		pole-pairs = <50>;
-		max-current-ma = <3000>;
+		max-current-ma = <670>;
 		inertia-mgcm2 = <9000>;
 		max-speed-hz = <400>;
 	};
@@ -101,7 +65,7 @@
 		/* Consecutive encoder read failures before triggering fault */
 		encoder-fault-threshold = <100>;
 		/* Overcurrent threshold in milliamps (typically 120% of max) */
-		overcurrent-threshold-ma = <3600>;  /* 120% of 3A max current */
+		overcurrent-threshold-ma = <800>;  /* 120% of 0.67A max current */
 	};
 };
 
@@ -240,4 +204,5 @@
 	compatible = "st,stm32-adc-injected";
 	status = "okay";
 	st,adc-trigger-source = "tim1_cc4";
+	st,adc-trigger-edge = "rising";
 };

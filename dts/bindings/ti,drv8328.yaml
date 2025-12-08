@@ -2,38 +2,59 @@
 # SPDX-License-Identifier: Apache-2.0
 
 description: |
-  Bindings for the TI DRV8328 gate driver.
-
-include: base.yaml
+  TI DRV8328 3-phase gate driver
+  
+  Supports 1-3 phase operation in two modes:
+  - 3x mode: 3 half-bridges using GPIO for INL control
+  - 6x mode: 6 independent switches using complementary PWM for INL control
 
 compatible: "ti,drv8328"
 
+include: base.yaml
+
 properties:
-  sleep-gpios:
-    description: |
-        GPIO pin used to put the DRV8328B into sleep mode.
-    type: phandle-array
-
-  fault-gpios:
-    description: |
-        GPIO pin used to indicate a fault condition. Should be configured 
-        as an interrupt input to detect fault events immediately.
-    type: phandle-array
-
-  drvoff-gpios:
-    description: |
-        GPIO pin used to turn off the gate drivers on the DRV8328C and DRV8328D.
-    type: phandle-array
-
-  inlx-gpios:
-    description: |
-        GPIO pins connected to INLx inputs for forcing them high when 
-        controlling via INHx PWM signals. Optional for advanced control schemes.
-    type: phandle-array
-
   pwms:
-    description: |
-        PWM signal used to control INHx inputs for motor control.
-        This property is required for the DRV8328B to function correctly.
     type: phandle-array
     required: true
+    description: |
+      MCPWM channels for INHx (high-side control) signals.
+      One PWM channel per half-bridge (1-3 channels supported).
+      Number of entries determines the channel count.
+      Format: <&mcpwm_device channel flags>
+
+  inl-gpios:
+    type: phandle-array
+    description: |
+      GPIO pins for INLx (low-side enable) signals.
+      One GPIO per half-bridge. Only used in 3x mode.
+      These will be set high when channel is enabled, low when disabled.
+
+  mode:
+    type: string
+    required: true
+    enum:
+      - "3x"
+      - "6x"
+    description: |
+      Operating mode:
+      - "3x": 3 half-bridges with GPIO control for INL (independent timers allowed)
+      - "6x": 6 independent switches with complementary PWM for INL (requires single timer)
+
+  sleep-gpios:
+    type: phandle-array
+    description: |
+      nSLEEP control pin (active high).
+      When low, device enters sleep mode.
+      Used for fault reset via low pulse.
+
+  fault-gpios:
+    type: phandle-array
+    description: |
+      nFAULT status pin (active low).
+      Triggers interrupt on fault conditions.
+
+  drvoff-gpios:
+    type: phandle-array
+    description: |
+      DRVOFF gate driver disable pin (active high, DRV8328C/D variants only).
+      When high, disables all gate drivers independent of PWM state.

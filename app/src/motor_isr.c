@@ -18,6 +18,7 @@
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
 #include <drivers/pwm/mcpwm_stm32.h>
+#include <drivers/gate_driver/ti_drv8328.h>
 
 #include "motor_control_api.h"
 #include "motor_isr.h"
@@ -109,6 +110,14 @@ void pwm_break_callback(const struct device *dev, void *user_data)
 	/* Hardware has already disabled PWM via break input
 	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault)
 	 */
+	
+	if (dev == pwm1) {
+		drv8328_disable_all_channels(gate_driver_a);
+	} else if (dev == pwm8) {
+		drv8328_disable_all_channels(gate_driver_b);
+	}
+	
+	/* Post error after driver handles disable all channels */
 	motor_api_post_error(ERROR_HARDWARE_BREAK);
 }
 
@@ -148,9 +157,14 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Id_ref_A, Iq_ref_A;
 
 	q31_t *adc_values[3];
-	adc_values[0] = (q31_t *)&values[0]; /* I_b */
-	adc_values[1] = (q31_t *)&values[1]; /* I_a */
+	adc_values[0] = (q31_t *)&values[0]; /* I_a */
+	adc_values[1] = (q31_t *)&values[1]; /* I_b */
 	adc_values[2] = (q31_t *)&values[2]; /* V_bus */
+
+	/* Safety: Don't run control if in ERROR state (PWM should be disabled) */
+	if (params->smf.current == &motor_states[MOTOR_STATE_ERROR]) {
+		goto isr_done;
+	}	
 
 	/* Read encoder and update observer */
 	if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
@@ -169,8 +183,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		params->encoder_fault_counter = 0;
 	}
 
-	Ia_A = adc_to_current(values[1]);
-	Ib_A = adc_to_current(values[0]);
+	Ia_A = adc_to_current(values[0]);
+	Ib_A = adc_to_current(values[1]);
 	Vbus_V = adc_to_vbus_v(values[2]);
 	Vbus_inv = 1.0f / Vbus_V;
 
@@ -264,11 +278,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	/* Run PI controllers for all states (measurement and control) */
 	Id_ref_A = params->Id_ref_A;
 	Iq_ref_A = params->Iq_ref_A;
-
-	/* Safety: Don't run control if in ERROR state (PWM should be disabled) */
-	if (params->smf.current == &motor_states[MOTOR_STATE_ERROR]) {
-		goto isr_done;
-	}
 
 	/* Get current electrical angle for Park transform */
 	float32_t elec_angle_deg = angle_observer_get_elec_angle_deg(&params->observer);

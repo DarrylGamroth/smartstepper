@@ -14,6 +14,7 @@
 #include <zephyr/timing/timing.h>
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
+#include <drivers/gate_driver/ti_drv8328.h>
 #include <dt-bindings/pwm/stm32-mcpwm.h>
 
 #include "motor_states.h"
@@ -177,6 +178,13 @@ const char *motor_error_to_string(int error)
 	}
 }
 
+void test_callback(const struct device *dev, uint32_t channel,
+                       void *user_data)
+{
+	q31_t values[3] = {0};
+	(void)adc_callback(adc1, &values[0], 3, user_data);
+}
+
 /* State: HW_INIT - Initialize hardware */
 static void motor_state_hw_init_entry(void *obj)
 {
@@ -200,17 +208,20 @@ static void motor_state_hw_init_entry(void *obj)
 		return;
 	}
 
-	/* Initialize PWM channels */
-	mcpwm_configure(pwm1, 1, 0);
-	mcpwm_configure(pwm1, 2, 0);
-	mcpwm_configure(pwm1, 4, STM32_PWM_OC_MODE_PWM2);
-	mcpwm_configure(pwm8, 1, 0);
-	mcpwm_configure(pwm8, 2, 0);
-	mcpwm_configure(pwm3, 1, 0);
-
 	/* Set initial duty cycles */
 	mcpwm_set_duty_cycle(pwm1, 4, 0x01000000);
-	mcpwm_set_duty_cycle(pwm3, 1, 0x47AE147A); /* 56% duty cycle */
+	// mcpwm_set_duty_cycle(pwm3, 1, 0x47AE147A); /* 56% duty cycle */
+	mcpwm_set_duty_cycle(pwm3, 1, 0x40000000); /* 56% duty cycle */
+
+	/* Enable gate driver channels */
+	drv8328_enable_channel(gate_driver_a, 0);
+	drv8328_enable_channel(gate_driver_a, 1);
+	drv8328_enable_channel(gate_driver_b, 0);
+	drv8328_enable_channel(gate_driver_b, 1);
+
+	/* Initialize PWM channels */
+	mcpwm_configure(pwm1, 4, STM32_PWM_OC_MODE_PWM2);
+	mcpwm_configure(pwm3, 1, 0);
 
 	/* Enable PWM for sampling */
 	mcpwm_enable(pwm3, 1);
@@ -219,13 +230,15 @@ static void motor_state_hw_init_entry(void *obj)
 	/* Set up encoder callback */
 	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, NULL);
 
-	/* Set up break interrupt handler for hardware fault protection */
+	// /* Set up break interrupt handler for hardware fault protection */
 	mcpwm_set_break_callback(pwm1, pwm_break_callback, params);
 	mcpwm_set_break_callback(pwm8, pwm_break_callback, params);
 
-	/* Set up ADC callback */
+	// /* Set up ADC callback */
 	adc_injected_set_callback(adc1, adc_callback, params);
 	adc_injected_enable(adc1);
+
+	// mcpwm_set_compare_callback(pwm1, 4, test_callback, params);
 
 	/* Initialize timing subsystem for ISR performance measurement */
 	timing_init();
@@ -741,6 +754,10 @@ static void motor_state_error_entry(void *obj)
 	mcpwm_disable(pwm1, 2);
 	mcpwm_disable(pwm8, 1);
 	mcpwm_disable(pwm8, 2);
+
+	/* Emergency stop gate drivers (sets INL GPIOs low) */
+	drv8328_disable_all_channels(gate_driver_a);
+	drv8328_disable_all_channels(gate_driver_b);
 
 	/* Clear current references for good measure */
 	params->Id_ref_A = 0.0f;

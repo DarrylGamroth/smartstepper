@@ -9,8 +9,6 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
-#include <drivers/adc_injected.h>
-#include <drivers/mcpwm.h>
 #include "config.h"
 
 /* Global device handles - accessed by ISR */
@@ -19,6 +17,8 @@ extern const struct device *const pwm8;
 extern const struct device *const pwm3;
 extern const struct device *const encoder1;
 extern const struct device *const adc1;
+extern const struct device *const gate_driver_a;
+extern const struct device *const gate_driver_b;
 
 /* Global GPIO specs - accessed by ISR */
 extern const struct gpio_dt_spec trig;

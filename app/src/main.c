@@ -21,13 +21,6 @@
 
 LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
-/* Global device handles - accessed by ISR and state functions */
-const struct device *const pwm1 = DEVICE_DT_GET(DT_NODELABEL(pwm1));
-const struct device *const pwm8 = DEVICE_DT_GET(DT_NODELABEL(pwm8));
-const struct device *const pwm3 = DEVICE_DT_GET(DT_NODELABEL(pwm3));
-const struct device *const encoder1 = DEVICE_DT_GET(DT_ALIAS(encoder1));
-const struct device *const adc1 = DEVICE_DT_GET(DT_NODELABEL(adc1));
-
 int main(void)
 {
 	/* Get motor parameters pointer from state machine */
@@ -40,6 +33,11 @@ int main(void)
 	motor_sm_thread_run();
 
 	LOG_INF("Motor state machine thread started");
+
+	while (1) {
+		k_sleep(K_SECONDS(10));
+		LOG_INF("Main thread alive");
+	}
 
 	return 0;
 }

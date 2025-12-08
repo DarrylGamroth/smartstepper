@@ -439,6 +439,8 @@ static inline int z_impl_mcpwm_configure(const struct device *dev,
 /**
  * @brief Enable a PWM channel.
  *
+ * Enables the PWM channel using the configuration flags previously set via mcpwm_configure().
+ *
  * @param[in] dev PWM device instance.
  * @param channel PWM channel.
  *
@@ -447,14 +449,15 @@ static inline int z_impl_mcpwm_configure(const struct device *dev,
  */
 __syscall int mcpwm_enable(const struct device *dev, uint32_t channel);
 
-static inline int z_impl_mcpwm_enable(const struct device *dev,
-				      uint32_t channel)
+static inline int z_impl_mcpwm_enable(const struct device *dev, uint32_t channel)
 {
 	return DEVICE_API_GET(mcpwm, dev)->enable(dev, channel);
 }
 
 /**
  * @brief Disable a PWM channel.
+ *
+ * Disables the PWM channel using the configuration flags previously set via mcpwm_configure().
  *
  * @param[in] dev PWM device instance.
  * @param channel PWM channel.
@@ -464,8 +467,7 @@ static inline int z_impl_mcpwm_enable(const struct device *dev,
  */
 __syscall int mcpwm_disable(const struct device *dev, uint32_t channel);
 
-static inline int z_impl_mcpwm_disable(const struct device *dev,
-				       uint32_t channel)
+static inline int z_impl_mcpwm_disable(const struct device *dev, uint32_t channel)
 {
 	return DEVICE_API_GET(mcpwm, dev)->disable(dev, channel);
 }
@@ -633,7 +635,7 @@ static inline int mcpwm_configure_dt(const struct mcpwm_dt_spec *spec)
  *
  * This is equivalent to:
  *
- *     mcpwm_enable(spec->dev, spec->channel)
+ *     mcpwm_enable(spec->dev, spec->channel, spec->flags)
  *
  * @param[in] spec PWM specification from devicetree.
  *
