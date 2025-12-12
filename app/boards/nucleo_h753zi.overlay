@@ -113,27 +113,26 @@
 	pinctrl-names = "default";
 	st,adc-clock-source = "SYNC";
 	st,adc-prescaler = <4>;
+	resolution = <12>;
 	status = "okay";
 
-	st,adc-trigger-source = "tim1_cc4";
+	st,adc-trigger-source = "TIM1_CH4";
 
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	channel@3 {
-		reg = <3>;
+	channel@F {
+		reg = <15>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <16>;
 	};
 
-	channel@C {
-		reg = <12>;
+	channel@B {
+		reg = <11>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <16>;
 	};
 
 	channel@A {
@@ -141,7 +140,6 @@
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <16>;
 	};
 };
 

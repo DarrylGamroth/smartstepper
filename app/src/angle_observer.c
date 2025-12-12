@@ -123,19 +123,22 @@ void angle_observer_update(struct angle_observer_state *obs,
 	obs->angle_est_deg += Ts * obs->speed_est_dps + obs->L1Ts * err_deg;
 	obs->speed_est_dps += obs->L2Ts * err_deg;
 
-	/* Current-cycle outputs (no wrapping needed) */
+	/* Wrap angle estimate to [0, 360) for easier debugging */
+	obs->angle_est_deg = wrap_deg_360(obs->angle_est_deg);
+
+	/* Current-cycle outputs (wrapped for readability) */
 	obs->mech_angle_deg = obs->angle_est_deg;
 	obs->mech_speed_dps = obs->speed_est_dps;
 
-	/* Apply mechanical offset and compute electrical angle (no wrapping needed - sin/cos handle it) */
+	/* Apply mechanical offset and compute electrical angle */
 	float32_t mech_angle_offset = obs->mech_angle_deg + obs->mech_angle_offset_deg;
-	obs->elec_angle_deg = mech_angle_offset * obs->pole_pairs;
+	obs->elec_angle_deg = wrap_deg_360(mech_angle_offset * obs->pole_pairs);
 
-	/* One-step prediction for next control cycle (no wrapping needed) */
+	/* One-step prediction for next control cycle */
 	float32_t mech_angle_pred = obs->angle_est_deg + Ts * obs->speed_est_dps;
-	obs->mech_angle_pred_deg = mech_angle_pred;
+	obs->mech_angle_pred_deg = wrap_deg_360(mech_angle_pred);
 
-	/* Apply offset to predicted mechanical angle for predicted electrical angle (no wrapping needed) */
+	/* Apply offset to predicted mechanical angle for predicted electrical angle */
 	float32_t mech_angle_pred_offset = obs->mech_angle_pred_deg + obs->mech_angle_offset_deg;
-	obs->elec_angle_pred_deg = mech_angle_pred_offset * obs->pole_pairs;
+	obs->elec_angle_pred_deg = wrap_deg_360(mech_angle_pred_offset * obs->pole_pairs);
 }

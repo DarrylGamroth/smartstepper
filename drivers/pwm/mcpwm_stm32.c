@@ -525,11 +525,30 @@ static int mcpwm_stm32_start(const struct device *dev)
 	const struct mcpwm_stm32_config *cfg = dev->config;
 	TIM_TypeDef *timer = cfg->timer;
 
-	LL_TIM_SetCounter(timer, 0);
-	LL_TIM_GenerateEvent_UPDATE(timer);
-	LL_TIM_EnableCounter(timer);
+	/* Reset counter and generate update event for master timers only
+	 * Slave timers are controlled by master's trigger signals
+	 */
+	if (!cfg->slave_mode) {
+		LL_TIM_SetCounter(timer, 0);
+		LL_TIM_GenerateEvent_UPDATE(timer);
+	}
 
-	LOG_DBG("Timer started for PWM device %s", dev->name);
+#if !defined(CONFIG_SOC_SERIES_STM32L0X) && !defined(CONFIG_SOC_SERIES_STM32L1X)
+	/* Enable all outputs (MOE bit) - also recovers from break faults */
+	if (IS_TIM_BREAK_INSTANCE(timer)) {
+		LL_TIM_EnableAllOutputs(timer);
+	}
+#endif
+
+	/* Enable counter for master timers only
+	 * Slave timers start automatically via hardware trigger
+	 */
+	if (!cfg->slave_mode) {
+		LL_TIM_EnableCounter(timer);
+	}
+
+	LOG_DBG("Timer %s for PWM device %s", 
+		cfg->slave_mode ? "outputs enabled" : "started", dev->name);
 	return 0;
 }
 
@@ -693,19 +712,23 @@ static int mcpwm_stm32_init(const struct device *dev)
 
 #if !defined(CONFIG_SOC_SERIES_STM32L0X) && !defined(CONFIG_SOC_SERIES_STM32L1X)
 	if (IS_TIM_BREAK_INSTANCE(timer)) {
-		if (cfg->break_enable || cfg->break2_enable || cfg->dead_time > 0 ||
-		    cfg->lock_level > 0 || cfg->automatic_output) {
-			/* Configure break and dead time settings */
-			LL_TIM_SetOffStates(timer,
-					    cfg->ossi ? LL_TIM_OSSI_ENABLE : LL_TIM_OSSI_DISABLE,
-					    cfg->ossr ? LL_TIM_OSSR_ENABLE : LL_TIM_OSSR_DISABLE);
+		/* Configure off-states behavior */
+		LL_TIM_SetOffStates(timer,
+				    cfg->ossi ? LL_TIM_OSSI_ENABLE : LL_TIM_OSSI_DISABLE,
+				    cfg->ossr ? LL_TIM_OSSR_ENABLE : LL_TIM_OSSR_DISABLE);
 
+		/* Configure dead time */
+		if (cfg->dead_time > 0) {
 			LL_TIM_OC_SetDeadTime(timer, cfg->dead_time);
+		}
 
-			if (cfg->break_enable) {
-				LL_TIM_EnableBRK(timer);
-			}
+		/* Configure lock level */
+		if (cfg->lock_level > 0) {
+			LL_TIM_CC_SetLockLevel(timer, cfg->lock_level);
+		}
 
+		/* Configure break input 1 */
+		if (cfg->break_enable) {
 #if defined(TIM_BDTR_BKBID)
 			LL_TIM_ConfigBRK(timer, cfg->break_polarity, LL_TIM_BREAK_FILTER_FDIV1,
 					 LL_TIM_BREAK_AFMODE_INPUT);
@@ -714,32 +737,28 @@ static int mcpwm_stm32_init(const struct device *dev)
 #else
 			LL_TIM_ConfigBRK(timer, cfg->break_polarity);
 #endif
-
-			if (cfg->automatic_output) {
-				LL_TIM_EnableAutomaticOutput(timer);
-			}
-
-			LL_TIM_CC_SetLockLevel(timer, cfg->lock_level);
-
-#if defined(IS_TIM_BKIN2_INSTANCE)
-			/* Configure BRK2 if supported */
-			if (IS_TIM_BKIN2_INSTANCE(timer)) {
-				if (cfg->break2_enable) {
-					LL_TIM_EnableBRK2(timer);
-				}
-#if defined(TIM_BDTR_BKBID)
-				LL_TIM_ConfigBRK2(timer, cfg->break2_polarity,
-						  LL_TIM_BREAK2_FILTER_FDIV1,
-						  LL_TIM_BREAK2_AFMODE_INPUT);
-#else
-				LL_TIM_ConfigBRK2(timer, cfg->break2_polarity,
-						  LL_TIM_BREAK2_FILTER_FDIV1);
-#endif
-			}
-#endif
+			LL_TIM_EnableBRK(timer);
 		}
 
-		LL_TIM_EnableAllOutputs(timer);
+#if defined(IS_TIM_BKIN2_INSTANCE)
+		/* Configure break input 2 if supported */
+		if (IS_TIM_BKIN2_INSTANCE(timer) && cfg->break2_enable) {
+#if defined(TIM_BDTR_BKBID)
+			LL_TIM_ConfigBRK2(timer, cfg->break2_polarity,
+					  LL_TIM_BREAK2_FILTER_FDIV1,
+					  LL_TIM_BREAK2_AFMODE_INPUT);
+#else
+			LL_TIM_ConfigBRK2(timer, cfg->break2_polarity,
+					  LL_TIM_BREAK2_FILTER_FDIV1);
+#endif
+			LL_TIM_EnableBRK2(timer);
+		}
+#endif
+
+		/* Enable automatic output enable */
+		if (cfg->automatic_output) {
+			LL_TIM_EnableAutomaticOutput(timer);
+		}
 	}
 #endif
 

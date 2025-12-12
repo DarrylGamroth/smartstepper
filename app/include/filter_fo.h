@@ -136,7 +136,7 @@ static inline void filter_fo_init(struct filter_fo_f32 *filter)
 }
 
 /**
- * @brief Run a first-order filter of the form y[n] = b0*x[n] + b1*x[n-1] - a1*y[n-1]
+ * @brief Run a first-order filter of the form y[n] = b0*x[n] + b1*x[n-1] + a1*y[n-1]
  *
  * @param filter Filter instance
  * @param input_value Input value to filter
@@ -147,7 +147,7 @@ static inline float32_t filter_fo_run(struct filter_fo_f32 *filter, float32_t in
 	float32_t y0;
 
 	/* Compute the output */
-	y0 = (filter->b0 * input_value) + (filter->b1 * filter->x1) - (filter->a1 * filter->y1);
+	y0 = (filter->b0 * input_value) + (filter->b1 * filter->x1) + (filter->a1 * filter->y1);
 
 	/* Store values for next time */
 	filter->x1 = input_value;
@@ -157,7 +157,7 @@ static inline float32_t filter_fo_run(struct filter_fo_f32 *filter, float32_t in
 }
 
 /**
- * @brief Run a first-order filter of the form y[n] = b0*x[n] - a1*y[n-1]
+ * @brief Run a first-order filter of the form y[n] = b0*x[n] + a1*y[n-1]
  *
  * Simplified form without the b1*x[n-1] term.
  *
@@ -170,7 +170,7 @@ static inline float32_t filter_fo_run_form_0(struct filter_fo_f32 *filter, float
 	float32_t y0;
 
 	/* Compute the output */
-	y0 = (filter->b0 * input_value) - (filter->a1 * filter->y1);
+	y0 = (filter->b0 * input_value) + (filter->a1 * filter->y1);
 
 	/* Store values for next time */
 	filter->y1 = y0;

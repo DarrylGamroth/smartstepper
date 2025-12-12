@@ -4,6 +4,7 @@
  */
 
 #include <zephyr/dt-bindings/dma/stm32_dma.h>
+#include <dt-bindings/current-sense.h>
 
 / {
 	user_parameters: user_parameters {
@@ -13,10 +14,10 @@
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
 		offset-pole-hz = <300>;
-		align-current-ma = <100>;
+		align-current-ma = <67>;
 		align-duration-ms = <100>;
 		brake-current-ma = <1000>;
-		max-modulation-index-mpu = <570>;  /* 0.57 = sqrt(3)/2/sqrt(2), max for SVPWM linear region */
+		max-modulation-index-mpu = <950>;  /* 0.95 - reserves 5% voltage margin for H-bridge control headroom */
 		roverl-est-current-ma = <67>;   /* 10-20% of rated (0.67A motor) */
 		roverl-est-freq-hz = <100>;     /* Increase if motor twitches */
 		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
@@ -36,7 +37,7 @@
 
 	current_sense: current_sense {
 		compatible = "rubus,current-sense";
-		channels = <1>, <2>;
+		channels = <1 CURRENT_SENSE_POSITIVE>, <2 CURRENT_SENSE_POSITIVE>;
 		current-sense-resistor-uohms = <10000>;
 		current-sense-gain = <50>;
 		vref-mv = <3000>;
@@ -193,7 +194,6 @@
 	st,trigger-selection = <0x00>; // ITR0 = TIM1
 
 	pwm8:mcpwm {
-		compatible = "st,stm32-mcpwm";
 		period = <PWM_KHZ(20)>;
 		status = "okay";
 		#pwm-cells = <2>;
@@ -203,6 +203,7 @@
 &adc1 {
 	compatible = "st,stm32-adc-injected";
 	status = "okay";
-	st,adc-trigger-source = "tim1_cc4";
+	resolution = <16>;
+	st,adc-trigger-source = "TIM1_CH4";
 	st,adc-trigger-edge = "rising";
 };

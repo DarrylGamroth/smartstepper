@@ -14,14 +14,16 @@ extern "C" {
 #endif
 
 /**
- * @brief Standard SPWM (Sinusoidal PWM) for 2-phase system
+ * @brief Standard SPWM (Sinusoidal PWM) for 2-phase H-bridge system
  *
  * Maps voltage commands directly to duty cycles with 50% offset.
+ * Each H-bridge uses complementary PWM: duty_hb2 = 1 - duty_hb1
  * - Va_normalized = 0.5 + 0.5*Va
  * - Vb_normalized = 0.5 + 0.5*Vb
+ * - Differential voltage = Vbus × (2*duty - 1)
  *
- * Linear range: ±1.0 (±100% modulation index)
- * DC bus utilization: 50% (Vdc/2 max line-to-neutral)
+ * Linear range: ±1.0 (full ±Vbus differential voltage)
+ * DC bus utilization: 100% (full Vbus available per winding)
  *
  * @param va Alpha voltage [-1.0, +1.0]
  * @param vb Beta voltage [-1.0, +1.0]
@@ -37,18 +39,19 @@ static inline void pwmgen_spwm_2phase_f32(float32_t va, float32_t vb,
 }
 
 /**
- * @brief Space Vector PWM (SVPWM) for 2-phase system
+ * @brief Space Vector PWM (SVPWM) for 2-phase H-bridge system
  *
- * Optimal PWM strategy for 2-phase systems. Adds common-mode offset to maximize
- * DC bus utilization while maintaining sinusoidal line-to-line voltages.
+ * Adds common-mode offset to center PWM waveforms for improved harmonic performance.
+ * For H-bridge topology, this reduces switching but doesn't increase voltage (already have full Vbus).
  *
  * Algorithm:
  * 1. Find Vmin = min(Va, Vb) and Vmax = max(Va, Vb)
  * 2. Common-mode offset = -(Vmax + Vmin) / 2
  * 3. Add offset to center the waveform
  *
- * Linear range: ±1.155 (±115.5% modulation index)
- * DC bus utilization: 57.7% (1/√3 improvement over SPWM)
+ * Linear range: ±1.0 (full ±Vbus differential voltage)
+ * DC bus utilization: 100% (H-bridge provides full Vbus per winding)
+ * Benefit: Reduced harmonic distortion and common-mode noise vs SPWM
  *
  * @param va Alpha voltage [-1.0, +1.0]
  * @param vb Beta voltage [-1.0, +1.0]
@@ -61,13 +64,8 @@ static inline void pwmgen_svpwm_2phase_f32(float32_t va, float32_t vb,
 	float32_t vmin, vmax, offset;
 
 	/* Find min and max */
-#if 0
-	vmin = MIN(va, vb);
-	vmax = MAX(va, vb);
-#else
 	vmin = fminf(va, vb);
 	vmax = fmaxf(va, vb);
-#endif
 
 	/* Common-mode offset = -(Vmax + Vmin) / 2
 	 * This centers the PWM waveform for maximum DC bus utilization */
@@ -79,10 +77,13 @@ static inline void pwmgen_svpwm_2phase_f32(float32_t va, float32_t vb,
 }
 
 /**
- * @brief Discontinuous PWM (DPWM) for 2-phase system
+ * @brief Discontinuous PWM (DPWM) for 2-phase H-bridge system
  *
- * Reduces switching losses by clamping one phase to rail for 60° sectors.
+ * Reduces switching losses by clamping one phase duty cycle to rail.
  * Lower switching losses than SVPWM but slightly higher harmonics.
+ * Best for high-speed operation where switching losses dominate.
+ *
+ * Linear range: ±1.0 (full ±Vbus differential voltage)
  *
  * @param va Alpha voltage [-1.0, +1.0]
  * @param vb Beta voltage [-1.0, +1.0]
@@ -95,13 +96,8 @@ static inline void pwmgen_dpwm_2phase_f32(float32_t va, float32_t vb,
 	float32_t vmin, vmax, offset;
 
 	/* Find min and max */
-#if 0
-	vmin = MIN(va, vb);
-	vmax = MAX(va, vb);
-#else
 	vmin = fminf(va, vb);
 	vmax = fmaxf(va, vb);
-#endif
 
 	/* DPWM offset clamps the max or min phase to rail
 	 * Offset = -Vmax (clamp max to top rail) or -Vmin (clamp min to bottom rail)
@@ -114,10 +110,12 @@ static inline void pwmgen_dpwm_2phase_f32(float32_t va, float32_t vb,
 }
 
 /**
- * @brief Saddle PWM for 2-phase system
+ * @brief Saddle PWM for 2-phase H-bridge system
  *
  * Hybrid between SVPWM and DPWM. Provides a balance of switching losses
- * and harmonic performance.
+ * and harmonic performance. Useful for medium to high speed operation.
+ *
+ * Linear range: ±1.0 (full ±Vbus differential voltage)
  *
  * @param va Alpha voltage [-1.0, +1.0]
  * @param vb Beta voltage [-1.0, +1.0]
@@ -130,13 +128,8 @@ static inline void pwmgen_saddle_pwm_2phase_f32(float32_t va, float32_t vb,
 	float32_t vmin, vmax, offset;
 
 	/* Find min and max */
-#if 0
-	vmin = MIN(va, vb);
-	vmax = MAX(va, vb);
-#else
 	vmin = fminf(va, vb);
 	vmax = fmaxf(va, vb);
-#endif
 
 	/* Saddle offset = -Vmin - Vmax (average of DPWM strategies) */
 	offset = -(vmin + vmax);

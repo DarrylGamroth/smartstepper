@@ -41,10 +41,10 @@ void config_init_pi_controllers(struct motor_parameters *params)
 
 	/* D-axis PI controller
 	 * Kp_Id = Ls_d * BWc_rps
-	 * Ki_Id = 0.25 * (Rs/Ls_d) * Ti
+	 * Ki_Id = (Rs/Ls_d) * Ti
 	 */
 	float32_t kp_d = MOTOR_INDUCTANCE_D_H * bwc_rps;
-	float32_t ki_d = 0.25f * rd_over_ld_rps * current_ctrl_period_sec;
+	float32_t ki_d = rd_over_ld_rps * current_ctrl_period_sec;
 
 	/* Initialize PI controller (NOT double buffered - single instance in main struct) */
 	pi_init(&params->pi_Id);
@@ -52,19 +52,21 @@ void config_init_pi_controllers(struct motor_parameters *params)
 
 	/* Q-axis PI controller
 	 * Kp_Iq = Ls_q * BWc_rps
-	 * Ki_Iq = 0.25 * (Rs/Ls_q) * Ti
+	 * Ki_Iq = (Rs/Ls_q) * Ti
 	 */
 	float32_t kp_q = MOTOR_INDUCTANCE_Q_H * bwc_rps;
-	float32_t ki_q = 0.25f * rq_over_lq_rps * current_ctrl_period_sec;
+	float32_t ki_q = rq_over_lq_rps * current_ctrl_period_sec;
 
 	/* Initialize PI controller (NOT double buffered - single instance in main struct) */
 	pi_init(&params->pi_Iq);
 	pi_set_gains(&params->pi_Iq, kp_q, ki_q);
 
-	LOG_DBG("PI controllers initialized: BWc=%.1f rad/s, Ti=%.6f s",
-		(double)bwc_rps, (double)current_ctrl_period_sec);
-	LOG_DBG("  D-axis: Kp=%.6f, Ki=%.6f", (double)kp_d, (double)ki_d);
-	LOG_DBG("  Q-axis: Kp=%.6f, Ki=%.6f", (double)kp_q, (double)ki_q);
+	LOG_DBG("PI controllers initialized: Ti=%.6f s",
+		(double)current_ctrl_period_sec);
+	LOG_DBG("  D-axis: Kp=%.6f, Ki=%.6f (R/L=%.1f rad/s)", 
+		(double)kp_d, (double)ki_d, (double)rd_over_ld_rps);
+	LOG_DBG("  Q-axis: Kp=%.6f, Ki=%.6f (R/L=%.1f rad/s)", 
+		(double)kp_q, (double)ki_q, (double)rq_over_lq_rps);
 }
 
 void config_print_parameters(void)

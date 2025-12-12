@@ -36,7 +36,7 @@ int main(void)
 
 	while (1) {
 		k_sleep(K_SECONDS(10));
-		LOG_INF("Main thread alive");
+		// LOG_INF("Main thread alive");
 	}
 
 	return 0;

@@ -164,6 +164,7 @@ struct adc_stm32_cfg {
 	uint32_t trigger_source;
 	uint32_t trigger_edge;
 	int8_t res_table_size;
+	uint8_t resolution_bits;
 	const uint32_t res_table[];
 };
 
@@ -819,10 +820,9 @@ static int adc_stm32_init(const struct device *dev)
 	adc_stm32_calibrate(dev, false);
 #endif /* HAS_CALIBRATION */
 
-	/* Set resolution from config table (use first/default resolution) */
+	/* Set resolution from DT property or use first from resolutions table */
 	if (config->res_table_size > 0) {
-		uint32_t res_entry = config->res_table[0];
-		uint8_t resolution = STM32_ADC_GET_REAL_VAL(res_entry);
+		uint8_t resolution = config->resolution_bits;
 
 		err = set_resolution(dev, resolution);
 		if (err < 0) {
@@ -1010,16 +1010,32 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 	ADC_TypeDef *adc = config->base;
 	int err;
 
+	/* Per RM0433: Queue mode (JQDIS) must be set while ADEN=0 */
+	/* We disabled ADC before calling this function */
+	LL_ADC_INJ_SetQueueMode(adc, LL_ADC_INJ_QUEUE_DISABLE);
+
+	/* Configure JSQR register: sequence length first */
 	LL_ADC_INJ_SetSequencerLength(adc, table_inj_seq_len[config->num_channels - 1]);
 
 	/* Configure each injected channel */
 	for (uint8_t i = 0; i < config->num_channels; i++) {
 		uint32_t channel = __LL_ADC_DECIMAL_NB_TO_CHANNEL(config->channel_ids[i]);
 
+#if ANY_ADC_HAS_CHANNEL_PRESELECTION
+		if (config->has_channel_preselection) {
+			/*
+			 * Each channel in the sequence must be previously enabled in PCSEL.
+			 * This register controls the analog switch integrated in the IO level.
+			 */
+			LL_ADC_SetChannelPreselection(adc, channel);
+		}
+#endif /* ANY_ADC_HAS_CHANNEL_PRESELECTION */
+
 		/* Set channel sampling time using common logic */
 		err = adc_stm32_sampling_time_setup(dev, config->channel_ids[i],
 						    config->channel_acq_times[i]);
 		if (err < 0) {
+			LOG_ERR("Failed to set sampling time for channel %d: %d", i, err);
 			return err;
 		}
 
@@ -1035,9 +1051,13 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 		}
 #endif
 
-		/* Set the channel to the appropriate rank in injected sequence */
+		/* Set the channel rank in injected sequence */
 		LL_ADC_INJ_SetSequencerRanks(adc, table_inj_rank[i], channel);
 	}
+
+#if defined(STM32F1XX_ADC) || defined(STM32F4XX_ADC)
+	LL_ADC_SetSequencersScanMode(adc, LL_ADC_SEQ_SCAN_ENABLE);
+#endif /* STM32F1XX_ADC || STM32F4XX_ADC */	
 
 	return 0;
 }
@@ -1059,6 +1079,10 @@ static int adc_stm32_configure_injected_trigger(const struct device *dev)
 #endif
 
 	LL_ADC_INJ_SetTrigAuto(adc, LL_ADC_INJ_TRIG_INDEPENDENT);
+
+	/* Ensure discontinuous mode is disabled for injected channels */
+	/* We want all channels converted on each trigger, not one-by-one */
+	LL_ADC_INJ_SetSequencerDiscont(adc, LL_ADC_INJ_SEQ_DISCONT_DISABLE);
 
 	return 0;
 }
@@ -1299,6 +1323,38 @@ static DEVICE_API(adc_injected, api_stm32_driver_api) = {
 #define ADC_INJ_CHECK_OVERRUN(adc, data, dev)
 #endif
 
+/* Debug helper function to process ADC conversions */
+static inline void adc_stm32_process_injected_conversions(const struct device *dev,
+							   ADC_TypeDef *adc,
+							   struct adc_stm32_data *data,
+							   const struct adc_stm32_cfg *config)
+{
+	uint32_t num_channels = config->num_channels;
+
+	/* Read all injected conversions in rank order and convert to Q31 */
+	for (uint32_t i = 0; i < num_channels; i++) {
+		uint32_t raw_value = LL_ADC_INJ_ReadConversionData32(adc, table_inj_rank[i]);
+
+		/* Convert to Q31 with rounding (single-ended: 0 to +full_scale)
+		 * If LSB of raw value is set, fill unused lower bits with 1s for rounding
+		 */
+		// uint8_t shift = 31 - data->resolution;
+		// uint32_t fill_mask = (0U - (raw_value & 1U)) & ((1U << shift) - 1U);
+
+		// data->inj_values[i] = (q31_t)((raw_value << shift) | fill_mask);
+		data->inj_values[i] = (q31_t)(raw_value << (31 - data->resolution));
+	}
+
+	/* Clear JEOS flag */
+	LL_ADC_ClearFlag_JEOS(adc);
+
+	/* Call user callback if registered */
+	if (data->callback != NULL) {
+		data->callback(dev, (const q31_t *)data->inj_values, num_channels,
+			       data->user_data);
+	}
+}
+
 #define GENERATE_ISR_CODE(index)                                                                   \
 	ISR_DIRECT_DECLARE(ISR_FUNC(index))                                                        \
 	{                                                                                          \
@@ -1312,26 +1368,7 @@ static DEVICE_API(adc_injected, api_stm32_driver_api) = {
                                                                                                    \
 		/* Check JEOS flag */                                                              \
 		if (LL_ADC_IsActiveFlag_JEOS(adc)) {                                               \
-			uint32_t num_channels = config->num_channels;                              \
-                                                                                                   \
-			/* Read all injected conversions in rank order and convert to Q31 */       \
-			for (uint32_t i = 0; i < num_channels; i++) {                              \
-				uint32_t raw_value =                                               \
-					LL_ADC_INJ_ReadConversionData32(adc, table_inj_rank[i]);   \
-                                                                                                   \
-				/* Convert to Q31 (single-ended: 0 to +full_scale) */              \
-				data->inj_values[i] =                                              \
-					(q31_t)(raw_value << (31 - data->resolution));             \
-			}                                                                          \
-                                                                                                   \
-			/* Clear JEOS flag */                                                      \
-			LL_ADC_ClearFlag_JEOS(adc);                                                \
-                                                                                                   \
-			/* Call user callback if registered */                                     \
-			if (data->callback != NULL) {                                              \
-				data->callback(dev, (const q31_t *)data->inj_values, num_channels, \
-					       data->user_data);                                   \
-			}                                                                          \
+			adc_stm32_process_injected_conversions(dev, adc, data, config);            \
 		}                                                                                  \
                                                                                                    \
 		return 0;                                                                          \
@@ -1361,33 +1398,25 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 				    (UTIL_CAT(ISR_FUNC(index), _init)), (NULL)),
 
 /*
- * Injected ADC trigger source mapping
- * Maps string trigger names to LL constants
+ * Injected ADC trigger source and edge mapping
+ *
+ * Devicetree strings are converted to LL driver constants using DT_STRING_UPPER_TOKEN.
+ * This approach works with any trigger source supported by the specific STM32 series.
+ *
+ * Examples:
+ *   DT: st,adc-trigger-source = "TIM1_CH4"  -> LL_ADC_INJ_TRIG_EXT_TIM1_CH4
+ *   DT: st,adc-trigger-source = "TIM3_TRGO" -> LL_ADC_INJ_TRIG_EXT_TIM3_TRGO
+ *   DT: st,adc-trigger-edge = "rising"      -> LL_ADC_INJ_TRIG_EXT_RISING
  */
-#define ADC_INJ_TRIGGER_tim1_trgo LL_ADC_INJ_TRIG_EXT_TIM1_TRGO
-#define ADC_INJ_TRIGGER_tim1_cc4  LL_ADC_INJ_TRIG_EXT_TIM1_CH4
-#define ADC_INJ_TRIGGER_tim2_trgo LL_ADC_INJ_TRIG_EXT_TIM2_TRGO
-#define ADC_INJ_TRIGGER_tim2_cc1  LL_ADC_INJ_TRIG_EXT_TIM2_CH1
-#define ADC_INJ_TRIGGER_tim3_cc2  LL_ADC_INJ_TRIG_EXT_TIM3_CH2
-#define ADC_INJ_TRIGGER_tim3_cc4  LL_ADC_INJ_TRIG_EXT_TIM3_CH4
-#define ADC_INJ_TRIGGER_tim3_trgo LL_ADC_INJ_TRIG_EXT_TIM3_TRGO
-#define ADC_INJ_TRIGGER_tim4_trgo LL_ADC_INJ_TRIG_EXT_TIM4_TRGO
-#define ADC_INJ_TRIGGER_tim5_trgo LL_ADC_INJ_TRIG_EXT_TIM5_TRGO
-#define ADC_INJ_TRIGGER_tim8_cc2  LL_ADC_INJ_TRIG_EXT_TIM8_CH2
-#define ADC_INJ_TRIGGER_tim8_cc4  LL_ADC_INJ_TRIG_EXT_TIM8_CH4
-#define ADC_INJ_TRIGGER_tim8_trgo LL_ADC_INJ_TRIG_EXT_TIM8_TRGO
 
-#define ADC_INJ_EDGE_rising  LL_ADC_INJ_TRIG_EXT_RISING
-#define ADC_INJ_EDGE_falling LL_ADC_INJ_TRIG_EXT_FALLING
-#define ADC_INJ_EDGE_both    LL_ADC_INJ_TRIG_EXT_RISINGFALLING
-
-/* Get trigger source from DT */
+/* Get trigger source from DT - converts string to LL constant */
 #define ADC_INJ_DT_TRIGGER_SRC(idx)                                                                \
-	_CONCAT(ADC_INJ_TRIGGER_, DT_INST_STRING_TOKEN(idx, st_adc_trigger_source))
+	UTIL_CAT(LL_ADC_INJ_TRIG_EXT_, DT_INST_STRING_UPPER_TOKEN(idx, st_adc_trigger_source))
 
-/* Get trigger edge from DT (with default) */
+/* Get trigger edge from DT (with default) - converts string to LL constant */
 #define ADC_INJ_DT_TRIGGER_EDGE(idx)                                                               \
-	_CONCAT(ADC_INJ_EDGE_, DT_INST_STRING_TOKEN_OR(idx, st_adc_trigger_edge, rising))
+	UTIL_CAT(LL_ADC_INJ_TRIG_EXT_,                                                             \
+		 DT_INST_STRING_UPPER_TOKEN_OR(idx, st_adc_trigger_edge, RISING))
 
 /*
  * Injected channel configuration from devicetree
@@ -1474,6 +1503,7 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 		    .trigger_edge = ADC_INJ_DT_TRIGGER_EDGE(index),))	\
 	.res_table_size = DT_INST_PROP_LEN(index, resolutions),		\
 	.res_table = DT_INST_PROP(index, resolutions),			\
+	.resolution_bits = DT_INST_PROP_OR(index, resolution, 0),	\
 };                             \
                                                                                                    \
 	static struct adc_stm32_data adc_stm32_data_##index = {};                                  \

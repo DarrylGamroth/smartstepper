@@ -165,13 +165,13 @@ static inline void mcpwm_stm32_set_duty_cycle_2phase_f32(const struct device *de
     const struct mcpwm_stm32_config *cfg = (const struct mcpwm_stm32_config *)dev->config;
     const struct mcpwm_stm32_data *data = (const struct mcpwm_stm32_data *)dev->data;
     TIM_TypeDef *timer = cfg->timer;
-    int32_t period = data->period_cycles;
+    float32_t period = (float32_t)(data->period_cycles);
 
     /* Calculate and clamp pulse cycles from float duty cycle */
-    int32_t pulse_a_i = (int32_t)(duty_a * period);
-    int32_t pulse_b_i = (int32_t)(duty_b * period);
-    uint32_t pulse_a = CLAMP(pulse_a_i, 0, period);
-    uint32_t pulse_b = CLAMP(pulse_b_i, 0, period);
+    float32_t pwm_a = duty_a * period;
+    float32_t pwm_b = duty_b * period;
+    uint32_t pulse_a = fmaxf(0.0f, fminf(pwm_a, period));
+    uint32_t pulse_b = fmaxf(0.0f, fminf(pwm_b, period));
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);
@@ -237,15 +237,15 @@ static inline void mcpwm_stm32_set_duty_cycle_3phase_f32(const struct device *de
     const struct mcpwm_stm32_config *cfg = (const struct mcpwm_stm32_config *)dev->config;
     const struct mcpwm_stm32_data *data = (const struct mcpwm_stm32_data *)dev->data;
     TIM_TypeDef *timer = cfg->timer;
-    int32_t period = data->period_cycles;
+    float32_t period = (float32_t)(data->period_cycles);
 
     /* Calculate and clamp pulse cycles from float duty cycle */
-    int32_t pulse_a_i = (int32_t)(duty_a * period);
-    int32_t pulse_b_i = (int32_t)(duty_b * period);
-    int32_t pulse_c_i = (int32_t)(duty_c * period);
-    uint32_t pulse_a = CLAMP(pulse_a_i, 0, period);
-    uint32_t pulse_b = CLAMP(pulse_b_i, 0, period);
-    uint32_t pulse_c = CLAMP(pulse_c_i, 0, period);
+    float32_t pwm_a = duty_a * period;
+    float32_t pwm_b = duty_b * period;
+    float32_t pwm_c = duty_c * period;
+    uint32_t pulse_a = fmaxf(0.0f, fminf(pwm_a, period));
+    uint32_t pulse_b = fmaxf(0.0f, fminf(pwm_b, period));
+    uint32_t pulse_c = fmaxf(0.0f, fminf(pwm_c, period));
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);

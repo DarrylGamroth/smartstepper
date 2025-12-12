@@ -311,13 +311,14 @@ static inline void pi_run_parallel(struct pi_f32 *pi, float32_t ref_value, float
 	ui_max = fmaxf(pi->out_max - p_out, 0.0f);
 	ui_min = fminf(pi->out_min - p_out, 0.0f);
 
-	pi->ui = CLAMP(pi->ui + (pi->ki * error), ui_min, ui_max);
+	float32_t ui = fmaf(pi->ki, error, pi->ui);
+	ui = fmaxf(fminf(ui, ui_max), ui_min);
+	*out_value = fmaxf(fminf(p_out + ui, pi->out_max), pi->out_min);
 
+	pi->ui = ui;
 	pi->ref_value = ref_value;
 	pi->fback_value = fback_value;
 	pi->ffwd_value = ffwd_value;
-
-	*out_value = CLAMP(p_out + pi->ui, pi->out_min, pi->out_max);
 }
 
 /**
@@ -339,6 +340,7 @@ static inline void pi_run_series(struct pi_f32 *pi, float32_t ref_value, float32
 {
 	float32_t error;
 	float32_t up;
+	float32_t ui;
 	float32_t p_out;
 	float32_t ui_min;
 	float32_t ui_max;
@@ -356,13 +358,14 @@ static inline void pi_run_series(struct pi_f32 *pi, float32_t ref_value, float32
 	ui_max = fmaxf(pi->out_max - p_out, 0.0f);
 	ui_min = fminf(pi->out_min - p_out, 0.0f);
 
-	pi->ui = CLAMP(pi->ui + (pi->ki * up), ui_min, ui_max);
+	ui = fmaf(pi->ki, up, pi->ui);
+	ui = fmaxf(fminf(ui, ui_max), ui_min);
+	*out_value = fmaxf(fminf(p_out + ui, pi->out_max), pi->out_min);
 
+	pi->ui = ui;
 	pi->ref_value = ref_value;
 	pi->fback_value = fback_value;
 	pi->ffwd_value = ffwd_value;
-
-	*out_value = CLAMP(p_out + pi->ui, pi->out_min, pi->out_max);
 }
 
 /**
@@ -398,9 +401,11 @@ static inline void pi_run(struct pi_f32 *pi, float32_t ref_value, float32_t fbac
 	ui_max = fmaxf(pi->out_max - up, 0.0f);
 	ui_min = fminf(pi->out_min - up, 0.0f);
 
-	pi->ui = CLAMP(pi->ui + (pi->ki * up), ui_min, ui_max);
+	float32_t ui = fmaf(pi->ki, up, pi->ui);
+	ui = fmaxf(fminf(ui, ui_max), ui_min);
+	*out_value = fmaxf(fminf(up + ui, pi->out_max), pi->out_min);
 
-	*out_value = CLAMP(up + pi->ui, pi->out_min, pi->out_max);
+	pi->ui = ui;
 }
 
 #ifdef __cplusplus

@@ -12,6 +12,7 @@
 #include "pi.h"
 #include "filter_fo.h"
 #include "angle_observer.h"
+#include "angle_gen.h"
 #include "rs_online.h"
 #include "traj.h"
 #include "motor_events.h"
@@ -40,6 +41,7 @@ struct motor_control_params {
 struct motor_parameters {
 	/* State machine */
 	struct smf_ctx smf;
+	const struct smf_state *state_for_isr;
 	struct motor_event event;  /* Current event being processed */
 	struct k_timer state_timer;  /* Timer for state timeouts */
 
@@ -86,17 +88,16 @@ struct motor_parameters {
 	float32_t Ls_measured_H;
 	float32_t Rs_measured_ohm;
 
-	/* R/L estimation accumulators */
+	/* R/L estimation accumulators and angle generator */
 	float32_t roverl_accumulator_Vd_Id;
 	float32_t roverl_accumulator_Vq_Id;
 	float32_t roverl_accumulator_Id2;
-	float32_t roverl_phase_degrees;
+	angle_gen_t angle_gen_roverl;
 
 	/* Telemetry and diagnostics */
 	uint32_t state_counter;
 	uint32_t encoder_fault_counter;
 	uint32_t control_loop_count;
-	uint32_t adc_conversion_count;
 	uint32_t max_isr_cycles;
 	uint32_t total_isr_cycles;
 	uint32_t buffer_swap_count;
@@ -159,7 +160,13 @@ struct motor_parameters {
 #define CURRENT_SENSE_VREF_V ((float32_t)DT_PROP(CURRENT_SENSE_NODE, vref_mv) / 1000.0f)
 #define CURRENT_SENSE_RESISTOR_OHM ((float32_t)DT_PROP(CURRENT_SENSE_NODE, current_sense_resistor_uohms) / 1000000.0f)
 #define CURRENT_SENSE_GAIN ((float32_t)DT_PROP(CURRENT_SENSE_NODE, current_sense_gain))
-#define CURRENT_SENSE_FULL_SCALE_A (CURRENT_SENSE_VREF_V / (CURRENT_SENSE_RESISTOR_OHM * CURRENT_SENSE_GAIN))
+#define CURRENT_SENSE_FULL_SCALE_A (CURRENT_SENSE_VREF_V / (2.0f * CURRENT_SENSE_RESISTOR_OHM * CURRENT_SENSE_GAIN))
+
+/* Current sense channels are stored as separate arrays after devicetree preprocessing */
+#define CURRENT_SENSE_CHANNEL_0  DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 0)
+#define CURRENT_SENSE_POLARITY_0 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 1)
+#define CURRENT_SENSE_CHANNEL_1  DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 2)
+#define CURRENT_SENSE_POLARITY_1 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 3)
 
 #define MOTOR_PARAMS_NODE DT_PATH(motor_parameters)
 #define MOTOR_INDUCTANCE_D_H ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, inductance_d_uh) / 1000000.0f)

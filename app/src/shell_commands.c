@@ -395,6 +395,9 @@ static int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Ib:             %.3f A", (double)g_motor_params->Ib_A);
 	shell_print(sh, "  Vd:             %.3f V", (double)g_motor_params->Vd_V);
 	shell_print(sh, "  Vq:             %.3f V", (double)g_motor_params->Vq_V);
+	shell_print(sh, "  Va:             %.3f V", (double)g_motor_params->Va_V);
+	shell_print(sh, "  Vb:             %.3f V", (double)g_motor_params->Vb_V);
+	shell_print(sh, "  Vmag(max):      %.3f V", (double)g_motor_params->max_voltage_magnitude_V);
 	shell_print(sh, "  Vbus:           %.1f V", (double)g_motor_params->dc_bus_voltage_V);
 	shell_print(sh, "  Encoder OK:     %s", g_motor_params->encoder_fault_counter == 0 ? "yes" : "no");
 	shell_print(sh, "  Encoder faults: %u", g_motor_params->encoder_fault_counter);

@@ -9,7 +9,9 @@ properties:
   channels:
     type: array
     required: true
-    description: ADC channel numbers for phase A and B currents
+    description: |
+      ADC channel configurations as <channel polarity> tuples.
+      Polarity: CURRENT_SENSE_POSITIVE (1) or CURRENT_SENSE_NEGATIVE (-1).
 
   current-sense-resistor-uohms:
     type: int

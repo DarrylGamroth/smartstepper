@@ -48,18 +48,18 @@ void rs_online_init(struct rs_online_estimator *est,
     est->id_prev   = 0.0f;
     est->iq_prev   = 0.0f;
 
-    // --- Initialize derivative filters: y[n] = b0*x[n] - a1*y[n-1] ---
-    // For first-order low-pass: alpha = 2*pi*bw*Ts, b0 = alpha, a1 = -(1-alpha)
+    // --- Initialize derivative filters: y[n] = b0*x[n] + a1*y[n-1] ---
+    // For first-order low-pass: alpha = 2*pi*bw*Ts, b0 = alpha, a1 = (1-alpha)
     float32_t deriv_alpha = 2.0f * PI_F32 * deriv_bw_hz * est->Ts;
     deriv_alpha = CLAMP(deriv_alpha, 0.0f, 1.0f);  // Stability limit
 
     filter_fo_init(&est->did_dt_filt);
     filter_fo_set_b0(&est->did_dt_filt, deriv_alpha);
-    filter_fo_set_a1(&est->did_dt_filt, -(1.0f - deriv_alpha));
+    filter_fo_set_a1(&est->did_dt_filt, (1.0f - deriv_alpha));
 
     filter_fo_init(&est->diq_dt_filt);
     filter_fo_set_b0(&est->diq_dt_filt, deriv_alpha);
-    filter_fo_set_a1(&est->diq_dt_filt, -(1.0f - deriv_alpha));
+    filter_fo_set_a1(&est->diq_dt_filt, (1.0f - deriv_alpha));
 
     // --- Initialize Rs low-pass filter ---
     float32_t Rs_alpha = 2.0f * PI_F32 * Rs_lp_bw_hz * est->Ts;
@@ -67,7 +67,7 @@ void rs_online_init(struct rs_online_estimator *est,
 
     filter_fo_init(&est->Rs_filt);
     filter_fo_set_b0(&est->Rs_filt, Rs_alpha);
-    filter_fo_set_a1(&est->Rs_filt, -(1.0f - Rs_alpha));
+    filter_fo_set_a1(&est->Rs_filt, (1.0f - Rs_alpha));
     filter_fo_set_y1(&est->Rs_filt, Rs_init);  // Initialize to starting value
 }
 
@@ -106,8 +106,7 @@ void rs_online_update(struct rs_online_estimator *est,
 
     // --- 1. Predict dq voltages using full model with di/dt terms ---
     // Convert electrical speed from deg/s to rad/s for voltage model
-    const float32_t DEG_TO_RAD = 0.017453292519943295f;  // π/180
-    float32_t omega_e_rads = omega_e_dps * DEG_TO_RAD;
+    float32_t omega_e_rads = omega_e_dps * PI_F32 / 180.0f;
 
     float32_t vd_hat = est->Rs_est * id
                      - omega_e_rads * est->Lq * iq
@@ -120,7 +119,7 @@ void rs_online_update(struct rs_online_estimator *est,
     float32_t evd = vd - vd_hat;
     float32_t evq = vq - vq_hat;
 
-    // --- 2. Slow rotating probe direction in dq-plane (TI-style) ---
+    // --- 2. Slow rotating probe direction in dq-plane ---
 
     est->probe_angle += est->probe_dtheta;
 

@@ -64,7 +64,23 @@ void adc_callback(const struct device *dev, const q31_t *values,
  * @param dev PWM device that triggered the break
  * @param user_data Pointer to motor_parameters struct
  */
-void pwm_break_callback(const struct device *dev, void *user_data);
+void gate_driver_a_break_callback(const struct device *dev, void *user_data);
+
+/**
+ * @brief Hardware break interrupt handler - emergency fault protection
+ * 
+ * Called when the break input (BKIN) goes active due to:
+ * - Hardware overcurrent detection
+ * - External fault signal
+ * - Other safety-critical conditions
+ * 
+ * PWM outputs are already disabled by hardware when this fires.
+ * This handler transitions the state machine to ERROR state.
+ *
+ * @param dev PWM device that triggered the break
+ * @param user_data Pointer to motor_parameters struct
+ */
+void gate_driver_b_break_callback(const struct device *dev, void *user_data);
 
 /**
  * @brief Encoder timer compare callback - triggers encoder read

@@ -61,100 +61,6 @@ static int drv8328_init(const struct device *dev)
     LOG_INF("Initializing DRV8328 gate driver: %s (%d channels, %s mode)",
             dev->name, config->num_channels, config->mode_6x ? "6x" : "3x");
 
-    /* Initialize sleep GPIO if specified */
-    if (config->sleep_gpio.port != NULL)
-    {
-        if (!gpio_is_ready_dt(&config->sleep_gpio))
-        {
-            LOG_ERR("Sleep GPIO device %s not ready", config->sleep_gpio.port->name);
-            return -ENODEV;
-        }
-
-        ret = gpio_pin_configure_dt(&config->sleep_gpio, GPIO_OUTPUT_ACTIVE);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to configure sleep GPIO: %d", ret);
-            return ret;
-        }
-
-        /* Start in active mode (not sleeping) */
-        ret = gpio_pin_set_dt(&config->sleep_gpio, 1);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to set sleep GPIO: %d", ret);
-            return ret;
-        }
-        LOG_DBG("Sleep GPIO configured and set to active");
-    }
-
-    /* Initialize fault GPIO if specified */
-    if (config->fault_gpio.port != NULL)
-    {
-        if (!gpio_is_ready_dt(&config->fault_gpio))
-        {
-            LOG_ERR("Fault GPIO device %s not ready", config->fault_gpio.port->name);
-            return -ENODEV;
-        }
-
-        ret = gpio_pin_configure_dt(&config->fault_gpio, GPIO_INPUT);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to configure fault GPIO: %d", ret);
-            return ret;
-        }
-
-        /* Configure fault interrupt */
-        ret = gpio_pin_interrupt_configure_dt(&config->fault_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to configure fault GPIO interrupt: %d", ret);
-            return ret;
-        }
-
-        /* Initialize callback */
-        data->dev = dev;
-        data->user_fault_cb = NULL;
-        data->user_data = NULL;
-        data->fault_state = false;
-
-        gpio_init_callback(&data->fault_cb, drv8328_fault_callback, BIT(config->fault_gpio.pin));
-
-        ret = gpio_add_callback(config->fault_gpio.port, &data->fault_cb);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to add fault GPIO callback: %d", ret);
-            return ret;
-        }
-
-        LOG_DBG("Fault GPIO configured as interrupt input");
-    }
-
-    /* Initialize DRVOFF GPIO if specified (for DRV8328C/D variants) */
-    if (config->drvoff_gpio.port != NULL)
-    {
-        if (!gpio_is_ready_dt(&config->drvoff_gpio))
-        {
-            LOG_ERR("DRVOFF GPIO device %s not ready", config->drvoff_gpio.port->name);
-            return -ENODEV;
-        }
-
-        ret = gpio_pin_configure_dt(&config->drvoff_gpio, GPIO_OUTPUT_INACTIVE);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to configure DRVOFF GPIO: %d", ret);
-            return ret;
-        }
-
-        /* Start with gate drivers enabled (DRVOFF inactive) */
-        ret = gpio_pin_set_dt(&config->drvoff_gpio, 0);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to set DRVOFF GPIO: %d", ret);
-            return ret;
-        }
-        LOG_DBG("DRVOFF GPIO configured and set to enable gate drivers");
-    }
-
     /* Initialize channels */
     for (uint8_t i = 0; i < config->num_channels; i++)
     {
@@ -196,6 +102,80 @@ static int drv8328_init(const struct device *dev)
 
         LOG_DBG("Channel %u initialized (PWM dev: %s, channel: %u)",
                 i, ch->pwm_spec.dev->name, ch->pwm_spec.channel);
+    }
+
+    /* Initialize sleep GPIO if specified */
+    if (config->sleep_gpio.port != NULL)
+    {
+        if (!gpio_is_ready_dt(&config->sleep_gpio))
+        {
+            LOG_ERR("Sleep GPIO device %s not ready", config->sleep_gpio.port->name);
+            return -ENODEV;
+        }
+
+        ret = gpio_pin_configure_dt(&config->sleep_gpio, GPIO_OUTPUT_INACTIVE);
+        if (ret < 0)
+        {
+            LOG_ERR("Failed to configure sleep GPIO: %d", ret);
+            return ret;
+        }
+    }
+
+    /* Initialize fault GPIO if specified */
+    if (config->fault_gpio.port != NULL)
+    {
+        if (!gpio_is_ready_dt(&config->fault_gpio))
+        {
+            LOG_ERR("Fault GPIO device %s not ready", config->fault_gpio.port->name);
+            return -ENODEV;
+        }
+
+        ret = gpio_pin_configure_dt(&config->fault_gpio, GPIO_INPUT);
+        if (ret < 0)
+        {
+            LOG_ERR("Failed to configure fault GPIO: %d", ret);
+            return ret;
+        }
+
+        /* Configure fault interrupt */
+        ret = gpio_pin_interrupt_configure_dt(&config->fault_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+        if (ret < 0)
+        {
+            LOG_ERR("Failed to configure fault GPIO interrupt: %d", ret);
+            return ret;
+        }
+
+        /* Initialize callback */
+        data->dev = dev;
+        data->user_fault_cb = NULL;
+        data->user_data = NULL;
+        data->fault_state = false;
+
+        gpio_init_callback(&data->fault_cb, drv8328_fault_callback, BIT(config->fault_gpio.pin));
+
+        ret = gpio_add_callback(config->fault_gpio.port, &data->fault_cb);
+        if (ret < 0)
+        {
+            LOG_ERR("Failed to add fault GPIO callback: %d", ret);
+            return ret;
+        }
+    }
+
+    /* Initialize DRVOFF GPIO if specified (for DRV8328C/D variants) */
+    if (config->drvoff_gpio.port != NULL)
+    {
+        if (!gpio_is_ready_dt(&config->drvoff_gpio))
+        {
+            LOG_ERR("DRVOFF GPIO device %s not ready", config->drvoff_gpio.port->name);
+            return -ENODEV;
+        }
+
+        ret = gpio_pin_configure_dt(&config->drvoff_gpio, GPIO_OUTPUT_INACTIVE);
+        if (ret < 0)
+        {
+            LOG_ERR("Failed to configure DRVOFF GPIO: %d", ret);
+            return ret;
+        }
     }
 
     return 0;
@@ -242,7 +222,7 @@ int drv8328_set_sleep_mode(const struct device *dev, bool sleep)
         }
     }
 
-    ret = gpio_pin_set_dt(&config->sleep_gpio, sleep ? 0 : 1);
+    ret = gpio_pin_set_dt(&config->sleep_gpio, sleep ? 1 : 0);
     if (ret < 0)
     {
         LOG_ERR("Failed to set sleep mode: %d", ret);
@@ -277,7 +257,7 @@ int drv8328_reset_fault(const struct device *dev)
     /* Duration: 1-1.2μs as per datasheet section 8.4.3 */
 
     /* Ensure sleep pin is high first */
-    ret = gpio_pin_set_dt(&config->sleep_gpio, 1);
+    ret = gpio_pin_set_dt(&config->sleep_gpio, 0);
     if (ret < 0)
     {
         LOG_ERR("Failed to set sleep GPIO high: %d", ret);
@@ -285,7 +265,7 @@ int drv8328_reset_fault(const struct device *dev)
     }
 
     /* Pull sleep pin low for fault reset pulse */
-    ret = gpio_pin_set_dt(&config->sleep_gpio, 0);
+    ret = gpio_pin_set_dt(&config->sleep_gpio, 1);
     if (ret < 0)
     {
         LOG_ERR("Failed to pull sleep GPIO low: %d", ret);
@@ -295,7 +275,7 @@ int drv8328_reset_fault(const struct device *dev)
     k_busy_wait(1);
 
     /* Pull sleep pin high to complete reset pulse */
-    ret = gpio_pin_set_dt(&config->sleep_gpio, 1);
+    ret = gpio_pin_set_dt(&config->sleep_gpio, 0);
     if (ret < 0)
     {
         LOG_ERR("Failed to set sleep GPIO high: %d", ret);

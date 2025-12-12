@@ -63,7 +63,7 @@
 		inl-gpios = <&gpioe 8 GPIO_ACTIVE_HIGH>,
 		            <&gpiob 0 GPIO_ACTIVE_HIGH>;
 		
-		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
+		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_LOW>;
 	};
 	
 	drv8328_b: drv8328_b {
@@ -78,7 +78,7 @@
 		inl-gpios = <&gpioh 13 GPIO_ACTIVE_HIGH>,
 		            <&gpioh 14 GPIO_ACTIVE_HIGH>;
 		
-		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
+		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -406,12 +406,7 @@ zephyr_udc0: &usbotg_fs {
 	pinctrl-names = "default";
 	st,adc-clock-source = "SYNC";
 	st,adc-prescaler = <4>;
-	status = "okay";
-
-    // clocks = <&rcc STM32_CLOCK(AHB1, 5)>,
-    //          <&rcc STM32_SRC_PLL2_P ADC_SEL(2)>;
-    // clock-names = "adcx", "adc_ker";
-    // st,adc-clock-source = "ASYNC";	
+	status = "disabled";
 
 	vref-mv = <3000>;
 
@@ -424,7 +419,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 
 	/* I_SENSE_B */
@@ -433,7 +427,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 
 	/* VINSENSE */
@@ -442,7 +435,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 };
 
