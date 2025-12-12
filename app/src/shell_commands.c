@@ -425,7 +425,6 @@ static int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "  ISR count:              %u", g_motor_params->control_loop_count);
 	shell_print(sh, "  ISR max cycles:         %u", g_motor_params->max_isr_cycles);
 	shell_print(sh, "  ISR avg cycles:         %u", avg_cycles);
-	shell_print(sh, "  Buffer swaps:           %u", g_motor_params->buffer_swap_count);
 	shell_print(sh, "  Encoder faults:         %u", g_motor_params->encoder_fault_counter);
 	
 	return 0;

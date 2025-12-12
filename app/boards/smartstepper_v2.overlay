@@ -18,18 +18,19 @@
 		align-duration-ms = <100>;
 		brake-current-ma = <1000>;
 		max-modulation-index-mpu = <950>;  /* 0.95 - reserves 5% voltage margin for H-bridge control headroom */
-		roverl-est-current-ma = <67>;   /* 10-20% of rated (0.67A motor) */
-		roverl-est-freq-hz = <100>;     /* Increase if motor twitches */
+		roverl-est-current-ma = <100>;   /* 10-20% of rated (0.67A motor) */
+		roverl-est-freq-hz = <250>;     /* Increase if motor twitches */
 		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
 		roverl-est-duration-ms = <5000>;
-		rs-est-current-ma = <67>;       /* Same as RoverL */
+		rs-est-current-ma = <100>;       /* Same as RoverL */
 		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
 		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
 	};
 
-	vbus_sense: vbus_sense {
-		compatible = "rubus,vbus-sense";
+	voltage_sense: voltage_sense {
+		compatible = "rubus,voltage-sense";
 		channel = <0>;
+		adc-buffer-index = <2>;
 		vref-mv = <3000>;
 		output-ohms = <10000>;
 		full-ohms = <(191000 + 10000)>;
@@ -38,6 +39,7 @@
 	current_sense: current_sense {
 		compatible = "rubus,current-sense";
 		channels = <1 CURRENT_SENSE_POSITIVE>, <2 CURRENT_SENSE_POSITIVE>;
+		adc-buffer-indices = <0 1>;
 		current-sense-resistor-uohms = <10000>;
 		current-sense-gain = <50>;
 		vref-mv = <3000>;

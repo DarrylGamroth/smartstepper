@@ -383,16 +383,11 @@ static void motor_state_roverl_meas_entry(void *obj)
 
 	/* Configure trajectory to ramp rotating current amplitude smoothly
 	 * This allows PI controllers to settle before measurements begin
+	 * Trajectory continues from previous state's current value for smooth transition
 	 */
 	traj_set_target_value(&params->traj_Id, ROVERL_EST_CURRENT_A);
-	traj_set_int_value(&params->traj_Id, 0.0f);
 	float32_t roverl_ramp_rate = ROVERL_EST_CURRENT_A / (ROVERL_EST_SETTLING_S * CONTROL_LOOP_FREQUENCY_HZ);
 	traj_set_max_delta(&params->traj_Id, roverl_ramp_rate);
-	params->Iq_ref_A = 0.0f;
-
-	/* Reset PI controller integrators to prevent windup from previous states */
-	pi_set_ui(&params->pi_Id, 0.0f);
-	pi_set_ui(&params->pi_Iq, 0.0f);
 
 	/* Reset accumulators and initialize angle generator */
 	params->roverl_accumulator_Vd_Id = 0.0f;
@@ -401,7 +396,7 @@ static void motor_state_roverl_meas_entry(void *obj)
 	angle_gen_init(&params->angle_gen_roverl, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	angle_gen_set_freq(&params->angle_gen_roverl, ROVERL_EST_FREQ_HZ);
 
-	LOG_INF("RoverL: %.0fHz excitation for %.1fs (I_amplitude=%.2fA)",
+	LOG_INF("RoverL: %.0fHz excitation for %.1fs (I_amplitude=%.3fA)",
 		(double)ROVERL_EST_FREQ_HZ, (double)ROVERL_EST_DURATION_S,
 		(double)ROVERL_EST_CURRENT_A);
 
@@ -462,9 +457,7 @@ static void motor_state_roverl_meas_exit(void *obj)
 
 	LOG_INF("Exiting ROVERL_MEAS state");
 
-	/* Clear current references and angle generator */
-	params->Id_ref_A = 0.0f;
-	params->Iq_ref_A = 0.0f;
+	/* Reset angle generator */
 	angle_gen_set_freq(&params->angle_gen_roverl, 0.0f);
 	angle_gen_set_angle(&params->angle_gen_roverl, 0.0f);
 }
@@ -484,16 +477,12 @@ static void motor_state_rs_est_entry(void *obj)
 	 * PI controller automatically generates voltage needed: V = I*R
 	 */
 
-	/* Configure trajectory for smooth current ramp */
+	/* Configure trajectory for smooth current ramp
+	 * Continues from previous state (ROVERL_MEAS) current value
+	 */
 	traj_set_target_value(&params->traj_Id, RS_EST_CURRENT_A);
-	traj_set_int_value(&params->traj_Id, 0.0f);
 	float32_t rs_est_ramp_rate = RS_EST_CURRENT_A / (RS_EST_RAMPUP_S * CONTROL_LOOP_FREQUENCY_HZ);
 	traj_set_max_delta(&params->traj_Id, rs_est_ramp_rate);
-	params->Iq_ref_A = 0.0f;
-
-	/* Reset PI controller integrators to prevent windup from previous states */
-	pi_set_ui(&params->pi_Id, 0.0f);
-	pi_set_ui(&params->pi_Iq, 0.0f);
 
 	/* Initialize filters for measurement */
 	float32_t a1 = expf(-2.0f * PI_F32 * RS_EST_FILTER_BW_HZ / CONTROL_LOOP_FREQUENCY_HZ);
@@ -508,7 +497,7 @@ static void motor_state_rs_est_entry(void *obj)
 	filter_fo_set_num_coeffs(&params->filter_rs_est_I, b0, 0.0f);
 	filter_fo_set_initial_conditions(&params->filter_rs_est_I, 0.0f, 0.0f);
 
-	LOG_INF("Rs EST: I_target=%.2fA, rampup=%.1fs, measurement=%.1fs",
+	LOG_INF("Rs EST: I_target=%.3fA, rampup=%.1fs, measurement=%.1fs",
 		(double)RS_EST_CURRENT_A,
 		(double)RS_EST_RAMPUP_S, (double)RS_EST_DURATION_S);
 
@@ -546,13 +535,7 @@ static enum smf_state_result motor_state_rs_est_run(void *obj)
 
 static void motor_state_rs_est_exit(void *obj)
 {
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
 	LOG_INF("Exiting RS_EST state");
-
-	/* Clear current references */
-	params->Id_ref_A = 0.0f;
-	params->Iq_ref_A = 0.0f;
 }
 
 /* State: ALIGN - Align rotor to known position */
@@ -562,16 +545,12 @@ static void motor_state_align_entry(void *obj)
 
 	LOG_INF("Entering ALIGN state");
 
-	/* Set trajectory target to alignment current (will ramp smoothly) */
+	/* Set trajectory target to alignment current (will ramp smoothly)
+	 * Continues from previous state (RS_EST) current value
+	 */
 	traj_set_target_value(&params->traj_Id, ALIGN_CURRENT_A);
-	traj_set_int_value(&params->traj_Id, 0.0f);
 	float32_t align_ramp_rate = ALIGN_CURRENT_A / (0.1f * CONTROL_LOOP_FREQUENCY_HZ);
 	traj_set_max_delta(&params->traj_Id, align_ramp_rate);
-	params->Iq_ref_A = 0.0f;
-
-	/* Reset PI controller integrators to prevent windup from previous states */
-	pi_set_ui(&params->pi_Id, 0.0f);
-	pi_set_ui(&params->pi_Iq, 0.0f);
 
 	LOG_INF("Applying alignment current: Id=%.3fA for %.1fs",
 		(double)ALIGN_CURRENT_A, (double)ALIGN_DURATION_S);
@@ -612,13 +591,7 @@ static enum smf_state_result motor_state_align_run(void *obj)
 
 static void motor_state_align_exit(void *obj)
 {
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
 	LOG_INF("Exiting ALIGN state");
-
-	/* Clear current references (trajectory stops running after state exit) */
-	params->Id_ref_A = 0.0f;
-	params->Iq_ref_A = 0.0f;
 }
 
 /* State: IDLE - Ready but not running */

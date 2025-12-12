@@ -41,7 +41,7 @@
 		die-temp0 = &die_temp;
 		volt-sensor0 = &vref;
 		gate-driver-a = &drv8328_a;
-		gate-driver-b = &drv8328_b;		
+		gate-driver-b = &drv8328_b;
 	};
 
 	vbus {
@@ -54,30 +54,30 @@
 	drv8328_a: drv8328_a {
 		compatible = "ti,drv8328";
 		status = "okay";
-		
+
 		mode = "3x";
-		
+
 		pwms = <&pwm1 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
 		       <&pwm1 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
-		
+
 		inl-gpios = <&gpioe 8 GPIO_ACTIVE_HIGH>,
 		            <&gpiob 0 GPIO_ACTIVE_HIGH>;
-		
+
 		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
 	};
-	
+
 	drv8328_b: drv8328_b {
 		compatible = "ti,drv8328";
 		status = "okay";
-		
+
 		mode = "3x";
-		
+
 		pwms = <&pwm8 1 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>,
 		       <&pwm8 2 (PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1)>;
-		
+
 		inl-gpios = <&gpioh 13 GPIO_ACTIVE_HIGH>,
 		            <&gpioh 14 GPIO_ACTIVE_HIGH>;
-		
+
 		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
 	};
 };
@@ -405,8 +405,8 @@ zephyr_udc0: &usbotg_fs {
 	#size-cells = <0>;
 
 	/* I_SENSE_A */
-	channel@3 {
-		reg = <3>;
+	channel@c {
+		reg = <12>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
@@ -414,8 +414,8 @@ zephyr_udc0: &usbotg_fs {
 	};
 
 	/* I_SENSE_B */
-	channel@c {
-		reg = <12>;
+	channel@3 {
+		reg = <3>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
@@ -449,5 +449,5 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <12>;
-	};	
+	};
 };

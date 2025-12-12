@@ -3,13 +3,18 @@
 
 description: DC bus voltage sensing configuration
 
-compatible: "rubus,vbus-sense"
+compatible: "rubus,voltage-sense"
 
 properties:
   channel:
     type: int
     required: true
     description: ADC channel number
+
+  adc-buffer-index:
+    type: int
+    required: true
+    description: Index into the ADC results buffer where this channel's data is stored
 
   vref-mv:
     type: int

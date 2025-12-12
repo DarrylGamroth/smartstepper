@@ -100,7 +100,6 @@ struct motor_parameters {
 	uint32_t control_loop_count;
 	uint32_t max_isr_cycles;
 	uint32_t total_isr_cycles;
-	uint32_t buffer_swap_count;
 	uint32_t overrun_count;
 
 	/* Error tracking */
@@ -143,11 +142,12 @@ struct motor_parameters {
 #define RS_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms) / 1000.0f)
 #define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
 
-#define VBUS_SENSE_NODE DT_PATH(vbus_sense)
-#define VBUS_CHANNEL DT_PROP(VBUS_SENSE_NODE, channel)
-#define VBUS_VREF_V ((float32_t)DT_PROP(VBUS_SENSE_NODE, vref_mv) / 1000.0f)
-#define VBUS_OUTPUT_OHMS ((float32_t)DT_PROP(VBUS_SENSE_NODE, output_ohms))
-#define VBUS_FULL_OHMS ((float32_t)DT_PROP(VBUS_SENSE_NODE, full_ohms))
+#define VOLTAGE_SENSE_NODE DT_PATH(voltage_sense)
+#define VBUS_CHANNEL DT_PROP(VOLTAGE_SENSE_NODE, channel)
+#define VBUS_ADC_BUFFER_INDEX DT_PROP(VOLTAGE_SENSE_NODE, adc_buffer_index)
+#define VBUS_VREF_V ((float32_t)DT_PROP(VOLTAGE_SENSE_NODE, vref_mv) / 1000.0f)
+#define VBUS_OUTPUT_OHMS ((float32_t)DT_PROP(VOLTAGE_SENSE_NODE, output_ohms))
+#define VBUS_FULL_OHMS ((float32_t)DT_PROP(VOLTAGE_SENSE_NODE, full_ohms))
 #define VBUS_FULL_SCALE_V (VBUS_VREF_V * (VBUS_FULL_OHMS / VBUS_OUTPUT_OHMS))
 
 /* Braking voltage limits */
@@ -167,6 +167,8 @@ struct motor_parameters {
 #define CURRENT_SENSE_POLARITY_0 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 1)
 #define CURRENT_SENSE_CHANNEL_1  DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 2)
 #define CURRENT_SENSE_POLARITY_1 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, channels, 3)
+#define CURRENT_SENSE_ADC_BUFFER_INDEX_0 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, adc_buffer_indices, 0)
+#define CURRENT_SENSE_ADC_BUFFER_INDEX_1 DT_PROP_BY_IDX(CURRENT_SENSE_NODE, adc_buffer_indices, 1)
 
 #define MOTOR_PARAMS_NODE DT_PATH(motor_parameters)
 #define MOTOR_INDUCTANCE_D_H ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, inductance_d_uh) / 1000000.0f)

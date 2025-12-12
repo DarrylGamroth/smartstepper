@@ -36,8 +36,8 @@
 		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
 	};
 
-	vbus_sense: vbus_sense {
-		compatible = "rubus,vbus-sense";
+	voltage_sense: voltage_sense {
+		compatible = "rubus,voltage-sense";
 		channel = <0>;
 		vref-mv = <3000>;
 		output-ohms = <10000>;

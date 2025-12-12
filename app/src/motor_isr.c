@@ -141,6 +141,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	timing_t cycles_start = timing_counter_get();
 
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
+	const struct smf_state *state = params->state_for_isr;
 
 	/* Double-buffer swap: atomically toggle index between 0 and 1
 	 * Shell writes to ctrl_buf[ctrl_index^1], ISR reads from ctrl_buf[ctrl_index].
@@ -149,7 +150,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	if (params->ctrl_swap_pending) {
 		params->ctrl_index ^= 1;
 		params->ctrl_swap_pending = false;
-		params->buffer_swap_count++;
 	}
 
 	/* Increment control loop counter */
@@ -166,11 +166,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Da_hb1_pu, Da_hb2_pu, Db_hb1_pu, Db_hb2_pu;
 	float32_t Vq_limit_V;
 	float32_t Id_ref_A, Iq_ref_A;
-
-	q31_t *adc_values[3];
-	adc_values[0] = (q31_t *)&values[0]; /* I_a */
-	adc_values[1] = (q31_t *)&values[1]; /* I_b */
-	adc_values[2] = (q31_t *)&values[2]; /* V_bus */
+	float32_t Vd_V, Vq_V;
+	float32_t max_voltage_magnitude_V;
 
 	/* Read encoder and update observer */
 	if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
@@ -190,19 +187,19 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	}
 
 	/* Safety: Don't run control if in ERROR state (PWM should be disabled) */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_ERROR]) {
+	if (state == &motor_states[MOTOR_STATE_ERROR]) {
 		goto isr_done;
 	}
 
 	/* Skip control during hardware/controller initialization */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_HW_INIT] ||
-	    params->state_for_isr == &motor_states[MOTOR_STATE_CTRL_INIT]) {
+	if (state == &motor_states[MOTOR_STATE_HW_INIT] ||
+	    state == &motor_states[MOTOR_STATE_CTRL_INIT]) {
 		goto isr_done;
 	}
 
-	Ia_A = adc_to_current(values[0], CURRENT_SENSE_POLARITY_0);
-	Ib_A = adc_to_current(values[1], CURRENT_SENSE_POLARITY_1);
-	Vbus_V = adc_to_vbus_v(values[2]);
+	Ia_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_0], CURRENT_SENSE_POLARITY_0);
+	Ib_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_1], CURRENT_SENSE_POLARITY_1);
+	Vbus_V = adc_to_vbus_v(values[VBUS_ADC_BUFFER_INDEX]);
 	Vbus_inv = 1.0f / Vbus_V;
 
 	/* Fault detection: Check for overvoltage */
@@ -212,7 +209,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	}
 
 	/* Handle offset measurement (no control, just filtering) */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
+	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
 		filter_fo_run(&params->filter_Ia, Ia_A);
 		filter_fo_run(&params->filter_Ib, Ib_A);
 		goto isr_done;
@@ -230,11 +227,11 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Select control frame angle based on state and transform currents */
 	float32_t ctrl_angle_deg;
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_RS_EST] ||
-	    params->state_for_isr == &motor_states[MOTOR_STATE_ALIGN]) {
+	if (state == &motor_states[MOTOR_STATE_RS_EST] ||
+	    state == &motor_states[MOTOR_STATE_ALIGN]) {
 		/* Stationary frame (0°) for resistance measurement and alignment */
 		ctrl_angle_deg = 0.0f;
-	} else if (params->state_for_isr == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
+	} else if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
 		/* Rotating excitation frame for inductance measurement */
 		ctrl_angle_deg = angle_gen_get_angle_deg(&params->angle_gen_roverl);
 	} else {
@@ -246,19 +243,16 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
 	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
 
-	/* R/L measurement: rotate current reference and accumulate V/I in rotating frame */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
+	/* R/L measurement: set current reference and accumulate V/I in rotating frame */
+	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
 		traj_run(&params->traj_Id);
 
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
 		params->Iq_ref_A = 0.0f;
 
-		/* Advance excitation phase using angle generator */
-		angle_gen_run(&params->angle_gen_roverl);
-
 		/* Check if settling period complete using trajectory target */
 		if (traj_is_at_target(&params->traj_Id)) {
-			/* Accumulate for R/L extraction */
+			/* Accumulate for R/L extraction using previous cycle's voltage */
 			params->roverl_accumulator_Vd_Id += params->Vd_V * Id_A;
 			params->roverl_accumulator_Vq_Id += params->Vq_V * Id_A;
 			params->roverl_accumulator_Id2 += Id_A * Id_A;
@@ -266,13 +260,13 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	}
 
 	/* Rs EST: filter V/I in d-axis for DC resistance */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_RS_EST]) {
+	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
 		traj_run(&params->traj_Id);
 
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
 		params->Iq_ref_A = 0.0f;
 
-		/* After rampup complete: filter voltage and current measurements */
+		/* After rampup complete: filter voltage and current measurements using previous cycle's voltage */
 		if (traj_is_at_target(&params->traj_Id)) {
 			filter_fo_run(&params->filter_rs_est_V, params->Vd_V);
 			filter_fo_run(&params->filter_rs_est_I, Id_A);
@@ -280,7 +274,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	}
 
 	/* ALIGN: ramp alignment current smoothly */
-	if (params->state_for_isr == &motor_states[MOTOR_STATE_ALIGN]) {
+	if (state == &motor_states[MOTOR_STATE_ALIGN]) {
 		traj_run(&params->traj_Id);
 
 		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -291,48 +285,39 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	Id_ref_A = params->Id_ref_A;
 	Iq_ref_A = params->Iq_ref_A;
 
-	/* Update telemetry snapshot (convert from deg/Hz to rad/rad_s) */
-	params->position_rad = angle_observer_get_mech_angle_deg(&params->observer) * (PI_F32 / 180.0f);
-	params->velocity_rad_s = angle_observer_get_mech_speed_hz(&params->observer) * (2.0f * PI_F32);
+	max_voltage_magnitude_V = params->max_modulation_index * Vbus_V;
+	pi_set_min_max(&params->pi_Id, -max_voltage_magnitude_V, max_voltage_magnitude_V);
+	pi_run_series(&params->pi_Id, Id_ref_A, Id_A, 0.0f, &Vd_V);
 
-	params->Id_A = Id_A;
-	params->Iq_A = Iq_A;
-	params->Ia_A = Ia_A;
-	params->Ib_A = Ib_A;
-	params->elec_angle_rad = ctrl_angle_deg * (PI_F32 / 180.0f);
-	params->dc_bus_voltage_V = Vbus_V;
-
-	params->max_voltage_magnitude_V = params->max_modulation_index * Vbus_V;
-	pi_set_min_max(&params->pi_Id, -params->max_voltage_magnitude_V, params->max_voltage_magnitude_V);
-	pi_run_series(&params->pi_Id, Id_ref_A, Id_A, 0.0f, &params->Vd_V);
-
-	Vq_limit_V = sqrtf((params->max_voltage_magnitude_V * params->max_voltage_magnitude_V) - (params->Vd_V * params->Vd_V));
+	Vq_limit_V = sqrtf((max_voltage_magnitude_V * max_voltage_magnitude_V) - (Vd_V * Vd_V));
 	pi_set_min_max(&params->pi_Iq, -Vq_limit_V, Vq_limit_V);
-	pi_run_series(&params->pi_Iq, Iq_ref_A, Iq_A, 0.0f, &params->Vq_V);
+	pi_run_series(&params->pi_Iq, Iq_ref_A, Iq_A, 0.0f, &Vq_V);
 
-	/* For normal FOC, recalculate sin/cos with predicted angle for voltage output compensation
-	 * Calibration states reuse sin_theta/cos_theta from control frame (no prediction needed)
+	/* Advance angle generators and recalculate sin/cos with predicted angle for voltage output
+	 * This compensates for the fact that computed voltages will be applied in the next cycle
 	 */
-	if (params->state_for_isr != &motor_states[MOTOR_STATE_RS_EST] &&
-	    params->state_for_isr != &motor_states[MOTOR_STATE_ALIGN] &&
-	    params->state_for_isr != &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
-		float32_t pred_angle_deg = angle_observer_get_elec_angle_pred_deg(&params->observer);
-		arm_sin_cos_f32(pred_angle_deg, &sin_theta, &cos_theta);
+	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
+		/* Advance R/L excitation angle and use next angle for inverse Park */
+		angle_gen_run(&params->angle_gen_roverl);
+		ctrl_angle_deg= angle_gen_get_angle_deg(&params->angle_gen_roverl);
+	} else if (params->state_for_isr != &motor_states[MOTOR_STATE_RS_EST] &&
+	           params->state_for_isr != &motor_states[MOTOR_STATE_ALIGN]) {
+		/* Normal FOC: use predicted rotor angle */
+		ctrl_angle_deg = angle_observer_get_elec_angle_pred_deg(&params->observer);
 	}
 
-	/* Transform voltages to stationary frame */
-	arm_inv_park_f32(params->Vd_V, params->Vq_V, &Va_V, &Vb_V, sin_theta, cos_theta);
+	/* Calculate sin and cos of control angle */
+	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
 
-	/* Update voltage telemetry snapshot */
-	params->Va_V = Va_V;
-	params->Vb_V = Vb_V;
+	/* Transform voltages to stationary frame */
+	arm_inv_park_f32(Vd_V, Vq_V, &Va_V, &Vb_V, sin_theta, cos_theta);
 
 	/* Normalize voltage commands to available bus voltage */
 	Ua_pu = Va_V * Vbus_inv;
 	Ub_pu = Vb_V * Vbus_inv;
 
 	/* Apply SVPWM modulation - outputs duty cycles in [0,1] range */
-	pwmgen_svpwm_2phase_f32(Ua_pu, Ub_pu, &Da_pu, &Db_pu);
+	pwmgen_spwm_2phase_f32(Ua_pu, Ub_pu, &Da_pu, &Db_pu);
 
 	/* Complementary PWM for H-bridge control
 	 * Half-bridge 1: Da_pu [0,1]
@@ -379,6 +364,22 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	 */
 	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1, Da_hb1_pu, Da_hb2_pu);
 	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, Db_hb1_pu, Db_hb2_pu);
+
+	/* Update telemetry snapshot (convert from deg/Hz to rad/rad_s) */
+	params->position_rad = angle_observer_get_mech_angle_deg(&params->observer) * (PI_F32 / 180.0f);
+	params->velocity_rad_s = angle_observer_get_mech_speed_hz(&params->observer) * (2.0f * PI_F32);
+
+	params->Id_A = Id_A;
+	params->Iq_A = Iq_A;
+	params->Ia_A = Ia_A;
+	params->Ib_A = Ib_A;
+	params->Vd_V = Vd_V;
+	params->Vq_V = Vq_V;
+	params->Va_V = Va_V;
+	params->Vb_V = Vb_V;
+	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
+	params->elec_angle_rad = ctrl_angle_deg * (PI_F32 / 180.0f);
+	params->dc_bus_voltage_V = Vbus_V;
 
 isr_done:
 	/* Measure ISR execution time */

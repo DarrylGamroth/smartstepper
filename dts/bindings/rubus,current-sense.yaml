@@ -13,6 +13,13 @@ properties:
       ADC channel configurations as <channel polarity> tuples.
       Polarity: CURRENT_SENSE_POSITIVE (1) or CURRENT_SENSE_NEGATIVE (-1).
 
+  adc-buffer-indices:
+    type: array
+    required: true
+    description: |
+      Indices into the ADC results buffer where each channel's data is stored.
+      Must match the order of channels property (index 0 for first channel, etc.).
+
   current-sense-resistor-uohms:
     type: int
     required: true
