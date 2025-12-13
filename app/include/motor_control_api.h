@@ -70,24 +70,22 @@ int motor_api_request_stop(void);
 int motor_api_request_calibrate(void);
 
 /**
- * @brief Update control parameter by offset (thread-safe)
- * 
- * Posts parameter update to state machine thread via message queue.
- * Parameter is written to shadow buffer and swap is triggered.
- * 
- * @param param_offset Offset into motor_control_params structure
- * @param value New parameter value
- * @return 0 on success, negative errno on failure
- * 
- * @note This function is non-blocking. Update will occur asynchronously
- *       in the state machine thread, then ISR will swap buffers.
- */
-int motor_api_update_param(uint16_t param_offset, float value);
-
-/**
  * @brief Update control parameter by name (thread-safe)
  * 
- * Looks up parameter by name in the parameter table and updates it.
+ * Posts parameter update to state machine thread via message queue.
+ * State machine will apply the update when it processes the event.
+ * 
+ * @param name Parameter name (Id_setpoint_A or Iq_setpoint_A)
+ * @param value New parameter value
+ * @return 0 on success, -EINVAL if parameter not found, -ENOMEM if queue full
+ * 
+ * @note This function is non-blocking. Update will occur asynchronously
+ *       when the state machine processes the PARAM_UPDATE event.
+ */
+int motor_api_update_param(const char *name, float value);
+
+/**
+ * @brief Update control parameter by name (alias for motor_api_update_param)
  * 
  * @param name Parameter name string
  * @param value New parameter value

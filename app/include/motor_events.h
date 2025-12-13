@@ -28,7 +28,7 @@ struct motor_event {
 	enum motor_event_type type;
 	union {
 		struct {
-			uint16_t param_offset;   /* Offset into motor_control_params */
+			uint8_t param_id;        /* Parameter ID (0=Id_setpoint_A, 1=Iq_setpoint_A) */
 			float value;
 		} param_update;
 		uint32_t error_code;         /* Error code for EMERGENCY_STOP events */

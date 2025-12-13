@@ -18,25 +18,10 @@
 #include "motor_events.h"
 
 /**
- * @brief Double-buffered motor control parameters
- *
- * Shell-writable STATELESS parameters that can be modified at runtime without
- * disrupting the control loop. ISR reads from read_buffer, shell writes
- * to write_buffer, and swap is atomic.
- *
- * IMPORTANT: Only put stateless values here (setpoints, references).
- * Do NOT put stateful objects (PI controllers with integrators, filters).
- */
-struct motor_control_params {
-	float32_t Id_setpoint_A;
-	float32_t Iq_setpoint_A;
-};
-
-/**
  * @brief Main motor control parameters structure
  *
  * Contains all state needed for motor control including SMF state machine,
- * control parameters (double-buffered), filters, observers, and telemetry.
+ * control parameters, filters, observers, and telemetry.
  */
 struct motor_parameters {
 	/* State machine */
@@ -44,11 +29,6 @@ struct motor_parameters {
 	const struct smf_state *state_for_isr;
 	struct motor_event event;  /* Current event being processed */
 	struct k_timer state_timer;  /* Timer for state timeouts */
-
-	/* Double-buffered control parameters (index-based for minimal overhead) */
-	struct motor_control_params ctrl_buf[2];     /* Two buffers */
-	volatile uint8_t ctrl_index;                 /* ISR reads ctrl_buf[ctrl_index], shell writes ctrl_buf[ctrl_index^1] */
-	volatile bool ctrl_swap_pending;             /* Set by shell, cleared by ISR */
 
 	/* PI controllers (stateful - NOT double buffered) */
 	struct pi_f32 pi_Id;
@@ -65,13 +45,11 @@ struct motor_parameters {
 	struct filter_fo_f32 filter_rs_est_V;
 	struct filter_fo_f32 filter_rs_est_I;
 
-	/* Current references (computed by control loop) */
-	float32_t Id_ref_A;
-	float32_t Iq_ref_A;
+	/* Current setpoints */
+	float32_t Id_setpoint_A;
+	float32_t Iq_setpoint_A;
 
 	/* Voltage references (computed by PI controllers) */
-	float32_t Vd_ref_V;
-	float32_t Vq_ref_V;
 	float32_t max_voltage_magnitude_V;
 
 	/* Applied voltages (after SVPWM limiting) */
@@ -108,6 +86,8 @@ struct motor_parameters {
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
 	float32_t velocity_rad_s;
+	float32_t Id_ref_A;
+	float32_t Iq_ref_A;	
 	float32_t Id_A;
 	float32_t Iq_A;
 	float32_t Ia_A;

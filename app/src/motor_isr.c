@@ -143,15 +143,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
 	const struct smf_state *state = params->state_for_isr;
 
-	/* Double-buffer swap: atomically toggle index between 0 and 1
-	 * Shell writes to ctrl_buf[ctrl_index^1], ISR reads from ctrl_buf[ctrl_index].
-	 * XOR toggle is single instruction - minimal ISR overhead.
-	 */
-	if (params->ctrl_swap_pending) {
-		params->ctrl_index ^= 1;
-		params->ctrl_swap_pending = false;
-	}
-
 	/* Increment control loop counter */
 	params->control_loop_count++;
 
@@ -165,7 +156,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Da_pu, Db_pu;
 	float32_t Da_hb1_pu, Da_hb2_pu, Db_hb1_pu, Db_hb2_pu;
 	float32_t Vq_limit_V;
-	float32_t Id_ref_A, Iq_ref_A;
+	float32_t Id_ref_A = 0.0f, Iq_ref_A = 0.0f;
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 
@@ -247,8 +238,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
 		traj_run(&params->traj_Id);
 
-		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
-		params->Iq_ref_A = 0.0f;
+		Id_ref_A = traj_get_int_value(&params->traj_Id);
+		Iq_ref_A = 0.0f;
 
 		/* Check if settling period complete using trajectory target */
 		if (traj_is_at_target(&params->traj_Id)) {
@@ -263,8 +254,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
 		traj_run(&params->traj_Id);
 
-		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
-		params->Iq_ref_A = 0.0f;
+		Id_ref_A = traj_get_int_value(&params->traj_Id);
+		Iq_ref_A = 0.0f;
 
 		/* After rampup complete: filter voltage and current measurements using previous cycle's voltage */
 		if (traj_is_at_target(&params->traj_Id)) {
@@ -277,13 +268,18 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	if (state == &motor_states[MOTOR_STATE_ALIGN]) {
 		traj_run(&params->traj_Id);
 
-		params->Id_ref_A = traj_get_int_value(&params->traj_Id);
-		params->Iq_ref_A = 0.0f;
+		Id_ref_A = traj_get_int_value(&params->traj_Id);
+		Iq_ref_A = 0.0f;
 	}
 
 	/* Run PI controllers for all states (measurement and control) */
-	Id_ref_A = params->Id_ref_A;
-	Iq_ref_A = params->Iq_ref_A;
+	if (state != &motor_states[MOTOR_STATE_ROVERL_MEAS] &&
+	    state != &motor_states[MOTOR_STATE_RS_EST] &&
+	    state != &motor_states[MOTOR_STATE_ALIGN]) {
+		/* Normal FOC operation: use commanded current references */
+		Id_ref_A = params->Id_setpoint_A;
+		Iq_ref_A = params->Iq_setpoint_A;
+	}
 
 	max_voltage_magnitude_V = params->max_modulation_index * Vbus_V;
 	pi_set_min_max(&params->pi_Id, -max_voltage_magnitude_V, max_voltage_magnitude_V);
@@ -369,6 +365,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	params->position_rad = angle_observer_get_mech_angle_deg(&params->observer) * (PI_F32 / 180.0f);
 	params->velocity_rad_s = angle_observer_get_mech_speed_hz(&params->observer) * (2.0f * PI_F32);
 
+	params->Id_ref_A = Id_ref_A;
+	params->Iq_ref_A = Iq_ref_A;
 	params->Id_A = Id_A;
 	params->Iq_A = Iq_A;
 	params->Ia_A = Ia_A;

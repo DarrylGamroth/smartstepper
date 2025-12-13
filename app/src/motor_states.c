@@ -438,7 +438,7 @@ static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 
 		/* TODO: Use R/L to calculate initial PI current controller gains:
 		 * Kp = bandwidth * L
-		 * Ki = bandwidth * R
+		 * Ki = R/L * Ts
 		 * This will be done when PI controllers are reconfigured
 		 */
 
@@ -602,9 +602,8 @@ static void motor_state_idle_entry(void *obj)
 	LOG_INF("Entering IDLE state");
 	/* Disable motor outputs */
 
-	/* Clear current references (trajectory stops running after state exit) */
-	params->Id_ref_A = 0.0f;
-	params->Iq_ref_A = 0.0f;
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
 }
 
 static enum smf_state_result motor_state_idle_run(void *obj)
@@ -725,9 +724,8 @@ static void motor_state_error_entry(void *obj)
 	drv8328_disable_all_channels(gate_driver_a);
 	drv8328_disable_all_channels(gate_driver_b);
 
-	/* Clear current references for good measure */
-	params->Id_ref_A = 0.0f;
-	params->Iq_ref_A = 0.0f;
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
 }
 
 static enum smf_state_result motor_state_error_run(void *obj)

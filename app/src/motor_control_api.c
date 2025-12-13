@@ -19,24 +19,6 @@ static struct motor_parameters *g_motor_params = NULL;
 static struct motor_event cached_event;
 static bool event_cached = false;
 
-/* Parameter descriptor for name-based access */
-struct param_descr {
-	const char *name;
-	uint16_t offset;
-};
-
-/* Parameter table - double-buffered control parameters only */
-#define PARAM_DESCR(field_name_) \
-	{ \
-		.name = #field_name_, \
-		.offset = offsetof(struct motor_control_params, field_name_), \
-	}
-
-static const struct param_descr param_table[] = {
-	PARAM_DESCR(Id_setpoint_A),
-	PARAM_DESCR(Iq_setpoint_A),
-};
-
 int motor_control_api_init(struct motor_parameters *params)
 {
 	if (params == NULL) {
@@ -106,13 +88,22 @@ int motor_api_request_calibrate(void)
 	return 0;
 }
 
-int motor_api_update_param(uint16_t param_offset, float value)
+int motor_api_update_param(const char *name, float value)
 {
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_PARAM_UPDATE,
-		.param_update.param_offset = param_offset,
-		.param_update.value = value,
 	};
+	
+	/* Store parameter name and value in event */
+	if (strcmp(name, "Id_setpoint_A") == 0) {
+		evt.param_update.param_id = 0;
+	} else if (strcmp(name, "Iq_setpoint_A") == 0) {
+		evt.param_update.param_id = 1;
+	} else {
+		return -EINVAL;  /* Parameter not found */
+	}
+	
+	evt.param_update.value = value;
 	
 	/* Non-blocking post to queue */
 	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
@@ -121,19 +112,13 @@ int motor_api_update_param(uint16_t param_offset, float value)
 		return -ENOMEM;
 	}
 	
-	LOG_DBG("Parameter update posted: offset=%u, value=%.6f", param_offset, (double)value);
+	LOG_DBG("Parameter update posted: %s=%.6f", name, (double)value);
 	return 0;
 }
 
 int motor_api_set_param(const char *name, float value)
 {
-	/* Linear search through parameter table */
-	for (size_t i = 0; i < ARRAY_SIZE(param_table); i++) {
-		if (strcmp(name, param_table[i].name) == 0) {
-			return motor_api_update_param(param_table[i].offset, value);
-		}
-	}
-	return -EINVAL;  /* Parameter not found */
+	return motor_api_update_param(name, value);
 }
 
 int motor_api_get_param(const char *name, float *value)
@@ -142,43 +127,48 @@ int motor_api_get_param(const char *name, float *value)
 		return -ENODEV;
 	}
 	
-	/* Linear search through parameter table */
-	for (size_t i = 0; i < ARRAY_SIZE(param_table); i++) {
-		if (strcmp(name, param_table[i].name) == 0) {
-			/* Read from write buffer (protocol's view of pending parameters) */
-			uint8_t write_index = g_motor_params->ctrl_index ^ 1;
-			*value = *(float *)((uint8_t *)&g_motor_params->ctrl_buf[write_index] + 
-			                   param_table[i].offset);
-			return 0;
-		}
+	/* Direct read from current setpoints */
+	if (strcmp(name, "Id_setpoint_A") == 0) {
+		*value = g_motor_params->Id_setpoint_A;
+		return 0;
+	} else if (strcmp(name, "Iq_setpoint_A") == 0) {
+		*value = g_motor_params->Iq_setpoint_A;
+		return 0;
 	}
+	
 	return -EINVAL;  /* Parameter not found */
 }
 
 size_t motor_api_get_param_count(void)
 {
-	return ARRAY_SIZE(param_table);
+	return 2;  /* Id_setpoint_A and Iq_setpoint_A */
 }
 
 const char *motor_api_get_param_name(size_t index)
 {
-	if (index >= ARRAY_SIZE(param_table)) {
-		return NULL;
+	switch (index) {
+	case 0: return "Id_setpoint_A";
+	case 1: return "Iq_setpoint_A";
+	default: return NULL;
 	}
-	return param_table[index].name;
 }
 
 int motor_api_get_param_by_index(size_t index, float *value)
 {
-	if (!g_motor_params || index >= ARRAY_SIZE(param_table)) {
-		return -EINVAL;
+	if (!g_motor_params) {
+		return -ENODEV;
 	}
 	
-	/* Read from write buffer */
-	uint8_t write_index = g_motor_params->ctrl_index ^ 1;
-	*value = *(float *)((uint8_t *)&g_motor_params->ctrl_buf[write_index] + 
-	                   param_table[index].offset);
-	return 0;
+	switch (index) {
+	case 0:
+		*value = g_motor_params->Id_setpoint_A;
+		return 0;
+	case 1:
+		*value = g_motor_params->Iq_setpoint_A;
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 int motor_api_set_currents(float id_A, float iq_A)
@@ -186,15 +176,13 @@ int motor_api_set_currents(float id_A, float iq_A)
 	int ret;
 	
 	/* Post Id update */
-	ret = motor_api_update_param(
-		offsetof(struct motor_control_params, Id_setpoint_A), id_A);
+	ret = motor_api_update_param("Id_setpoint_A", id_A);
 	if (ret != 0) {
 		return ret;
 	}
 	
 	/* Post Iq update */
-	ret = motor_api_update_param(
-		offsetof(struct motor_control_params, Iq_setpoint_A), iq_A);
+	ret = motor_api_update_param("Iq_setpoint_A", iq_A);
 	if (ret != 0) {
 		return ret;
 	}
@@ -334,20 +322,20 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		return;
 	}
 
-	/* Write to shadow buffer (write index = ctrl_index XOR 1) */
-	uint8_t write_idx = params->ctrl_index ^ 1;
-	uint8_t *shadow_base = (uint8_t *)&params->ctrl_buf[write_idx];
-
-	/* Direct offset write */
-	*(float *)(shadow_base + params->event.param_update.param_offset) = 
-		params->event.param_update.value;
-
-	/* Signal ISR to swap buffers on next control cycle */
-	params->ctrl_swap_pending = true;
-
-	LOG_DBG("Parameter updated: offset=%u, value=%.6f", 
-	        params->event.param_update.param_offset, 
-	        (double)params->event.param_update.value);
+	/* Direct write to setpoint fields based on param_id */
+	switch (params->event.param_update.param_id) {
+	case 0:  /* Id_setpoint_A */
+		params->Id_setpoint_A = params->event.param_update.value;
+		LOG_DBG("Updated Id_setpoint_A = %.3f A", (double)params->event.param_update.value);
+		break;
+	case 1:  /* Iq_setpoint_A */
+		params->Iq_setpoint_A = params->event.param_update.value;
+		LOG_DBG("Updated Iq_setpoint_A = %.3f A", (double)params->event.param_update.value);
+		break;
+	default:
+		LOG_ERR("Unknown parameter ID: %u", params->event.param_update.param_id);
+		break;
+	}
 }
 
 void motor_api_consume_event(void)
