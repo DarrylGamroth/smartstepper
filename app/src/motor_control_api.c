@@ -539,6 +539,10 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			LOG_ERR("Rejected command_timeout_ms < 0");
 			break;
 		}
+		if (params->event.param_update.value > (float)UINT32_MAX) {
+			LOG_ERR("Rejected command_timeout_ms > UINT32_MAX");
+			break;
+		}
 		params->command_timeout_ms = (uint32_t)(params->event.param_update.value + 0.5f);
 		if (params->command_timeout_ms == 0U) {
 			params->command_timeout_latched = false;
