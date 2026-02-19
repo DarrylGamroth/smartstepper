@@ -1029,8 +1029,8 @@ static int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **a
 	uint8_t status = (uint8_t)(raw.val1 & 0xFF);
 	shell_print(sh, "AEAT-9955 alarm/error status:");
 	shell_print(sh, "  Raw status: 0x%02X", status);
-	shell_print(sh, "  MHI:        %s", (mhi.val1 != 0) ? "SET" : "clear");
-	shell_print(sh, "  MLO:        %s", (mlo.val1 != 0) ? "SET" : "clear");
+	shell_print(sh, "  MHI:        %s", (mhi.val1 != 0) ? "SET" : "CLEAR");
+	shell_print(sh, "  MLO:        %s", (mlo.val1 != 0) ? "SET" : "CLEAR");
 
 	return 0;
 #endif
