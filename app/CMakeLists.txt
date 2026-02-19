@@ -19,9 +19,11 @@ target_sources(app PRIVATE
 	src/rls_motor_est.c
 	src/thermal_model.c
 	src/shell_commands.c
+	src/shell_commands_motion.c
 	src/motor_control_api.c
 	src/motor_isr.c
 	src/motor_states.c
+	src/motor_states_online.c
 	src/motor_hardware.c
 )
 target_include_directories(app PRIVATE include)
