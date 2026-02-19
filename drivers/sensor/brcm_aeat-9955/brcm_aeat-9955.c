@@ -917,6 +917,7 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 
 	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
 				 sizeof(sample->raw), NULL);
+	txrx_sqe->flags |= RTIO_SQE_CHAINED;
 
 	rtio_sqe_prep_callback_no_cqe(complete_sqe, aeat9955_complete_result, iodev_sqe, NULL);
 

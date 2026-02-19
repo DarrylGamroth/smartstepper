@@ -482,6 +482,7 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 
 	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
 				 sizeof(sample->raw), (void *)dev);
+	txrx_sqe->flags |= RTIO_SQE_CHAINED;
 
 	rtio_sqe_prep_callback_no_cqe(complete_sqe, mt6835_complete_result, iodev_sqe, NULL);
 
