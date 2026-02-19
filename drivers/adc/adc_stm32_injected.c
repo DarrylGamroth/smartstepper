@@ -1012,7 +1012,7 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 
 	/* Per RM0433: Queue mode (JQDIS) must be set while ADEN=0 */
 	/* We disabled ADC before calling this function */
-	LL_ADC_INJ_SetQueueMode(adc, LL_ADC_INJ_QUEUE_DISABLE);
+	// LL_ADC_INJ_SetQueueMode(adc, LL_ADC_INJ_QUEUE_DISABLE);
 
 	/* Configure JSQR register: sequence length first */
 	LL_ADC_INJ_SetSequencerLength(adc, table_inj_seq_len[config->num_channels - 1]);
@@ -1334,14 +1334,6 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
 	/* Read all injected conversions in rank order and convert to Q31 */
 	for (uint32_t i = 0; i < num_channels; i++) {
 		uint32_t raw_value = LL_ADC_INJ_ReadConversionData32(adc, table_inj_rank[i]);
-
-		/* Convert to Q31 with rounding (single-ended: 0 to +full_scale)
-		 * If LSB of raw value is set, fill unused lower bits with 1s for rounding
-		 */
-		// uint8_t shift = 31 - data->resolution;
-		// uint32_t fill_mask = (0U - (raw_value & 1U)) & ((1U << shift) - 1U);
-
-		// data->inj_values[i] = (q31_t)((raw_value << shift) | fill_mask);
 		data->inj_values[i] = (q31_t)(raw_value << (31 - data->resolution));
 	}
 

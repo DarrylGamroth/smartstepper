@@ -27,6 +27,15 @@ void shell_set_motor_params(struct motor_parameters *params)
 	g_motor_params = params;
 }
 
+/**
+ * @brief Get global motor parameters pointer
+ * @return Pointer to motor parameters, or NULL if not set
+ */
+struct motor_parameters *shell_get_motor_params(void)
+{
+	return g_motor_params;
+}
+
 /*============================================================================
  * Shell Command Implementations
  *============================================================================*/
@@ -151,26 +160,64 @@ static int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv
 	}
 }
 
-/* motor state start */
-static int cmd_motor_state_start(const struct shell *sh, size_t argc, char **argv)
+/* motor state offline */
+static int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 	
-	motor_api_request_start();
-	shell_print(sh, "Motor start requested");
-	return 0;
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_offline() == 0) {
+		shell_print(sh, "OFFLINE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request OFFLINE state");
+		return -EIO;
+	}
 }
 
-/* motor state stop */
-static int cmd_motor_state_stop(const struct shell *sh, size_t argc, char **argv)
+/* motor state idle */
+static int cmd_motor_state_idle(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 	
-	motor_api_request_stop();
-	shell_print(sh, "Motor stop requested");
-	return 0;
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_idle() == 0) {
+		shell_print(sh, "IDLE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request IDLE state");
+		return -EIO;
+	}
+}
+
+/* motor state online */
+static int cmd_motor_state_online(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_online() == 0) {
+		shell_print(sh, "ONLINE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request ONLINE state");
+		return -EIO;
+	}
 }
 
 /* motor state calibrate */
@@ -184,6 +231,21 @@ static int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char *
 		return 0;
 	} else {
 		shell_error(sh, "Failed to start calibration");
+		return -EIO;
+	}
+}
+
+/* motor state clear_error */
+static int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (motor_api_clear_error() == 0) {
+		shell_print(sh, "Error cleared");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to clear error");
 		return -EIO;
 	}
 }
@@ -203,6 +265,132 @@ static int cmd_motor_state_status(const struct shell *sh, size_t argc, char **ar
 	shell_print(sh, "  State: %s (%d)", state_str, state);
 	shell_print(sh, "  Error: %s (%d)", error_str, error);
 	
+	return 0;
+}
+
+/* Helper function for mode changes */
+static int motor_request_mode_change(const struct shell *sh, enum motor_state target_state, const char *mode_name)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	/* Post mode change event to state machine */
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_MODE_CHANGE,
+		.target_mode = target_state,
+	};
+
+	extern struct k_msgq motor_event_queue;
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		shell_error(sh, "Failed to post mode change event: queue full");
+		return -ENOMEM;
+	}
+
+	shell_print(sh, "Mode change to %s requested", mode_name);
+	return 0;
+}
+
+/* motor state mode torque */
+static int cmd_motor_state_mode_torque(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_TORQUE, "torque");
+}
+
+/* motor state mode velocity_open */
+static int cmd_motor_state_mode_velocity_open(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_OPEN, "velocity_open");
+}
+
+/* motor state mode velocity_closed */
+static int cmd_motor_state_mode_velocity_closed(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_CLOSED, "velocity_closed");
+}
+
+/* motor velocity target <hz> */
+static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor velocity target <hz>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	/* Check if in velocity open mode */
+	if (g_motor_params->state_for_isr != &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]) {
+		shell_error(sh, "Not in velocity open-loop mode. Use 'motor state mode velocity_open' first.");
+		return -EACCES;
+	}
+
+	float target_hz = strtof(argv[1], NULL);
+	/* Convert Hz to mechanical rad/s for trajectory */
+	float target_rad_s = target_hz * 2.0f * PI_F32;
+	
+	/* Set trajectory target (thread-safe access) */
+	traj_set_target_value(&g_motor_params->traj_velocity, target_rad_s);
+
+	shell_print(sh, "Velocity target set to %.2f Hz", (double)target_hz);
+	return 0;
+}
+
+/* motor velocity status */
+static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	/* Check if in velocity open mode */
+	if (g_motor_params->state_for_isr != &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]) {
+		shell_print(sh, "Velocity controller: INACTIVE");
+		return 0;
+	}
+
+	/* Get values from trajectory (in rad/s) and convert to Hz for display */
+	float target_rad_s = traj_get_target_value(&g_motor_params->traj_velocity);
+	float current_rad_s = traj_get_int_value(&g_motor_params->traj_velocity);
+	float target_hz = target_rad_s / (2.0f * PI_F32);
+	float current_hz = current_rad_s / (2.0f * PI_F32);
+	float error_hz = target_hz - current_hz;
+	bool at_target = traj_is_at_target(&g_motor_params->traj_velocity);
+
+	/* Determine motion state */
+	const char *motion_str;
+	if (fabsf(current_rad_s) < 0.1f && fabsf(target_rad_s) < 0.1f) {
+		motion_str = "STOPPED";
+	} else if (at_target) {
+		motion_str = "AT_SPEED";
+	} else if (fabsf(target_rad_s) > fabsf(current_rad_s)) {
+		motion_str = "ACCELERATING";
+	} else {
+		motion_str = "DECELERATING";
+	}
+
+	shell_print(sh, "Velocity Controller Status:");
+	shell_print(sh, "  Target:     %.2f Hz", (double)target_hz);
+	shell_print(sh, "  Current:    %.2f Hz", (double)current_hz);
+	shell_print(sh, "  Error:      %.2f Hz", (double)error_hz);
+	shell_print(sh, "  At Target:  %s", at_target ? "YES" : "NO");
+	shell_print(sh, "  Motion:     %s", motion_str);
+
 	return 0;
 }
 
@@ -430,6 +618,164 @@ static int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv
 	return 0;
 }
 
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+/* motor rls status */
+static int cmd_motor_rls_status(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -EINVAL;
+	}
+	
+	shell_print(sh, "RLS Estimator Status:");
+	shell_print(sh, "");
+	
+	/* D-axis status */
+	bool d_converged = rls_motor_est_is_converged(&g_motor_params->rls_d);
+	float32_t d_residual = rls_motor_est_get_residual(&g_motor_params->rls_d);
+	shell_print(sh, "D-axis:");
+	shell_print(sh, "  Converged:     %s", d_converged ? "YES" : "NO");
+	shell_print(sh, "  Residual:      %.6f V", (double)d_residual);
+	shell_print(sh, "  Update count:  %u", g_motor_params->rls_d.num_updates);
+	
+	/* Q-axis status */
+	bool q_converged = rls_motor_est_is_converged(&g_motor_params->rls_q);
+	float32_t q_residual = rls_motor_est_get_residual(&g_motor_params->rls_q);
+	shell_print(sh, "");
+	shell_print(sh, "Q-axis:");
+	shell_print(sh, "  Converged:     %s", q_converged ? "YES" : "NO");
+	shell_print(sh, "  Residual:      %.6f V", (double)q_residual);
+	shell_print(sh, "  Update count:  %u", g_motor_params->rls_q.num_updates);
+	
+	return 0;
+}
+
+/* motor rls params */
+static int cmd_motor_rls_params(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -EINVAL;
+	}
+	
+	/* D-axis estimates */
+	float32_t Rs_d = rls_motor_est_get_Rs(&g_motor_params->rls_d);
+	float32_t Ld = rls_motor_est_get_L(&g_motor_params->rls_d);
+	float32_t Vbias_d = rls_motor_est_get_Vbias(&g_motor_params->rls_d);
+	float32_t Vdt_d = rls_motor_est_get_Vdt_sign(&g_motor_params->rls_d);
+	
+	/* Q-axis estimates */
+	float32_t Rs_q = rls_motor_est_get_Rs(&g_motor_params->rls_q);
+	float32_t Lq = rls_motor_est_get_L(&g_motor_params->rls_q);
+	float32_t Vbias_q = rls_motor_est_get_Vbias(&g_motor_params->rls_q);
+	float32_t Vdt_q = rls_motor_est_get_Vdt_sign(&g_motor_params->rls_q);
+	
+	/* Averaged/synthesized values */
+	float32_t Rs_avg = g_motor_params->Rs_measured_ohm;
+	
+	shell_print(sh, "RLS Parameter Estimates:");
+	shell_print(sh, "");
+	shell_print(sh, "Resistance:");
+	shell_print(sh, "  Rs (d-axis):   %.6f Ω", (double)Rs_d);
+	shell_print(sh, "  Rs (q-axis):   %.6f Ω", (double)Rs_q);
+	shell_print(sh, "  Rs (averaged): %.6f Ω", (double)Rs_avg);
+	shell_print(sh, "");
+	shell_print(sh, "Inductance:");
+	shell_print(sh, "  Ld:            %.6f H (%.3f mH)", (double)Ld, (double)(Ld * 1000.0f));
+	shell_print(sh, "  Lq:            %.6f H (%.3f mH)", (double)Lq, (double)(Lq * 1000.0f));
+	shell_print(sh, "  Saliency:      %.3f", (double)(Lq / Ld));
+	shell_print(sh, "");
+	shell_print(sh, "Nonlinearities:");
+	shell_print(sh, "  Vbias (d):     %.6f V", (double)Vbias_d);
+	shell_print(sh, "  Vbias (q):     %.6f V", (double)Vbias_q);
+	shell_print(sh, "  Vdt*sign (d):  %.6f V", (double)Vdt_d);
+	shell_print(sh, "  Vdt*sign (q):  %.6f V", (double)Vdt_q);
+	
+	return 0;
+}
+
+/* motor rls temp */
+static int cmd_motor_rls_temp(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -EINVAL;
+	}
+	
+	float32_t T_rls = g_motor_params->T_rls_C;
+	float32_t T_thermal = thermal_model_get_temperature(&g_motor_params->thermal);
+	float32_t P_loss = thermal_model_get_power_loss(&g_motor_params->thermal);
+	float32_t T_delta = T_rls - T_thermal;
+	
+	shell_print(sh, "Temperature Estimates:");
+	shell_print(sh, "");
+	shell_print(sh, "  T_rls (from Rs):       %.2f °C", (double)T_rls);
+	shell_print(sh, "  T_thermal (model):     %.2f °C", (double)T_thermal);
+	shell_print(sh, "  Delta:                 %.2f °C", (double)T_delta);
+	shell_print(sh, "");
+	shell_print(sh, "Thermal Model:");
+	shell_print(sh, "  Power loss:            %.3f W", (double)P_loss);
+	shell_print(sh, "  Ambient temp:          %.2f °C", (double)g_motor_params->thermal.T_ambient);
+	shell_print(sh, "  R_th:                  %.3f °C/W", (double)g_motor_params->thermal.R_th);
+	shell_print(sh, "  C_th:                  %.1f J/°C", (double)g_motor_params->thermal.C_th);
+	
+	return 0;
+}
+
+/* motor rls gating */
+static int cmd_motor_rls_gating(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -EINVAL;
+	}
+	
+	shell_print(sh, "RLS Gating Conditions:");
+	shell_print(sh, "");
+	shell_print(sh, "Thresholds:");
+	shell_print(sh, "  Min current:     %.3f A", (double)g_motor_params->rls_min_current_A);
+	/* Convert rad/s to Hz for display */
+	float32_t min_speed_hz = g_motor_params->rls_min_speed_rad_s / (2.0f * PI_F32);
+	shell_print(sh, "  Min speed:       %.2f Hz", (double)min_speed_hz);
+	shell_print(sh, "  Max voltage:     %.2f V", (double)g_motor_params->rls_max_voltage_V);
+	shell_print(sh, "  Max residual:    %.4f V", (double)g_motor_params->rls_max_residual);
+	shell_print(sh, "");
+	shell_print(sh, "Current Status:");
+	float32_t Id_abs = fabsf(g_motor_params->Id_A);
+	float32_t Iq_abs = fabsf(g_motor_params->Iq_A);
+	float32_t omega_hz = fabsf(g_motor_params->velocity_rad_s / (2.0f * PI_F32));
+	shell_print(sh, "  |Id|:             %.3f A %s", (double)Id_abs,
+	            Id_abs > g_motor_params->rls_min_current_A ? "[OK]" : "[LOW]");
+	shell_print(sh, "  |Iq|:             %.3f A %s", (double)Iq_abs,
+	            Iq_abs > g_motor_params->rls_min_current_A ? "[OK]" : "[LOW]");
+	shell_print(sh, "  Speed:           %.2f Hz %s", (double)omega_hz,
+	            omega_hz > min_speed_hz ? "[OK]" : "[LOW]");
+	shell_print(sh, "  D residual:      %.6f V %s", (double)g_motor_params->rls_d.residual,
+	            fabsf(g_motor_params->rls_d.residual) < g_motor_params->rls_max_residual ? "[OK]" : "[HIGH]");
+	shell_print(sh, "  Q residual:      %.6f V %s", (double)g_motor_params->rls_q.residual,
+	            fabsf(g_motor_params->rls_q.residual) < g_motor_params->rls_max_residual ? "[OK]" : "[HIGH]");
+	
+	return 0;
+}
+
+/* motor rls reset */
+static int cmd_motor_rls_reset(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -EINVAL;
+	}
+	
+	/* Reset both RLS estimators */
+	rls_motor_est_reset(&g_motor_params->rls_d);
+	rls_motor_est_reset(&g_motor_params->rls_q);
+	
+	shell_print(sh, "RLS estimators reset");
+	
+	return 0;
+}
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+
 /*============================================================================
  * Shell Command Tree
  *============================================================================*/
@@ -450,12 +796,23 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor state mode subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state_mode,
+	SHELL_CMD(torque, NULL, "Torque (Id/Iq) control mode", cmd_motor_state_mode_torque),
+	SHELL_CMD(velocity_open, NULL, "Open-loop velocity control mode", cmd_motor_state_mode_velocity_open),
+	SHELL_CMD(velocity_closed, NULL, "Closed-loop velocity control mode", cmd_motor_state_mode_velocity_closed),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor state subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
-	SHELL_CMD(start, NULL, "Start motor", cmd_motor_state_start),
-	SHELL_CMD(stop, NULL, "Stop motor", cmd_motor_state_stop),
+	SHELL_CMD(idle, NULL, "Transition to IDLE state", cmd_motor_state_idle),
+	SHELL_CMD(offline, NULL, "Transition to OFFLINE state", cmd_motor_state_offline),
+	SHELL_CMD(online, NULL, "Transition to ONLINE state", cmd_motor_state_online),
 	SHELL_CMD(calibrate, NULL, "Run calibration sequence", cmd_motor_state_calibrate),
+	SHELL_CMD(clear_error, NULL, "Clear error state", cmd_motor_state_clear_error),
 	SHELL_CMD(status, NULL, "Show motor status", cmd_motor_state_status),
+	SHELL_CMD(mode, &sub_motor_state_mode, "Switch control mode", NULL),
 	SHELL_SUBCMD_SET_END
 );
 
@@ -476,6 +833,25 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_info,
 	SHELL_SUBCMD_SET_END
 );
 
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+/* motor rls subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
+	SHELL_CMD(status, NULL, "Show RLS status", cmd_motor_rls_status),
+	SHELL_CMD(params, NULL, "Show RLS estimates", cmd_motor_rls_params),
+	SHELL_CMD(temp, NULL, "Show temperature estimates", cmd_motor_rls_temp),
+	SHELL_CMD(gating, NULL, "Show gating conditions", cmd_motor_rls_gating),
+	SHELL_CMD(reset, NULL, "Reset RLS estimators", cmd_motor_rls_reset),
+	SHELL_SUBCMD_SET_END
+);
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+
+/* motor velocity subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
+	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
+	SHELL_CMD(status, NULL, "Show velocity status", cmd_motor_velocity_status),
+	SHELL_SUBCMD_SET_END
+);
+
 /* Top-level motor command */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(params, &sub_motor_params, "Parameter access", NULL),
@@ -483,6 +859,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(state, &sub_motor_state, "State machine control", NULL),
 	SHELL_CMD(pi, &sub_motor_pi, "PI controller tuning", NULL),
 	SHELL_CMD(info, &sub_motor_info, "Motor information", NULL),
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+	SHELL_CMD(velocity, &sub_motor_velocity, "Velocity control", NULL),
 	SHELL_SUBCMD_SET_END
 );
 

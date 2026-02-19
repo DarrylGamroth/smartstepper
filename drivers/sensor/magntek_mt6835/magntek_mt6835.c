@@ -167,75 +167,29 @@ static int mt6835_attr_set(const struct device *dev, enum sensor_channel chan,
 		break;
 
 	case MT6835_ATTR_CALIBRATION:
-		/* Trigger auto-calibration process */
-		if (val->val1 == 1) {
+		/* Control auto-calibration process via CAL_EN pin
+		 * val->val1 = 1: Assert CAL_EN to start calibration
+		 * val->val1 = 0: Deassert CAL_EN to end calibration
+		 * User must poll MT6835_ATTR_CAL_STATUS to monitor progress
+		 */
+		{
 			const struct mt6835_config *config = dev->config;
-			uint8_t status_reg;
-			int timeout_count = 0;
-			const int max_timeout = 1000; /* 10 second timeout (10ms * 1000) */
 
-			LOG_INF("Starting auto-calibration process");
-
-			/* Assert CAL_EN pin to start calibration */
-			ret = gpio_pin_set_dt(&config->gpio_cal_en, 1);
-			if (ret < 0) {
-				LOG_ERR("Failed to assert CAL_EN pin");
-				return ret;
-			}
-
-			/* Monitor calibration status via register 0x113 */
-			do {
-				k_sleep(K_MSEC(10)); /* Small delay between status checks */
-
-				ret = mt6835_read_register(dev, MT6835_REG_CAL_STATUS, &status_reg);
+			if (val->val1 == 1) {
+				LOG_INF("Starting auto-calibration (poll MT6835_ATTR_CAL_STATUS for progress)");
+				ret = gpio_pin_set_dt(&config->gpio_cal_en, 1);
 				if (ret < 0) {
-					LOG_ERR("Failed to read calibration status register");
-					gpio_pin_set_dt(&config->gpio_cal_en, 0);
+					LOG_ERR("Failed to assert CAL_EN pin");
 					return ret;
 				}
-
-				/* Check calibration status bits [7:6] */
-				uint8_t cal_status = status_reg & MT6835_CAL_STATUS_MASK;
-
-				if (cal_status == MT6835_CAL_STATUS_NONE) {
-					/* No calibration */
-					LOG_DBG("Calibration not started yet");
-				} else if (cal_status == MT6835_CAL_STATUS_RUNNING) {
-					/* Running auto calibration */
-					LOG_DBG("Auto-calibration in progress...");
-				} else if (cal_status == MT6835_CAL_STATUS_FAILED) {
-					/* Calibration failed */
-					LOG_ERR("Auto-calibration failed");
-					gpio_pin_set_dt(&config->gpio_cal_en, 0);
-					return -EIO;
-				} else if (cal_status == MT6835_CAL_STATUS_SUCCESS) {
-					/* Calibration successful */
-					LOG_INF("Auto-calibration completed successfully");
-					break;
+			} else {
+				LOG_INF("Stopping auto-calibration");
+				ret = gpio_pin_set_dt(&config->gpio_cal_en, 0);
+				if (ret < 0) {
+					LOG_ERR("Failed to deassert CAL_EN pin");
+					return ret;
 				}
-
-				timeout_count++;
-				if (timeout_count >= max_timeout) {
-					LOG_ERR("Auto-calibration timeout after %d seconds",
-						max_timeout / 100);
-					gpio_pin_set_dt(&config->gpio_cal_en, 0);
-					return -ETIMEDOUT;
-				}
-
-			} while (1);
-
-			/* Release CAL_EN pin after successful calibration */
-			ret = gpio_pin_set_dt(&config->gpio_cal_en, 0);
-			if (ret < 0) {
-				LOG_ERR("Failed to release CAL_EN pin");
-				return ret;
 			}
-
-			/* Wait >6s before allowing other operations as per datasheet */
-			LOG_INF("Waiting 6 seconds before allowing other operations...");
-			k_sleep(K_SECONDS(6));
-
-			LOG_INF("Auto-calibration process completed");
 		}
 		break;
 

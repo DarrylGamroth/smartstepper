@@ -21,10 +21,10 @@ properties:
     required: true
     description: Phase resistance in milliohms
 
-  flux_linkage_mvphz:
+  flux_linkage_uvphz:
     type: int
     required: true
-    description: Permanent magnet flux linkage in millivolt-seconds per Hz
+    description: Permanent magnet flux linkage in microvolt-seconds per Hz
 
   pole-pairs:
     type: int

@@ -16,6 +16,11 @@
 #include "rs_online.h"
 #include "traj.h"
 #include "motor_events.h"
+#include "motor_states.h"
+#include "prbs.h"
+#include "rls_motor_est.h"
+#include "thermal_model.h"
+#include "math_constants.h"
 
 /**
  * @brief Main motor control parameters structure
@@ -60,6 +65,7 @@ struct motor_parameters {
 	struct angle_observer_state observer;
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
+	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
@@ -70,7 +76,9 @@ struct motor_parameters {
 	float32_t roverl_accumulator_Vd_Id;
 	float32_t roverl_accumulator_Vq_Id;
 	float32_t roverl_accumulator_Id2;
-	angle_gen_t angle_gen_roverl;
+
+	/* Generic angle generator (used by calibration and open-loop velocity states) */
+	angle_gen_t angle_gen;
 
 	/* Telemetry and diagnostics */
 	uint32_t state_counter;
@@ -83,6 +91,39 @@ struct motor_parameters {
 	/* Error tracking */
 	uint32_t last_error_code;  /* Last error that caused ERROR state entry */
 
+	/* Calibration status */
+	bool calibration_complete;  /* True if calibration has been run successfully */
+
+	/* ISR feature flags (atomic for thread-safe access) */
+	atomic_t feature_flags;
+	atomic_val_t feature_flags_next;  /* Pending flags to apply after state entry completes (state machine thread only) */
+
+	/* RLS parameter estimation */
+	struct prbs_gen prbs_gen;        /* PRBS generator state */
+	struct rls_motor_est rls_d;      /* D-axis RLS estimator */
+	struct rls_motor_est rls_q;      /* Q-axis RLS estimator */
+	uint32_t rls_decimation;         /* RLS update rate decimation (power-of-2) */
+	uint32_t rls_stagger_offset;     /* Q-axis RLS stagger offset for load spreading */
+	float32_t prbs_amplitude_V;      /* PRBS voltage amplitude (volts) */
+	float32_t Ld_est;                /* D-axis inductance estimate for cross-coupling */
+	float32_t Lq_est;                /* Q-axis inductance estimate for cross-coupling */
+	float32_t Id_A_rls_prev;         /* Previous RLS update Id for dI/dt calculation */
+	float32_t Iq_A_rls_prev;         /* Previous RLS update Iq for dI/dt calculation */
+
+	/* Thermal model */
+	struct thermal_model thermal;    /* Thermal model state */
+	uint32_t thermal_decimation;     /* Thermal update rate decimation (power-of-2) */
+	float32_t Rs_ref_ohm;            /* Reference Rs from calibration (at ref temp) */
+	float32_t Rs_ref_temp_C;         /* Reference temperature for Rs measurement (°C) */
+	float32_t Rs_temp_coeff;         /* Rs temperature coefficient (1/°C) */
+	float32_t T_rls_C;               /* Temperature from RLS Rs estimate (°C) */
+
+	/* RLS gating conditions */
+	float32_t rls_min_current_A;    /* Minimum current for observability */
+	float32_t rls_min_speed_rad_s;  /* Minimum electrical speed for back-EMF observability */
+	float32_t rls_max_residual;     /* Maximum residual before disabling RLS */
+	float32_t rls_max_voltage_V;    /* Maximum voltage magnitude for validity check */
+
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
 	float32_t velocity_rad_s;
@@ -90,6 +131,8 @@ struct motor_parameters {
 	float32_t Iq_ref_A;	
 	float32_t Id_A;
 	float32_t Iq_A;
+	float32_t Id_rls_prev;	/* Previous RLS update current (for dI/dt) */
+	float32_t Iq_rls_prev;	/* Previous RLS update current (for dI/dt) */
 	float32_t Ia_A;
 	float32_t Ib_A;
 	float32_t Va_V;
@@ -97,9 +140,6 @@ struct motor_parameters {
 	float32_t elec_angle_rad;
 	float32_t dc_bus_voltage_V;
 };
-
-/* M_PI is not guaranteed by C standard, define float version */
-#define PI_F32 3.14159265358979323846f
 
 /* Devicetree parameter extraction with unit conversion */
 #define USER_PARAMS_NODE DT_PATH(user_parameters)
@@ -111,6 +151,10 @@ struct motor_parameters {
 #define OFFSET_POLE_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, offset_pole_hz))
 #define ALIGN_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, align_current_ma) / 1000.0f)
 #define ALIGN_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, align_duration_ms) / 1000.0f)
+#define ALIGN_STABILIZE_MS 20U
+#define ALIGN_INJECT_MS (DT_PROP(USER_PARAMS_NODE, align_duration_ms) - ALIGN_STABILIZE_MS)
+#define ALIGN_INJECT_DURATION_S ((float32_t)ALIGN_INJECT_MS / 1000.0f)
+#define ALIGN_STABILIZE_DURATION_S ((float32_t)ALIGN_STABILIZE_MS / 1000.0f)
 #define BRAKE_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, brake_current_ma) / 1000.0f)
 #define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) / 1000.0f)
 #define ROVERL_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma) / 1000.0f)
@@ -121,6 +165,25 @@ struct motor_parameters {
 #define RS_EST_RAMPUP_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms) / 1000.0f)
 #define RS_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms) / 1000.0f)
 #define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
+
+/* RLS and Thermal parameters - all values from devicetree (motor/system specific) */
+#define RLS_DECIMATION DT_PROP(USER_PARAMS_NODE, rls_decimation)
+#define PRBS_AMPLITUDE_V ((float32_t)DT_PROP(USER_PARAMS_NODE, prbs_amplitude_millivolts) / 1000.0f)
+#define RLS_LAMBDA ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_lambda_mppu) / 10000.0f)
+#define RLS_CONVERGENCE_THRESHOLD ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_convergence_threshold_mpu) / 1000.0f)
+#define RLS_INITIAL_COVARIANCE ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_initial_covariance_mpu) / 1000.0f)
+#define RLS_INITIAL_LQ_H ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_initial_lq_millihenries) / 1000000.0f)
+#define RLS_STAGGER_OFFSET DT_PROP(USER_PARAMS_NODE, rls_stagger_offset)
+#define THERMAL_DECIMATION DT_PROP(USER_PARAMS_NODE, thermal_decimation)
+#define THERMAL_R_TH ((float32_t)DT_PROP(USER_PARAMS_NODE, thermal_resistance_c_per_w_milli) / 1000.0f)
+#define THERMAL_C_TH ((float32_t)DT_PROP(USER_PARAMS_NODE, thermal_capacitance_j_per_c))
+#define THERMAL_T_AMBIENT ((float32_t)DT_PROP(USER_PARAMS_NODE, thermal_ambient_temp_c))
+#define RS_TEMP_COEFF ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_temp_coeff_ppm_per_c) / 1000000.0f)
+#define RS_REF_TEMP_C ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_ref_temp_c))
+#define RLS_MIN_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_min_current_ma) / 1000.0f)
+#define RLS_MIN_SPEED_RAD_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_min_speed_hz) * 2.0f * PI_F32)
+#define RLS_MAX_RESIDUAL ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_max_residual_volts))
+#define RLS_MAX_VOLTAGE_V ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_max_voltage_volts))
 
 #define VOLTAGE_SENSE_NODE DT_PATH(voltage_sense)
 #define VBUS_CHANNEL DT_PROP(VOLTAGE_SENSE_NODE, channel)
@@ -154,8 +217,9 @@ struct motor_parameters {
 #define MOTOR_INDUCTANCE_D_H ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, inductance_d_uh) / 1000000.0f)
 #define MOTOR_INDUCTANCE_Q_H ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, inductance_q_uh) / 1000000.0f)
 #define MOTOR_RESISTANCE_OHM ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, resistance_mohms) / 1000.0f)
-#define MOTOR_FLUX_LINKAGE_VPH ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, flux_linkage_mvphz) / 1000.0f)
+#define MOTOR_FLUX_LINKAGE_VPH_ELEC ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, flux_linkage_uvphz) / 1000000.0f)
 #define MOTOR_POLE_PAIRS DT_PROP(MOTOR_PARAMS_NODE, pole_pairs)
+#define MOTOR_FLUX_LINKAGE_WB (MOTOR_FLUX_LINKAGE_VPH_ELEC / (2.0f * PI_F32))
 #define MOTOR_MAX_CURRENT_A ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, max_current_ma) / 1000.0f)
 #define MOTOR_INERTIA_KGM2 ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, inertia_mgcm2) / 10000000.0f)
 #define MOTOR_MAX_SPEED_HZ ((float32_t)DT_PROP(MOTOR_PARAMS_NODE, max_speed_hz))
@@ -166,6 +230,13 @@ struct motor_parameters {
 #define FAULT_DETECT_NODE DT_PATH(fault_detection)
 #define ENCODER_FAULT_THRESHOLD DT_PROP(FAULT_DETECT_NODE, encoder_fault_threshold)
 #define OVERCURRENT_THRESHOLD_A ((float32_t)DT_PROP(FAULT_DETECT_NODE, overcurrent_threshold_ma) / 1000.0f)
+
+/* Velocity control parameters */
+#define VELOCITY_MAX_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_max_hz))
+#define VELOCITY_MAX_ACCEL_HZ_S ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_max_accel_hz_per_s))
+#define VELOCITY_MAX_RAD_S (VELOCITY_MAX_HZ * 2.0f * PI_F32)
+#define VELOCITY_MAX_ACCEL_RAD_S2 (VELOCITY_MAX_ACCEL_HZ_S * 2.0f * PI_F32)
+#define VELOCITY_INITIAL_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_initial_hz))
 
 /**
  * @brief Initialize filters with devicetree parameters

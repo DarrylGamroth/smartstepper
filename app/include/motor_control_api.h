@@ -43,11 +43,11 @@ int motor_control_api_init(struct motor_parameters *params);
  * @brief Request motor start (thread-safe)
  * 
  * Posts start request to state machine. State machine will transition
- * from IDLE to ONLINE if conditions are met.
+ * from IDLE to OFFLINE if conditions are met.
  * 
  * @return 0 on success, negative errno on failure
  */
-int motor_api_request_start(void);
+int motor_api_request_offline(void);
 
 /**
  * @brief Request motor stop (thread-safe)
@@ -57,7 +57,17 @@ int motor_api_request_start(void);
  * 
  * @return 0 on success, negative errno on failure
  */
-int motor_api_request_stop(void);
+int motor_api_request_idle(void);
+
+/**
+ * @brief Request motor online (thread-safe)
+ * 
+ * Posts online request to state machine. State machine will transition
+ * to ONLINE state if conditions are met.
+ * 
+ * @return 0 on success, negative errno on failure
+ */
+int motor_api_request_online(void);
 
 /**
  * @brief Request calibration sequence (thread-safe)

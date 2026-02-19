@@ -7,11 +7,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include "config.h"
+#include "math_constants.h"
 
 LOG_MODULE_REGISTER(config, CONFIG_APP_LOG_LEVEL);
-
-/* M_PI is not guaranteed by C standard, define float version */
-#define PI_F32 3.14159265358979323846f
 
 void config_init_filters(struct motor_parameters *params)
 {
@@ -92,7 +90,7 @@ void config_print_parameters(void)
 		(double)(MOTOR_INDUCTANCE_D_H * 1e6f),
 		(double)(MOTOR_INDUCTANCE_Q_H * 1e6f));
 	LOG_INF("  R=%.1fmOhm", (double)(MOTOR_RESISTANCE_OHM * 1000.0f));
-	LOG_INF("  Flux linkage=%.1fmV/Hz", (double)(MOTOR_FLUX_LINKAGE_VPH * 1000.0f));
+	LOG_INF("  Flux linkage=%.3fuV/Hz", (double)(MOTOR_FLUX_LINKAGE_VPH_ELEC * 1000000.0f));
 	LOG_INF("  Pole pairs=%d", MOTOR_POLE_PAIRS);
 	LOG_INF("  Max current=%.1fA", (double)MOTOR_MAX_CURRENT_A);
 	LOG_INF("  Max speed=%.0fHz", (double)MOTOR_MAX_SPEED_HZ);

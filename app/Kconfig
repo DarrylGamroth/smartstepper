@@ -13,3 +13,16 @@ endmenu
 module = APP
 module-str = APP
 source "subsys/logging/Kconfig.template.log_config"
+
+menu "Motor Control"
+
+config RLS_PARAMETER_ESTIMATION
+	bool "Enable RLS online parameter estimation"
+	default n
+	help
+	  Enable Recursive Least Squares (RLS) online parameter estimation
+	  for motor inductance and resistance. This feature uses PRBS excitation
+	  and real-time RLS filtering to estimate motor parameters during operation.
+	  Currently not functioning - disabled for future development.
+
+endmenu

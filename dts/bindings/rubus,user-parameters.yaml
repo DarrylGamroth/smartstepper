@@ -85,3 +85,103 @@ properties:
     type: int
     required: true
     description: Rs estimation measurement duration in milliseconds (default 6000 ms)
+
+  rls-decimation:
+    type: int
+    default: 16
+    description: RLS update rate decimation (power-of-2, default 16 = 1.25 kHz @ 20 kHz loop)
+
+  prbs-amplitude-millivolts:
+    type: int
+    default: 1000
+    description: PRBS voltage amplitude in millivolts (default 1000 mV = 1.0 V)
+
+  rls-lambda-mppu:
+    type: int
+    default: 9999
+    description: RLS forgetting factor in milli-per-unit (9999 mppu = 0.9999)
+
+  rls-convergence-threshold-mpu:
+    type: int
+    default: 100
+    description: RLS convergence threshold for trace(P) in milli-per-unit (100 mpu = 0.1)
+
+  rls-initial-covariance-mpu:
+    type: int
+    default: 1000
+    description: RLS initial covariance diagonal in milli-per-unit (1000 mpu = 1.0)
+
+  rls-initial-lq-millihenries:
+    type: int
+    default: 5000
+    description: Initial Lq estimate in millihenries for cross-coupling (5000 mH = 5 mH)
+
+  rls-stagger-offset:
+    type: int
+    default: 8
+    description: Q-axis RLS stagger offset for load spreading (default 8 = half of decimation)
+
+  thermal-decimation:
+    type: int
+    default: 2048
+    description: Thermal model update rate decimation (default 2048 = ~10Hz @ 20kHz loop)
+
+  thermal-resistance-c-per-w-milli:
+    type: int
+    default: 10000
+    description: Thermal resistance in milli-°C/W (10000 = 10 °C/W typical for small motors)
+
+  thermal-capacitance-j-per-c:
+    type: int
+    default: 50
+    description: Thermal capacitance in J/°C (50 J/°C typical for small motors)
+
+  thermal-ambient-temp-c:
+    type: int
+    default: 25
+    description: Ambient temperature in °C
+
+  rs-temp-coeff-ppm-per-c:
+    type: int
+    default: 3930
+    description: Rs temperature coefficient in ppm/°C (3930 = 0.00393/°C for copper)
+
+  rs-ref-temp-c:
+    type: int
+    default: 25
+    description: Reference temperature for Rs measurement in °C
+
+  rls-min-current-ma:
+    type: int
+    default: 100
+    description: Minimum current magnitude for RLS observability in milliamps
+
+  rls-min-speed-hz:
+    type: int
+    default: 1
+    description: Minimum electrical speed for back-EMF observability in Hz
+
+  rls-max-residual-volts:
+    type: int
+    default: 5
+    description: Maximum RLS residual before disabling (divergence detection) in volts
+
+  rls-max-voltage-volts:
+    type: int
+    default: 50
+    description: Maximum voltage magnitude for validity check in volts
+
+  velocity-max-hz:
+    type: int
+    default: 50
+    description: Maximum mechanical velocity in Hz (revolutions per second)
+
+  velocity-max-accel-hz-per-s:
+    type: int
+    default: 10
+    description: Maximum velocity acceleration/deceleration rate in Hz/s
+
+  velocity-initial-hz:
+    type: int
+    default: 0
+    description: Initial velocity setpoint in Hz (typically 0)

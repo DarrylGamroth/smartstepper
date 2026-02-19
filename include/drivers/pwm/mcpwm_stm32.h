@@ -17,6 +17,7 @@
 #include <zephyr/dsp/types.h>
 #include <drivers/mcpwm.h>
 #include <stm32_ll_tim.h>
+#include "math_constants.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,8 +171,8 @@ static inline void mcpwm_stm32_set_duty_cycle_2phase_f32(const struct device *de
     /* Calculate and clamp pulse cycles from float duty cycle */
     float32_t pwm_a = duty_a * period;
     float32_t pwm_b = duty_b * period;
-    uint32_t pulse_a = fmaxf(0.0f, fminf(pwm_a, period));
-    uint32_t pulse_b = fmaxf(0.0f, fminf(pwm_b, period));
+    uint32_t pulse_a = clampf(pwm_a, 0.0f, period);
+    uint32_t pulse_b = clampf(pwm_b, 0.0f, period);
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);
@@ -243,9 +244,9 @@ static inline void mcpwm_stm32_set_duty_cycle_3phase_f32(const struct device *de
     float32_t pwm_a = duty_a * period;
     float32_t pwm_b = duty_b * period;
     float32_t pwm_c = duty_c * period;
-    uint32_t pulse_a = fmaxf(0.0f, fminf(pwm_a, period));
-    uint32_t pulse_b = fmaxf(0.0f, fminf(pwm_b, period));
-    uint32_t pulse_c = fmaxf(0.0f, fminf(pwm_c, period));
+    uint32_t pulse_a = clampf(pwm_a, 0.0f, period);
+    uint32_t pulse_b = clampf(pwm_b, 0.0f, period);
+    uint32_t pulse_c = clampf(pwm_c, 0.0f, period);
 
     /* Direct register writes for minimum latency */
     LL_TIM_OC_SetCompareCH1(timer, pulse_a);

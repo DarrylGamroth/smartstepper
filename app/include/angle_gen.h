@@ -13,20 +13,17 @@ extern "C" {
 
 #include <math.h>
 #include <zephyr/dsp/types.h>
-
-#ifndef PI_F32
-#define PI_F32 3.14159265358979323846f
-#endif
+#include "math_constants.h"
 
 /**
  * @brief Angle generator object
  * 
- * Generates a continuously incrementing angle at a specified frequency.
+ * Generates a continuously incrementing angle at a specified angular velocity.
  * Useful for open-loop excitation, test signals, and reference frame generation.
  */
 typedef struct {
-	float32_t freq_hz;              //!< Current frequency in Hz
-	float32_t angle_delta_factor;   //!< Precalculated: 2*pi * ctrl_period_sec
+	float32_t omega_rad_s;          //!< Current angular velocity in rad/s
+	float32_t angle_delta_factor;   //!< Precalculated: ctrl_period_sec
 	float32_t angle_delta_rad;      //!< Angle increment per iteration, rad
 	float32_t angle_rad;            //!< Current angle output value, rad [-pi, pi]
 } angle_gen_t;
@@ -39,22 +36,22 @@ typedef struct {
  */
 static inline void angle_gen_init(angle_gen_t *gen, float32_t ctrl_period_sec)
 {
-	gen->freq_hz = 0.0f;
-	gen->angle_delta_factor = 2.0f * PI_F32 * ctrl_period_sec;
+	gen->omega_rad_s = 0.0f;
+	gen->angle_delta_factor = ctrl_period_sec;
 	gen->angle_delta_rad = 0.0f;
 	gen->angle_rad = 0.0f;
 }
 
 /**
- * @brief Set angle generator frequency
+ * @brief Set angle generator angular velocity
  * 
  * @param gen Pointer to angle generator structure
- * @param freq_hz Desired frequency in Hz
+ * @param omega_rad_s Desired angular velocity in rad/s
  */
-static inline void angle_gen_set_freq(angle_gen_t *gen, float32_t freq_hz)
+static inline void angle_gen_set_velocity(angle_gen_t *gen, float32_t omega_rad_s)
 {
-	gen->freq_hz = freq_hz;
-	gen->angle_delta_rad = freq_hz * gen->angle_delta_factor;
+	gen->omega_rad_s = omega_rad_s;
+	gen->angle_delta_rad = omega_rad_s * gen->angle_delta_factor;
 }
 
 /**

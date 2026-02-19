@@ -25,6 +25,9 @@
 		rs-est-current-ma = <100>;       /* Same as RoverL */
 		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
 		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
+		velocity-max-hz = <50>;         /* Maximum velocity (50 Hz = 3000 RPM) */
+		velocity-max-accel-hz-per-s = <10>; /* Acceleration limit */
+		velocity-initial-hz = <0>;      /* Start from stopped */
 	};
 
 	voltage_sense: voltage_sense {
@@ -50,11 +53,11 @@
 		inductance-d-uh = <3400>;
 		inductance-q-uh = <3400>;
 		resistance-mohms = <5600>;
-		flux_linkage_mvphz = <15000>;
+		flux_linkage_uvphz = <17675>;
 		pole-pairs = <50>;
 		max-current-ma = <670>;
 		inertia-mgcm2 = <9000>;
-		max-speed-hz = <400>;
+		max-speed-hz = <50>;
 	};
 
 	angle_observer: angle_observer {

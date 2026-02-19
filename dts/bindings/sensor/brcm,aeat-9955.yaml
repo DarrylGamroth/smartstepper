@@ -18,3 +18,19 @@ properties:
     type: phandle-array
     description: |
       The ERR signal is used to indicate an error condition.
+
+  sleep-gpios:
+    type: phandle-array
+    description: |
+      The SLEEP signal is used to put the device into low power mode.
+
+  sensing-axis:
+    type: string
+    default: "on-axis"
+    enum:
+      - "on-axis"
+      - "off-axis-radial"
+      - "off-axis-axial"
+      - "off-axis-side-shaft"
+    description: |
+      Sensing axis configuration.

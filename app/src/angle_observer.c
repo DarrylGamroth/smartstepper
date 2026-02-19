@@ -10,45 +10,42 @@
 
 LOG_MODULE_REGISTER(angle_observer, CONFIG_APP_LOG_LEVEL);
 
-/* Pi constant for bandwidth to rad/s conversion */
-#define PI_F32 3.14159265358979323846f
-
 /**
- * @brief Wrap angle to (-180, 180] degrees
+ * @brief Wrap angle to (-π, π] radians
  *
  * Used for computing the shortest-path error when the encoder crosses the
- * ±180° boundary. For typical small per-tick angle changes, this executes
+ * ±π boundary. For typical small per-tick angle changes, this executes
  * zero or one loop iteration.
  *
- * @param angle Input angle in degrees
- * @return Wrapped angle in (-180, 180]
+ * @param angle Input angle in radians
+ * @return Wrapped angle in (-π, π]
  */
-static inline float32_t wrap_deg_180(float32_t angle)
+static inline float32_t wrap_rad_pi(float32_t angle)
 {
-	while (angle > 180.0f) {
-		angle -= 360.0f;
+	while (angle > PI_F32) {
+		angle -= 2.0f * PI_F32;
 	}
-	while (angle <= -180.0f) {
-		angle += 360.0f;
+	while (angle <= -PI_F32) {
+		angle += 2.0f * PI_F32;
 	}
 	return angle;
 }
 
 /**
- * @brief Wrap angle to [0, 360) degrees
+ * @brief Wrap angle to [0, 2π) radians
  *
  * Used for normalizing output angles to a consistent range.
  *
- * @param angle Input angle in degrees
- * @return Wrapped angle in [0, 360)
+ * @param angle Input angle in radians
+ * @return Wrapped angle in [0, 2π)
  */
-static inline float32_t wrap_deg_360(float32_t angle)
+static inline float32_t wrap_rad_2pi(float32_t angle)
 {
-	while (angle >= 360.0f) {
-		angle -= 360.0f;
+	while (angle >= 2.0f * PI_F32) {
+		angle -= 2.0f * PI_F32;
 	}
 	while (angle < 0.0f) {
-		angle += 360.0f;
+		angle += 2.0f * PI_F32;
 	}
 	return angle;
 }
@@ -56,23 +53,25 @@ static inline float32_t wrap_deg_360(float32_t angle)
 void angle_observer_init(struct angle_observer_state *obs,
 			 float32_t sample_period_s,
 			 float32_t bandwidth_hz,
-			 uint32_t pole_pairs)
+			 uint32_t pole_pairs,
+			 float32_t delay_samples)
 {
 	/* Zero all state */
-	obs->angle_est_deg = 0.0f;
-	obs->speed_est_dps = 0.0f;
+	obs->angle_est_rad = 0.0f;
+	obs->speed_est_rad_s = 0.0f;
 
 	/* Zero all outputs */
-	obs->mech_angle_deg = 0.0f;
-	obs->elec_angle_deg = 0.0f;
-	obs->mech_speed_dps = 0.0f;
-	obs->mech_angle_pred_deg = 0.0f;
-	obs->elec_angle_pred_deg = 0.0f;
+	obs->mech_angle_rad = 0.0f;
+	obs->elec_angle_rad = 0.0f;
+	obs->mech_speed_rad_s = 0.0f;
+	obs->mech_angle_pred_rad = 0.0f;
+	obs->elec_angle_pred_rad = 0.0f;
 
 	/* Cache configuration */
 	obs->sample_period_s = sample_period_s;
 	obs->bandwidth_hz = bandwidth_hz;
 	obs->pole_pairs = pole_pairs;
+	obs->delay_samples = delay_samples;
 
 	/* Precalculate observer gains (critically damped tuning) */
 	const float32_t wo = 2.0f * PI_F32 * bandwidth_hz;
@@ -80,17 +79,17 @@ void angle_observer_init(struct angle_observer_state *obs,
 	obs->L2Ts = wo * wo * sample_period_s;    /* Velocity gain × Ts */
 
 	/* Zero mechanical angle offset */
-	obs->mech_angle_offset_deg = 0.0f;
+	obs->mech_angle_offset_rad = 0.0f;
 }
 
 void angle_observer_set_offset(struct angle_observer_state *obs,
-			       float32_t offset_deg)
+			       float32_t offset_rad)
 {
-	obs->mech_angle_offset_deg = offset_deg;
+	obs->mech_angle_offset_rad = offset_rad;
 }
 
 void angle_observer_update(struct angle_observer_state *obs,
-			   float32_t encoder_angle_deg)
+			   float32_t encoder_angle_rad)
 {
 	const float32_t Ts = obs->sample_period_s;
 
@@ -114,31 +113,42 @@ void angle_observer_update(struct angle_observer_state *obs,
 	 *   θ̂[k+1] = θ̂[k] + Ts·ω̂[k] + L₁Ts·e[k]
 	 *   ω̂[k+1] = ω̂[k] + L₂Ts·e[k]
 	 *   where e[k] = θ[k] - θ̂[k] (wrapped error)
+	 * 
+	 * Delay compensation (for pipelined SPI reads):
+	 *   If encoder reading is N samples old, extrapolate forward:
+	 *   θ_compensated = θ_encoder + N·Ts·ω̂
 	 */
 
-	/* Compute wrapped error in (-180, 180] for shortest-path tracking */
-	float32_t err_deg = wrap_deg_180(encoder_angle_deg - obs->angle_est_deg);
+	/* Compensate for encoder measurement delay using current speed estimate */
+	float32_t compensated_angle = encoder_angle_rad;
+	if (obs->delay_samples > 0.0f) {
+		const float32_t delay_compensation = obs->delay_samples * Ts * obs->speed_est_rad_s;
+		compensated_angle = wrap_rad_2pi(encoder_angle_rad + delay_compensation);
+	}
+
+	/* Compute wrapped error in (-π, π] for shortest-path tracking */
+	float32_t err_rad = wrap_rad_pi(compensated_angle - obs->angle_est_rad);
 
 	/* Observer update (forward Euler discretization) */
-	obs->angle_est_deg += Ts * obs->speed_est_dps + obs->L1Ts * err_deg;
-	obs->speed_est_dps += obs->L2Ts * err_deg;
+	obs->angle_est_rad += Ts * obs->speed_est_rad_s + obs->L1Ts * err_rad;
+	obs->speed_est_rad_s += obs->L2Ts * err_rad;
 
-	/* Wrap angle estimate to [0, 360) for easier debugging */
-	obs->angle_est_deg = wrap_deg_360(obs->angle_est_deg);
+	/* Wrap angle estimate to [0, 2π) for easier debugging */
+	obs->angle_est_rad = wrap_rad_2pi(obs->angle_est_rad);
 
 	/* Current-cycle outputs (wrapped for readability) */
-	obs->mech_angle_deg = obs->angle_est_deg;
-	obs->mech_speed_dps = obs->speed_est_dps;
+	obs->mech_angle_rad = obs->angle_est_rad;
+	obs->mech_speed_rad_s = obs->speed_est_rad_s;
 
 	/* Apply mechanical offset and compute electrical angle */
-	float32_t mech_angle_offset = obs->mech_angle_deg + obs->mech_angle_offset_deg;
-	obs->elec_angle_deg = wrap_deg_360(mech_angle_offset * obs->pole_pairs);
+	float32_t mech_angle_offset = obs->mech_angle_rad + obs->mech_angle_offset_rad;
+	obs->elec_angle_rad = wrap_rad_2pi(mech_angle_offset * obs->pole_pairs);
 
 	/* One-step prediction for next control cycle */
-	float32_t mech_angle_pred = obs->angle_est_deg + Ts * obs->speed_est_dps;
-	obs->mech_angle_pred_deg = wrap_deg_360(mech_angle_pred);
+	float32_t mech_angle_pred = obs->angle_est_rad + Ts * obs->speed_est_rad_s;
+	obs->mech_angle_pred_rad = wrap_rad_2pi(mech_angle_pred);
 
 	/* Apply offset to predicted mechanical angle for predicted electrical angle */
-	float32_t mech_angle_pred_offset = obs->mech_angle_pred_deg + obs->mech_angle_offset_deg;
-	obs->elec_angle_pred_deg = wrap_deg_360(mech_angle_pred_offset * obs->pole_pairs);
+	float32_t mech_angle_pred_offset = obs->mech_angle_pred_rad + obs->mech_angle_offset_rad;
+	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
 }

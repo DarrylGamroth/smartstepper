@@ -9,6 +9,7 @@
 
 #include <zephyr/sys/util.h>
 #include <zephyr/dsp/types.h>
+#include "math_constants.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -177,10 +178,10 @@ static inline void traj_run(struct traj_f32 *traj)
 	error = traj->target_value - traj->int_value;
 
 	/* Increment the value with saturation */
-	int_value = traj->int_value + fmaxf(fminf(error, traj->max_delta), -traj->max_delta);
+	int_value = traj->int_value + clampf(error, -traj->max_delta, traj->max_delta);
 
 	/* Bound the value */
-	traj->int_value = fmaxf(fminf(int_value, traj->max_value), traj->min_value);
+	traj->int_value = clampf(int_value, traj->min_value, traj->max_value);
 }
 
 #ifdef __cplusplus

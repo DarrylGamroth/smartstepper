@@ -1,0 +1,195 @@
+/*
+ * Copyright (c) 2025 Rubus Technologies Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file rls_motor_est.c
+ * @brief RLS motor parameter estimator implementation
+ *
+ * Implements 4-parameter recursive least squares for motor parameter
+ * identification using explicit matrix operations for efficiency.
+ */
+
+#include "rls_motor_est.h"
+#include "math_constants.h"
+#include <zephyr/sys/util.h>
+#include <math.h>
+
+/* Parameter bounds (from devicetree or config.h) */
+#define RS_MIN_OHM       0.1f
+#define RS_MAX_OHM       50.0f
+#define LD_MIN_H         0.0001f
+#define LD_MAX_H         0.1f
+#define VBIAS_MAX_V      5.0f
+#define VDT_SIGN_MAX_V   2.0f
+#define P_MIN            1e-6f
+
+void rls_motor_est_init(struct rls_motor_est *rls,
+                        float32_t lambda,
+                        float32_t control_freq,
+                        float32_t convergence_threshold,
+                        float32_t Rs_init,
+                        float32_t L_init,
+                        float32_t P_init)
+{
+	/* Initialize parameter estimates */
+	rls->theta[0] = Rs_init;    /* Rs */
+	rls->theta[1] = L_init;     /* Ld or Lq */
+	rls->theta[2] = 0.0f;       /* Vbias */
+	rls->theta[3] = 0.0f;       /* Vdt_sign */
+
+	/* Initialize covariance as diagonal matrix (P = P_init * I) */
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			rls->P[i][j] = (i == j) ? P_init : 0.0f;
+		}
+	}
+
+	/* Configuration */
+	rls->lambda = lambda;
+	rls->control_freq = control_freq;
+	rls->convergence_threshold = convergence_threshold;
+
+	/* Statistics */
+	rls->num_updates = 0;
+	rls->num_rejected = 0;
+	rls->residual = 0.0f;
+	rls->residual_sum_sq = 0.0f;
+	rls->converged = false;
+	rls->convergence_count = 0;
+}
+
+void rls_motor_est_update(struct rls_motor_est *rls,
+                          float32_t V_meas,
+                          float32_t I,
+                          float32_t I_prev,
+                          float32_t omega,
+                          float32_t L_cross,
+                          float32_t I_cross)
+{
+	/* Compensate cross-coupling: V_compensated = V_meas + ω*L_cross*I_cross */
+	float32_t V_compensated = V_meas + omega * L_cross * I_cross;
+
+	/* Calculate current derivative */
+	float32_t dI_dt = (I - I_prev) * rls->control_freq;
+
+	/* Build regression vector φ[k] = [I, dI/dt, 1, sign(I)]ᵀ */
+	float32_t phi[4];
+	phi[0] = I;
+	phi[1] = dI_dt;
+	phi[2] = 1.0f;
+	phi[3] = (I >= 0.0f) ? 1.0f : -1.0f;
+
+	/* Predicted voltage: y_pred = φᵀ * θ */
+	float32_t y_pred = phi[0] * rls->theta[0] +
+	                   phi[1] * rls->theta[1] +
+	                   phi[2] * rls->theta[2] +
+	                   phi[3] * rls->theta[3];
+
+	/* Prediction error */
+	float32_t error = V_compensated - y_pred;
+
+	/* Compute P * φ (4x4 * 4x1 = 4x1) */
+	float32_t P_phi[4];
+	P_phi[0] = rls->P[0][0] * phi[0] + rls->P[0][1] * phi[1] +
+	           rls->P[0][2] * phi[2] + rls->P[0][3] * phi[3];
+	P_phi[1] = rls->P[0][1] * phi[0] + rls->P[1][1] * phi[1] +
+	           rls->P[1][2] * phi[2] + rls->P[1][3] * phi[3];
+	P_phi[2] = rls->P[0][2] * phi[0] + rls->P[1][2] * phi[1] +
+	           rls->P[2][2] * phi[2] + rls->P[2][3] * phi[3];
+	P_phi[3] = rls->P[0][3] * phi[0] + rls->P[1][3] * phi[1] +
+	           rls->P[2][3] * phi[2] + rls->P[3][3] * phi[3];
+
+	/* Denominator: λ + φᵀ * P * φ */
+	float32_t phi_P_phi = phi[0] * P_phi[0] + phi[1] * P_phi[1] +
+	                      phi[2] * P_phi[2] + phi[3] * P_phi[3];
+	float32_t denom = rls->lambda + phi_P_phi;
+
+	/* Guard against numerical issues */
+	if (denom < 1e-6f) {
+		rls->num_rejected++;
+		return;
+	}
+
+	float32_t denom_inv = 1.0f / denom;
+
+	/* Kalman gain: K = (P * φ) / denom */
+	float32_t K[4];
+	K[0] = P_phi[0] * denom_inv;
+	K[1] = P_phi[1] * denom_inv;
+	K[2] = P_phi[2] * denom_inv;
+	K[3] = P_phi[3] * denom_inv;
+
+	/* Update parameters: θ = θ + K * error */
+	rls->theta[0] += K[0] * error;
+	rls->theta[1] += K[1] * error;
+	rls->theta[2] += K[2] * error;
+	rls->theta[3] += K[3] * error;
+
+	/* Apply parameter bounds */
+	rls->theta[0] = clampf(rls->theta[0], RS_MIN_OHM, RS_MAX_OHM);
+	rls->theta[1] = clampf(rls->theta[1], LD_MIN_H, LD_MAX_H);
+	rls->theta[2] = clampf(rls->theta[2], -VBIAS_MAX_V, VBIAS_MAX_V);
+	rls->theta[3] = clampf(rls->theta[3], -VDT_SIGN_MAX_V, VDT_SIGN_MAX_V);
+
+	/* Update covariance: P = (P - K * φᵀ * P) / λ
+	 * Only update upper triangle (P is symmetric)
+	 */
+	float32_t lambda_inv = 1.0f / rls->lambda;
+
+	/* Row 0 */
+	rls->P[0][0] = (rls->P[0][0] - K[0] * P_phi[0]) * lambda_inv;
+	rls->P[0][1] = (rls->P[0][1] - K[0] * P_phi[1]) * lambda_inv;
+	rls->P[0][2] = (rls->P[0][2] - K[0] * P_phi[2]) * lambda_inv;
+	rls->P[0][3] = (rls->P[0][3] - K[0] * P_phi[3]) * lambda_inv;
+
+	/* Row 1 (upper triangle only) */
+	rls->P[1][1] = (rls->P[1][1] - K[1] * P_phi[1]) * lambda_inv;
+	rls->P[1][2] = (rls->P[1][2] - K[1] * P_phi[2]) * lambda_inv;
+	rls->P[1][3] = (rls->P[1][3] - K[1] * P_phi[3]) * lambda_inv;
+
+	/* Row 2 (upper triangle only) */
+	rls->P[2][2] = (rls->P[2][2] - K[2] * P_phi[2]) * lambda_inv;
+	rls->P[2][3] = (rls->P[2][3] - K[2] * P_phi[3]) * lambda_inv;
+
+	/* Row 3 (diagonal only) */
+	rls->P[3][3] = (rls->P[3][3] - K[3] * P_phi[3]) * lambda_inv;
+
+	/* Enforce minimum covariance (prevent numerical collapse) */
+	for (int i = 0; i < 4; i++) {
+		rls->P[i][i] = fmaxf(rls->P[i][i], P_MIN);
+	}
+
+	/* Update statistics */
+	rls->num_updates++;
+	rls->residual_sum_sq += error * error;
+	rls->residual = error;
+
+	/* Convergence detection */
+	float32_t trace_P = rls->P[0][0] + rls->P[1][1] + rls->P[2][2] + rls->P[3][3];
+
+	if (!rls->converged) {
+		if (trace_P < rls->convergence_threshold) {
+			rls->converged = true;
+			rls->convergence_count = rls->num_updates;
+		}
+	} else {
+		/* Check divergence with hysteresis */
+		if (trace_P > rls->convergence_threshold * 2.0f) {
+			rls->converged = false;
+		}
+	}
+}
+
+void rls_motor_est_reset(struct rls_motor_est *rls)
+{
+	/* Reset statistics only - keep estimated parameters and covariance */
+	rls->num_updates = 0;
+	rls->num_rejected = 0;
+	rls->residual = 0.0f;
+	rls->residual_sum_sq = 0.0f;
+	rls->converged = false;
+	rls->convergence_count = 0;
+}

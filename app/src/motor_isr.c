@@ -23,6 +23,7 @@
 #include "motor_control_api.h"
 #include "motor_isr.h"
 #include "motor_states.h"
+#include "math_constants.h"
 #include "config.h"
 #include "pi.h"
 #include "filter_fo.h"
@@ -160,31 +161,46 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 
-	/* Read encoder and update observer */
-	if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
-		/* No new encoder data, use previous estimate */
-		params->encoder_fault_counter++;
+	/* Read encoder if feature is enabled */
+	float32_t angle_raw_rad;
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
+		/* Read encoder to consume RTIO queue data (callback keeps queuing reads) */
+		if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
+			/* No new encoder data, use previous estimate */
+			params->encoder_fault_counter++;
 
-		/* Fault detection: Too many consecutive encoder failures */
-		// if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-		// 	motor_api_post_error(ERROR_ENCODER_FAULT);
-		// 	goto isr_done;
-		// }
+			/* Fault detection: Too many consecutive encoder failures */
+			if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
+				motor_api_post_error(ERROR_ENCODER_FAULT);
+				goto isr_done;
+			}
+			
+			/* No encoder update this cycle - observer will use previous state */
+		} else {
+			/* Reset fault counter on successful read */
+			params->encoder_fault_counter = 0;
+		}
 	} else {
-		/* Update observer with new encoder measurement */
-		angle_observer_update(&params->observer, angle_raw_degrees);
-		/* Reset fault counter on successful read */
+		/* Encoder not active - reset fault counter */
 		params->encoder_fault_counter = 0;
 	}
-
-	/* Safety: Don't run control if in ERROR state (PWM should be disabled) */
-	if (state == &motor_states[MOTOR_STATE_ERROR]) {
-		goto isr_done;
+	
+	/* Select angle source based on feature flag */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+		/* Calibration/open-loop: use generated angle (no delay) */
+		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
+		angle_observer_set_delay(&params->observer, 0.0f);
+	} else {
+		/* Normal operation: use encoder reading (1-cycle delay from pipelined SPI) */
+		angle_raw_rad = angle_raw_degrees * (PI_F32 / 180.0f);
+		angle_observer_set_delay(&params->observer, 1.0f);
 	}
+	
+	/* Update observer with angle (encoder or generated) */
+	angle_observer_update(&params->observer, angle_raw_rad);
 
-	/* Skip control during hardware/controller initialization */
-	if (state == &motor_states[MOTOR_STATE_HW_INIT] ||
-	    state == &motor_states[MOTOR_STATE_CTRL_INIT]) {
+	/* Skip control if PWM output not enabled */
+	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PWM_OUTPUT)) {
 		goto isr_done;
 	}
 
@@ -206,7 +222,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		goto isr_done;
 	}
 
-	/* All other states use PI control - remove offsets first */
+	/* Remove offsets for current measurements */
 	Ia_A -= params->Ia_offset;
 	Ib_A -= params->Ib_offset;
 
@@ -216,21 +232,16 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		goto isr_done;
 	}
 
-	/* Select control frame angle based on state and transform currents */
-	float32_t ctrl_angle_deg;
-	if (state == &motor_states[MOTOR_STATE_RS_EST] ||
-	    state == &motor_states[MOTOR_STATE_ALIGN]) {
-		/* Stationary frame (0°) for resistance measurement and alignment */
-		ctrl_angle_deg = 0.0f;
-	} else if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
-		/* Rotating excitation frame for inductance measurement */
-		ctrl_angle_deg = angle_gen_get_angle_deg(&params->angle_gen_roverl);
-	} else {
-		/* Normal FOC: use rotor electrical angle */
-		ctrl_angle_deg = angle_observer_get_elec_angle_deg(&params->observer);
+	/* Skip PI control if not enabled */
+	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PI_CONTROL)) {
+		goto isr_done;
 	}
 
-	/* Park transform to dq frame */
+	/* Select control frame angle based on state and transform currents */
+	float32_t ctrl_angle_rad = angle_observer_get_elec_angle(&params->observer);
+
+	/* Park transform to dq frame - convert to degrees for arm_sin_cos_f32 */
+	float32_t ctrl_angle_deg = ctrl_angle_rad * (180.0f / PI_F32);
 	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
 	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
 
@@ -264,22 +275,45 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		}
 	}
 
-	/* ALIGN: ramp alignment current smoothly */
-	if (state == &motor_states[MOTOR_STATE_ALIGN]) {
+	/* ALIGN: ramp/hold alignment current */
+	if (state == &motor_states[MOTOR_STATE_ALIGN] ||
+	    state == &motor_states[MOTOR_STATE_ALIGN_SAMPLE]) {
 		traj_run(&params->traj_Id);
 
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
 		Iq_ref_A = 0.0f;
 	}
 
-	/* Run PI controllers for all states (measurement and control) */
-	if (state != &motor_states[MOTOR_STATE_ROVERL_MEAS] &&
-	    state != &motor_states[MOTOR_STATE_RS_EST] &&
-	    state != &motor_states[MOTOR_STATE_ALIGN]) {
+	/* Update velocity trajectory if enabled */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_VELOCITY_TRAJ)) {
+		/* Update velocity trajectory */
+		traj_run(&params->traj_velocity);
+		float32_t velocity_mech_rad_s = traj_get_int_value(&params->traj_velocity);
+
+		/* Update angle generator velocity (angle_gen produces mechanical angles) */
+		angle_gen_set_velocity(&params->angle_gen, velocity_mech_rad_s);
+	}
+
+	/* Select current references based on mode */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) {
 		/* Normal FOC operation: use commanded current references */
 		Id_ref_A = params->Id_setpoint_A;
 		Iq_ref_A = params->Iq_setpoint_A;
 	}
+
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+	/* PRBS injection for parameter estimation (d-axis current reference) */
+	const uint32_t rls_mask = params->rls_decimation - 1u;
+	float32_t I_prbs_d = 0.0f;
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	    (params->control_loop_count & rls_mask) == 0u) {
+		uint32_t prbs_bit = prbs_advance(&params->prbs_gen);
+		I_prbs_d = (2.0f * (float32_t)prbs_bit - 1.0f) * ROVERL_EST_CURRENT_A;
+	}
+
+	/* Apply PRBS excitation to d-axis current reference */
+	Id_ref_A += I_prbs_d;
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 
 	max_voltage_magnitude_V = params->max_modulation_index * Vbus_V;
 	pi_set_min_max(&params->pi_Id, -max_voltage_magnitude_V, max_voltage_magnitude_V);
@@ -289,20 +323,17 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	pi_set_min_max(&params->pi_Iq, -Vq_limit_V, Vq_limit_V);
 	pi_run_series(&params->pi_Iq, Iq_ref_A, Iq_A, 0.0f, &Vq_V);
 
-	/* Advance angle generators and recalculate sin/cos with predicted angle for voltage output
+	/* Advance angle generator if enabled
 	 * This compensates for the fact that computed voltages will be applied in the next cycle
 	 */
-	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
-		/* Advance R/L excitation angle and use next angle for inverse Park */
-		angle_gen_run(&params->angle_gen_roverl);
-		ctrl_angle_deg= angle_gen_get_angle_deg(&params->angle_gen_roverl);
-	} else if (params->state_for_isr != &motor_states[MOTOR_STATE_RS_EST] &&
-	           params->state_for_isr != &motor_states[MOTOR_STATE_ALIGN]) {
-		/* Normal FOC: use predicted rotor angle */
-		ctrl_angle_deg = angle_observer_get_elec_angle_pred_deg(&params->observer);
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+		angle_gen_run(&params->angle_gen);
 	}
 
-	/* Calculate sin and cos of control angle */
+	ctrl_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
+
+	/* Calculate sin and cos of control angle - convert to degrees for arm_sin_cos_f32 */
+	ctrl_angle_deg = ctrl_angle_rad * (180.0f / PI_F32);
 	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
 
 	/* Transform voltages to stationary frame */
@@ -326,17 +357,15 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	Db_hb2_pu = 1.0f - Db_pu;
 
 	/* Vbus-regulated braking: blend between regen and short-circuit
-	 * Only active during normal FOC operation (not calibration states)
+	 * Only active during ONLINE modes (not calibration states)
 	 * Braking occurs when torque opposes motion (Iq and speed have opposite signs)
 	 */
-	if (params->state_for_isr != &motor_states[MOTOR_STATE_OFFSET_MEAS] &&
-	    params->state_for_isr != &motor_states[MOTOR_STATE_RS_EST] &&
-	    params->state_for_isr != &motor_states[MOTOR_STATE_ROVERL_MEAS] &&
-	    params->state_for_isr != &motor_states[MOTOR_STATE_ALIGN]) {
-		float32_t speed_hz = angle_observer_get_mech_speed_hz(&params->observer);
-		bool is_braking = (params->Iq_ref_A * speed_hz) < 0.0f;  /* Opposite signs = braking */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING)) {
+		float32_t speed_rad_s = angle_observer_get_mech_speed(&params->observer);
+		bool is_braking = (params->Iq_ref_A * speed_rad_s) < 0.0f;  /* Opposite signs = braking */
 
-		if (is_braking && fabsf(speed_hz) > 0.1f) {  /* Braking mode (ignore near-zero speeds) */
+		/* Braking mode (ignore near-zero speeds, 0.628 rad/s = 0.1 Hz) */
+		if (is_braking && fabsf(speed_rad_s) > 0.628f) {
 			if (Vbus_V > VBUS_REGEN_LIMIT_V) {
 				/* Calculate short-circuit duty based on overvoltage */
 				float32_t overvoltage = Vbus_V - VBUS_REGEN_LIMIT_V;
@@ -361,9 +390,90 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1, Da_hb1_pu, Da_hb2_pu);
 	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, Db_hb1_pu, Db_hb2_pu);
 
-	/* Update telemetry snapshot (convert from deg/Hz to rad/rad_s) */
-	params->position_rad = angle_observer_get_mech_angle_deg(&params->observer) * (PI_F32 / 180.0f);
-	params->velocity_rad_s = angle_observer_get_mech_speed_hz(&params->observer) * (2.0f * PI_F32);
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+	/* D-axis RLS parameter estimation with comprehensive gating */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	    (params->control_loop_count & rls_mask) == 0u) {
+		/* Gating conditions for robust estimation:
+		 * 1. Voltage within valid measurement range
+		 * 2. PI controller not saturated (would corrupt voltage measurement)
+		 * 3. Speed sufficient for back-EMF observability (bypassed in open-loop)
+		 * Note: D-axis current check omitted since we command Id=0 (only PRBS excitation)
+		 */
+		float32_t Vd_abs = fabsf(Vd_V);
+		float32_t omega_elec;
+
+		omega_elec = angle_observer_get_elec_speed(&params->observer);
+
+		bool voltage_ok = (Vd_abs < params->rls_max_voltage_V);
+		bool pi_ok = (fabsf(Vd_V - pi_get_out_max(&params->pi_Id)) > 0.1f) &&
+		             (fabsf(Vd_V - pi_get_out_min(&params->pi_Id)) > 0.1f);
+		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
+
+		if (voltage_ok && pi_ok && speed_ok) {
+			rls_motor_est_update(&params->rls_d, Vd_V, Id_A, params->Id_rls_prev,
+			                     omega_elec, params->Lq_est, Iq_A);
+			params->Id_rls_prev = Id_A;  /* Store for next RLS update */
+		}
+	}
+
+	/* Q-axis RLS parameter estimation (staggered by offset for load spreading) */
+	const uint32_t rls_offset = params->rls_stagger_offset;
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	    ((params->control_loop_count & rls_mask) == rls_offset)) {
+		/* Compensate back-EMF first for gating check */
+		float32_t omega_elec = angle_observer_get_elec_speed(&params->observer);
+		float32_t V_bemf = omega_elec * MOTOR_FLUX_LINKAGE_WB;
+		float32_t Vq_compensated = Vq_V - V_bemf;
+		
+		/* Gating conditions using compensated voltage */
+		float32_t Iq_abs = fabsf(Iq_A);
+		float32_t Vq_comp_abs = fabsf(Vq_compensated);
+
+		bool current_ok = (Iq_abs > params->rls_min_current_A);
+		bool voltage_ok = (Vq_comp_abs < params->rls_max_voltage_V);
+		bool pi_ok = (fabsf(Vq_V - pi_get_out_max(&params->pi_Iq)) > 0.1f) &&
+		             (fabsf(Vq_V - pi_get_out_min(&params->pi_Iq)) > 0.1f);
+		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
+
+		if (current_ok && voltage_ok && pi_ok && speed_ok) {
+			/* Q-axis: Pass -omega to RLS so it subtracts cross-coupling ω·Ld·Id */
+			rls_motor_est_update(&params->rls_q, Vq_compensated, Iq_A, params->Iq_rls_prev,
+			                     -omega_elec, params->Ld_est, Id_A);
+			params->Iq_rls_prev = Iq_A;  /* Store for next RLS update */
+		}
+
+		/* Parameter synthesis: update cross-coupling estimates and average Rs */
+		if (rls_motor_est_is_converged(&params->rls_d) &&
+		    rls_motor_est_is_converged(&params->rls_q)) {
+			/* Update inductance estimates for cross-coupling compensation */
+			params->Ld_est = rls_motor_est_get_L(&params->rls_d);
+			params->Lq_est = rls_motor_est_get_L(&params->rls_q);
+
+			/* Average Rs from both axes (they should converge to same value) */
+			float32_t Rs_d = rls_motor_est_get_Rs(&params->rls_d);
+			float32_t Rs_q = rls_motor_est_get_Rs(&params->rls_q);
+			params->Rs_measured_ohm = (Rs_d + Rs_q) * 0.5f;
+
+			/* Compute temperature from RLS Rs estimate */
+			params->T_rls_C = thermal_Rs_to_temperature(params->Rs_measured_ohm,
+			                                             params->Rs_ref_ohm,
+			                                             params->Rs_ref_temp_C,
+			                                             params->Rs_temp_coeff);
+		}
+	}
+
+	/* Thermal model update (heavily decimated, ~10Hz) */
+	const uint32_t thermal_mask = params->thermal_decimation - 1u;
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	    (params->control_loop_count & thermal_mask) == 0u) {
+		thermal_model_update(&params->thermal, Id_A, Iq_A, params->Rs_measured_ohm);
+	}
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+
+	/* Update telemetry snapshot (observer already returns rad/rad_s) */
+	params->position_rad = angle_observer_get_mech_angle(&params->observer);
+	params->velocity_rad_s = angle_observer_get_mech_speed(&params->observer);
 
 	params->Id_ref_A = Id_ref_A;
 	params->Iq_ref_A = Iq_ref_A;
@@ -376,7 +486,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	params->Va_V = Va_V;
 	params->Vb_V = Vb_V;
 	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
-	params->elec_angle_rad = ctrl_angle_deg * (PI_F32 / 180.0f);
+	params->elec_angle_rad = ctrl_angle_rad;
 	params->dc_bus_voltage_V = Vbus_V;
 
 isr_done:
@@ -394,5 +504,12 @@ isr_done:
 void encoder1_callback(const struct device *dev, uint32_t channel,
                        void *user_data)
 {
-	(void)sensor_read_async_mempool(&encoder1_iodev, &encoder_rtio_ctx, NULL);
+	struct motor_parameters *params = (struct motor_parameters *)user_data;
+
+	/* Trigger continuous encoder reads when feature is enabled
+	 * This keeps SPI bus free during calibration and reduces interrupt load
+	 */
+	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
+		(void)sensor_read_async_mempool(&encoder1_iodev, &encoder_rtio_ctx, NULL);
+	}
 }

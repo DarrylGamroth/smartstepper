@@ -9,10 +9,23 @@
 
 #include <stdint.h>
 #include <zephyr/smf.h>
+#include <zephyr/sys/util.h>
 #include "motor_events.h"
 
 /* Forward declarations */
 struct motor_parameters;
+
+/* Feature flags for ISR - used to control which features are active */
+enum motor_feature_flags {
+	MOTOR_FEATURE_ENCODER_READ = 0,  /* Encoder SPI reads active */
+	MOTOR_FEATURE_ANGLE_GEN,         /* Use angle generator */
+	MOTOR_FEATURE_PWM_OUTPUT,        /* PWM output enabled */
+	MOTOR_FEATURE_PI_CONTROL,        /* PI current control active */
+	MOTOR_FEATURE_RLS_ESTIMATION,    /* RLS parameter estimation */
+	MOTOR_FEATURE_BRAKING,           /* Vbus-regulated braking active */
+	MOTOR_FEATURE_VELOCITY_TRAJ,     /* Velocity trajectory updates */
+	MOTOR_FEATURE_USE_COMMANDED_CURRENTS, /* Use Id/Iq setpoints vs calibration currents */
+};
 
 /* Motor control state machine states */
 enum motor_state {
@@ -26,7 +39,12 @@ enum motor_state {
 	MOTOR_STATE_IDLE,
 	MOTOR_STATE_OFFLINE,
 	MOTOR_STATE_ONLINE,
+	MOTOR_STATE_ONLINE_TORQUE,
+	MOTOR_STATE_ONLINE_VELOCITY_OPEN,
+	MOTOR_STATE_ONLINE_VELOCITY_CLOSED,
+	MOTOR_STATE_ALIGN_SAMPLE,
 	MOTOR_STATE_ERROR,
+	MOTOR_STATE_COUNT
 };
 
 /* Error codes for fault handling */
@@ -37,6 +55,7 @@ enum motor_error {
 	ERROR_ENCODER_FAULT = 3,
 	ERROR_OVERVOLTAGE = 4,
 	ERROR_EMERGENCY_STOP = 5,
+	ERROR_INVALID_ANGLE = 6,
 };
 
 /* State machine table - exposed for shell access */

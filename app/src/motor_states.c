@@ -12,6 +12,7 @@
 #include <zephyr/device.h>
 #include <zephyr/smf.h>
 #include <zephyr/timing/timing.h>
+#include <zephyr/sys/atomic.h>
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
 #include <drivers/gate_driver/ti_drv8328.h>
@@ -28,6 +29,29 @@
 #include "angle_observer.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
+
+/**
+ * @brief Stage ISR feature flags for the next stable state
+ *
+ * The ISR reads params->feature_flags (atomic). The state-machine thread builds up
+ * params->feature_flags_next while SMF runs (including any hierarchical entry/exit
+ * actions). After SMF completes for the current cycle, feature_flags_next is
+ * atomically published.
+ */
+static inline void motor_set_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
+{
+	params->feature_flags_next = mask;
+}
+
+static inline void motor_enable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
+{
+	params->feature_flags_next |= mask;
+}
+
+static inline void motor_disable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
+{
+	params->feature_flags_next &= ~mask;
+}
 
 static struct motor_parameters motor_params;
 K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
@@ -75,12 +99,26 @@ static void motor_state_roverl_meas_exit(void *obj);
 static void motor_state_align_entry(void *obj);
 static enum smf_state_result motor_state_align_run(void *obj);
 static void motor_state_align_exit(void *obj);
+static void motor_state_align_sample_entry(void *obj);
+static enum smf_state_result motor_state_align_sample_run(void *obj);
+static void motor_state_align_sample_exit(void *obj);
 static void motor_state_idle_entry(void *obj);
 static enum smf_state_result motor_state_idle_run(void *obj);
 static void motor_state_offline_entry(void *obj);
 static enum smf_state_result motor_state_offline_run(void *obj);
+static void motor_state_offline_exit(void *obj);
 static void motor_state_online_entry(void *obj);
 static enum smf_state_result motor_state_online_run(void *obj);
+static void motor_state_online_exit(void *obj);
+static void motor_state_online_torque_entry(void *obj);
+static enum smf_state_result motor_state_online_torque_run(void *obj);
+static void motor_state_online_torque_exit(void *obj);
+static void motor_state_online_velocity_open_entry(void *obj);
+static enum smf_state_result motor_state_online_velocity_open_run(void *obj);
+static void motor_state_online_velocity_open_exit(void *obj);
+static void motor_state_online_velocity_closed_entry(void *obj);
+static enum smf_state_result motor_state_online_velocity_closed_run(void *obj);
+static void motor_state_online_velocity_closed_exit(void *obj);
 static void motor_state_error_entry(void *obj);
 static enum smf_state_result motor_state_error_run(void *obj);
 
@@ -95,7 +133,7 @@ const struct smf_state motor_states[] = {
 	[MOTOR_STATE_CALIBRATION] = SMF_CREATE_STATE(motor_state_calibration_entry,
 						      motor_state_calibration_run,
 						      motor_state_calibration_exit,
-						      NULL,
+						      &motor_states[MOTOR_STATE_OFFLINE],
 						      &motor_states[MOTOR_STATE_OFFSET_MEAS]),
 	[MOTOR_STATE_OFFSET_MEAS] = SMF_CREATE_STATE(motor_state_offset_meas_entry,
 				       motor_state_offset_meas_run,
@@ -114,16 +152,40 @@ const struct smf_state motor_states[] = {
 				  NULL),
 	[MOTOR_STATE_ALIGN] = SMF_CREATE_STATE(motor_state_align_entry,
 					motor_state_align_run,
-					motor_state_align_exit, NULL, NULL),
+					motor_state_align_exit,
+					&motor_states[MOTOR_STATE_CALIBRATION],
+					NULL),
+	[MOTOR_STATE_ALIGN_SAMPLE] = SMF_CREATE_STATE(motor_state_align_sample_entry,
+					     motor_state_align_sample_run,
+					     motor_state_align_sample_exit,
+					     &motor_states[MOTOR_STATE_CALIBRATION],
+					     NULL),
 	[MOTOR_STATE_IDLE] = SMF_CREATE_STATE(motor_state_idle_entry,
 					       motor_state_idle_run,
 					       NULL, NULL, NULL),
 	[MOTOR_STATE_OFFLINE] = SMF_CREATE_STATE(motor_state_offline_entry,
 						  motor_state_offline_run,
-						  NULL, NULL, NULL),
+					  motor_state_offline_exit, NULL,
+						  &motor_states[MOTOR_STATE_CALIBRATION]),
 	[MOTOR_STATE_ONLINE] = SMF_CREATE_STATE(motor_state_online_entry,
 						 motor_state_online_run,
-						 NULL, NULL, NULL),
+					 motor_state_online_exit, NULL,
+						 &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]),
+	[MOTOR_STATE_ONLINE_TORQUE] = SMF_CREATE_STATE(motor_state_online_torque_entry,
+							 motor_state_online_torque_run,
+						 motor_state_online_torque_exit,
+							 &motor_states[MOTOR_STATE_ONLINE],
+							 NULL),
+	[MOTOR_STATE_ONLINE_VELOCITY_OPEN] = SMF_CREATE_STATE(motor_state_online_velocity_open_entry,
+								motor_state_online_velocity_open_run,
+								motor_state_online_velocity_open_exit,
+								&motor_states[MOTOR_STATE_ONLINE],
+								NULL),
+	[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] = SMF_CREATE_STATE(motor_state_online_velocity_closed_entry,
+								  motor_state_online_velocity_closed_run,
+								  motor_state_online_velocity_closed_exit,
+								  &motor_states[MOTOR_STATE_ONLINE],
+								  NULL),
 	[MOTOR_STATE_ERROR] = SMF_CREATE_STATE(motor_state_error_entry,
 						motor_state_error_run,
 						NULL, NULL, NULL),
@@ -157,11 +219,34 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_RS_EST:       return "RS_EST";
 	case MOTOR_STATE_ROVERL_MEAS:  return "ROVERL_MEAS";
 	case MOTOR_STATE_ALIGN:        return "ALIGN";
+	case MOTOR_STATE_ALIGN_SAMPLE: return "ALIGN_SAMPLE";
 	case MOTOR_STATE_IDLE:         return "IDLE";
 	case MOTOR_STATE_OFFLINE:      return "OFFLINE";
 	case MOTOR_STATE_ONLINE:       return "ONLINE";
+	case MOTOR_STATE_ONLINE_TORQUE:          return "ONLINE_TORQUE";
+	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:   return "ONLINE_VELOCITY_OPEN";
+	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED: return "ONLINE_VELOCITY_CLOSED";
 	case MOTOR_STATE_ERROR:        return "ERROR";
 	default:                       return "UNKNOWN";
+	}
+}
+
+const char *motor_event_to_string(enum motor_event_type event_type)
+{
+	switch (event_type) {
+	case MOTOR_EVENT_INIT:              return "INIT";
+	case MOTOR_EVENT_RUN:               return "RUN";
+	case MOTOR_EVENT_IDLE:              return "IDLE";
+	case MOTOR_EVENT_OFFLINE:           return "OFFLINE";
+	case MOTOR_EVENT_ONLINE:            return "ONLINE";
+	case MOTOR_EVENT_CALIBRATE_REQUEST: return "CALIBRATE_REQUEST";
+	case MOTOR_EVENT_MODE_CHANGE:       return "MODE_CHANGE";
+	case MOTOR_EVENT_PARAM_UPDATE:      return "PARAM_UPDATE";
+	case MOTOR_EVENT_CLEAR_ERROR:       return "CLEAR_ERROR";
+	case MOTOR_EVENT_ERROR:             return "ERROR";
+	case MOTOR_EVENT_TIMEOUT:           return "TIMEOUT";
+	case MOTOR_EVENT_NONE:              return "NONE";
+	default:                            return "UNKNOWN";
 	}
 }
 
@@ -174,6 +259,7 @@ const char *motor_error_to_string(int error)
 	case ERROR_ENCODER_FAULT:   return "ENCODER_FAULT";
 	case ERROR_OVERVOLTAGE:     return "OVERVOLTAGE";
 	case ERROR_EMERGENCY_STOP:  return "EMERGENCY_STOP";
+	case ERROR_INVALID_ANGLE:   return "INVALID_ANGLE";
 	default:                    return "UNKNOWN";
 	}
 }
@@ -216,10 +302,11 @@ static void motor_state_hw_init_entry(void *obj)
 
 	/* Set initial duty cycles */
 	mcpwm_set_duty_cycle(pwm1, 4, 0x01000000);
+	// mcpwm_set_duty_cycle(pwm3, 1, 0x40000000);
 	mcpwm_set_duty_cycle(pwm3, 1, 0x47AE147A); /* 56% duty cycle */
 
 	/* Set up encoder callback */
-	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, NULL);
+	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, params);
 
 	/* Set up break interrupt handler for hardware fault protection */
 	mcpwm_set_break_callback(pwm1, gate_driver_a_break_callback, params);
@@ -232,12 +319,6 @@ static void motor_state_hw_init_entry(void *obj)
 	/* Initialize timing subsystem for ISR performance measurement */
 	timing_init();
 	timing_start();
-
-	/* Enable gate driver channels */
-	drv8328_enable_channel(gate_driver_a, 0);
-	drv8328_enable_channel(gate_driver_a, 1);
-	drv8328_enable_channel(gate_driver_b, 0);
-	drv8328_enable_channel(gate_driver_b, 1);
 
 	/* Enable PWM for sampling */
 	mcpwm_enable(pwm3, 1);
@@ -272,24 +353,75 @@ static void motor_state_ctrl_init_entry(void *obj)
 	config_init_filters(params);
 	config_init_pi_controllers(params);
 
-	/* Initialize angle observer */
+	/* Initialize angle observer with 1-sample delay compensation for pipelined SPI4-16 reads */
 	angle_observer_init(&params->observer,
 			    1.0f / CONTROL_LOOP_FREQUENCY_HZ,
 			    ANGLE_OBSERVER_BANDWIDTH_HZ,
-			    MOTOR_POLE_PAIRS);
+			    MOTOR_POLE_PAIRS,
+			    1.0f); /* SPI4-16 pipelined reads have 1-cycle delay */
 
 	/* Initialize Id trajectory generator for smooth current ramping */
 	traj_init(&params->traj_Id);
 	traj_set_min_value(&params->traj_Id, 0.0f);
 	traj_set_max_value(&params->traj_Id, MOTOR_MAX_CURRENT_A);
+
+#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+	/* Initialize PRBS generator and RLS parameters */
+	prbs_init(&params->prbs_gen);
+	params->rls_decimation = RLS_DECIMATION;
+	params->rls_stagger_offset = RLS_STAGGER_OFFSET;
+	params->prbs_amplitude_V = PRBS_AMPLITUDE_V;
+	params->Ld_est = params->Ls_measured_H;  /* Initial estimate from calibration */
+	params->Lq_est = RLS_INITIAL_LQ_H;
+	params->Id_rls_prev = 0.0f;  /* Initialize previous RLS current for dI/dt */
+	params->Iq_rls_prev = 0.0f;
+
+	/* Initialize d-axis RLS estimator */
+	rls_motor_est_init(&params->rls_d,
+	                   RLS_LAMBDA,
+	                   CONTROL_LOOP_FREQUENCY_HZ / RLS_DECIMATION,
+	                   RLS_CONVERGENCE_THRESHOLD,
+	                   params->Rs_measured_ohm,
+	                   params->Ls_measured_H,
+	                   RLS_INITIAL_COVARIANCE);
+
+	/* Initialize q-axis RLS estimator */
+	rls_motor_est_init(&params->rls_q,
+	                   RLS_LAMBDA,
+	                   CONTROL_LOOP_FREQUENCY_HZ / RLS_DECIMATION,
+	                   RLS_CONVERGENCE_THRESHOLD,
+	                   params->Rs_measured_ohm,
+	                   RLS_INITIAL_LQ_H,
+	                   RLS_INITIAL_COVARIANCE);
+
+	/* Initialize thermal model */
+	params->thermal_decimation = THERMAL_DECIMATION;
+	params->Rs_ref_ohm = params->Rs_measured_ohm;  /* Save calibrated Rs as reference */
+	params->Rs_ref_temp_C = RS_REF_TEMP_C;
+	params->Rs_temp_coeff = RS_TEMP_COEFF;
+	params->T_rls_C = THERMAL_T_AMBIENT;  /* Initialize to ambient */
+
+	float32_t thermal_update_freq = CONTROL_LOOP_FREQUENCY_HZ / (float32_t)THERMAL_DECIMATION;
+	thermal_model_init(&params->thermal,
+	                   THERMAL_R_TH,
+	                   THERMAL_C_TH,
+	                   THERMAL_T_AMBIENT,
+	                   thermal_update_freq);
+
+	/* Initialize RLS gating conditions */
+	params->rls_min_current_A = RLS_MIN_CURRENT_A;
+	params->rls_min_speed_rad_s = RLS_MIN_SPEED_RAD_S;
+	params->rls_max_residual = RLS_MAX_RESIDUAL;
+	params->rls_max_voltage_V = RLS_MAX_VOLTAGE_V;
+#endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 }
 
 static enum smf_state_result motor_state_ctrl_init_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Transition to calibration parent state (will start with OFFSET_MEAS) */
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+	/* Transition to IDLE - ready but unpowered */
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 
 	return SMF_EVENT_HANDLED;
 }
@@ -297,7 +429,11 @@ static enum smf_state_result motor_state_ctrl_init_run(void *obj)
 /* State: CALIBRATION - Hierarchical parent state for all calibration sub-states */
 static void motor_state_calibration_entry(void *obj)
 {
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
 	LOG_INF("=== Starting Motor Calibration Sequence ===");
+
+	params->calibration_complete = false;
 }
 
 static enum smf_state_result motor_state_calibration_run(void *obj)
@@ -316,6 +452,8 @@ static void motor_state_calibration_exit(void *obj)
 	LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
 	LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
 	LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
+
+	params->calibration_complete = true;
 }
 
 /* State: OFFSET_MEAS - Measure current sensor offsets */
@@ -324,6 +462,9 @@ static void motor_state_offset_meas_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering OFFSET_MEAS state");
+
+	params->Ia_offset = 0.0f;
+	params->Ib_offset = 0.0f;
 
 	filter_fo_set_initial_conditions(&params->filter_Ia, 0.0f, 0.0f);
 	filter_fo_set_initial_conditions(&params->filter_Ib, 0.0f, 0.0f);
@@ -370,6 +511,10 @@ static void motor_state_roverl_meas_entry(void *obj)
 
 	LOG_INF("Entering ROVERL_MEAS state");
 
+	/* Additional ROVERL_MEAS requirements (PWM output is provided by OFFLINE). */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+
 	/* TI R/L uses small sinusoidal current excitation
 	 * Target: 10-20% of rated current
 	 * Method: Apply rotating voltage vector, measure phase lag
@@ -393,8 +538,10 @@ static void motor_state_roverl_meas_entry(void *obj)
 	params->roverl_accumulator_Vd_Id = 0.0f;
 	params->roverl_accumulator_Vq_Id = 0.0f;
 	params->roverl_accumulator_Id2 = 0.0f;
-	angle_gen_init(&params->angle_gen_roverl, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
-	angle_gen_set_freq(&params->angle_gen_roverl, ROVERL_EST_FREQ_HZ);
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	/* Convert electrical frequency to mechanical velocity: omega_mech = omega_elec / pole_pairs */
+	float32_t omega_rad_s = (ROVERL_EST_FREQ_HZ * 2.0f * PI_F32) / (float32_t)MOTOR_POLE_PAIRS;
+	angle_gen_set_velocity(&params->angle_gen, omega_rad_s);
 
 	LOG_INF("RoverL: %.0fHz excitation for %.1fs (I_amplitude=%.3fA)",
 		(double)ROVERL_EST_FREQ_HZ, (double)ROVERL_EST_DURATION_S,
@@ -458,8 +605,12 @@ static void motor_state_roverl_meas_exit(void *obj)
 	LOG_INF("Exiting ROVERL_MEAS state");
 
 	/* Reset angle generator */
-	angle_gen_set_freq(&params->angle_gen_roverl, 0.0f);
-	angle_gen_set_angle(&params->angle_gen_roverl, 0.0f);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
+
+	/* Clear this state's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
 /* State: RS_EST - Measure stator resistance via DC injection (TI method) */
@@ -469,6 +620,10 @@ static void motor_state_rs_est_entry(void *obj)
 
 	LOG_INF("Entering RS_EST state");
 
+	/* Additional RS_EST requirements (PWM output is provided by OFFLINE). */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+
 	/* Rs EST uses DC current injection on d-axis
 	 * Two phases:
 	 *   1. RampUp: Gradually ramp current to avoid transients
@@ -476,6 +631,11 @@ static void motor_state_rs_est_entry(void *obj)
 	 *
 	 * PI controller automatically generates voltage needed: V = I*R
 	 */
+
+	/* Initialize calibration angle generator to stationary frame (0 rad/s) */
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
 
 	/* Configure trajectory for smooth current ramp
 	 * Continues from previous state (ROVERL_MEAS) current value
@@ -496,6 +656,8 @@ static void motor_state_rs_est_entry(void *obj)
 	filter_fo_set_den_coeffs(&params->filter_rs_est_I, a1);
 	filter_fo_set_num_coeffs(&params->filter_rs_est_I, b0, 0.0f);
 	filter_fo_set_initial_conditions(&params->filter_rs_est_I, 0.0f, 0.0f);
+
+	params->Rs_measured_ohm = 0.0f;
 
 	LOG_INF("Rs EST: I_target=%.3fA, rampup=%.1fs, measurement=%.1fs",
 		(double)RS_EST_CURRENT_A,
@@ -535,28 +697,47 @@ static enum smf_state_result motor_state_rs_est_run(void *obj)
 
 static void motor_state_rs_est_exit(void *obj)
 {
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
 	LOG_INF("Exiting RS_EST state");
+
+	/* Clear this state's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
-/* State: ALIGN - Align rotor to known position */
+/* State: ALIGN - Align rotor to known position (Phase 1: injection in generated frame) */
 static void motor_state_align_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ALIGN state");
 
+	/* Phase 1: use generated angle (no encoder -> observer is driven by angle_gen). */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+			     BIT(MOTOR_FEATURE_PI_CONTROL));
+
+	/* Initialize angle generator to stationary frame (0 rad/s) */
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
+
 	/* Set trajectory target to alignment current (will ramp smoothly)
 	 * Continues from previous state (RS_EST) current value
 	 */
 	traj_set_target_value(&params->traj_Id, ALIGN_CURRENT_A);
-	float32_t align_ramp_rate = ALIGN_CURRENT_A / (0.1f * CONTROL_LOOP_FREQUENCY_HZ);
+	float32_t align_ramp_rate = ALIGN_CURRENT_A / (ALIGN_INJECT_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
 	traj_set_max_delta(&params->traj_Id, align_ramp_rate);
 
-	LOG_INF("Applying alignment current: Id=%.3fA for %.1fs",
-		(double)ALIGN_CURRENT_A, (double)ALIGN_DURATION_S);
+	LOG_INF("Applying alignment current: Id=%.3fA for %.3fs (then sample %.3fs)",
+		(double)ALIGN_CURRENT_A,
+		(double)ALIGN_INJECT_DURATION_S,
+		(double)ALIGN_STABILIZE_DURATION_S);
 
-	/* Start timer for alignment duration */
-	k_timer_start(&params->state_timer, K_MSEC((uint32_t)(ALIGN_DURATION_S * 1000)), K_NO_WAIT);
+	/* Start timer for alignment injection duration */
+	k_timer_start(&params->state_timer,
+		      K_MSEC((uint32_t)(ALIGN_INJECT_DURATION_S * 1000.0f)),
+		      K_NO_WAIT);
 }
 
 static enum smf_state_result motor_state_align_run(void *obj)
@@ -566,21 +747,8 @@ static enum smf_state_result motor_state_align_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_TIMEOUT:
-		/* Get the current mechanical angle from the observer */
-		float32_t mech_angle_deg = angle_observer_get_mech_angle_deg(&params->observer);
-
-		/* Set the offset so that electrical angle = 0 at this position
-		 * (d-axis aligned with alignment current)
-		 * offset = -mech_angle (so elec = (mech + offset) * poles = 0)
-		 */
-		float32_t offset_deg = -mech_angle_deg;
-		angle_observer_set_offset(&params->observer, offset_deg);
-
-		LOG_INF("Alignment complete: mech_angle=%.2f deg, offset=%.2f deg",
-			(double)mech_angle_deg, (double)offset_deg);
-
-		/* Transition to IDLE */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		/* Move to Phase 2: switch observer input to encoder and let it converge. */
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_SAMPLE]);
 		return SMF_EVENT_HANDLED;
 
 	default:
@@ -591,7 +759,75 @@ static enum smf_state_result motor_state_align_run(void *obj)
 
 static void motor_state_align_exit(void *obj)
 {
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
 	LOG_INF("Exiting ALIGN state");
+
+	/* Clear this phase's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+			      BIT(MOTOR_FEATURE_PI_CONTROL));
+}
+
+/* State: ALIGN_SAMPLE - Align rotor to known position (Phase 2: sample encoder/observer) */
+static void motor_state_align_sample_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ALIGN_SAMPLE state");
+
+	/* Phase 2: use encoder-based observer input. Keep PI current control enabled
+	 * so we continue holding alignment current while the observer converges.
+	 */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+			     BIT(MOTOR_FEATURE_PI_CONTROL));
+
+	/* Start timer for stabilization window */
+	k_timer_start(&params->state_timer,
+		      K_MSEC((uint32_t)(ALIGN_STABILIZE_DURATION_S * 1000.0f)),
+		      K_NO_WAIT);
+}
+
+static enum smf_state_result motor_state_align_sample_run(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	switch (params->event.type) {
+	case MOTOR_EVENT_TIMEOUT: {
+		/* Get the current mechanical angle from the observer (now encoder-driven). */
+		float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
+
+		/* Set the offset so that electrical angle = 0 at this position
+		 * (d-axis aligned with alignment current)
+		 * offset = -mech_angle (so elec = (mech + offset) * poles = 0)
+		 */
+		float32_t offset_rad = -mech_angle_rad;
+		angle_observer_set_offset(&params->observer, offset_rad);
+
+		/* Convert to degrees for display */
+		float32_t mech_angle_deg = mech_angle_rad * (180.0f / PI_F32);
+		float32_t offset_deg = offset_rad * (180.0f / PI_F32);
+		LOG_INF("Alignment complete: mech_angle=%.2f deg, offset=%.2f deg",
+			(double)mech_angle_deg, (double)offset_deg);
+
+		/* Transition from CALIBRATION (ALIGN_SAMPLE) to ONLINE */
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		return SMF_EVENT_HANDLED;
+	}
+
+	default:
+		return SMF_EVENT_PROPAGATE;
+	}
+}
+
+static void motor_state_align_sample_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ALIGN_SAMPLE state");
+
+	/* Clear this phase's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+			      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
 /* State: IDLE - Ready but not running */
@@ -600,7 +836,13 @@ static void motor_state_idle_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering IDLE state");
-	/* Disable motor outputs */
+
+	/* Disable all ISR features */
+	motor_set_isr_feature_flags(params, 0);
+
+	/* Disable gate drivers - motor unpowered */
+	drv8328_disable_all_channels(gate_driver_a);
+	drv8328_disable_all_channels(gate_driver_b);
 
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
@@ -612,13 +854,23 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 
 	/* Process current event */
 	switch (params->event.type) {
-	case MOTOR_EVENT_START_REQUEST:
-		LOG_INF("Start request received, transitioning to ONLINE");
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+	case MOTOR_EVENT_ONLINE:
+		if (params->calibration_complete) {
+			LOG_INF("ONLINE request received, transitioning to ONLINE");
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+			return SMF_EVENT_HANDLED;
+		}
+
+		LOG_WRN("ONLINE request ignored: calibration not complete");
+		return SMF_EVENT_HANDLED;
+
+	case MOTOR_EVENT_OFFLINE:
+		LOG_INF("OFFLINE request received, transitioning to OFFLINE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_OFFLINE]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_CALIBRATE_REQUEST:
-		LOG_INF("Calibrate request received, starting calibration sequence");
+		LOG_INF("Calibrate request received, forcing recalibration");
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
@@ -633,25 +885,64 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	}
 }
 
-/* State: OFFLINE - Open-loop control */
+/* State: OFFLINE - Motor energized, calibration and open-loop control */
 static void motor_state_offline_entry(void *obj)
 {
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
 	LOG_INF("Entering OFFLINE state");
+
+	/* OFFLINE baseline requirements (shared by all OFFLINE substates).
+	 * CALIBRATION is a child of OFFLINE and should not own PWM-output baseline.
+	 */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PWM_OUTPUT));
+
+	/* Enable gate driver channels - motor now energized */
+	drv8328_enable_channel(gate_driver_a, 0);
+	drv8328_enable_channel(gate_driver_a, 1);
+	drv8328_enable_channel(gate_driver_b, 0);
+	drv8328_enable_channel(gate_driver_b, 1);
+
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
+}
+
+static void motor_state_offline_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting OFFLINE state");
+
+	/* Clear OFFLINE baseline requirements on exit. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PWM_OUTPUT));
 }
 
 static enum smf_state_result motor_state_offline_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
+	/* Check if calibration is needed on first run */
+	if (!params->calibration_complete) {
+		/* SMF will automatically enter CALIBRATION child state */
+		/* Just propagate events to child states */
+	} else {
+		/* Calibration already done, skip to ONLINE */
+		LOG_INF("Calibration already complete, transitioning to ONLINE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		return SMF_EVENT_HANDLED;
+	}
+
 	/* Process current event */
 	switch (params->event.type) {
-	case MOTOR_EVENT_STOP_REQUEST:
-		LOG_INF("Stop request received, transitioning to IDLE");
+	case MOTOR_EVENT_IDLE:
+		LOG_INF("IDLE request received, transitioning to IDLE");
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_ERROR:
-		LOG_WRN("Emergency stop event received, code: %d, transitioning to ERROR", params->event.error_code);
+		LOG_WRN("%s event received, code: %s, transitioning to ERROR",
+			motor_event_to_string(params->event.type),
+			motor_error_to_string(params->event.error_code));
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
 		return SMF_EVENT_HANDLED;
 
@@ -661,15 +952,37 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 		return SMF_EVENT_HANDLED;
 
 	default:
-		/* Propagate unhandled events */
+		/* Propagate events to child states (CALIBRATION sequence) */
 		return SMF_EVENT_PROPAGATE;
 	}
 }
 
-/* State: ONLINE - Closed-loop control */
 static void motor_state_online_entry(void *obj)
 {
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
 	LOG_INF("Entering ONLINE state");
+
+	/* ONLINE baseline requirements (shared by all ONLINE substates). */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_BRAKING) |
+				     BIT(MOTOR_FEATURE_PWM_OUTPUT) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL) |
+				     BIT(MOTOR_FEATURE_RLS_ESTIMATION) |
+				     BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+}
+
+static void motor_state_online_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ONLINE state");
+
+	/* Clear ONLINE baseline requirements on exit. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_BRAKING) |
+				      BIT(MOTOR_FEATURE_PWM_OUTPUT) |
+				      BIT(MOTOR_FEATURE_PI_CONTROL) |
+				      BIT(MOTOR_FEATURE_RLS_ESTIMATION) |
+				      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 }
 
 static enum smf_state_result motor_state_online_run(void *obj)
@@ -678,13 +991,15 @@ static enum smf_state_result motor_state_online_run(void *obj)
 
 	/* Process current event */
 	switch (params->event.type) {
-	case MOTOR_EVENT_STOP_REQUEST:
-		LOG_INF("Stop request received, transitioning to IDLE");
+	case MOTOR_EVENT_IDLE:
+		LOG_INF("IDLE request received, transitioning to IDLE");
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_ERROR:
-		LOG_WRN("Emergency stop event received, code: %d, transitioning to ERROR", params->event.error_code);
+		LOG_WRN("%s event received, code: %s, transitioning to ERROR",
+			motor_event_to_string(params->event.type),
+			motor_error_to_string(params->event.error_code));
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
 		return SMF_EVENT_HANDLED;
 
@@ -693,10 +1008,143 @@ static enum smf_state_result motor_state_online_run(void *obj)
 		motor_api_apply_param_update(params);
 		return SMF_EVENT_HANDLED;
 
+	case MOTOR_EVENT_MODE_CHANGE:
+		/* Transition to requested control mode substate */
+		LOG_INF("%s event: changing to state %s",
+			motor_event_to_string(params->event.type),
+			motor_state_to_string(params->event.target_mode));
+
+		/* Validate target is an ONLINE substate */
+		if (params->event.target_mode != MOTOR_STATE_ONLINE_TORQUE &&
+		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_OPEN &&
+		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_CLOSED) {
+			LOG_ERR("Invalid mode change target: %s",
+				motor_state_to_string(params->event.target_mode));
+			return SMF_EVENT_HANDLED;
+		}
+
+		smf_set_state(SMF_CTX(params), &motor_states[params->event.target_mode]);
+		return SMF_EVENT_HANDLED;
+
 	default:
 		/* Propagate unhandled events */
 		return SMF_EVENT_PROPAGATE;
 	}
+}
+
+/* Substate: ONLINE_TORQUE - Direct Id/Iq control mode */
+static void motor_state_online_torque_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ONLINE_TORQUE substate (direct Id/Iq control)");
+
+	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+}
+
+static void motor_state_online_torque_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ONLINE_TORQUE substate");
+
+	/* Clear this substate's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+}
+
+static enum smf_state_result motor_state_online_torque_run(void *obj)
+{
+	/* Direct torque control - no additional processing needed
+	 * Id/Iq setpoints are controlled via shell commands
+	 * Parent ONLINE state handles stop/error events
+	 */
+	return SMF_EVENT_PROPAGATE;
+}
+
+/* Substate: ONLINE_VELOCITY_OPEN - Open-loop velocity control */
+static void motor_state_online_velocity_open_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ONLINE_VELOCITY_OPEN substate");
+
+	/* Open-loop velocity control uses angle generator and velocity trajectory.
+	 * ONLINE provides the baseline.
+	 */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+
+	/* Initialize angle generator for open-loop mode */
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
+
+	/* Initialize velocity trajectory */
+	traj_init(&params->traj_velocity);
+	traj_set_min_value(&params->traj_velocity, -VELOCITY_MAX_RAD_S);
+	traj_set_max_value(&params->traj_velocity, VELOCITY_MAX_RAD_S);
+	traj_set_max_delta(&params->traj_velocity, VELOCITY_MAX_ACCEL_RAD_S2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+
+	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
+		(double)VELOCITY_MAX_HZ, (double)VELOCITY_MAX_ACCEL_HZ_S);
+}
+
+static enum smf_state_result motor_state_online_velocity_open_run(void *obj)
+{
+	/* Velocity control happens in motor_isr based on active substate
+	 * This handler just maintains state and propagates events to parent
+	 */
+	return SMF_EVENT_PROPAGATE;
+}
+
+static void motor_state_online_velocity_open_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ONLINE_VELOCITY_OPEN substate");
+
+	/* Reset angle generator and trajectory */
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+
+	/* Clear this substate's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+}
+
+/* Substate: ONLINE_VELOCITY_CLOSED - Closed-loop velocity control (Phase 3) */
+static void motor_state_online_velocity_closed_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_WRN("ONLINE_VELOCITY_CLOSED not implemented yet (Phase 3)");
+
+	/* Closed-loop velocity will be encoder-based; ONLINE provides baseline. */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+
+	/* Fallback to torque mode */
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE_TORQUE]);
+}
+
+static enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
+{
+	/* Stub - should not reach here due to immediate transition in entry */
+	return SMF_EVENT_PROPAGATE;
+}
+
+static void motor_state_online_velocity_closed_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ONLINE_VELOCITY_CLOSED substate");
+
+	/* Clear this substate's additional requirements. */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 }
 
 /* State: ERROR - Fault condition */
@@ -704,10 +1152,14 @@ static void motor_state_error_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
+	/* Disable all ISR features */
+	motor_set_isr_feature_flags(params, 0);
+
 	/* Store the error code that triggered this state */
 	params->last_error_code = params->event.error_code;
 
-	LOG_ERR("Entering ERROR state, code: %d", params->last_error_code);
+	LOG_ERR("Entering ERROR state, code: %s",
+		motor_error_to_string(params->last_error_code));
 
 	/* Immediately disable PWM outputs to prevent damage
 	 * This prevents:
@@ -779,16 +1231,22 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 
 		}
 
+		/* Start each SMF cycle from the currently published stable flags so that
+		 * hierarchical entry/exit delta updates compose correctly.
+		 */
+		motor_params.feature_flags_next = atomic_get(&motor_params.feature_flags);
+
 		rc = smf_run_state(SMF_CTX(&motor_params));
 
 		if (rc) {
 			/* State machine terminated */
 			LOG_ERR("State machine terminated with code %d", rc);
 			break;
-		}		
+		}
 
-		/* Update ISR-safe state after all actions complete */
+		/* Update ISR-safe state and feature flags after all actions complete */
 		motor_params.state_for_isr = motor_params.smf.current;
+		atomic_set(&motor_params.feature_flags, motor_params.feature_flags_next);
 	}
 }
 

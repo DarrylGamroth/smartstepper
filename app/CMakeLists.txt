@@ -14,6 +14,9 @@ target_sources(app PRIVATE
 	src/config.c
 	src/angle_observer.c
 	src/rs_online.c
+	src/prbs.c
+	src/rls_motor_est.c
+	src/thermal_model.c
 	src/shell_commands.c
 	src/motor_control_api.c
 	src/motor_isr.c

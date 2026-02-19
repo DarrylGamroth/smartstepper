@@ -63,7 +63,7 @@
 		inl-gpios = <&gpioe 8 GPIO_ACTIVE_HIGH>,
 		            <&gpiob 0 GPIO_ACTIVE_HIGH>;
 
-		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_HIGH>;
+		sleep-gpios = <&gpiog 14 GPIO_ACTIVE_LOW>;
 	};
 
 	drv8328_b: drv8328_b {
@@ -78,7 +78,7 @@
 		inl-gpios = <&gpioh 13 GPIO_ACTIVE_HIGH>,
 		            <&gpioh 14 GPIO_ACTIVE_HIGH>;
 
-		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_HIGH>;
+		sleep-gpios = <&gpiod 8 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -256,10 +256,10 @@
 	cs-gpios = <&gpioa 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	status = "okay";
 
-	dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
-		<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
+	// dmas = <&dma2 3 5 (STM32_DMA_PERIPH_TX | STM32_DMA_MEM_8BITS)>,
+	// 	<&dma2 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_MEM_8BITS)>;
 
-	dma-names = "tx", "rx";
+	// dma-names = "tx", "rx";
 
 	w25q128: w25q128@0 {
 		compatible ="jedec,spi-nor";
@@ -397,7 +397,7 @@ zephyr_udc0: &usbotg_fs {
 	pinctrl-names = "default";
 	st,adc-clock-source = "SYNC";
 	st,adc-prescaler = <2>;
-	status = "okay";
+	status = "disabled";
 
 	vref-mv = <3000>;
 
@@ -410,7 +410,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 
 	/* I_SENSE_B */
@@ -419,7 +418,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 
 	/* VINSENSE */
@@ -428,7 +426,6 @@ zephyr_udc0: &usbotg_fs {
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
-		zephyr,resolution = <12>;
 	};
 };
 

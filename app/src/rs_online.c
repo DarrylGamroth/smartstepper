@@ -5,15 +5,13 @@
  */
 
 #include "rs_online.h"
+#include "math_constants.h"
+
 #include <zephyr/dsp/types.h>
 #include <zephyr/dsp/dsp.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
-
-#ifndef PI_F32
-#define PI_F32 3.14159265358979323846f
-#endif
 
 void rs_online_init(struct rs_online_estimator *est,
                     float32_t Rs_init,
@@ -51,7 +49,7 @@ void rs_online_init(struct rs_online_estimator *est,
     // --- Initialize derivative filters: y[n] = b0*x[n] + a1*y[n-1] ---
     // For first-order low-pass: alpha = 2*pi*bw*Ts, b0 = alpha, a1 = (1-alpha)
     float32_t deriv_alpha = 2.0f * PI_F32 * deriv_bw_hz * est->Ts;
-    deriv_alpha = CLAMP(deriv_alpha, 0.0f, 1.0f);  // Stability limit
+    deriv_alpha = clampf(deriv_alpha, 0.0f, 1.0f);  // Stability limit
 
     filter_fo_init(&est->did_dt_filt);
     filter_fo_set_b0(&est->did_dt_filt, deriv_alpha);
@@ -63,7 +61,7 @@ void rs_online_init(struct rs_online_estimator *est,
 
     // --- Initialize Rs low-pass filter ---
     float32_t Rs_alpha = 2.0f * PI_F32 * Rs_lp_bw_hz * est->Ts;
-    Rs_alpha = CLAMP(Rs_alpha, 0.0f, 1.0f);
+    Rs_alpha = clampf(Rs_alpha, 0.0f, 1.0f);
 
     filter_fo_init(&est->Rs_filt);
     filter_fo_set_b0(&est->Rs_filt, Rs_alpha);
@@ -145,7 +143,7 @@ void rs_online_update(struct rs_online_estimator *est,
     est->Rs_est += dRs;
 
     // Clamp to valid range
-    est->Rs_est = CLAMP(est->Rs_est, est->Rs_min, est->Rs_max);
+    est->Rs_est = clampf(est->Rs_est, est->Rs_min, est->Rs_max);
 
     // --- 4. Low-pass filtered Rs output ---
     filter_fo_run_form_0(&est->Rs_filt, est->Rs_est);

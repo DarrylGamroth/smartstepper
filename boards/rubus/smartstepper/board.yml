@@ -3,6 +3,7 @@
 
 board:
   name: smartstepper
+  full_name: Smart Stepper
   vendor: rubus
   socs:
     - name: stm32f407xx

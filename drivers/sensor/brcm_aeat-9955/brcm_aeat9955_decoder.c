@@ -87,22 +87,29 @@ static int aeat9955_decoder_decode(const uint8_t *buffer, struct sensor_chan_spe
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
 	const uint8_t *raw = sample->raw;
 	struct sensor_q31_data *out = data_out;
-	const uint8_t status = raw[2];
 
-	if ((status & AEAT9955_STATUS_ERROR_BIT) != 0U) {
-		return -EIO;
-	}
+	uint32_t position;
+	bool warning;
+	bool parity;
+	int ret;
 
-	if ((status & AEAT9955_STATUS_PARITY_BIT) != 0U) {
-		return -EBADMSG;
+	ret = aeat9955_decode_position(raw, &position, &warning, &parity);
+	if (ret < 0) {
+		if (warning) {
+			LOG_WRN("Warning flag set in AEAT9955 data");
+		}
+
+		if (parity) {
+			LOG_WRN("Parity error detected in AEAT9955 data");
+			return -EIO;
+		}
+		return ret;
 	}
 
 	out->header.reading_count = 1;
 
 	switch (chan_spec.chan_type) {
 	case SENSOR_CHAN_ROTATION:
-		uint32_t position = sys_get_be24(&raw[2]) >> 6;
-
 		out->header.base_timestamp_ns = sample->header.timestamp_ns;
 		out->shift = 0; /* Q31 format doesn't use shift */
 		out->readings[0].timestamp_delta = 0;

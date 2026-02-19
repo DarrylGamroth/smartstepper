@@ -25,6 +25,11 @@
 extern "C" {
 #endif
 
+/* AEAT-9955 encoder specifications */
+#define AEAT9955_RESOLUTION_BITS 18 /**< 18-bit absolute position resolution */
+#define AEAT9955_MAX_COUNT       (1U << AEAT9955_RESOLUTION_BITS) /**< Maximum count value (262144) */
+#define AEAT9955_COUNTS_TO_DEGREES (360.0f / (float)AEAT9955_MAX_COUNT) /**< Conversion factor */
+
 /**
  * @brief AEAT9955 Q31 sensor reading
  */
@@ -39,98 +44,73 @@ struct aeat9955_q31_reading {
 enum aeat9955_sensor_attribute {
 	/** ABZ Resolution setting (0-3 for 1024, 2048, 4096, 8192 PPR) */
 	AEAT9955_ATTR_ABZ_RESOLUTION = SENSOR_ATTR_PRIV_START,
-	
-	/** Zero position setting (16-bit value: val1=high byte, val2=low byte) */
+
+	/** Zero position setting (18-bit value: val1=MSB bits[17:10], val2=bits[9:2]) */
 	AEAT9955_ATTR_ZERO_POSITION,
-	
-	/** Trigger calibration (set val1=1 to start calibration) */
-	AEAT9955_ATTR_CALIBRATION,
-	
-	/** Output options configuration (val1=OPTS0, val2=OPTS1) */
-	AEAT9955_ATTR_OUTPUT_OPTIONS,
-	
-	/** Auto-calibration rotation speed range (0-7 for different RPM ranges) */
-	AEAT9955_ATTR_AUTOCAL_FREQ,
-	
-	/** Calibration status (read-only: bits [7:6] from register 0x113) */
+
+	/** Trigger accuracy angle calibration (set val1=1 to start, motor must rotate 10-2000 RPM) */
+	AEAT9955_ATTR_AUTO_CALIBRATION,
+
+	/** Trigger zero reset calibration (set val1=1, encoder must be stationary at desired zero) */
+	AEAT9955_ATTR_ZERO_RESET,
+
+	/** Calibration status (read-only: val1=accuracy cal status [1:0], val2=zero reset status [3:2]) */
 	AEAT9955_ATTR_CAL_STATUS,
-	
+
+	/** Multi-index pulses per revolution (0=1, 1=2, 2=4, ..., 7=128 pulses) */
+	AEAT9955_ATTR_MULTI_INDEX,
+
+	/** Sensing axis configuration (0=On-Axis, 1=Off-Axis radial, 2=Off-Axis axial, 3=Off-Axis side shaft) */
+	AEAT9955_ATTR_SENSING_AXIS,
+
+	/** Incremental resolution (15-bit value for CPR: 0=OFF, 1=1 CPR, ..., 20000=20,000 CPR) */
+	AEAT9955_ATTR_INCREMENTAL_RESOLUTION,
+
 	/** Rotation direction (0=clockwise, 1=counter-clockwise) */
-	AEAT9955_ATTR_ROTATION_DIRECTION,
-	
+	AEAT9955_ATTR_DIRECTION,
+
 	/** Hysteresis setting (0-7 for different hysteresis levels) */
 	AEAT9955_ATTR_HYSTERESIS,
+
+	/** UVW output resolution (6-bit value: 0=OFF, 1=1 pole pair, ..., 31=31 pole pairs, 32=32 pole pairs) */
+	AEAT9955_ATTR_UVW_RESOLUTION,
+
+	/** Single turn resolution (4-bit value: 0=18bit, 1=17bit, ..., 8=10bit minimum) */
+	AEAT9955_ATTR_SINGLE_TURN_RESOLUTION,
+
+	/** Program current configuration to EEPROM (set val1=1 to save to non-volatile memory) */
+	AEAT9955_ATTR_EEPROM_PROGRAM,
+
+	/** Alarm latch configuration (0=triggered alarm resets once error recovered, 1=alarm remains until user clears or power-cycles) */
+	AEAT9955_ATTR_ALARM_LATCH,
+
+	/** SPI output high-impedance mode (0=enable high-z, 1=disable high-z for multi-slave or bus connection) */
+	AEAT9955_ATTR_SPI_HIGHZ,
+
+	/** Magnetic field high limit (val1=0-15, 0=lowest, 15=highest, default=1001b=10) */
+	AEAT9955_ATTR_MAGNETIC_HIGH,
+
+	/** Magnetic field low limit (val1=0-15, 0=lowest, 15=highest, default=0101b=5) */
+	AEAT9955_ATTR_MAGNETIC_LOW,
+
+	/** Vertical Hall selection for off-axis configurations (4-bit value, see datasheet) */
+	AEAT9955_ATTR_VERTICAL_HALL_SEL,
+
+	/** PWM resolution/frequency (0-15, see datasheet for fixed period or clock settings) */
+	AEAT9955_ATTR_PWM_RESOLUTION,
+
+	/** Index state configuration (0=A low B low, 1=A low B high, 2=A high B high, 3=A high B low) */
+	AEAT9955_ATTR_INDEX_STATE,
+
+	/** Index width configuration (0=90°, 1=180e°, 2=270e°, 3=360e°) */
+	AEAT9955_ATTR_INDEX_WIDTH,
+
+	/** Protocol mode selection PSEL (0=SSI3a/SSI2a/All SPI4 modes, 1=SSI3b/SSI2b/PWM) */
+	AEAT9955_ATTR_PROTOCOL_MODE,
+
+	/** Auto-calibration hardware enable via M1 pin (0=disable, 1=enable calibration on M1 pin) */
+	AEAT9955_ATTR_AUTO_CAL_HARDWARE,
 };
-
-/**
- * @brief AEAT9955 encoder resolution
- */
-#define AEAT9955_RESOLUTION_BITS 18  /**< 18-bit encoder (262144 counts per revolution) */
-
-/**
- * @brief AEAT9955 angle conversion constants
- */
-#define AEAT9955_COUNTS_TO_DEGREES (360.0f / (float)(1U << AEAT9955_RESOLUTION_BITS))  /**< Multiply factor: counts to degrees */
-
-/**
- * @brief ABZ Resolution values
- */
-#define AEAT9955_ABZ_RES_1024_PPR   0  /**< 1024 pulses per revolution */
-#define AEAT9955_ABZ_RES_2048_PPR   1  /**< 2048 pulses per revolution */
-#define AEAT9955_ABZ_RES_4096_PPR   2  /**< 4096 pulses per revolution */
-#define AEAT9955_ABZ_RES_8192_PPR   3  /**< 8192 pulses per revolution */
-
-/**
- * @brief Auto-calibration rotation speed range values
- * Based on AEAT9955 datasheet Table: User Auto-Calibration Rotation Speed Register (EEPROM)
- */
-#define AEAT9955_AUTOCAL_SPEED_3200_6400_RPM   0  /**< 3200 ≤ Speed < 6400 RPM */
-#define AEAT9955_AUTOCAL_SPEED_1600_3200_RPM   1  /**< 1600 ≤ Speed < 3200 RPM */
-#define AEAT9955_AUTOCAL_SPEED_800_1600_RPM    2  /**< 800 ≤ Speed < 1600 RPM */
-#define AEAT9955_AUTOCAL_SPEED_400_800_RPM     3  /**< 400 ≤ Speed < 800 RPM */
-#define AEAT9955_AUTOCAL_SPEED_200_400_RPM     4  /**< 200 ≤ Speed < 400 RPM */
-#define AEAT9955_AUTOCAL_SPEED_100_200_RPM     5  /**< 100 ≤ Speed < 200 RPM */
-#define AEAT9955_AUTOCAL_SPEED_50_100_RPM      6  /**< 50 ≤ Speed < 100 RPM */
-#define AEAT9955_AUTOCAL_SPEED_25_50_RPM       7  /**< 25 ≤ Speed < 50 RPM */
-
-/**
- * @brief STATUS[2:0] values from register 0x0005
- * Based on AEAT9955 datasheet - these indicate chip warnings/status
- */
-#define AEAT9955_STATUS_BIT0_ROTATION_OVERSPEED  0x01  /**< Bit 0: Rotation Over Speed Warning */
-#define AEAT9955_STATUS_BIT1_WEAK_MAGNETIC       0x02  /**< Bit 1: Weak Magnetic Field Warning */
-#define AEAT9955_STATUS_BIT2_UNDER_VOLTAGE       0x04  /**< Bit 2: Under Voltage Warning */
-
-/**
- * @brief Calibration status values from register 0x113 bits [7:6]
- * Used with AEAT9955_ATTR_CAL_STATUS attribute
- */
-#define AEAT9955_CAL_STATUS_NONE      0x00  /**< No calibration */
-#define AEAT9955_CAL_STATUS_RUNNING   0x40  /**< Running auto calibration */
-#define AEAT9955_CAL_STATUS_FAILED    0x80  /**< Calibration failed */
-#define AEAT9955_CAL_STATUS_SUCCESS   0xC0  /**< Calibration successful */
-
-/**
- * @brief Rotation direction values
- * Used with AEAT9955_ATTR_ROTATION_DIRECTION attribute
- */
-#define AEAT9955_ROTATION_CLOCKWISE       0  /**< Clockwise rotation */
-#define AEAT9955_ROTATION_COUNTER_CLOCKWISE  1  /**< Counter-clockwise rotation */
-
-/**
- * @brief Hysteresis values (0-7)
- * Used with AEAT9955_ATTR_HYSTERESIS attribute
- */
-#define AEAT9955_HYSTERESIS_MIN  0  /**< Minimum hysteresis */
-#define AEAT9955_HYSTERESIS_MAX  7  /**< Maximum hysteresis */
-
-/** Raw SPI frame size returned by the encoder. */
-#define AEAT9955_RAW_FRAME_SIZE 5U
-
-/** Status bit indicating a parity failure in the sensor response. */
-#define AEAT9955_STATUS_PARITY_BIT 0x80U
-/** Status bit indicating a sensor error in the response. */
-#define AEAT9955_STATUS_ERROR_BIT  0x40U
 
 /**
  * @brief Metadata recorded for each AEAT-9955 RTIO submission.
@@ -144,12 +124,12 @@ struct aeat9955_sample_header {
  */
 struct aeat9955_sample {
 	struct aeat9955_sample_header header;
-	uint8_t raw[AEAT9955_RAW_FRAME_SIZE]; /**< Raw SPI response bytes. */
+	uint8_t raw[3]; /**< Raw 3-byte SPI frame from encoder */
 };
 
 /**
  * @brief Get the sensor decoder API for AEAT9955
- * 
+ *
  * @param dev AEAT9955 device instance
  * @param decoder Pointer to store the decoder API
  * @return 0 on success, negative error code on failure
@@ -174,8 +154,7 @@ int aeat9955_get_decoder(const struct device *dev, const struct sensor_decoder_a
 static inline q31_t aeat9955_decode_position_q31(const uint8_t *buffer)
 {
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	/* Extract 18-bit position from bytes [2:4], bits [17:0] after status bits */
-	uint32_t position = sys_get_be24(&sample->raw[2]) >> 6;
+	uint32_t position = (sys_get_be24(sample->raw) >> 4) & (AEAT9955_MAX_COUNT - 1);
 	/* Convert to Q31 centered at 0: maps [0, 262143] to [-2^31, 2^31-1] */
 	return (q31_t)((position << (32 - AEAT9955_RESOLUTION_BITS)) - 0x80000000UL);
 }
@@ -198,8 +177,7 @@ static inline q31_t aeat9955_decode_position_q31(const uint8_t *buffer)
 static inline float aeat9955_decode_position_f32(const uint8_t *buffer)
 {
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	/* Extract 18-bit position from bytes [2:4], bits [17:0] after status bits */
-	int32_t position = (int32_t)(sys_get_be24(&sample->raw[2]) >> 6);
+	uint32_t position = (sys_get_be24(sample->raw) >> 4) & (AEAT9955_MAX_COUNT - 1);
 	/* Convert to degrees centered at 0: [0, 262143] -> [-180.0, +180.0) */
 	return (float)(position - (1 << (AEAT9955_RESOLUTION_BITS - 1))) * AEAT9955_COUNTS_TO_DEGREES;
 }

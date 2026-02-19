@@ -9,6 +9,7 @@
 
 #include <zephyr/sys/util.h>
 #include <zephyr/dsp/types.h>
+#include "math_constants.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,7 +125,7 @@ static inline float32_t pi_get_out_max(const struct pi_f32 *pi)
  * @param pi PI controller instance
  * @return Minimum output value
  */
-static inline float32_t pi_get_out_fminf(const struct pi_f32 *pi)
+static inline float32_t pi_get_out_min(const struct pi_f32 *pi)
 {
 	return pi->out_min;
 }
@@ -248,7 +249,7 @@ static inline void pi_set_out_max(struct pi_f32 *pi, float32_t out_max)
  * @param pi PI controller instance
  * @param out_min Minimum output value
  */
-static inline void pi_set_out_fminf(struct pi_f32 *pi, float32_t out_min)
+static inline void pi_set_out_min(struct pi_f32 *pi, float32_t out_min)
 {
 	pi->out_min = out_min;
 }
@@ -312,8 +313,8 @@ static inline void pi_run_parallel(struct pi_f32 *pi, float32_t ref_value, float
 	ui_min = fminf(pi->out_min - p_out, 0.0f);
 
 	float32_t ui = fmaf(pi->ki, error, pi->ui);
-	ui = fmaxf(fminf(ui, ui_max), ui_min);
-	*out_value = fmaxf(fminf(p_out + ui, pi->out_max), pi->out_min);
+	ui = clampf(ui, ui_min, ui_max);
+	*out_value = clampf(p_out + ui, pi->out_min, pi->out_max);
 
 	pi->ui = ui;
 	pi->ref_value = ref_value;
@@ -359,8 +360,8 @@ static inline void pi_run_series(struct pi_f32 *pi, float32_t ref_value, float32
 	ui_min = fminf(pi->out_min - p_out, 0.0f);
 
 	ui = fmaf(pi->ki, up, pi->ui);
-	ui = fmaxf(fminf(ui, ui_max), ui_min);
-	*out_value = fmaxf(fminf(p_out + ui, pi->out_max), pi->out_min);
+	ui = clampf(ui, ui_min, ui_max);
+	*out_value = clampf(p_out + ui, pi->out_min, pi->out_max);
 
 	pi->ui = ui;
 	pi->ref_value = ref_value;
@@ -402,8 +403,8 @@ static inline void pi_run(struct pi_f32 *pi, float32_t ref_value, float32_t fbac
 	ui_min = fminf(pi->out_min - up, 0.0f);
 
 	float32_t ui = fmaf(pi->ki, up, pi->ui);
-	ui = fmaxf(fminf(ui, ui_max), ui_min);
-	*out_value = fmaxf(fminf(up + ui, pi->out_max), pi->out_min);
+	ui = clampf(ui, ui_min, ui_max);
+	*out_value = clampf(up + ui, pi->out_min, pi->out_max);
 
 	pi->ui = ui;
 }

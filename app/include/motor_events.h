@@ -13,9 +13,11 @@
 enum motor_event_type {
 	MOTOR_EVENT_INIT,                /* Initial event to start state machine */
 	MOTOR_EVENT_RUN,                 /* Generic run event for state transitions */
-	MOTOR_EVENT_START_REQUEST,       /* Request to start motor */
-	MOTOR_EVENT_STOP_REQUEST,        /* Request to stop motor */
+	MOTOR_EVENT_IDLE,                /* Request transition to IDLE state */
+	MOTOR_EVENT_OFFLINE,             /* Request transition to OFFLINE state */
+	MOTOR_EVENT_ONLINE,              /* Request transition to ONLINE state */
 	MOTOR_EVENT_CALIBRATE_REQUEST,   /* Request calibration sequence */
+	MOTOR_EVENT_MODE_CHANGE,         /* Request control mode change */
 	MOTOR_EVENT_PARAM_UPDATE,        /* Update control parameter */
 	MOTOR_EVENT_CLEAR_ERROR,         /* Clear error condition */
 	MOTOR_EVENT_ERROR,               /* Error event  */
@@ -32,7 +34,16 @@ struct motor_event {
 			float value;
 		} param_update;
 		uint32_t error_code;         /* Error code for EMERGENCY_STOP events */
+		int target_mode;             /* Target mode for MODE_CHANGE events (enum motor_state) */
 	};
 };
+
+/**
+ * @brief Convert motor event type enum to string
+ *
+ * @param event_type Motor event type enum value
+ * @return String representation of the event type
+ */
+const char *motor_event_to_string(enum motor_event_type event_type);
 
 #endif /* MOTOR_EVENTS_H */

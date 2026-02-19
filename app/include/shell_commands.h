@@ -17,4 +17,10 @@ struct motor_parameters;
  */
 void shell_set_motor_params(struct motor_parameters *params);
 
+/**
+ * @brief Get global motor parameters pointer
+ * @return Pointer to motor parameters, or NULL if not set
+ */
+struct motor_parameters *shell_get_motor_params(void);
+
 #endif /* SHELL_COMMANDS_H_ */

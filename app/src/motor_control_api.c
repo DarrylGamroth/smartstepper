@@ -37,37 +37,54 @@ int motor_control_api_init(struct motor_parameters *params)
 	return 0;
 }
 
-int motor_api_request_start(void)
+int motor_api_request_offline(void)
 {
 	struct motor_event evt = {
-		.type = MOTOR_EVENT_START_REQUEST,
+		.type = MOTOR_EVENT_OFFLINE,
 	};
 	
 	/* Non-blocking post to queue */
 	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
 	if (ret != 0) {
-		LOG_ERR("Failed to post start request: queue full");
+		LOG_ERR("Failed to post OFFLINE request: queue full");
 		return -ENOMEM;
 	}
 	
-	LOG_DBG("Start request posted");
+	LOG_DBG("OFFLINE request posted");
 	return 0;
 }
 
-int motor_api_request_stop(void)
+int motor_api_request_idle(void)
 {
 	struct motor_event evt = {
-		.type = MOTOR_EVENT_STOP_REQUEST,
+		.type = MOTOR_EVENT_IDLE,
 	};
 	
 	/* Non-blocking post to queue */
 	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
 	if (ret != 0) {
-		LOG_ERR("Failed to post stop request: queue full");
+		LOG_ERR("Failed to post IDLE request: queue full");
 		return -ENOMEM;
 	}
 	
-	LOG_DBG("Stop request posted");
+	LOG_DBG("IDLE request posted");
+	return 0;
+}
+
+int motor_api_request_online(void)
+{
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_ONLINE,
+	};
+	
+	/* Non-blocking post to queue */
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		LOG_ERR("Failed to post ONLINE request: queue full");
+		return -ENOMEM;
+	}
+	
+	LOG_DBG("ONLINE request posted");
 	return 0;
 }
 
