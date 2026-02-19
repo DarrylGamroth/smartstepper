@@ -110,6 +110,15 @@ enum aeat9955_sensor_attribute {
 
 	/** Auto-calibration hardware enable via M1 pin (0=disable, 1=enable calibration on M1 pin) */
 	AEAT9955_ATTR_AUTO_CAL_HARDWARE,
+
+	/** Raw alarm/error status byte from register 0x29 (Chip Status) */
+	AEAT9955_ATTR_ERROR_STATUS,
+
+	/** Magnet high alarm status from register 0x29 bit 5 (0=OK, 1=alarm) */
+	AEAT9955_ATTR_ALARM_MAGNET_HIGH,
+
+	/** Magnet low alarm status from register 0x29 bit 4 (0=OK, 1=alarm) */
+	AEAT9955_ATTR_ALARM_MAGNET_LOW,
 };
 
 /**

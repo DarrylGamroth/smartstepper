@@ -6,6 +6,8 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/sensor.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <math.h>
@@ -19,6 +21,13 @@
 #include "config.h"
 #include "angle_wrap.h"
 #include "shell_commands_motion.h"
+
+#if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#include <drivers/sensor/brcm_aeat9955.h>
+#define MOTOR_ENCODER_IS_AEAT9955 1
+#else
+#define MOTOR_ENCODER_IS_AEAT9955 0
+#endif
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -977,6 +986,56 @@ static int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv
 	return 0;
 }
 
+/* motor encoder alarm */
+static int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955
+	shell_error(sh, "encoder1 is not AEAT-9955 on this build");
+	return -ENOTSUP;
+#else
+	if (!device_is_ready(encoder1)) {
+		shell_error(sh, "encoder1 device is not ready");
+		return -ENODEV;
+	}
+
+	struct sensor_value raw = {0};
+	struct sensor_value mhi = {0};
+	struct sensor_value mlo = {0};
+
+	int ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+				  (enum sensor_attribute)AEAT9955_ATTR_ERROR_STATUS, &raw);
+	if (ret < 0) {
+		shell_error(sh, "Failed to read AEAT error status (err %d)", ret);
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_HIGH, &mhi);
+	if (ret < 0) {
+		shell_error(sh, "Failed to read AEAT MHI status (err %d)", ret);
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_LOW, &mlo);
+	if (ret < 0) {
+		shell_error(sh, "Failed to read AEAT MLO status (err %d)", ret);
+		return ret;
+	}
+
+	uint8_t status = (uint8_t)(raw.val1 & 0xFF);
+	shell_print(sh, "AEAT-9955 alarm/error status:");
+	shell_print(sh, "  Raw status: 0x%02X", status);
+	shell_print(sh, "  MHI:        %s", (mhi.val1 != 0) ? "SET" : "clear");
+	shell_print(sh, "  MLO:        %s", (mlo.val1 != 0) ? "SET" : "clear");
+
+	return 0;
+#endif
+}
+
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 /* motor rls status */
 static int cmd_motor_rls_status(const struct shell *sh, size_t argc, char **argv)
@@ -1279,6 +1338,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor encoder subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
+	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor safety subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_safety,
 	SHELL_CMD_ARG(timeout, NULL, "Set command timeout <ms> (0 disables)", cmd_motor_safety_timeout, 2, 0),
@@ -1304,6 +1369,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(position, &sub_motor_position, "Position control", NULL),
 	SHELL_CMD(profile, &sub_motor_profile, "Motion profile settings", NULL),
 	SHELL_CMD(chopper, &sub_motor_chopper, "Optical chopper utilities", NULL),
+	SHELL_CMD(encoder, &sub_motor_encoder, "Encoder diagnostics", NULL),
 	SHELL_SUBCMD_SET_END
 );
 

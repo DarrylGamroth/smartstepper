@@ -824,6 +824,36 @@ static int aeat9955_attr_get(const struct device *dev, enum sensor_channel chan,
 		val->val2 = 0;
 		break;
 
+	case AEAT9955_ATTR_ERROR_STATUS:
+		/* Get raw alarm/error status register (0x29). */
+		ret = aeat9955_read_register(dev, AEAT9955_REG_ERROR_STATUS, &reg_val);
+		if (ret < 0) {
+			return ret;
+		}
+		val->val1 = reg_val;
+		val->val2 = 0;
+		break;
+
+	case AEAT9955_ATTR_ALARM_MAGNET_HIGH:
+		/* Get magnet high alarm bit from register 0x29 bit 5. */
+		ret = aeat9955_read_register(dev, AEAT9955_REG_ERROR_STATUS, &reg_val);
+		if (ret < 0) {
+			return ret;
+		}
+		val->val1 = (reg_val & AEAT9955_ERROR_MHI_BIT) ? 1 : 0;
+		val->val2 = 0;
+		break;
+
+	case AEAT9955_ATTR_ALARM_MAGNET_LOW:
+		/* Get magnet low alarm bit from register 0x29 bit 4. */
+		ret = aeat9955_read_register(dev, AEAT9955_REG_ERROR_STATUS, &reg_val);
+		if (ret < 0) {
+			return ret;
+		}
+		val->val1 = (reg_val & AEAT9955_ERROR_MLO_BIT) ? 1 : 0;
+		val->val2 = 0;
+		break;
+
 	case SENSOR_ATTR_SAMPLING_FREQUENCY:
 		/* AEAT9955 doesn't have configurable sampling frequency - it's continuous */
 		val->val1 = 0;
