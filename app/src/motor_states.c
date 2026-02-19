@@ -53,6 +53,11 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 	params->feature_flags_next &= ~mask;
 }
 
+static inline bool is_power_of_two_u32(uint32_t value)
+{
+	return (value != 0u) && ((value & (value - 1u)) == 0u);
+}
+
 static struct motor_parameters motor_params;
 K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
 
@@ -119,6 +124,9 @@ static void motor_state_online_velocity_open_exit(void *obj);
 static void motor_state_online_velocity_closed_entry(void *obj);
 static enum smf_state_result motor_state_online_velocity_closed_run(void *obj);
 static void motor_state_online_velocity_closed_exit(void *obj);
+static void motor_state_online_position_entry(void *obj);
+static enum smf_state_result motor_state_online_position_run(void *obj);
+static void motor_state_online_position_exit(void *obj);
 static void motor_state_error_entry(void *obj);
 static enum smf_state_result motor_state_error_run(void *obj);
 
@@ -186,9 +194,14 @@ const struct smf_state motor_states[] = {
 								  motor_state_online_velocity_closed_exit,
 								  &motor_states[MOTOR_STATE_ONLINE],
 								  NULL),
+	[MOTOR_STATE_ONLINE_POSITION] = SMF_CREATE_STATE(motor_state_online_position_entry,
+							  motor_state_online_position_run,
+							  motor_state_online_position_exit,
+							  &motor_states[MOTOR_STATE_ONLINE],
+							  NULL),
 	[MOTOR_STATE_ERROR] = SMF_CREATE_STATE(motor_state_error_entry,
-						motor_state_error_run,
-						NULL, NULL, NULL),
+							motor_state_error_run,
+							NULL, NULL, NULL),
 };
 
 int motor_states_get_current(const struct motor_parameters *params)
@@ -226,6 +239,7 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_ONLINE_TORQUE:          return "ONLINE_TORQUE";
 	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:   return "ONLINE_VELOCITY_OPEN";
 	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED: return "ONLINE_VELOCITY_CLOSED";
+	case MOTOR_STATE_ONLINE_POSITION:        return "ONLINE_POSITION";
 	case MOTOR_STATE_ERROR:        return "ERROR";
 	default:                       return "UNKNOWN";
 	}
@@ -365,11 +379,44 @@ static void motor_state_ctrl_init_entry(void *obj)
 	traj_set_min_value(&params->traj_Id, 0.0f);
 	traj_set_max_value(&params->traj_Id, MOTOR_MAX_CURRENT_A);
 
-#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
+	/* Initialize velocity/position scaffold defaults */
+	params->position_target_rad = 0.0f;
+	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
+	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
+	params->velocity_cl_iq_limit_A = MOTOR_MAX_CURRENT_A;
+	params->velocity_cl_kp_A_per_rad_s =
+		MOTOR_MAX_CURRENT_A / MAX(params->profile_max_velocity_rad_s, 1.0f);
+	params->position_cl_kp_rad_s_per_rad = params->profile_max_velocity_rad_s / PI_F32;
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+	atomic_set(&params->control_armed, 0);
+	params->command_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
+	params->last_command_update_ms = k_uptime_get_32();
+	params->command_timeout_count = 0U;
+	params->command_timeout_latched = false;
+
+	traj_init(&params->traj_velocity);
+	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
+	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
+	traj_set_max_delta(&params->traj_velocity,
+			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+
+	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* Initialize PRBS generator and RLS parameters */
 	prbs_init(&params->prbs_gen);
 	params->rls_decimation = RLS_DECIMATION;
+	if (!is_power_of_two_u32(params->rls_decimation)) {
+		LOG_WRN("Invalid rls_decimation=%u, forcing 1", params->rls_decimation);
+		params->rls_decimation = 1u;
+	}
 	params->rls_stagger_offset = RLS_STAGGER_OFFSET;
+	if (params->rls_stagger_offset >= params->rls_decimation) {
+		params->rls_stagger_offset &= (params->rls_decimation - 1u);
+	}
 	params->prbs_amplitude_V = PRBS_AMPLITUDE_V;
 	params->Ld_est = params->Ls_measured_H;  /* Initial estimate from calibration */
 	params->Lq_est = RLS_INITIAL_LQ_H;
@@ -379,7 +426,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	/* Initialize d-axis RLS estimator */
 	rls_motor_est_init(&params->rls_d,
 	                   RLS_LAMBDA,
-	                   CONTROL_LOOP_FREQUENCY_HZ / RLS_DECIMATION,
+	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls_decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
 	                   params->Ls_measured_H,
@@ -388,7 +435,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	/* Initialize q-axis RLS estimator */
 	rls_motor_est_init(&params->rls_q,
 	                   RLS_LAMBDA,
-	                   CONTROL_LOOP_FREQUENCY_HZ / RLS_DECIMATION,
+	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls_decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
 	                   RLS_INITIAL_LQ_H,
@@ -396,12 +443,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	/* Initialize thermal model */
 	params->thermal_decimation = THERMAL_DECIMATION;
+	if (!is_power_of_two_u32(params->thermal_decimation)) {
+		LOG_WRN("Invalid thermal_decimation=%u, forcing 1", params->thermal_decimation);
+		params->thermal_decimation = 1u;
+	}
 	params->Rs_ref_ohm = params->Rs_measured_ohm;  /* Save calibrated Rs as reference */
 	params->Rs_ref_temp_C = RS_REF_TEMP_C;
 	params->Rs_temp_coeff = RS_TEMP_COEFF;
 	params->T_rls_C = THERMAL_T_AMBIENT;  /* Initialize to ambient */
 
-	float32_t thermal_update_freq = CONTROL_LOOP_FREQUENCY_HZ / (float32_t)THERMAL_DECIMATION;
+	float32_t thermal_update_freq = CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->thermal_decimation;
 	thermal_model_init(&params->thermal,
 	                   THERMAL_R_TH,
 	                   THERMAL_C_TH,
@@ -558,6 +609,15 @@ static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_TIMEOUT:
+		if (params->roverl_accumulator_Id2 <= 1e-9f) {
+			LOG_ERR("RoverL failed: insufficient excitation (sum(Id^2)=%.3e)",
+				(double)params->roverl_accumulator_Id2);
+			params->event.type = MOTOR_EVENT_ERROR;
+			params->event.error_code = ERROR_HARDWARE_BREAK;
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+			return SMF_EVENT_HANDLED;
+		}
+
 		/* Extract R and ωL from accumulated phase components
 		 *
 		 * From least-squares fit of V = R*I + jωL*I:
@@ -571,6 +631,16 @@ static enum smf_state_result motor_state_roverl_meas_run(void *obj)
 		float32_t omega_L_est = params->roverl_accumulator_Vq_Id / params->roverl_accumulator_Id2;
 		float32_t omega_roverl = 2.0f * PI_F32 * ROVERL_EST_FREQ_HZ;
 		float32_t L_est = omega_L_est / omega_roverl;
+
+		if (fabsf(R_est) <= 1e-9f || fabsf(L_est) <= 1e-9f) {
+			LOG_ERR("RoverL failed: invalid estimate (R=%.4e, L=%.4e)",
+				(double)R_est, (double)L_est);
+			params->event.type = MOTOR_EVENT_ERROR;
+			params->event.error_code = ERROR_HARDWARE_BREAK;
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+			return SMF_EVENT_HANDLED;
+		}
+
 		float32_t RoverL = R_est / L_est;
 		float32_t tau = L_est / R_est;
 
@@ -678,6 +748,15 @@ static enum smf_state_result motor_state_rs_est_run(void *obj)
 		/* Get final filtered values */
 		float32_t V_est = filter_fo_get_y1(&params->filter_rs_est_V);
 		float32_t I_est = filter_fo_get_y1(&params->filter_rs_est_I);
+
+		if (fabsf(I_est) <= 1e-6f) {
+			LOG_ERR("Rs EST failed: filtered current too small (I=%.4e)", (double)I_est);
+			params->event.type = MOTOR_EVENT_ERROR;
+			params->event.error_code = ERROR_HARDWARE_BREAK;
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+			return SMF_EVENT_HANDLED;
+		}
+
 		float32_t Rs_est = V_est / I_est;
 
 		LOG_INF("Rs EST complete: Rs=%.4f Ω (V=%.3fV, I=%.3fA)",
@@ -844,6 +923,7 @@ static void motor_state_idle_entry(void *obj)
 	drv8328_disable_all_channels(gate_driver_a);
 	drv8328_disable_all_channels(gate_driver_b);
 
+	atomic_set(&params->control_armed, 0);
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
 }
@@ -1017,7 +1097,8 @@ static enum smf_state_result motor_state_online_run(void *obj)
 		/* Validate target is an ONLINE substate */
 		if (params->event.target_mode != MOTOR_STATE_ONLINE_TORQUE &&
 		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_OPEN &&
-		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_CLOSED) {
+		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_CLOSED &&
+		    params->event.target_mode != MOTOR_STATE_ONLINE_POSITION) {
 			LOG_ERR("Invalid mode change target: %s",
 				motor_state_to_string(params->event.target_mode));
 			return SMF_EVENT_HANDLED;
@@ -1041,6 +1122,8 @@ static void motor_state_online_torque_entry(void *obj)
 
 	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
 }
 
 static void motor_state_online_torque_exit(void *obj)
@@ -1082,14 +1165,16 @@ static void motor_state_online_velocity_open_entry(void *obj)
 
 	/* Initialize velocity trajectory */
 	traj_init(&params->traj_velocity);
-	traj_set_min_value(&params->traj_velocity, -VELOCITY_MAX_RAD_S);
-	traj_set_max_value(&params->traj_velocity, VELOCITY_MAX_RAD_S);
-	traj_set_max_delta(&params->traj_velocity, VELOCITY_MAX_ACCEL_RAD_S2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
+	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
+	traj_set_max_delta(&params->traj_velocity,
+			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 
 	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
-		(double)VELOCITY_MAX_HZ, (double)VELOCITY_MAX_ACCEL_HZ_S);
+		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
+		(double)(params->profile_max_accel_rad_s2 / (2.0f * PI_F32)));
 }
 
 static enum smf_state_result motor_state_online_velocity_open_run(void *obj)
@@ -1117,23 +1202,33 @@ static void motor_state_online_velocity_open_exit(void *obj)
 				      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 }
 
-/* Substate: ONLINE_VELOCITY_CLOSED - Closed-loop velocity control (Phase 3) */
+/* Substate: ONLINE_VELOCITY_CLOSED - Closed-loop velocity control */
 static void motor_state_online_velocity_closed_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
+	float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
 
-	LOG_WRN("ONLINE_VELOCITY_CLOSED not implemented yet (Phase 3)");
+	LOG_INF("Entering ONLINE_VELOCITY_CLOSED substate");
 
-	/* Closed-loop velocity will be encoder-based; ONLINE provides baseline. */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	/* Closed-loop velocity uses measured speed and acceleration-limited velocity profile. */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+					     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 
-	/* Fallback to torque mode */
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE_TORQUE]);
+	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
+	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
+	traj_set_max_delta(&params->traj_velocity,
+			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_target_value(&params->traj_velocity, speed_mech_rad_s);
+	traj_set_int_value(&params->traj_velocity, speed_mech_rad_s);
+	params->velocity_target_rad_s = speed_mech_rad_s;
+	params->velocity_ref_rad_s = speed_mech_rad_s;
 }
 
 static enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
 {
-	/* Stub - should not reach here due to immediate transition in entry */
+	ARG_UNUSED(obj);
 	return SMF_EVENT_PROPAGATE;
 }
 
@@ -1144,7 +1239,57 @@ static void motor_state_online_velocity_closed_exit(void *obj)
 	LOG_INF("Exiting ONLINE_VELOCITY_CLOSED substate");
 
 	/* Clear this substate's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+}
+
+/* Substate: ONLINE_POSITION - Cascaded position->velocity->current scaffold */
+static void motor_state_online_position_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+	float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
+
+	LOG_INF("Entering ONLINE_POSITION substate");
+
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+					     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+
+	/* Use current angle as initial target for bumpless mode entry. */
+	params->position_target_rad = angle_observer_get_mech_angle(&params->observer);
+
+	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
+	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
+	traj_set_max_delta(&params->traj_velocity,
+			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, speed_mech_rad_s);
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = speed_mech_rad_s;
+}
+
+static enum smf_state_result motor_state_online_position_run(void *obj)
+{
+	ARG_UNUSED(obj);
+	return SMF_EVENT_PROPAGATE;
+}
+
+static void motor_state_online_position_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ONLINE_POSITION substate");
+
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 }
 
 /* State: ERROR - Fault condition */
@@ -1176,6 +1321,7 @@ static void motor_state_error_entry(void *obj)
 	drv8328_disable_all_channels(gate_driver_a);
 	drv8328_disable_all_channels(gate_driver_b);
 
+	atomic_set(&params->control_armed, 0);
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
 }

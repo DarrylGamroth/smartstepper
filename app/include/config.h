@@ -54,6 +54,13 @@ struct motor_parameters {
 	float32_t Id_setpoint_A;
 	float32_t Iq_setpoint_A;
 
+	/* Safety interlock and command-timeout state */
+	atomic_t control_armed;          /* 1 when torque-producing commands are allowed */
+	uint32_t command_timeout_ms;     /* 0 disables timeout */
+	uint32_t last_command_update_ms; /* Last command activity timestamp (k_uptime_get_32) */
+	uint32_t command_timeout_count;  /* Number of timeout-triggered disarms */
+	bool command_timeout_latched;    /* Prevent repeated timeout handling */
+
 	/* Voltage references (computed by PI controllers) */
 	float32_t max_voltage_magnitude_V;
 
@@ -66,6 +73,14 @@ struct motor_parameters {
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
+	float32_t position_target_rad;  /* Position target for closed-loop position mode */
+
+	/* Cascaded control scaffolding (velocity/position/motion profile) */
+	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */
+	float32_t velocity_cl_iq_limit_A;       /* Closed-loop velocity Iq limit */
+	float32_t position_cl_kp_rad_s_per_rad; /* Position P gain: position error -> velocity target */
+	float32_t profile_max_velocity_rad_s;   /* Motion profile velocity limit */
+	float32_t profile_max_accel_rad_s2;     /* Motion profile acceleration limit */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
@@ -127,6 +142,8 @@ struct motor_parameters {
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
 	float32_t velocity_rad_s;
+	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
+	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;	
 	float32_t Id_A;
@@ -237,6 +254,7 @@ struct motor_parameters {
 #define VELOCITY_MAX_RAD_S (VELOCITY_MAX_HZ * 2.0f * PI_F32)
 #define VELOCITY_MAX_ACCEL_RAD_S2 (VELOCITY_MAX_ACCEL_HZ_S * 2.0f * PI_F32)
 #define VELOCITY_INITIAL_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_initial_hz))
+#define COMMAND_TIMEOUT_DEFAULT_MS 1000U
 
 /**
  * @brief Initialize filters with devicetree parameters
