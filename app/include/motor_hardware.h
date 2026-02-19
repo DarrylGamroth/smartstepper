@@ -8,6 +8,7 @@
 #define MOTOR_HARDWARE_H
 
 #include <zephyr/device.h>
+#include <stdbool.h>
 
 /* Hardware device handles */
 extern const struct device *const pwm1;
@@ -40,5 +41,13 @@ int motor_hardware_init_gpio(void);
  * @return 0 if all devices ready, negative error code otherwise
  */
 int motor_hardware_check_devices(void);
+
+/**
+ * @brief Control photo interruptor emitter enable GPIO
+ *
+ * @param enable true to drive enable pin active, false to drive inactive
+ * @return 0 on success, negative error code on failure
+ */
+int motor_hardware_set_photo_interruptor_enable(bool enable);
 
 #endif /* MOTOR_HARDWARE_H */

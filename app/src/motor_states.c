@@ -448,6 +448,31 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->profile_sequence_move_duration_s = 0.100f;
 	params->profile_sequence_end_velocity_rad_s = 0.0f;
 
+	params->chopper_cal_active = false;
+	params->chopper_cal_complete = false;
+	params->chopper_cal_valid = false;
+	params->chopper_cal_slots = 0U;
+	params->chopper_cal_revs_target = 0U;
+	params->chopper_cal_samples_per_edge = 0U;
+	params->chopper_cal_midpoint_count = 0U;
+	params->chopper_cal_total_edges_target = 0U;
+	params->chopper_cal_total_edges_captured = 0U;
+	params->chopper_cal_discarded_edges = 0U;
+	params->chopper_cal_saved_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
+	params->chopper_cal_edge_min_step_rad = 0.0f;
+	params->chopper_cal_speed_target_rad_s = 0.0f;
+	params->chopper_cal_last_wrapped_rad = 0.0f;
+	params->chopper_cal_last_unwrapped_rad = 0.0f;
+	params->chopper_cal_start_unwrapped_rad = 0.0f;
+
+	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_EDGES; i++) {
+		params->chopper_cal_edge_sum_rad[i] = 0.0f;
+		params->chopper_cal_edge_count[i] = 0U;
+	}
+	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
+		params->chopper_blade_midpoints_rad[i] = 0.0f;
+	}
+
 	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* Initialize PRBS generator and RLS parameters */
 	prbs_init(&params->prbs_gen);

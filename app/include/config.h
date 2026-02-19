@@ -24,6 +24,8 @@
 #include "math_constants.h"
 
 #define MOTOR_PROFILE_SEQUENCE_MAX_POINTS 64U
+#define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS
+#define CHOPPER_CAL_MAX_EDGES (2U * CHOPPER_CAL_MAX_SLOTS)
 
 /**
  * @brief Main motor control parameters structure
@@ -91,6 +93,27 @@ struct motor_parameters {
 	float32_t profile_sequence_move_duration_s; /* Quintic segment duration */
 	float32_t profile_sequence_end_velocity_rad_s; /* Segment end velocity */
 	float32_t profile_sequence_points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute target points [0, 2pi) */
+
+	/* Chopper edge calibration (photo-interrupter + encoder angle snapshots) */
+	bool chopper_cal_active;            /* Edge capture in progress */
+	bool chopper_cal_complete;          /* Capture complete and midpoint table valid */
+	bool chopper_cal_valid;             /* Midpoint table can be used */
+	uint16_t chopper_cal_slots;         /* Number of blades/slots being calibrated */
+	uint16_t chopper_cal_revs_target;   /* Number of revolutions to average */
+	uint16_t chopper_cal_samples_per_edge; /* Expected samples per edge bin */
+	uint16_t chopper_cal_midpoint_count; /* Number of valid midpoint entries */
+	uint32_t chopper_cal_total_edges_target;   /* 2 * slots * revs */
+	uint32_t chopper_cal_total_edges_captured; /* Number of accepted edges */
+	uint32_t chopper_cal_discarded_edges;      /* Edges rejected by sanity checks */
+	uint32_t chopper_cal_saved_timeout_ms;     /* Timeout restored after calibration */
+	float32_t chopper_cal_edge_min_step_rad;   /* Reject edges too close together */
+	float32_t chopper_cal_speed_target_rad_s;  /* Open-loop speed command used for calibration */
+	float32_t chopper_cal_last_wrapped_rad;    /* Last wrapped encoder angle sample */
+	float32_t chopper_cal_last_unwrapped_rad;  /* Last unwrapped encoder angle sample */
+	float32_t chopper_cal_start_unwrapped_rad; /* Unwrapped angle when capture started */
+	float32_t chopper_cal_edge_sum_rad[CHOPPER_CAL_MAX_EDGES];      /* Unwrapped angle sum per edge bin */
+	uint32_t chopper_cal_edge_count[CHOPPER_CAL_MAX_EDGES];         /* Sample count per edge bin */
+	float32_t chopper_blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
 	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */

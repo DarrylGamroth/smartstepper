@@ -92,3 +92,8 @@ int motor_hardware_check_devices(void)
 
 	return 0;
 }
+
+int motor_hardware_set_photo_interruptor_enable(bool enable)
+{
+	return gpio_pin_set_dt(&pi_enable, enable ? 1 : 0);
+}
