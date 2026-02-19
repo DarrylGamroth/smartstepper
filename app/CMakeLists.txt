@@ -12,6 +12,7 @@ project(app LANGUAGES C)
 target_sources(app PRIVATE 
 	src/main.c
 	src/config.c
+	src/motion_profile.c
 	src/angle_observer.c
 	src/rs_online.c
 	src/prbs.c

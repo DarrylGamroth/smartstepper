@@ -327,10 +327,40 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	/* Position cascade: generate velocity target from position error. */
 	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
 		float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
-		float32_t position_error_rad = wrap_rad_pi(params->position_target_rad - position_mech_rad);
+		float32_t position_error_rad;
+
+		/* Position mode supports optional quintic profile feedforward. */
+		if (motion_profile_quintic_is_active(&params->position_profile)) {
+			if (control_armed) {
+				motion_profile_quintic_step(&params->position_profile);
+			}
+
+			float32_t profile_pos_rad =
+				motion_profile_quintic_get_position(&params->position_profile);
+			float32_t profile_vel_rad_s =
+				motion_profile_quintic_get_velocity(&params->position_profile);
+			params->position_target_rad = wrap_rad_2pi(profile_pos_rad);
+			position_error_rad = wrap_rad_pi(profile_pos_rad - position_mech_rad);
+			velocity_target_rad_s =
+				profile_vel_rad_s +
+				params->position_cl_kp_rad_s_per_rad * position_error_rad;
+		} else if (params->position_profile.valid) {
+			/* Completed profile: hold final position with pure feedback. */
+			float32_t profile_pos_rad =
+				motion_profile_quintic_get_position(&params->position_profile);
+			params->position_target_rad = wrap_rad_2pi(profile_pos_rad);
+			position_error_rad = wrap_rad_pi(profile_pos_rad - position_mech_rad);
+			velocity_target_rad_s =
+				params->position_cl_kp_rad_s_per_rad * position_error_rad;
+		} else {
+			position_error_rad =
+				wrap_rad_pi(params->position_target_rad - position_mech_rad);
+			velocity_target_rad_s =
+				params->position_cl_kp_rad_s_per_rad * position_error_rad;
+		}
+
 		velocity_target_rad_s =
-			clampf(params->position_cl_kp_rad_s_per_rad * position_error_rad,
-			       -params->profile_max_velocity_rad_s,
+			clampf(velocity_target_rad_s, -params->profile_max_velocity_rad_s,
 			       params->profile_max_velocity_rad_s);
 		traj_set_target_value(&params->traj_velocity, velocity_target_rad_s);
 	}

@@ -15,6 +15,7 @@
 #include "angle_gen.h"
 #include "rs_online.h"
 #include "traj.h"
+#include "motion_profile.h"
 #include "motor_events.h"
 #include "motor_states.h"
 #include "prbs.h"
@@ -73,6 +74,7 @@ struct motor_parameters {
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
+	struct motion_profile_quintic position_profile; /* Optional quintic position profile */
 	float32_t position_target_rad;  /* Position target for closed-loop position mode */
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */

@@ -401,6 +401,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
+	motion_profile_quintic_init(&params->position_profile, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	motion_profile_quintic_cancel(&params->position_profile, 0.0f);
 
 	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* Initialize PRBS generator and RLS parameters */
@@ -1250,6 +1252,7 @@ static void motor_state_online_position_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
+	float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
 
 	LOG_INF("Entering ONLINE_POSITION substate");
 
@@ -1259,7 +1262,8 @@ static void motor_state_online_position_entry(void *obj)
 					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 
 	/* Use current angle as initial target for bumpless mode entry. */
-	params->position_target_rad = angle_observer_get_mech_angle(&params->observer);
+	params->position_target_rad = position_mech_rad;
+	motion_profile_quintic_cancel(&params->position_profile, position_mech_rad);
 
 	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
 	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
@@ -1286,6 +1290,8 @@ static void motor_state_online_position_exit(void *obj)
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
+	motion_profile_quintic_cancel(&params->position_profile,
+				      angle_observer_get_mech_angle(&params->observer));
 	params->velocity_ref_rad_s = 0.0f;
 
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
