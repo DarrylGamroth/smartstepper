@@ -58,25 +58,20 @@ static int aeat9955_write_register(const struct device *dev, uint8_t reg, uint8_
 {
 	const struct aeat9955_config *cfg = dev->config;
 	const struct spi_dt_spec *bus = &cfg->bus;
-	int ret;
-	uint8_t tx_buf[2];
-	struct spi_buf spi_tx_buf = {.buf = tx_buf, .len = 2};
+	uint8_t tx_buf[4];
+	uint8_t rx_buf[4] = {0};
+	struct spi_buf spi_tx_buf = {.buf = tx_buf, .len = sizeof(tx_buf)};
+	struct spi_buf spi_rx_buf = {.buf = rx_buf, .len = sizeof(rx_buf)};
 	struct spi_buf_set tx_set = {.buffers = &spi_tx_buf, .count = 1};
+	struct spi_buf_set rx_set = {.buffers = &spi_rx_buf, .count = 1};
 
-	/* SPI4-16 Write: Two separate 16-bit frames with parity */
-
-	/* First frame: command + register address */
+	/* SPI4-16 write: command/register frame followed by value frame. */
 	tx_buf[0] = AEAT9955_CMD_WRITE_SPI16 | ((POPCOUNT(reg) & 1U) << 7);
 	tx_buf[1] = reg;
-	ret = spi_write_dt(bus, &tx_set);
-	if (ret < 0) {
-		return ret;
-	}
+	tx_buf[2] = ((POPCOUNT(value) & 1U) << 7);
+	tx_buf[3] = value;
 
-	/* Second frame: value with parity */
-	tx_buf[0] = ((POPCOUNT(value) & 1U) << 7);
-	tx_buf[1] = value;
-	return spi_write_dt(bus, &tx_set);
+	return spi_transceive_dt(bus, &tx_set, &rx_set);
 }
 
 static int aeat9955_read_register(const struct device *dev, uint8_t reg, uint8_t *data)
@@ -959,14 +954,16 @@ static int aeat9955_initialize(const struct device *dev)
 		return result;
 	}
 
-	reg_val = (reg_val & ~AEAT9955_CONFIG0_SENSING_MASK) |
-		  ((config->sensing_axis << AEAT9955_CONFIG0_SENSING_SHIFT) &
-		   AEAT9955_CONFIG0_SENSING_MASK);
+	uint8_t reg_new = (reg_val & ~AEAT9955_CONFIG0_SENSING_MASK) |
+			  ((config->sensing_axis << AEAT9955_CONFIG0_SENSING_SHIFT) &
+			   AEAT9955_CONFIG0_SENSING_MASK);
 
-	result = aeat9955_write_register(dev, AEAT9955_REG_CONFIG0_SENSING, reg_val);
-	if (result < 0) {
-		LOG_ERR("Failed to write CONFIG0_SENSING register");
-		return result;
+	if (reg_new != reg_val) {
+		result = aeat9955_write_register(dev, AEAT9955_REG_CONFIG0_SENSING, reg_new);
+		if (result < 0) {
+			LOG_ERR("Failed to write CONFIG0_SENSING register");
+			return result;
+		}
 	}
 	LOG_INF("Configured sensing axis: %s", sensing_axis_names[config->sensing_axis]);
 
