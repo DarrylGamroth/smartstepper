@@ -173,6 +173,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t max_voltage_magnitude_V;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
+	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 
 	/* Timeout disarms output commands when command updates stop. */
 	if (online_control_state && control_armed && params->command_timeout_ms > 0U) {
@@ -219,14 +220,19 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		/* Calibration/open-loop: use generated angle (no delay) */
 		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
 		angle_observer_set_delay(&params->observer, 0.0f);
+		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
 	} else if (fresh_encoder_sample) {
 		/* Normal operation: use fresh encoder reading (1-cycle pipelined delay) */
 		angle_raw_rad = angle_raw_degrees * (PI_F32 / 180.0f);
 		angle_observer_set_delay(&params->observer, 1.0f);
+		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;
+		params->encoder_raw_deg = angle_raw_degrees;
+		params->encoder_raw_rad = angle_raw_rad;
 	} else {
 		/* No fresh encoder sample: propagate using prior estimate only. */
 		angle_raw_rad = angle_observer_get_mech_angle(&params->observer);
 		angle_observer_set_delay(&params->observer, 0.0f);
+		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	}
 	
 	/* Update observer with angle (encoder or generated) */
@@ -603,6 +609,9 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
 	params->elec_angle_rad = ctrl_angle_rad;
 	params->dc_bus_voltage_V = Vbus_V;
+	params->encoder_observer_input_rad = angle_raw_rad;
+	params->encoder_sample_fresh = fresh_encoder_sample ? 1U : 0U;
+	params->encoder_input_source = encoder_input_source;
 
 isr_done:
 	/* Measure ISR execution time */

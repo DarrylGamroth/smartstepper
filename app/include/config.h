@@ -34,6 +34,10 @@
 #define PROFILE_SEQUENCE_TRIGGER_EDGE_FALLING 1U
 #define PROFILE_SEQUENCE_TRIGGER_EDGE_BOTH 2U
 
+#define MOTOR_ANGLE_INPUT_SRC_GENERATED 0U
+#define MOTOR_ANGLE_INPUT_SRC_ENCODER 1U
+#define MOTOR_ANGLE_INPUT_SRC_PROPAGATED 2U
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -199,6 +203,9 @@ struct motor_parameters {
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
 	float32_t velocity_rad_s;
+	float32_t encoder_raw_deg;
+	float32_t encoder_raw_rad;
+	float32_t encoder_observer_input_rad;
 	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
 	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
 	float32_t Id_ref_A;
@@ -213,6 +220,8 @@ struct motor_parameters {
 	float32_t Vb_V;
 	float32_t elec_angle_rad;
 	float32_t dc_bus_voltage_V;
+	uint8_t encoder_sample_fresh;
+	uint8_t encoder_input_source;
 };
 
 /* Devicetree parameter extraction with unit conversion */

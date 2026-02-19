@@ -39,6 +39,19 @@ static inline bool motor_state_allows_arm(int state)
 	       motor_state_is_online_submode(state);
 }
 
+static const char *motor_encoder_input_source_to_string(uint8_t source)
+{
+	switch (source) {
+	case MOTOR_ANGLE_INPUT_SRC_GENERATED:
+		return "generated";
+	case MOTOR_ANGLE_INPUT_SRC_ENCODER:
+		return "encoder";
+	case MOTOR_ANGLE_INPUT_SRC_PROPAGATED:
+	default:
+		return "propagated";
+	}
+}
+
 static inline void motor_zero_control_targets(struct motor_parameters *params)
 {
 	if (!params) {
@@ -510,6 +523,13 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Error:          %s", motor_error_to_string(error));
 	shell_print(sh, "  Angle (mech):   %.1f deg", (double)(g_motor_params->position_rad * 180.0f / PI_F32));
 	shell_print(sh, "  Angle (elec):   %.1f deg", (double)(g_motor_params->elec_angle_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
+		    (double)g_motor_params->encoder_raw_deg,
+		    (double)g_motor_params->encoder_raw_rad);
+	shell_print(sh, "  Enc used:       %.6f rad (%s, fresh=%s)",
+		    (double)g_motor_params->encoder_observer_input_rad,
+		    motor_encoder_input_source_to_string(g_motor_params->encoder_input_source),
+		    g_motor_params->encoder_sample_fresh ? "yes" : "no");
 	shell_print(sh, "  Speed:          %.3f Hz (%.1f RPM)", 
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32)),
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32) * 60.0f));
@@ -583,4 +603,3 @@ int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 #endif
 }
-
