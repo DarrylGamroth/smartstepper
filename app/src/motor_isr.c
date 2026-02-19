@@ -76,6 +76,7 @@ LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
 SENSOR_DT_READ_IODEV(encoder1_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
+static atomic_t encoder_read_in_flight;
 
 #define VBUS_MIN_VALID_V 0.1f
 
@@ -95,16 +96,19 @@ static inline int encoder_read(struct rtio *ctx, float32_t *angle)
 
 	if (cqe->result != 0) {
 		rtio_cqe_release(ctx, cqe);
+		atomic_set(&encoder_read_in_flight, 0);
 		return -1;
 	}
 
 	rc = rtio_cqe_get_mempool_buffer(ctx, cqe, &buf, &buf_len);
 	if (rc != 0) {
 		rtio_cqe_release(ctx, cqe);
+		atomic_set(&encoder_read_in_flight, 0);
 		return -1;
 	}
 
-    rtio_cqe_release(ctx, cqe);
+	rtio_cqe_release(ctx, cqe);
+	atomic_set(&encoder_read_in_flight, 0);
 
 	/* Fast-path decode: directly extract angle from RTIO buffer */
 	*angle = encoder_decode_position_f32(buf);
@@ -591,6 +595,11 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	 * This keeps SPI bus free during calibration and reduces interrupt load
 	 */
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		(void)sensor_read_async_mempool(&encoder1_iodev, &encoder_rtio_ctx, NULL);
+		if (atomic_cas(&encoder_read_in_flight, 0, 1)) {
+			int ret = sensor_read_async_mempool(&encoder1_iodev, &encoder_rtio_ctx, NULL);
+			if (ret != 0) {
+				atomic_set(&encoder_read_in_flight, 0);
+			}
+		}
 	}
 }

@@ -871,6 +871,7 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 	uint8_t *buf;
 	uint32_t buf_len;
 	struct aeat9955_sample *sample;
+	struct rtio_sqe *sqes[2];
 
 	rc = sensor_clock_get_cycles(&cycles);
 	if (rc != 0) {
@@ -899,14 +900,14 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 	sample->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
 
 	struct rtio *ctx = data->rtio_ctx;
-	struct rtio_sqe *txrx_sqe = rtio_sqe_acquire(ctx);
-	struct rtio_sqe *complete_sqe = rtio_sqe_acquire(ctx);
-
-	if (!txrx_sqe || !complete_sqe) {
+	rc = rtio_sqe_acquire_array(ctx, ARRAY_SIZE(sqes), sqes);
+	if (rc != 0) {
 		LOG_ERR("Failed to acquire RTIO SQEs");
 		rtio_iodev_sqe_err(iodev_sqe, -ENOMEM);
 		return;
 	}
+	struct rtio_sqe *txrx_sqe = sqes[0];
+	struct rtio_sqe *complete_sqe = sqes[1];
 
 	static uint8_t __aligned(32) tx_buf[] = {
 		AEAT9955_CMD_READ_SPI16 | (1U << 7),

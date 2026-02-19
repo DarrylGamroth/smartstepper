@@ -441,6 +441,7 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 	int rc;
 	uint8_t *buf;
 	struct mt6835_sample *sample;
+	struct rtio_sqe *sqes[2];
 
 	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, NULL);
 	if (rc) {
@@ -461,14 +462,14 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 	sample->header.timestamp_ns = sensor_clock_cycles_to_ns(cycles);
 
 	struct rtio *ctx = data->rtio_ctx;
-	struct rtio_sqe *txrx_sqe = rtio_sqe_acquire(ctx);
-	struct rtio_sqe *complete_sqe = rtio_sqe_acquire(ctx);
-
-	if (!txrx_sqe || !complete_sqe) {
+	rc = rtio_sqe_acquire_array(ctx, ARRAY_SIZE(sqes), sqes);
+	if (rc != 0) {
 		LOG_ERR("Failed to acquire RTIO SQEs");
 		rtio_iodev_sqe_err(iodev_sqe, -ENOMEM);
 		return;
 	}
+	struct rtio_sqe *txrx_sqe = sqes[0];
+	struct rtio_sqe *complete_sqe = sqes[1];
 
 	/* Prepare 6-byte TX buffer: command + dummy bytes */
 	static uint8_t __aligned(32) tx_buf[] = {
