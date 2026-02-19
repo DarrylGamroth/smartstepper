@@ -58,19 +58,24 @@ static int aeat9955_write_register(const struct device *dev, uint8_t reg, uint8_
 {
 	const struct aeat9955_config *cfg = dev->config;
 	const struct spi_dt_spec *bus = &cfg->bus;
-	uint8_t tx_buf[4];
-	uint8_t rx_buf[4] = {0};
+	uint8_t tx_buf[2];
+	uint8_t rx_buf[2] = {0};
+	int ret;
 	struct spi_buf spi_tx_buf = {.buf = tx_buf, .len = sizeof(tx_buf)};
 	struct spi_buf spi_rx_buf = {.buf = rx_buf, .len = sizeof(rx_buf)};
 	struct spi_buf_set tx_set = {.buffers = &spi_tx_buf, .count = 1};
 	struct spi_buf_set rx_set = {.buffers = &spi_rx_buf, .count = 1};
 
-	/* SPI4-16 write: command/register frame followed by value frame. */
+	/* SPI4-16 write sequence uses two 16-bit transmissions with CS high between them. */
 	tx_buf[0] = AEAT9955_CMD_WRITE_SPI16 | ((POPCOUNT(reg) & 1U) << 7);
 	tx_buf[1] = reg;
-	tx_buf[2] = ((POPCOUNT(value) & 1U) << 7);
-	tx_buf[3] = value;
+	ret = spi_transceive_dt(bus, &tx_set, &rx_set);
+	if (ret < 0) {
+		return ret;
+	}
 
+	tx_buf[0] = ((POPCOUNT(value) & 1U) << 7);
+	tx_buf[1] = value;
 	return spi_transceive_dt(bus, &tx_set, &rx_set);
 }
 
