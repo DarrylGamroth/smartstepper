@@ -159,6 +159,8 @@ struct motor_parameters {
 	/* Telemetry and diagnostics */
 	uint32_t state_counter;
 	uint32_t encoder_fault_counter;
+	uint32_t encoder_warning_count;
+	uint32_t encoder_error_count;
 	uint32_t control_loop_count;
 	uint32_t max_isr_cycles;
 	uint32_t total_isr_cycles;
@@ -220,7 +222,10 @@ struct motor_parameters {
 	float32_t Vb_V;
 	float32_t elec_angle_rad;
 	float32_t dc_bus_voltage_V;
+	uint8_t encoder_last_status;
 	uint8_t encoder_sample_fresh;
+	uint8_t encoder_sample_warning;
+	uint8_t encoder_sample_error;
 	uint8_t encoder_input_source;
 };
 

@@ -65,9 +65,43 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
 #define encoder_decode_position_f32 aeat9955_decode_position_f32
+#define ENCODER_FRAME_WARNING_BIT 0x80U
+#define ENCODER_FRAME_ERROR_BIT 0x40U
+
+static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
+					       bool *warning, bool *error)
+{
+	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
+	uint8_t frame_status = sample->raw[0] & (ENCODER_FRAME_WARNING_BIT | ENCODER_FRAME_ERROR_BIT);
+
+	if (status != NULL) {
+		*status = frame_status;
+	}
+	if (warning != NULL) {
+		*warning = (frame_status & ENCODER_FRAME_WARNING_BIT) != 0U;
+	}
+	if (error != NULL) {
+		*error = (frame_status & ENCODER_FRAME_ERROR_BIT) != 0U;
+	}
+}
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
 #include <drivers/sensor/magntek_mt6835.h>
 #define encoder_decode_position_f32 mt6835_decode_position_f32
+
+static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
+					       bool *warning, bool *error)
+{
+	ARG_UNUSED(buffer);
+	if (status != NULL) {
+		*status = 0U;
+	}
+	if (warning != NULL) {
+		*warning = false;
+	}
+	if (error != NULL) {
+		*error = false;
+	}
+}
 #else
 #error "Unsupported encoder type for encoder1 alias"
 #endif
@@ -80,12 +114,16 @@ static atomic_t encoder_read_in_flight;
 
 #define VBUS_MIN_VALID_V 0.1f
 
-static inline int encoder_read(struct rtio *ctx, float32_t *angle)
+static inline int encoder_read(struct rtio *ctx, float32_t *angle, uint8_t *status,
+			       bool *warning, bool *error)
 {
 	struct rtio_cqe *cqe;
 	uint8_t *buf;
 	uint32_t buf_len;
 	int rc;
+	uint8_t frame_status = 0U;
+	bool frame_warning = false;
+	bool frame_error = false;
 
 	/* Non-blocking: check if a completion is ready */
 	cqe = rtio_cqe_consume(ctx);
@@ -112,10 +150,21 @@ static inline int encoder_read(struct rtio *ctx, float32_t *angle)
 
 	/* Fast-path decode: directly extract angle from RTIO buffer */
 	*angle = encoder_decode_position_f32(buf);
+	encoder_parse_frame_flags(buf, &frame_status, &frame_warning, &frame_error);
+
+	if (status != NULL) {
+		*status = frame_status;
+	}
+	if (warning != NULL) {
+		*warning = frame_warning;
+	}
+	if (error != NULL) {
+		*error = frame_error;
+	}
 
 	rtio_release_buffer(ctx, buf, buf_len);
 
-	return 0;
+	return frame_error ? -1 : 0;
 }
 
 void gate_driver_a_break_callback(const struct device *dev, void *user_data)
@@ -193,26 +242,49 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	/* Read encoder if feature is enabled */
 	float32_t angle_raw_rad;
 	bool fresh_encoder_sample = false;
+	uint8_t encoder_frame_status = 0U;
+	bool encoder_frame_warning = false;
+	bool encoder_frame_error = false;
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
 		/* Read encoder to consume RTIO queue data (callback keeps queuing reads) */
-		if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
+		if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees, &encoder_frame_status,
+				 &encoder_frame_warning, &encoder_frame_error) < 0) {
 			/* No new encoder data this cycle. */
 			params->encoder_fault_counter++;
-
-			/* Fault detection: Too many consecutive encoder failures */
-			if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-				motor_api_post_error(ERROR_ENCODER_FAULT);
-				goto isr_done;
+			if (encoder_frame_warning) {
+				params->encoder_warning_count++;
 			}
-			
+			if (encoder_frame_error) {
+				params->encoder_error_count++;
+			}
+
 		} else {
 			/* Reset fault counter on successful read */
 			params->encoder_fault_counter = 0;
 			fresh_encoder_sample = true;
+			if (encoder_frame_warning) {
+				params->encoder_warning_count++;
+			}
+		}
+
+		params->encoder_sample_fresh = fresh_encoder_sample ? 1U : 0U;
+		params->encoder_sample_warning = encoder_frame_warning ? 1U : 0U;
+		params->encoder_sample_error = encoder_frame_error ? 1U : 0U;
+		if (fresh_encoder_sample || encoder_frame_warning || encoder_frame_error) {
+			params->encoder_last_status = encoder_frame_status;
+		}
+
+		/* Fault detection: Too many consecutive encoder failures */
+		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
+			motor_api_post_error(ERROR_ENCODER_FAULT);
+			goto isr_done;
 		}
 	} else {
 		/* Encoder not active - reset fault counter */
 		params->encoder_fault_counter = 0;
+		params->encoder_sample_fresh = 0U;
+		params->encoder_sample_warning = 0U;
+		params->encoder_sample_error = 0U;
 	}
 	
 	/* Select angle source based on feature flag */
@@ -237,6 +309,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	
 	/* Update observer with angle (encoder or generated) */
 	angle_observer_update(&params->observer, angle_raw_rad);
+	params->encoder_observer_input_rad = angle_raw_rad;
+	params->encoder_input_source = encoder_input_source;
 
 	/* Skip control if PWM output not enabled */
 	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PWM_OUTPUT)) {
@@ -609,9 +683,6 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
 	params->elec_angle_rad = ctrl_angle_rad;
 	params->dc_bus_voltage_V = Vbus_V;
-	params->encoder_observer_input_rad = angle_raw_rad;
-	params->encoder_sample_fresh = fresh_encoder_sample ? 1U : 0U;
-	params->encoder_input_source = encoder_input_source;
 
 isr_done:
 	/* Measure ISR execution time */

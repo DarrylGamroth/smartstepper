@@ -530,6 +530,13 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->encoder_observer_input_rad,
 		    motor_encoder_input_source_to_string(g_motor_params->encoder_input_source),
 		    g_motor_params->encoder_sample_fresh ? "yes" : "no");
+	shell_print(sh, "  Enc flags:      status=0x%02X warn=%s err=%s",
+		    g_motor_params->encoder_last_status,
+		    g_motor_params->encoder_sample_warning ? "SET" : "CLEAR",
+		    g_motor_params->encoder_sample_error ? "SET" : "CLEAR");
+	shell_print(sh, "  Enc flag count: warn=%u err=%u",
+		    g_motor_params->encoder_warning_count,
+		    g_motor_params->encoder_error_count);
 	shell_print(sh, "  Speed:          %.3f Hz (%.1f RPM)", 
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32)),
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32) * 60.0f));
@@ -572,6 +579,8 @@ int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  ISR max cycles:         %u", g_motor_params->max_isr_cycles);
 	shell_print(sh, "  ISR avg cycles:         %u", avg_cycles);
 	shell_print(sh, "  Encoder faults:         %u", g_motor_params->encoder_fault_counter);
+	shell_print(sh, "  Encoder warn count:     %u", g_motor_params->encoder_warning_count);
+	shell_print(sh, "  Encoder error count:    %u", g_motor_params->encoder_error_count);
 	
 	return 0;
 }
