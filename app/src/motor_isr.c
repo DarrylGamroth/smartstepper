@@ -620,6 +620,12 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
                        void *user_data)
 {
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
+	ARG_UNUSED(dev);
+	ARG_UNUSED(channel);
+
+	if (params == NULL) {
+		return;
+	}
 
 	/* Trigger continuous encoder reads when feature is enabled
 	 * This keeps SPI bus free during calibration and reduces interrupt load
@@ -631,5 +637,33 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 				atomic_set(&encoder_read_in_flight, 0);
 			}
 		}
+	}
+
+	/* Hardware-timer-driven position-sequence tick source. */
+	if (params->profile_sequence_running &&
+	    atomic_get(&params->control_armed) != 0 &&
+	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+		uint32_t period_ticks = params->profile_sequence_period_ticks;
+		if (period_ticks == 0U) {
+			period_ticks = 1U;
+		}
+
+		uint32_t tick_counter = params->profile_sequence_tick_counter + 1U;
+		if (tick_counter >= period_ticks) {
+			struct motor_event evt = {
+				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
+			};
+			int ret;
+
+			params->profile_sequence_tick_counter = 0U;
+			ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+			if (ret != 0) {
+				params->profile_sequence_event_drop_count++;
+			}
+		} else {
+			params->profile_sequence_tick_counter = tick_counter;
+		}
+	} else {
+		params->profile_sequence_tick_counter = 0U;
 	}
 }

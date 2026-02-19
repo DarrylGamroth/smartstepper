@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdint.h>
 #include "shell_commands.h"
 #include "motor_control_api.h"
 #include "motor_states.h"
@@ -77,6 +78,14 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	motion_profile_quintic_cancel(&params->position_profile, params->position_rad);
 	params->position_target_rad = wrap_rad_2pi(params->position_rad);
+}
+
+static inline uint32_t motor_profile_period_ms_to_ticks(uint32_t period_ms)
+{
+	float32_t ticks_f = (CONTROL_LOOP_FREQUENCY_HZ * (float32_t)period_ms) / 1000.0f;
+	uint32_t ticks = (uint32_t)(ticks_f + 0.5f);
+
+	return (ticks == 0U) ? 1U : ticks;
 }
 
 /*============================================================================
@@ -605,6 +614,8 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 
 	float target_deg = strtof(argv[1], NULL);
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
+	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_sequence_tick_counter = 0U;
 	motion_profile_quintic_cancel(&g_motor_params->position_profile, target_rad);
 	g_motor_params->position_target_rad = target_rad;
 	motor_command_feed_watchdog(g_motor_params);
@@ -729,6 +740,8 @@ static int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **ar
 	float end_pos_rad = start_pos_rad + delta_rad;
 	float end_vel_rad_s = end_vel_hz * 2.0f * PI_F32;
 	float duration_s = duration_ms * 0.001f;
+	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_sequence_tick_counter = 0U;
 
 	int ret = motion_profile_quintic_plan(&g_motor_params->position_profile,
 					      start_pos_rad, start_vel_rad_s, 0.0f,
@@ -778,6 +791,8 @@ static int cmd_motor_profile_cancel(const struct shell *sh, size_t argc, char **
 	}
 
 	float hold_pos_rad = g_motor_params->position_rad;
+	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_sequence_tick_counter = 0U;
 	motion_profile_quintic_cancel(&g_motor_params->position_profile, hold_pos_rad);
 	g_motor_params->position_target_rad = wrap_rad_2pi(hold_pos_rad);
 	motor_command_feed_watchdog(g_motor_params);
@@ -810,6 +825,11 @@ static int cmd_motor_profile_status(const struct shell *sh, size_t argc, char **
 		    motion_profile_quintic_is_active(&g_motor_params->position_profile) ?
 			    "ACTIVE" :
 			    (g_motor_params->position_profile.valid ? "COMPLETE" : "IDLE"));
+	shell_print(sh, "  Sequence:     %s (%u points, next=%u, drops=%u)",
+		    g_motor_params->profile_sequence_running ? "RUNNING" : "STOPPED",
+		    g_motor_params->profile_sequence_count,
+		    g_motor_params->profile_sequence_next_idx,
+		    g_motor_params->profile_sequence_event_drop_count);
 
 	if (g_motor_params->position_profile.valid) {
 		shell_print(sh, "  Segment t/T:  %.1f / %.1f ms",
@@ -831,6 +851,257 @@ static int cmd_motor_profile_status(const struct shell *sh, size_t argc, char **
 			    (double)(g_motor_params->position_profile.velocity_rad_s /
 				     (2.0f * PI_F32)));
 	}
+	return 0;
+}
+
+/* motor profile seq clear */
+static int cmd_motor_profile_seq_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_sequence_count = 0U;
+	g_motor_params->profile_sequence_next_idx = 0U;
+	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_sequence_event_drop_count = 0U;
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "Profile sequence cleared");
+	return 0;
+}
+
+/* motor profile seq add <target_deg> */
+static int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor profile seq add <target_deg>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (g_motor_params->profile_sequence_count >= MOTOR_PROFILE_SEQUENCE_MAX_POINTS) {
+		shell_error(sh, "Sequence full (%u points max)", MOTOR_PROFILE_SEQUENCE_MAX_POINTS);
+		return -ENOMEM;
+	}
+
+	float target_deg = strtof(argv[1], NULL);
+	if (!isfinite(target_deg)) {
+		shell_error(sh, "Invalid target_deg");
+		return -EINVAL;
+	}
+
+	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
+	uint16_t idx = g_motor_params->profile_sequence_count;
+	g_motor_params->profile_sequence_points_rad[idx] = target_rad;
+	g_motor_params->profile_sequence_count++;
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "Added seq[%u] = %.2f deg", (unsigned int)idx,
+		    (double)(target_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+/* motor profile seq config <period_ms> <move_ms> <end_vel_hz> <loop:0|1> */
+static int cmd_motor_profile_seq_config(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 5) {
+		shell_error(sh, "Usage: motor profile seq config <period_ms> <move_ms> <end_vel_hz> <loop:0|1>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	char *endp = NULL;
+	unsigned long period_ms_ul = strtoul(argv[1], &endp, 10);
+	if (endp == argv[1] || *endp != '\0' || period_ms_ul == 0UL || period_ms_ul > UINT32_MAX) {
+		shell_error(sh, "period_ms must be a positive integer");
+		return -EINVAL;
+	}
+
+	endp = NULL;
+	unsigned long move_ms_ul = strtoul(argv[2], &endp, 10);
+	if (endp == argv[2] || *endp != '\0' || move_ms_ul == 0UL || move_ms_ul > UINT32_MAX) {
+		shell_error(sh, "move_ms must be a positive integer");
+		return -EINVAL;
+	}
+
+	float end_vel_hz = strtof(argv[3], &endp);
+	if (endp == argv[3] || *endp != '\0' || !isfinite(end_vel_hz)) {
+		shell_error(sh, "end_vel_hz must be a finite number");
+		return -EINVAL;
+	}
+
+	endp = NULL;
+	unsigned long loop_ul = strtoul(argv[4], &endp, 10);
+	if (endp == argv[4] || *endp != '\0' || loop_ul > 1UL) {
+		shell_error(sh, "loop must be 0 or 1");
+		return -EINVAL;
+	}
+
+	uint32_t period_ms = (uint32_t)period_ms_ul;
+	uint32_t move_ms = (uint32_t)move_ms_ul;
+	g_motor_params->profile_sequence_period_ms = period_ms;
+	g_motor_params->profile_sequence_period_ticks = motor_profile_period_ms_to_ticks(period_ms);
+	g_motor_params->profile_sequence_move_duration_s = (float32_t)move_ms * 0.001f;
+	g_motor_params->profile_sequence_end_velocity_rad_s = end_vel_hz * 2.0f * PI_F32;
+	g_motor_params->profile_sequence_loop = (loop_ul != 0UL);
+	g_motor_params->profile_sequence_tick_counter = 0U;
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "Sequence config: period=%u ms (%u ticks), move=%u ms, vend=%.2f Hz, loop=%s",
+		    period_ms, g_motor_params->profile_sequence_period_ticks, move_ms,
+		    (double)end_vel_hz, g_motor_params->profile_sequence_loop ? "YES" : "NO");
+	return 0;
+}
+
+/* motor profile seq start */
+static int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+		shell_error(sh, "Sequence start requires ONLINE_POSITION mode.");
+		return -EACCES;
+	}
+
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before sequence start.");
+		return -EACCES;
+	}
+
+	if (g_motor_params->profile_sequence_count == 0U) {
+		shell_error(sh, "Sequence is empty. Add points with 'motor profile seq add <deg>'.");
+		return -EINVAL;
+	}
+
+	g_motor_params->profile_sequence_running = true;
+	g_motor_params->profile_sequence_next_idx = 0U;
+	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_sequence_event_drop_count = 0U;
+	motor_command_feed_watchdog(g_motor_params);
+
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
+	};
+	extern struct k_msgq motor_event_queue;
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		g_motor_params->profile_sequence_event_drop_count++;
+		shell_warn(sh, "Sequence started, initial tick dropped (queue full)");
+	}
+
+	if (g_motor_params->command_timeout_ms > 0U &&
+	    g_motor_params->profile_sequence_period_ms >= g_motor_params->command_timeout_ms) {
+		shell_warn(sh, "period_ms >= command_timeout_ms; increase timeout to avoid disarm");
+	}
+
+	shell_print(sh, "Profile sequence started (%u points)", g_motor_params->profile_sequence_count);
+	return 0;
+}
+
+/* motor profile seq stop */
+static int cmd_motor_profile_seq_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_sequence_tick_counter = 0U;
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Profile sequence stopped");
+	return 0;
+}
+
+/* motor profile seq status */
+static int cmd_motor_profile_seq_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Profile Sequence:");
+	shell_print(sh, "  Running:      %s", g_motor_params->profile_sequence_running ? "YES" : "NO");
+	shell_print(sh, "  Mode:         %s",
+		    motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ?
+			    "ONLINE_POSITION" :
+			    motor_state_to_string(motor_api_get_state()));
+	shell_print(sh, "  Armed:        %s", motor_control_is_armed(g_motor_params) ? "YES" : "NO");
+	shell_print(sh, "  Loop:         %s", g_motor_params->profile_sequence_loop ? "YES" : "NO");
+	shell_print(sh, "  Count:        %u / %u", g_motor_params->profile_sequence_count,
+		    MOTOR_PROFILE_SEQUENCE_MAX_POINTS);
+	shell_print(sh, "  Next index:   %u", g_motor_params->profile_sequence_next_idx);
+	shell_print(sh, "  Period:       %u ms (%u ticks)", g_motor_params->profile_sequence_period_ms,
+		    g_motor_params->profile_sequence_period_ticks);
+	shell_print(sh, "  Move:         %.1f ms",
+		    (double)(g_motor_params->profile_sequence_move_duration_s * 1000.0f));
+	shell_print(sh, "  End vel:      %.2f Hz",
+		    (double)(g_motor_params->profile_sequence_end_velocity_rad_s / (2.0f * PI_F32)));
+	shell_print(sh, "  Dropped ticks:%u", g_motor_params->profile_sequence_event_drop_count);
+
+	if (g_motor_params->profile_sequence_count > 0U) {
+		uint16_t idx = g_motor_params->profile_sequence_next_idx;
+		if (idx >= g_motor_params->profile_sequence_count) {
+			idx = 0U;
+		}
+		shell_print(sh, "  Next target:  %.2f deg",
+			    (double)(g_motor_params->profile_sequence_points_rad[idx] *
+				     180.0f / PI_F32));
+	}
+
+	return 0;
+}
+
+/* motor profile seq list */
+static int cmd_motor_profile_seq_list(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (g_motor_params->profile_sequence_count == 0U) {
+		shell_print(sh, "Sequence is empty");
+		return 0;
+	}
+
+	shell_print(sh, "Sequence Points (%u):", g_motor_params->profile_sequence_count);
+	for (uint16_t i = 0; i < g_motor_params->profile_sequence_count; i++) {
+		shell_print(sh, "  [%u] %.2f deg", (unsigned int)i,
+			    (double)(g_motor_params->profile_sequence_points_rad[i] *
+				     180.0f / PI_F32));
+	}
+
 	return 0;
 }
 
@@ -1380,11 +1651,26 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor profile seq subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq,
+	SHELL_CMD(clear, NULL, "Clear sequence points", cmd_motor_profile_seq_clear),
+	SHELL_CMD_ARG(add, NULL, "Add sequence point <target_deg>", cmd_motor_profile_seq_add, 2, 0),
+	SHELL_CMD_ARG(config, NULL,
+		      "Set sequence config <period_ms> <move_ms> <end_vel_hz> <loop:0|1>",
+		      cmd_motor_profile_seq_config, 5, 0),
+	SHELL_CMD(start, NULL, "Start hardware-timer sequence playback", cmd_motor_profile_seq_start),
+	SHELL_CMD(stop, NULL, "Stop sequence playback", cmd_motor_profile_seq_stop),
+	SHELL_CMD(status, NULL, "Show sequence status", cmd_motor_profile_seq_status),
+	SHELL_CMD(list, NULL, "List sequence points", cmd_motor_profile_seq_list),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor profile subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile,
 	SHELL_CMD_ARG(set, NULL, "Set profile limits <max_hz> <max_accel_hz_s>", cmd_motor_profile_set, 3, 0),
 	SHELL_CMD_ARG(move, NULL, "Plan quintic move <target_deg> <end_vel_hz> <duration_ms>", cmd_motor_profile_move, 4, 0),
 	SHELL_CMD(cancel, NULL, "Cancel active motion profile", cmd_motor_profile_cancel),
+	SHELL_CMD(seq, &sub_motor_profile_seq, "Sequence playback control", NULL),
 	SHELL_CMD(status, NULL, "Show motion profile status", cmd_motor_profile_status),
 	SHELL_SUBCMD_SET_END
 );

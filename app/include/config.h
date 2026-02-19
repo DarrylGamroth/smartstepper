@@ -23,6 +23,8 @@
 #include "thermal_model.h"
 #include "math_constants.h"
 
+#define MOTOR_PROFILE_SEQUENCE_MAX_POINTS 64U
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -76,6 +78,19 @@ struct motor_parameters {
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
 	struct motion_profile_quintic position_profile; /* Optional quintic position profile */
 	float32_t position_target_rad;  /* Position target for closed-loop position mode */
+
+	/* Hardware-timer-driven position sequence profile */
+	bool profile_sequence_running;      /* Sequence engine active */
+	bool profile_sequence_loop;         /* Loop sequence when last point is reached */
+	uint16_t profile_sequence_count;    /* Number of valid points in sequence array */
+	uint16_t profile_sequence_next_idx; /* Next point index to trigger */
+	uint32_t profile_sequence_period_ms;      /* Target trigger period */
+	uint32_t profile_sequence_period_ticks;   /* Hardware timer ISR ticks per trigger */
+	uint32_t profile_sequence_tick_counter;   /* Runtime tick accumulator */
+	uint32_t profile_sequence_event_drop_count; /* Dropped sequence-tick events */
+	float32_t profile_sequence_move_duration_s; /* Quintic segment duration */
+	float32_t profile_sequence_end_velocity_rad_s; /* Segment end velocity */
+	float32_t profile_sequence_points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute target points [0, 2pi) */
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
 	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */

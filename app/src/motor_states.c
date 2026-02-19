@@ -28,6 +28,7 @@
 #include "filter_fo.h"
 #include "traj.h"
 #include "angle_observer.h"
+#include "angle_wrap.h"
 #include "motor_state_utils.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
@@ -70,6 +71,37 @@ static void state_timer_expiry(struct k_timer *timer)
 	if (ret != 0) {
 		LOG_ERR("Failed to post timeout event: queue full");
 	}
+}
+
+static int motor_position_plan_sequence_move(struct motor_parameters *params, float32_t target_wrapped_rad)
+{
+	float32_t start_pos_rad = params->position_rad;
+	float32_t start_vel_rad_s = params->velocity_rad_s;
+	float32_t delta_rad = wrap_rad_pi(target_wrapped_rad - start_pos_rad);
+	float32_t end_pos_rad = start_pos_rad + delta_rad;
+
+	int ret = motion_profile_quintic_plan(&params->position_profile,
+					      start_pos_rad, start_vel_rad_s, 0.0f,
+					      end_pos_rad, params->profile_sequence_end_velocity_rad_s,
+					      0.0f, params->profile_sequence_move_duration_s);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = motion_profile_quintic_check_limits(&params->position_profile,
+						  params->profile_max_velocity_rad_s,
+						  params->profile_max_accel_rad_s2, 64U,
+						  NULL, NULL);
+	if (ret != 0) {
+		motion_profile_quintic_cancel(&params->position_profile, start_pos_rad);
+		return ret;
+	}
+
+	params->position_target_rad = wrap_rad_2pi(start_pos_rad);
+	params->last_command_update_ms = k_uptime_get_32();
+	params->command_timeout_latched = false;
+
+	return 0;
 }
 
 /* State machine thread stack and data */
@@ -255,6 +287,7 @@ const char *motor_event_to_string(enum motor_event_type event_type)
 	case MOTOR_EVENT_PARAM_UPDATE:      return "PARAM_UPDATE";
 	case MOTOR_EVENT_CLEAR_ERROR:       return "CLEAR_ERROR";
 	case MOTOR_EVENT_ERROR:             return "ERROR";
+	case MOTOR_EVENT_PROFILE_SEQ_TICK:  return "PROFILE_SEQ_TICK";
 	case MOTOR_EVENT_TIMEOUT:           return "TIMEOUT";
 	case MOTOR_EVENT_NONE:              return "NONE";
 	default:                            return "UNKNOWN";
@@ -403,6 +436,17 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_ref_rad_s = 0.0f;
 	motion_profile_quintic_init(&params->position_profile, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	motion_profile_quintic_cancel(&params->position_profile, 0.0f);
+	params->profile_sequence_running = false;
+	params->profile_sequence_loop = false;
+	params->profile_sequence_count = 0U;
+	params->profile_sequence_next_idx = 0U;
+	params->profile_sequence_period_ms = 1000U;
+	params->profile_sequence_period_ticks =
+		MAX(1U, (uint32_t)((CONTROL_LOOP_FREQUENCY_HZ * params->profile_sequence_period_ms) / 1000.0f));
+	params->profile_sequence_tick_counter = 0U;
+	params->profile_sequence_event_drop_count = 0U;
+	params->profile_sequence_move_duration_s = 0.100f;
+	params->profile_sequence_end_velocity_rad_s = 0.0f;
 
 	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* Initialize PRBS generator and RLS parameters */
@@ -1277,8 +1321,58 @@ static void motor_state_online_position_entry(void *obj)
 
 static enum smf_state_result motor_state_online_position_run(void *obj)
 {
-	ARG_UNUSED(obj);
-	return SMF_EVENT_PROPAGATE;
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	switch (params->event.type) {
+	case MOTOR_EVENT_PROFILE_SEQ_TICK: {
+		if (!params->profile_sequence_running) {
+			return SMF_EVENT_HANDLED;
+		}
+		if (params->profile_sequence_count == 0U) {
+			params->profile_sequence_running = false;
+			params->profile_sequence_tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
+		}
+		if (atomic_get(&params->control_armed) == 0) {
+			return SMF_EVENT_HANDLED;
+		}
+
+		uint16_t idx = params->profile_sequence_next_idx;
+		if (idx >= params->profile_sequence_count) {
+			if (params->profile_sequence_loop) {
+				idx = 0U;
+			} else {
+				params->profile_sequence_running = false;
+				params->profile_sequence_tick_counter = 0U;
+				return SMF_EVENT_HANDLED;
+			}
+		}
+
+		int ret = motor_position_plan_sequence_move(params, params->profile_sequence_points_rad[idx]);
+		if (ret != 0) {
+			LOG_ERR("Profile sequence move %u failed (%d), stopping", idx, ret);
+			params->profile_sequence_running = false;
+			params->profile_sequence_tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
+		}
+
+		idx++;
+		if (idx >= params->profile_sequence_count) {
+			if (params->profile_sequence_loop) {
+				idx = 0U;
+			} else {
+				params->profile_sequence_running = false;
+				params->profile_sequence_tick_counter = 0U;
+				LOG_INF("Profile sequence completed");
+			}
+		}
+		params->profile_sequence_next_idx = idx;
+		return SMF_EVENT_HANDLED;
+	}
+
+	default:
+		return SMF_EVENT_PROPAGATE;
+	}
 }
 
 static void motor_state_online_position_exit(void *obj)
@@ -1293,6 +1387,8 @@ static void motor_state_online_position_exit(void *obj)
 	motion_profile_quintic_cancel(&params->position_profile,
 				      angle_observer_get_mech_angle(&params->observer));
 	params->velocity_ref_rad_s = 0.0f;
+	params->profile_sequence_running = false;
+	params->profile_sequence_tick_counter = 0U;
 
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));

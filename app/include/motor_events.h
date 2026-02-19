@@ -21,6 +21,7 @@ enum motor_event_type {
 	MOTOR_EVENT_PARAM_UPDATE,        /* Update control parameter */
 	MOTOR_EVENT_CLEAR_ERROR,         /* Clear error condition */
 	MOTOR_EVENT_ERROR,               /* Error event  */
+	MOTOR_EVENT_PROFILE_SEQ_TICK,    /* Profile sequence timer tick */
 	MOTOR_EVENT_TIMEOUT,             /* State timeout expired */
     MOTOR_EVENT_NONE                 /* No event (used for polling) */
 };
