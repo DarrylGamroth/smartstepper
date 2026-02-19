@@ -44,6 +44,14 @@ static inline bool motor_control_is_armed(const struct motor_parameters *params)
 	return params && (atomic_get(&params->control_armed) != 0);
 }
 
+static inline bool motor_state_allows_arm(int state)
+{
+	return state == MOTOR_STATE_IDLE ||
+	       state == MOTOR_STATE_OFFLINE ||
+	       state == MOTOR_STATE_ONLINE ||
+	       motor_state_is_online_submode(state);
+}
+
 static inline void motor_command_touch(struct motor_parameters *params)
 {
 	if (!params) {
@@ -143,6 +151,11 @@ static int cmd_motor_current_id(const struct shell *sh, size_t argc, char **argv
 		return -EINVAL;
 	}
 
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
 	float id_amps = strtof(argv[1], NULL);
 	if (fabsf(id_amps) > 1e-6f && !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero current commands.");
@@ -167,6 +180,11 @@ static int cmd_motor_current_iq(const struct shell *sh, size_t argc, char **argv
 		return -EINVAL;
 	}
 
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
 	float iq_amps = strtof(argv[1], NULL);
 	if (fabsf(iq_amps) > 1e-6f && !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero current commands.");
@@ -189,6 +207,11 @@ static int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv
 	if (argc != 3) {
 		shell_error(sh, "Usage: motor current dq <id_amps> <iq_amps>");
 		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
 	}
 
 	float id_amps = strtof(argv[1], NULL);
@@ -310,9 +333,16 @@ static int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
+	int state = motor_api_get_state();
+	if (!motor_state_allows_arm(state)) {
+		shell_error(sh, "Cannot arm while in state %s. Wait for IDLE/OFFLINE/ONLINE.",
+			    motor_state_to_string(state));
+		return -EAGAIN;
+	}
+
 	atomic_set(&g_motor_params->control_armed, 1);
 	motor_command_touch(g_motor_params);
-	shell_print(sh, "Control armed");
+	shell_print(sh, "Control armed (state=%s)", motor_state_to_string(state));
 	return 0;
 }
 
