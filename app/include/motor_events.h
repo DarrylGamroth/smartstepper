@@ -27,12 +27,12 @@ enum motor_event_type {
 
 /* Motor control event message */
 struct motor_event {
-	enum motor_event_type type;
-	union {
-		struct {
-			uint8_t param_id;        /* Parameter ID (0=Id_setpoint_A, 1=Iq_setpoint_A) */
-			float value;
-		} param_update;
+		enum motor_event_type type;
+		union {
+			struct {
+				uint8_t param_id;        /* Parameter ID (see motor_control_api.c parameter table) */
+				float value;
+			} param_update;
 		uint32_t error_code;         /* Error code for EMERGENCY_STOP events */
 		int target_mode;             /* Target mode for MODE_CHANGE events (enum motor_state) */
 	};
