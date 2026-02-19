@@ -1148,6 +1148,7 @@ static enum smf_state_result motor_state_online_torque_run(void *obj)
 static void motor_state_online_velocity_open_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
+	float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
 
 	LOG_INF("Entering ONLINE_VELOCITY_OPEN substate");
 
@@ -1160,7 +1161,8 @@ static void motor_state_online_velocity_open_entry(void *obj)
 	/* Initialize angle generator for open-loop mode */
 	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
-	angle_gen_set_angle(&params->angle_gen, 0.0f);
+	/* Preserve commutation frame across mode transitions. */
+	angle_gen_set_angle(&params->angle_gen, mech_angle_rad);
 
 	/* Initialize velocity trajectory */
 	traj_init(&params->traj_velocity);
