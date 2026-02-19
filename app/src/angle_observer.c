@@ -5,50 +5,11 @@
  */
 
 #include "angle_observer.h"
+#include "angle_wrap.h"
 #include <zephyr/dsp/types.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(angle_observer, CONFIG_APP_LOG_LEVEL);
-
-/**
- * @brief Wrap angle to (-π, π] radians
- *
- * Used for computing the shortest-path error when the encoder crosses the
- * ±π boundary. For typical small per-tick angle changes, this executes
- * zero or one loop iteration.
- *
- * @param angle Input angle in radians
- * @return Wrapped angle in (-π, π]
- */
-static inline float32_t wrap_rad_pi(float32_t angle)
-{
-	while (angle > PI_F32) {
-		angle -= 2.0f * PI_F32;
-	}
-	while (angle <= -PI_F32) {
-		angle += 2.0f * PI_F32;
-	}
-	return angle;
-}
-
-/**
- * @brief Wrap angle to [0, 2π) radians
- *
- * Used for normalizing output angles to a consistent range.
- *
- * @param angle Input angle in radians
- * @return Wrapped angle in [0, 2π)
- */
-static inline float32_t wrap_rad_2pi(float32_t angle)
-{
-	while (angle >= 2.0f * PI_F32) {
-		angle -= 2.0f * PI_F32;
-	}
-	while (angle < 0.0f) {
-		angle += 2.0f * PI_F32;
-	}
-	return angle;
-}
 
 void angle_observer_init(struct angle_observer_state *obs,
 			 float32_t sample_period_s,

@@ -12,6 +12,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
+#include "angle_wrap.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -69,28 +70,6 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 	params->velocity_ref_rad_s = 0.0f;
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
-}
-
-static inline float32_t wrap_rad_2pi(float32_t angle_rad)
-{
-	while (angle_rad >= 2.0f * PI_F32) {
-		angle_rad -= 2.0f * PI_F32;
-	}
-	while (angle_rad < 0.0f) {
-		angle_rad += 2.0f * PI_F32;
-	}
-	return angle_rad;
-}
-
-static inline float32_t wrap_rad_pi(float32_t angle_rad)
-{
-	while (angle_rad > PI_F32) {
-		angle_rad -= 2.0f * PI_F32;
-	}
-	while (angle_rad <= -PI_F32) {
-		angle_rad += 2.0f * PI_F32;
-	}
-	return angle_rad;
 }
 
 /*============================================================================

@@ -32,6 +32,7 @@
 #include "pwmgen.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
+#include "angle_wrap.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -84,17 +85,6 @@ static inline bool is_online_control_state(const struct smf_state *state)
 	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN] ||
 	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
 	       state == &motor_states[MOTOR_STATE_ONLINE_POSITION];
-}
-
-static inline float32_t wrap_rad_pi(float32_t angle_rad)
-{
-	while (angle_rad > PI_F32) {
-		angle_rad -= 2.0f * PI_F32;
-	}
-	while (angle_rad <= -PI_F32) {
-		angle_rad += 2.0f * PI_F32;
-	}
-	return angle_rad;
 }
 
 static inline int encoder_read(struct rtio *ctx, float32_t *angle)
