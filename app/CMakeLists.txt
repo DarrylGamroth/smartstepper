@@ -23,6 +23,7 @@ target_sources(app PRIVATE
 	src/motor_control_api.c
 	src/motor_isr.c
 	src/motor_states.c
+	src/motor_states_calibration.c
 	src/motor_states_online.c
 	src/motor_hardware.c
 )
