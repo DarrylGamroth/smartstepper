@@ -13,6 +13,7 @@
 #include <zephyr/smf.h>
 #include <zephyr/timing/timing.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/util.h>
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
 #include <drivers/gate_driver/ti_drv8328.h>
@@ -27,6 +28,7 @@
 #include "filter_fo.h"
 #include "traj.h"
 #include "angle_observer.h"
+#include "motor_state_utils.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -51,11 +53,6 @@ static inline void motor_enable_isr_feature_flags(struct motor_parameters *param
 static inline void motor_disable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
 {
 	params->feature_flags_next &= ~mask;
-}
-
-static inline bool is_power_of_two_u32(uint32_t value)
-{
-	return (value != 0u) && ((value & (value - 1u)) == 0u);
 }
 
 static struct motor_parameters motor_params;
@@ -409,7 +406,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	/* Initialize PRBS generator and RLS parameters */
 	prbs_init(&params->prbs_gen);
 	params->rls_decimation = RLS_DECIMATION;
-	if (!is_power_of_two_u32(params->rls_decimation)) {
+	if (!is_power_of_two(params->rls_decimation)) {
 		LOG_WRN("Invalid rls_decimation=%u, forcing 1", params->rls_decimation);
 		params->rls_decimation = 1u;
 	}
@@ -443,7 +440,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	/* Initialize thermal model */
 	params->thermal_decimation = THERMAL_DECIMATION;
-	if (!is_power_of_two_u32(params->thermal_decimation)) {
+	if (!is_power_of_two(params->thermal_decimation)) {
 		LOG_WRN("Invalid thermal_decimation=%u, forcing 1", params->thermal_decimation);
 		params->thermal_decimation = 1u;
 	}
@@ -1095,10 +1092,7 @@ static enum smf_state_result motor_state_online_run(void *obj)
 			motor_state_to_string(params->event.target_mode));
 
 		/* Validate target is an ONLINE substate */
-		if (params->event.target_mode != MOTOR_STATE_ONLINE_TORQUE &&
-		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_OPEN &&
-		    params->event.target_mode != MOTOR_STATE_ONLINE_VELOCITY_CLOSED &&
-		    params->event.target_mode != MOTOR_STATE_ONLINE_POSITION) {
+		if (!motor_state_is_online_submode(params->event.target_mode)) {
 			LOG_ERR("Invalid mode change target: %s",
 				motor_state_to_string(params->event.target_mode));
 			return SMF_EVENT_HANDLED;

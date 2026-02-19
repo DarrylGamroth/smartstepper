@@ -33,6 +33,7 @@
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
+#include "motor_state_utils.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -77,15 +78,6 @@ SENSOR_DT_READ_IODEV(encoder1_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 
 RTIO_DEFINE_WITH_MEMPOOL(encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
 
 #define VBUS_MIN_VALID_V 0.1f
-
-static inline bool is_online_control_state(const struct smf_state *state)
-{
-	return state == &motor_states[MOTOR_STATE_ONLINE] ||
-	       state == &motor_states[MOTOR_STATE_ONLINE_TORQUE] ||
-	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN] ||
-	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
-	       state == &motor_states[MOTOR_STATE_ONLINE_POSITION];
-}
 
 static inline int encoder_read(struct rtio *ctx, float32_t *angle)
 {
@@ -156,7 +148,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
 	const struct smf_state *state = params->state_for_isr;
-	bool online_control_state = is_online_control_state(state);
+	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool control_armed = atomic_get(&params->control_armed) != 0;
 
 	/* Increment control loop counter */

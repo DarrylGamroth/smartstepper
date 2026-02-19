@@ -11,6 +11,7 @@
 #include "shell_commands.h"
 #include "motor_control_api.h"
 #include "motor_states.h"
+#include "motor_state_utils.h"
 #include "config.h"
 #include "angle_wrap.h"
 
@@ -36,11 +37,6 @@ void shell_set_motor_params(struct motor_parameters *params)
 struct motor_parameters *shell_get_motor_params(void)
 {
 	return g_motor_params;
-}
-
-static inline bool is_mode(const struct smf_state *state, enum motor_state mode)
-{
-	return state == &motor_states[mode];
 }
 
 static inline bool motor_control_is_armed(const struct motor_parameters *params)
@@ -446,8 +442,8 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 	}
 
 	const struct smf_state *mode = g_motor_params->state_for_isr;
-	if (!is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
-	    !is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED)) {
+	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED)) {
 		shell_error(sh, "Velocity target requires velocity_open or velocity_closed mode.");
 		return -EACCES;
 	}
@@ -486,9 +482,9 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	}
 
 	const struct smf_state *mode = g_motor_params->state_for_isr;
-	if (!is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
-	    !is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) &&
-	    !is_mode(mode, MOTOR_STATE_ONLINE_POSITION)) {
+	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_POSITION)) {
 		shell_print(sh, "Velocity controller: INACTIVE");
 		return 0;
 	}
@@ -569,7 +565,7 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 		return -ENODEV;
 	}
 
-	if (!is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
 		shell_error(sh, "Not in position mode. Use 'motor state mode position' first.");
 		return -EACCES;
 	}
@@ -594,7 +590,7 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 		return -ENODEV;
 	}
 
-	if (!is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
 		shell_print(sh, "Position controller: INACTIVE");
 		return 0;
 	}
