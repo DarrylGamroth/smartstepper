@@ -85,12 +85,18 @@ int motor_api_request_calibrate(void);
  * Posts parameter update to state machine thread via message queue.
  * State machine will apply the update when it processes the event.
  * 
- * @param name Parameter name (Id_setpoint_A or Iq_setpoint_A)
+ * @param name Parameter name from the API table (see motor params list)
  * @param value New parameter value
  * @return 0 on success, -EINVAL if parameter not found, -ENOMEM if queue full
  * 
  * @note This function is non-blocking. Update will occur asynchronously
  *       when the state machine processes the PARAM_UPDATE event.
+ *       Current table includes:
+ *       Id_setpoint_A, Iq_setpoint_A,
+ *       velocity_cl_kp_A_per_rad_s, velocity_cl_iq_limit_A,
+ *       position_cl_kp_rad_s_per_rad,
+ *       profile_max_velocity_hz, profile_max_accel_hz_s,
+ *       command_timeout_ms.
  */
 int motor_api_update_param(const char *name, float value);
 

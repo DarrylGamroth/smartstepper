@@ -15,6 +15,7 @@
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
 #include <zephyr/timing/timing.h>
+#include <zephyr/sys/atomic.h>
 #include <drivers/mcpwm.h>
 #include <drivers/adc_injected.h>
 #include <drivers/pwm/mcpwm_stm32.h>
@@ -73,6 +74,28 @@ LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
 SENSOR_DT_READ_IODEV(encoder1_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
+
+#define VBUS_MIN_VALID_V 0.1f
+
+static inline bool is_online_control_state(const struct smf_state *state)
+{
+	return state == &motor_states[MOTOR_STATE_ONLINE] ||
+	       state == &motor_states[MOTOR_STATE_ONLINE_TORQUE] ||
+	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN] ||
+	       state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
+	       state == &motor_states[MOTOR_STATE_ONLINE_POSITION];
+}
+
+static inline float32_t wrap_rad_pi(float32_t angle_rad)
+{
+	while (angle_rad > PI_F32) {
+		angle_rad -= 2.0f * PI_F32;
+	}
+	while (angle_rad <= -PI_F32) {
+		angle_rad += 2.0f * PI_F32;
+	}
+	return angle_rad;
+}
 
 static inline int encoder_read(struct rtio *ctx, float32_t *angle)
 {
@@ -143,6 +166,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	struct motor_parameters *params = (struct motor_parameters *)user_data;
 	const struct smf_state *state = params->state_for_isr;
+	bool online_control_state = is_online_control_state(state);
+	bool control_armed = atomic_get(&params->control_armed) != 0;
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
@@ -160,13 +185,31 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t Id_ref_A = 0.0f, Iq_ref_A = 0.0f;
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
+	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
+	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
+
+	/* Timeout disarms output commands when command updates stop. */
+	if (online_control_state && control_armed && params->command_timeout_ms > 0U) {
+		uint32_t now_ms = k_uptime_get_32();
+		uint32_t elapsed_ms = now_ms - params->last_command_update_ms;
+
+		if (elapsed_ms > params->command_timeout_ms) {
+			control_armed = false;
+			atomic_set(&params->control_armed, 0);
+			if (!params->command_timeout_latched) {
+				params->command_timeout_latched = true;
+				params->command_timeout_count++;
+			}
+		}
+	}
 
 	/* Read encoder if feature is enabled */
 	float32_t angle_raw_rad;
+	bool fresh_encoder_sample = false;
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
 		/* Read encoder to consume RTIO queue data (callback keeps queuing reads) */
 		if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees) < 0) {
-			/* No new encoder data, use previous estimate */
+			/* No new encoder data this cycle. */
 			params->encoder_fault_counter++;
 
 			/* Fault detection: Too many consecutive encoder failures */
@@ -175,10 +218,10 @@ void adc_callback(const struct device *dev, const q31_t *values,
 				goto isr_done;
 			}
 			
-			/* No encoder update this cycle - observer will use previous state */
 		} else {
 			/* Reset fault counter on successful read */
 			params->encoder_fault_counter = 0;
+			fresh_encoder_sample = true;
 		}
 	} else {
 		/* Encoder not active - reset fault counter */
@@ -190,10 +233,14 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		/* Calibration/open-loop: use generated angle (no delay) */
 		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
 		angle_observer_set_delay(&params->observer, 0.0f);
-	} else {
-		/* Normal operation: use encoder reading (1-cycle delay from pipelined SPI) */
+	} else if (fresh_encoder_sample) {
+		/* Normal operation: use fresh encoder reading (1-cycle pipelined delay) */
 		angle_raw_rad = angle_raw_degrees * (PI_F32 / 180.0f);
 		angle_observer_set_delay(&params->observer, 1.0f);
+	} else {
+		/* No fresh encoder sample: propagate using prior estimate only. */
+		angle_raw_rad = angle_observer_get_mech_angle(&params->observer);
+		angle_observer_set_delay(&params->observer, 0.0f);
 	}
 	
 	/* Update observer with angle (encoder or generated) */
@@ -207,13 +254,20 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	Ia_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_0], CURRENT_SENSE_POLARITY_0);
 	Ib_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_1], CURRENT_SENSE_POLARITY_1);
 	Vbus_V = adc_to_vbus_v(values[VBUS_ADC_BUFFER_INDEX]);
-	Vbus_inv = 1.0f / Vbus_V;
+
+	/* Validate bus voltage before reciprocal to avoid Inf/NaN propagation. */
+	if (Vbus_V < VBUS_MIN_VALID_V) {
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		goto isr_done;
+	}
 
 	/* Fault detection: Check for overvoltage */
 	if (Vbus_V > VBUS_MAX_V) {
 		motor_api_post_error(ERROR_OVERVOLTAGE);
 		goto isr_done;
 	}
+
+	Vbus_inv = 1.0f / Vbus_V;
 
 	/* Handle offset measurement (no control, just filtering) */
 	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
@@ -284,14 +338,40 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		Iq_ref_A = 0.0f;
 	}
 
+	/* Position cascade: generate velocity target from position error. */
+	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
+		float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
+		float32_t position_error_rad = wrap_rad_pi(params->position_target_rad - position_mech_rad);
+		velocity_target_rad_s =
+			clampf(params->position_cl_kp_rad_s_per_rad * position_error_rad,
+			       -params->profile_max_velocity_rad_s,
+			       params->profile_max_velocity_rad_s);
+		traj_set_target_value(&params->traj_velocity, velocity_target_rad_s);
+	}
+
 	/* Update velocity trajectory if enabled */
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_VELOCITY_TRAJ)) {
-		/* Update velocity trajectory */
+		velocity_target_rad_s = traj_get_target_value(&params->traj_velocity);
 		traj_run(&params->traj_velocity);
-		float32_t velocity_mech_rad_s = traj_get_int_value(&params->traj_velocity);
+		velocity_ref_rad_s = traj_get_int_value(&params->traj_velocity);
 
-		/* Update angle generator velocity (angle_gen produces mechanical angles) */
-		angle_gen_set_velocity(&params->angle_gen, velocity_mech_rad_s);
+		/* Open-loop commutation uses the trajectory directly. */
+		if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+			angle_gen_set_velocity(&params->angle_gen, velocity_ref_rad_s);
+		}
+	}
+
+	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
+	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
+	    state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
+		float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
+		float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_rad_s;
+
+		Id_ref_A = params->Id_setpoint_A;
+		Iq_ref_A =
+			clampf(params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s,
+			       -params->velocity_cl_iq_limit_A,
+			       params->velocity_cl_iq_limit_A);
 	}
 
 	/* Select current references based on mode */
@@ -299,6 +379,21 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		/* Normal FOC operation: use commanded current references */
 		Id_ref_A = params->Id_setpoint_A;
 		Iq_ref_A = params->Iq_setpoint_A;
+	}
+
+	/* Arm/disarm interlock only applies in ONLINE control states. */
+	if (online_control_state && !control_armed) {
+		Id_ref_A = 0.0f;
+		Iq_ref_A = 0.0f;
+		params->Id_setpoint_A = 0.0f;
+		params->Iq_setpoint_A = 0.0f;
+		velocity_target_rad_s = 0.0f;
+		velocity_ref_rad_s = 0.0f;
+		params->velocity_target_rad_s = 0.0f;
+		params->velocity_ref_rad_s = 0.0f;
+		traj_set_target_value(&params->traj_velocity, 0.0f);
+		traj_set_int_value(&params->traj_velocity, 0.0f);
+		angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	}
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
@@ -474,6 +569,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	/* Update telemetry snapshot (observer already returns rad/rad_s) */
 	params->position_rad = angle_observer_get_mech_angle(&params->observer);
 	params->velocity_rad_s = angle_observer_get_mech_speed(&params->observer);
+	params->velocity_target_rad_s = velocity_target_rad_s;
+	params->velocity_ref_rad_s = velocity_ref_rad_s;
 
 	params->Id_ref_A = Id_ref_A;
 	params->Iq_ref_A = Iq_ref_A;

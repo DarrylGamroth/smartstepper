@@ -19,6 +19,119 @@ static struct motor_parameters *g_motor_params = NULL;
 static struct motor_event cached_event;
 static bool event_cached = false;
 
+enum motor_param_id {
+	PARAM_ID_ID_SETPOINT_A = 0,
+	PARAM_ID_IQ_SETPOINT_A,
+	PARAM_ID_VELOCITY_KP_A_PER_RAD_S,
+	PARAM_ID_VELOCITY_IQ_LIMIT_A,
+	PARAM_ID_POSITION_KP_RAD_S_PER_RAD,
+	PARAM_ID_PROFILE_MAX_VELOCITY_HZ,
+	PARAM_ID_PROFILE_MAX_ACCEL_HZ_S,
+	PARAM_ID_COMMAND_TIMEOUT_MS,
+	PARAM_ID_COUNT,
+};
+
+static const char *const motor_param_names[PARAM_ID_COUNT] = {
+	[PARAM_ID_ID_SETPOINT_A] = "Id_setpoint_A",
+	[PARAM_ID_IQ_SETPOINT_A] = "Iq_setpoint_A",
+	[PARAM_ID_VELOCITY_KP_A_PER_RAD_S] = "velocity_cl_kp_A_per_rad_s",
+	[PARAM_ID_VELOCITY_IQ_LIMIT_A] = "velocity_cl_iq_limit_A",
+	[PARAM_ID_POSITION_KP_RAD_S_PER_RAD] = "position_cl_kp_rad_s_per_rad",
+	[PARAM_ID_PROFILE_MAX_VELOCITY_HZ] = "profile_max_velocity_hz",
+	[PARAM_ID_PROFILE_MAX_ACCEL_HZ_S] = "profile_max_accel_hz_s",
+	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
+};
+
+static bool motor_param_requires_positive(uint8_t param_id)
+{
+	switch (param_id) {
+	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
+	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
+	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
+	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
+	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int motor_param_name_to_id(const char *name, uint8_t *param_id)
+{
+	if (name == NULL || param_id == NULL) {
+		return -EINVAL;
+	}
+
+	for (uint8_t i = 0; i < PARAM_ID_COUNT; i++) {
+		if (strcmp(name, motor_param_names[i]) == 0) {
+			*param_id = i;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static int motor_param_get_value(const struct motor_parameters *params, uint8_t param_id, float *value)
+{
+	if (params == NULL || value == NULL) {
+		return -EINVAL;
+	}
+
+	switch (param_id) {
+	case PARAM_ID_ID_SETPOINT_A:
+		*value = params->Id_setpoint_A;
+		return 0;
+	case PARAM_ID_IQ_SETPOINT_A:
+		*value = params->Iq_setpoint_A;
+		return 0;
+	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
+		*value = params->velocity_cl_kp_A_per_rad_s;
+		return 0;
+	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
+		*value = params->velocity_cl_iq_limit_A;
+		return 0;
+	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
+		*value = params->position_cl_kp_rad_s_per_rad;
+		return 0;
+	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
+		*value = params->profile_max_velocity_rad_s / (2.0f * PI_F32);
+		return 0;
+	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
+		*value = params->profile_max_accel_rad_s2 / (2.0f * PI_F32);
+		return 0;
+	case PARAM_ID_COMMAND_TIMEOUT_MS:
+		*value = (float)params->command_timeout_ms;
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+static void motor_param_apply_profile_limits(struct motor_parameters *params)
+{
+	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
+	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
+	traj_set_max_delta(&params->traj_velocity,
+			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
+	traj_set_target_value(&params->traj_velocity,
+			      clampf(traj_get_target_value(&params->traj_velocity),
+				     -params->profile_max_velocity_rad_s,
+				     params->profile_max_velocity_rad_s));
+	traj_set_int_value(&params->traj_velocity,
+			   clampf(traj_get_int_value(&params->traj_velocity),
+				  -params->profile_max_velocity_rad_s,
+				  params->profile_max_velocity_rad_s));
+	params->velocity_target_rad_s =
+		clampf(params->velocity_target_rad_s,
+		       -params->profile_max_velocity_rad_s,
+		       params->profile_max_velocity_rad_s);
+	params->velocity_ref_rad_s =
+		clampf(params->velocity_ref_rad_s,
+		       -params->profile_max_velocity_rad_s,
+		       params->profile_max_velocity_rad_s);
+}
+
 int motor_control_api_init(struct motor_parameters *params)
 {
 	if (params == NULL) {
@@ -110,20 +223,22 @@ int motor_api_update_param(const char *name, float value)
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_PARAM_UPDATE,
 	};
-	
-	/* Store parameter name and value in event */
-	if (strcmp(name, "Id_setpoint_A") == 0) {
-		evt.param_update.param_id = 0;
-	} else if (strcmp(name, "Iq_setpoint_A") == 0) {
-		evt.param_update.param_id = 1;
-	} else {
-		return -EINVAL;  /* Parameter not found */
+
+	uint8_t param_id;
+	int ret = motor_param_name_to_id(name, &param_id);
+	if (ret != 0) {
+		return ret;
 	}
-	
+
+	if (motor_param_requires_positive(param_id) && value <= 0.0f) {
+		return -EINVAL;
+	}
+
+	evt.param_update.param_id = param_id;
 	evt.param_update.value = value;
 	
 	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
 	if (ret != 0) {
 		LOG_ERR("Failed to post parameter update: queue full");
 		return -ENOMEM;
@@ -140,52 +255,51 @@ int motor_api_set_param(const char *name, float value)
 
 int motor_api_get_param(const char *name, float *value)
 {
+	if (name == NULL || value == NULL) {
+		return -EINVAL;
+	}
+
 	if (!g_motor_params) {
 		return -ENODEV;
 	}
 	
-	/* Direct read from current setpoints */
-	if (strcmp(name, "Id_setpoint_A") == 0) {
-		*value = g_motor_params->Id_setpoint_A;
-		return 0;
-	} else if (strcmp(name, "Iq_setpoint_A") == 0) {
-		*value = g_motor_params->Iq_setpoint_A;
-		return 0;
+	uint8_t param_id;
+	int ret = motor_param_name_to_id(name, &param_id);
+	if (ret != 0) {
+		return ret;
 	}
-	
-	return -EINVAL;  /* Parameter not found */
+
+	return motor_param_get_value(g_motor_params, param_id, value);
 }
 
 size_t motor_api_get_param_count(void)
 {
-	return 2;  /* Id_setpoint_A and Iq_setpoint_A */
+	return PARAM_ID_COUNT;
 }
 
 const char *motor_api_get_param_name(size_t index)
 {
-	switch (index) {
-	case 0: return "Id_setpoint_A";
-	case 1: return "Iq_setpoint_A";
-	default: return NULL;
+	if (index >= PARAM_ID_COUNT) {
+		return NULL;
 	}
+	return motor_param_names[index];
 }
 
 int motor_api_get_param_by_index(size_t index, float *value)
 {
+	if (value == NULL) {
+		return -EINVAL;
+	}
+
 	if (!g_motor_params) {
 		return -ENODEV;
 	}
-	
-	switch (index) {
-	case 0:
-		*value = g_motor_params->Id_setpoint_A;
-		return 0;
-	case 1:
-		*value = g_motor_params->Iq_setpoint_A;
-		return 0;
-	default:
+
+	if (index >= PARAM_ID_COUNT) {
 		return -EINVAL;
 	}
+
+	return motor_param_get_value(g_motor_params, (uint8_t)index, value);
 }
 
 int motor_api_set_currents(float id_A, float iq_A)
@@ -282,21 +396,41 @@ int motor_api_get_error(void)
 void motor_api_get_telemetry(float *id_meas, float *iq_meas, 
                              float *speed_hz, float *vbus_V)
 {
+	if (id_meas == NULL && iq_meas == NULL && speed_hz == NULL && vbus_V == NULL) {
+		return;
+	}
+
 	if (!g_motor_params) {
-		*id_meas = 0.0f;
-		*iq_meas = 0.0f;
-		*speed_hz = 0.0f;
-		*vbus_V = 0.0f;
+		if (id_meas != NULL) {
+			*id_meas = 0.0f;
+		}
+		if (iq_meas != NULL) {
+			*iq_meas = 0.0f;
+		}
+		if (speed_hz != NULL) {
+			*speed_hz = 0.0f;
+		}
+		if (vbus_V != NULL) {
+			*vbus_V = 0.0f;
+		}
 		return;
 	}
 	
 	/* Safe read-only access: ISR updates telemetry snapshot atomically
 	 * Single 32-bit float reads are atomic on Cortex-M
 	 */
-	*id_meas = g_motor_params->Id_A;
-	*iq_meas = g_motor_params->Iq_A;
-	*speed_hz = g_motor_params->velocity_rad_s / (2.0f * PI_F32);
-	*vbus_V = g_motor_params->dc_bus_voltage_V;
+	if (id_meas != NULL) {
+		*id_meas = g_motor_params->Id_A;
+	}
+	if (iq_meas != NULL) {
+		*iq_meas = g_motor_params->Iq_A;
+	}
+	if (speed_hz != NULL) {
+		*speed_hz = g_motor_params->velocity_rad_s / (2.0f * PI_F32);
+	}
+	if (vbus_V != NULL) {
+		*vbus_V = g_motor_params->dc_bus_voltage_V;
+	}
 }
 
 bool motor_api_has_event(void)
@@ -311,6 +445,10 @@ bool motor_api_has_event(void)
 
 int motor_api_peek_event(struct motor_event *evt)
 {
+	if (evt == NULL) {
+		return -EINVAL;
+	}
+
 	if (event_cached) {
 		*evt = cached_event;
 		return 0;
@@ -341,13 +479,71 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 
 	/* Direct write to setpoint fields based on param_id */
 	switch (params->event.param_update.param_id) {
-	case 0:  /* Id_setpoint_A */
+	case PARAM_ID_ID_SETPOINT_A:
 		params->Id_setpoint_A = params->event.param_update.value;
 		LOG_DBG("Updated Id_setpoint_A = %.3f A", (double)params->event.param_update.value);
 		break;
-	case 1:  /* Iq_setpoint_A */
+	case PARAM_ID_IQ_SETPOINT_A:
 		params->Iq_setpoint_A = params->event.param_update.value;
 		LOG_DBG("Updated Iq_setpoint_A = %.3f A", (double)params->event.param_update.value);
+		break;
+	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
+		if (params->event.param_update.value <= 0.0f) {
+			LOG_ERR("Rejected velocity_cl_kp_A_per_rad_s <= 0");
+			break;
+		}
+		params->velocity_cl_kp_A_per_rad_s = params->event.param_update.value;
+		LOG_DBG("Updated velocity_cl_kp_A_per_rad_s = %.6f",
+			(double)params->event.param_update.value);
+		break;
+	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
+		if (params->event.param_update.value <= 0.0f) {
+			LOG_ERR("Rejected velocity_cl_iq_limit_A <= 0");
+			break;
+		}
+		params->velocity_cl_iq_limit_A = params->event.param_update.value;
+		LOG_DBG("Updated velocity_cl_iq_limit_A = %.6f",
+			(double)params->event.param_update.value);
+		break;
+	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
+		if (params->event.param_update.value <= 0.0f) {
+			LOG_ERR("Rejected position_cl_kp_rad_s_per_rad <= 0");
+			break;
+		}
+		params->position_cl_kp_rad_s_per_rad = params->event.param_update.value;
+		LOG_DBG("Updated position_cl_kp_rad_s_per_rad = %.6f",
+			(double)params->event.param_update.value);
+		break;
+	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
+		if (params->event.param_update.value <= 0.0f) {
+			LOG_ERR("Rejected profile_max_velocity_hz <= 0");
+			break;
+		}
+		params->profile_max_velocity_rad_s = params->event.param_update.value * 2.0f * PI_F32;
+		motor_param_apply_profile_limits(params);
+		LOG_DBG("Updated profile_max_velocity_hz = %.6f",
+			(double)params->event.param_update.value);
+		break;
+	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
+		if (params->event.param_update.value <= 0.0f) {
+			LOG_ERR("Rejected profile_max_accel_hz_s <= 0");
+			break;
+		}
+		params->profile_max_accel_rad_s2 = params->event.param_update.value * 2.0f * PI_F32;
+		motor_param_apply_profile_limits(params);
+		LOG_DBG("Updated profile_max_accel_hz_s = %.6f",
+			(double)params->event.param_update.value);
+		break;
+	case PARAM_ID_COMMAND_TIMEOUT_MS:
+		if (params->event.param_update.value < 0.0f) {
+			LOG_ERR("Rejected command_timeout_ms < 0");
+			break;
+		}
+		params->command_timeout_ms = (uint32_t)(params->event.param_update.value + 0.5f);
+		if (params->command_timeout_ms == 0U) {
+			params->command_timeout_latched = false;
+		}
+		LOG_DBG("Updated command_timeout_ms = %u", params->command_timeout_ms);
 		break;
 	default:
 		LOG_ERR("Unknown parameter ID: %u", params->event.param_update.param_id);
