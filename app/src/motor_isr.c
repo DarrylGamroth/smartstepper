@@ -383,8 +383,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Arm/disarm interlock only applies in ONLINE control states. */
 	if (online_control_state && !control_armed) {
-		Id_ref_A = 0.0f;
-		Iq_ref_A = 0.0f;
+		Id_ref_A = Id_A;
+		Iq_ref_A = Iq_A;
 		params->Id_setpoint_A = 0.0f;
 		params->Iq_setpoint_A = 0.0f;
 		velocity_target_rad_s = 0.0f;
@@ -394,6 +394,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		traj_set_target_value(&params->traj_velocity, 0.0f);
 		traj_set_int_value(&params->traj_velocity, 0.0f);
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);
+		pi_set_ui(&params->pi_Id, 0.0f);
+		pi_set_ui(&params->pi_Iq, 0.0f);
 	}
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
