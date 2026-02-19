@@ -445,6 +445,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 		MAX(1U, (uint32_t)((CONTROL_LOOP_FREQUENCY_HZ * params->profile_sequence_period_ms) / 1000.0f));
 	params->profile_sequence_tick_counter = 0U;
 	params->profile_sequence_event_drop_count = 0U;
+	params->profile_sequence_trigger_source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
+	params->profile_sequence_trigger_edge = PROFILE_SEQUENCE_TRIGGER_EDGE_RISING;
+	params->profile_sequence_trigger_channel = 0U;
+	params->profile_sequence_ext_capture_enabled = false;
+	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_sequence_ext_min_interval_us = 0U;
+	params->profile_sequence_ext_min_interval_cycles = 0U;
+	params->profile_sequence_ext_last_capture_cycles = 0U;
+	params->profile_sequence_ext_trigger_count = 0U;
+	params->profile_sequence_ext_reject_count = 0U;
 	params->profile_sequence_move_duration_s = 0.100f;
 	params->profile_sequence_end_velocity_rad_s = 0.0f;
 

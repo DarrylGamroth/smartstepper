@@ -27,6 +27,13 @@
 #define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS
 #define CHOPPER_CAL_MAX_EDGES (2U * CHOPPER_CAL_MAX_SLOTS)
 
+#define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
+#define PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL 1U
+
+#define PROFILE_SEQUENCE_TRIGGER_EDGE_RISING 0U
+#define PROFILE_SEQUENCE_TRIGGER_EDGE_FALLING 1U
+#define PROFILE_SEQUENCE_TRIGGER_EDGE_BOTH 2U
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -90,6 +97,16 @@ struct motor_parameters {
 	uint32_t profile_sequence_period_ticks;   /* Hardware timer ISR ticks per trigger */
 	uint32_t profile_sequence_tick_counter;   /* Runtime tick accumulator */
 	uint32_t profile_sequence_event_drop_count; /* Dropped sequence-tick events */
+	uint8_t profile_sequence_trigger_source; /* PROFILE_SEQUENCE_TRIGGER_SRC_* */
+	uint8_t profile_sequence_trigger_edge;   /* PROFILE_SEQUENCE_TRIGGER_EDGE_* */
+	uint8_t profile_sequence_trigger_channel; /* External capture channel index */
+	bool profile_sequence_ext_capture_enabled; /* External capture currently armed */
+	bool profile_sequence_ext_last_capture_valid; /* External filter history valid */
+	uint32_t profile_sequence_ext_min_interval_us; /* Reject edges closer than this interval */
+	uint32_t profile_sequence_ext_min_interval_cycles; /* Converted from min_interval_us */
+	uint32_t profile_sequence_ext_last_capture_cycles; /* Last accepted capture cycle */
+	uint32_t profile_sequence_ext_trigger_count; /* Accepted external triggers */
+	uint32_t profile_sequence_ext_reject_count;  /* Rejected external edges (filter/status) */
 	float32_t profile_sequence_move_duration_s; /* Quintic segment duration */
 	float32_t profile_sequence_end_velocity_rad_s; /* Segment end velocity */
 	float32_t profile_sequence_points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute target points [0, 2pi) */

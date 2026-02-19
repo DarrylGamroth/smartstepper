@@ -642,6 +642,7 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	/* Hardware-timer-driven position-sequence tick source. */
 	if (params->profile_sequence_running &&
 	    atomic_get(&params->control_armed) != 0 &&
+	    params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
 	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
 		uint32_t period_ticks = params->profile_sequence_period_ticks;
 		if (period_ticks == 0U) {
