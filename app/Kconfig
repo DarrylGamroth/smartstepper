@@ -25,4 +25,12 @@ config RLS_PARAMETER_ESTIMATION
 	  and real-time RLS filtering to estimate motor parameters during operation.
 	  Currently not functioning - disabled for future development.
 
+config ENCODER_MAGNET_CHECK_ON_ARM
+	bool "Block arm when AEAT-9955 reports MHI/MLO alarm"
+	default n
+	help
+	  If enabled, `motor arm` reads AEAT-9955 error status register 0x29
+	  and rejects arming when MHI or MLO alarm bits are set.
+	  Keep disabled for bring-up if magnet alignment/strength is not finalized.
+
 endmenu

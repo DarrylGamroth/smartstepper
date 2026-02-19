@@ -92,6 +92,54 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 	params->position_target_rad = wrap_rad_2pi(params->position_rad);
 }
 
+static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, bool *mlo_out)
+{
+#if !MOTOR_ENCODER_IS_AEAT9955
+	ARG_UNUSED(status_out);
+	ARG_UNUSED(mhi_out);
+	ARG_UNUSED(mlo_out);
+	return -ENOTSUP;
+#else
+	if (!device_is_ready(encoder1)) {
+		return -ENODEV;
+	}
+
+	struct sensor_value raw = {0};
+	struct sensor_value mhi = {0};
+	struct sensor_value mlo = {0};
+
+	int ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+				  (enum sensor_attribute)AEAT9955_ATTR_ERROR_STATUS, &raw);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_HIGH, &mhi);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_LOW, &mlo);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (status_out) {
+		*status_out = (uint8_t)(raw.val1 & 0xFF);
+	}
+	if (mhi_out) {
+		*mhi_out = (mhi.val1 != 0);
+	}
+	if (mlo_out) {
+		*mlo_out = (mlo.val1 != 0);
+	}
+
+	return 0;
+#endif
+}
+
 /*============================================================================
  * Shell Command Implementations
  *============================================================================*/
@@ -355,6 +403,29 @@ static int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv)
 			    motor_state_to_string(state));
 		return -EAGAIN;
 	}
+
+#if CONFIG_ENCODER_MAGNET_CHECK_ON_ARM
+	{
+		uint8_t status = 0U;
+		bool mhi = false;
+		bool mlo = false;
+		int ret = motor_encoder_read_aeat_alarm(&status, &mhi, &mlo);
+		if (ret == -ENOTSUP) {
+			shell_error(sh, "CONFIG_ENCODER_MAGNET_CHECK_ON_ARM requires AEAT-9955 encoder1.");
+			return ret;
+		}
+		if (ret < 0) {
+			shell_error(sh, "Failed to read encoder magnet alarms (err %d)", ret);
+			return ret;
+		}
+		if (mhi || mlo) {
+			shell_error(sh,
+				    "Cannot arm: encoder magnet alarm active (raw=0x%02X, MHI=%s, MLO=%s)",
+				    status, mhi ? "SET" : "CLEAR", mlo ? "SET" : "CLEAR");
+			return -EACCES;
+		}
+	}
+#endif
 
 	atomic_set(&g_motor_params->control_armed, 1);
 	motor_command_feed_watchdog(g_motor_params);
@@ -758,6 +829,25 @@ static int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "  Timeout latch:      %s",
 		    g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
 	shell_print(sh, "  Timeout count:      %u", g_motor_params->command_timeout_count);
+#if CONFIG_ENCODER_MAGNET_CHECK_ON_ARM
+	shell_print(sh, "  Magnet check arm:   ENABLED (Kconfig)");
+#else
+	shell_print(sh, "  Magnet check arm:   DISABLED (Kconfig)");
+#endif
+
+#if MOTOR_ENCODER_IS_AEAT9955
+	uint8_t mag_status = 0U;
+	bool mhi = false;
+	bool mlo = false;
+	int mag_ret = motor_encoder_read_aeat_alarm(&mag_status, &mhi, &mlo);
+	if (mag_ret == 0) {
+		shell_print(sh, "  Magnet raw status:  0x%02X", mag_status);
+		shell_print(sh, "  Magnet MHI:         %s", mhi ? "SET" : "CLEAR");
+		shell_print(sh, "  Magnet MLO:         %s", mlo ? "SET" : "CLEAR");
+	} else {
+		shell_print(sh, "  Magnet status err:  %d", mag_ret);
+	}
+#endif
 
 	return 0;
 }
@@ -996,41 +1086,19 @@ static int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **a
 	shell_error(sh, "encoder1 is not AEAT-9955 on this build");
 	return -ENOTSUP;
 #else
-	if (!device_is_ready(encoder1)) {
-		shell_error(sh, "encoder1 device is not ready");
-		return -ENODEV;
-	}
-
-	struct sensor_value raw = {0};
-	struct sensor_value mhi = {0};
-	struct sensor_value mlo = {0};
-
-	int ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-				  (enum sensor_attribute)AEAT9955_ATTR_ERROR_STATUS, &raw);
+	uint8_t status = 0U;
+	bool mhi = false;
+	bool mlo = false;
+	int ret = motor_encoder_read_aeat_alarm(&status, &mhi, &mlo);
 	if (ret < 0) {
-		shell_error(sh, "Failed to read AEAT error status (err %d)", ret);
+		shell_error(sh, "Failed to read AEAT alarm status (err %d)", ret);
 		return ret;
 	}
 
-	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_HIGH, &mhi);
-	if (ret < 0) {
-		shell_error(sh, "Failed to read AEAT MHI status (err %d)", ret);
-		return ret;
-	}
-
-	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_LOW, &mlo);
-	if (ret < 0) {
-		shell_error(sh, "Failed to read AEAT MLO status (err %d)", ret);
-		return ret;
-	}
-
-	uint8_t status = (uint8_t)(raw.val1 & 0xFF);
 	shell_print(sh, "AEAT-9955 alarm/error status:");
 	shell_print(sh, "  Raw status: 0x%02X", status);
-	shell_print(sh, "  MHI:        %s", (mhi.val1 != 0) ? "SET" : "CLEAR");
-	shell_print(sh, "  MLO:        %s", (mlo.val1 != 0) ? "SET" : "CLEAR");
+	shell_print(sh, "  MHI:        %s", mhi ? "SET" : "CLEAR");
+	shell_print(sh, "  MLO:        %s", mlo ? "SET" : "CLEAR");
 
 	return 0;
 #endif
