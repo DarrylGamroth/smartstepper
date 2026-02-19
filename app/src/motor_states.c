@@ -1116,6 +1116,11 @@ static void motor_state_online_torque_entry(void *obj)
 
 	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	/* Start torque mode from a neutral current command for bumpless handover. */
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
+	pi_set_ui(&params->pi_Id, 0.0f);
+	pi_set_ui(&params->pi_Iq, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 }
