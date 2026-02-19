@@ -381,6 +381,9 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 		params->chopper_cal_valid = false;
 		motor_chopper_cal_restore_timeout(params);
 	}
+}
+#endif
+
 int cmd_motor_profile_set(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc != 3) {
@@ -1387,4 +1390,3 @@ int cmd_motor_profile_seq_list(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 }
-
