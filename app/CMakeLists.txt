@@ -19,6 +19,7 @@ target_sources(app PRIVATE
 	src/rls_motor_est.c
 	src/thermal_model.c
 	src/shell_commands.c
+	src/shell_commands_state.c
 	src/shell_commands_motion.c
 	src/motor_control_api.c
 	src/motor_isr.c

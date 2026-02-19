@@ -1,0 +1,586 @@
+/*
+ * Copyright (c) 2026 Rubus Technologies Inc
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/sensor.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdint.h>
+
+#include "shell_commands_state.h"
+#include "shell_commands_motion.h"
+#include "motor_control_api.h"
+#include "motor_states.h"
+#include "motor_state_utils.h"
+#include "motor_hardware.h"
+#include "config.h"
+#include "angle_wrap.h"
+
+#if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#include <drivers/sensor/brcm_aeat9955.h>
+#define MOTOR_ENCODER_IS_AEAT9955 1
+#else
+#define MOTOR_ENCODER_IS_AEAT9955 0
+#endif
+
+#include <zephyr/logging/log.h>
+LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
+
+static inline bool motor_state_allows_arm(int state)
+{
+	return state == MOTOR_STATE_IDLE ||
+	       state == MOTOR_STATE_OFFLINE ||
+	       state == MOTOR_STATE_ONLINE ||
+	       motor_state_is_online_submode(state);
+}
+
+static inline void motor_zero_control_targets(struct motor_parameters *params)
+{
+	if (!params) {
+		return;
+	}
+
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+	motion_profile_quintic_cancel(&params->position_profile, params->position_rad);
+	params->position_target_rad = wrap_rad_2pi(params->position_rad);
+}
+
+static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, bool *mlo_out)
+{
+#if !MOTOR_ENCODER_IS_AEAT9955
+	ARG_UNUSED(status_out);
+	ARG_UNUSED(mhi_out);
+	ARG_UNUSED(mlo_out);
+	return -ENOTSUP;
+#else
+	if (!device_is_ready(encoder1)) {
+		return -ENODEV;
+	}
+
+	struct sensor_value raw = {0};
+	struct sensor_value mhi = {0};
+	struct sensor_value mlo = {0};
+
+	int ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+				  (enum sensor_attribute)AEAT9955_ATTR_ERROR_STATUS, &raw);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_HIGH, &mhi);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
+			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_LOW, &mlo);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (status_out) {
+		*status_out = (uint8_t)(raw.val1 & 0xFF);
+	}
+	if (mhi_out) {
+		*mhi_out = (mhi.val1 != 0);
+	}
+	if (mlo_out) {
+		*mlo_out = (mlo.val1 != 0);
+	}
+
+	return 0;
+#endif
+}
+
+/* motor state offline */
+int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_offline() == 0) {
+		shell_print(sh, "OFFLINE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request OFFLINE state");
+		return -EIO;
+	}
+}
+
+/* motor state idle */
+int cmd_motor_state_idle(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_idle() == 0) {
+		shell_print(sh, "IDLE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request IDLE state");
+		return -EIO;
+	}
+}
+
+/* motor state online */
+int cmd_motor_state_online(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_api_request_online() == 0) {
+		shell_print(sh, "ONLINE state requested");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to request ONLINE state");
+		return -EIO;
+	}
+}
+
+/* motor state calibrate */
+int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (motor_api_request_calibrate() == 0) {
+		shell_print(sh, "Calibration sequence started");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to start calibration");
+		return -EIO;
+	}
+}
+
+/* motor state clear_error */
+int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (motor_api_clear_error() == 0) {
+		shell_print(sh, "Error cleared");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to clear error");
+		return -EIO;
+	}
+}
+
+/* motor arm */
+int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	int state = motor_api_get_state();
+	if (!motor_state_allows_arm(state)) {
+		shell_error(sh, "Cannot arm while in state %s. Wait for IDLE/OFFLINE/ONLINE.",
+			    motor_state_to_string(state));
+		return -EAGAIN;
+	}
+
+#if CONFIG_ENCODER_MAGNET_CHECK_ON_ARM
+	{
+		uint8_t status = 0U;
+		bool mhi = false;
+		bool mlo = false;
+		int ret = motor_encoder_read_aeat_alarm(&status, &mhi, &mlo);
+		if (ret == -ENOTSUP) {
+			shell_error(sh, "CONFIG_ENCODER_MAGNET_CHECK_ON_ARM requires AEAT-9955 encoder1.");
+			return ret;
+		}
+		if (ret < 0) {
+			shell_error(sh, "Failed to read encoder magnet alarms (err %d)", ret);
+			return ret;
+		}
+		if (mhi || mlo) {
+			shell_error(sh,
+				    "Cannot arm: encoder magnet alarm active (raw=0x%02X, MHI=%s, MLO=%s)",
+				    status, mhi ? "SET" : "CLEAR", mlo ? "SET" : "CLEAR");
+			return -EACCES;
+		}
+	}
+#endif
+
+	atomic_set(&g_motor_params->control_armed, 1);
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Control armed (state=%s)", motor_state_to_string(state));
+	return 0;
+}
+
+/* motor disarm */
+int cmd_motor_disarm(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	atomic_set(&g_motor_params->control_armed, 0);
+	motor_zero_control_targets(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
+
+	int ret = motor_api_request_idle();
+	if (ret != 0) {
+		shell_error(sh, "Disarmed, but failed to request IDLE (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Control disarmed and IDLE requested");
+	return 0;
+}
+
+/* motor state status */
+int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	
+	int state = motor_api_get_state();
+	const char *state_str = motor_state_to_string(state);
+	int error = motor_api_get_error();
+	const char *error_str = motor_error_to_string(error);
+	uint32_t now_ms = k_uptime_get_32();
+	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	
+	shell_print(sh, "Motor Status:");
+	shell_print(sh, "  State: %s (%d)", state_str, state);
+	shell_print(sh, "  Error: %s (%d)", error_str, error);
+	shell_print(sh, "  Armed: %s", motor_control_is_armed(g_motor_params) ? "YES" : "NO");
+	shell_print(sh, "  Command timeout: %u ms", g_motor_params->command_timeout_ms);
+	shell_print(sh, "  Command age: %u ms", age_ms);
+	shell_print(sh, "  Timeout latch: %s", g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
+	shell_print(sh, "  Timeout count: %u", g_motor_params->command_timeout_count);
+	
+	return 0;
+}
+
+/* Helper function for mode changes */
+static int motor_request_mode_change(const struct shell *sh, enum motor_state target_state, const char *mode_name)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	/* Post mode change event to state machine */
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_MODE_CHANGE,
+		.target_mode = target_state,
+	};
+
+	extern struct k_msgq motor_event_queue;
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		shell_error(sh, "Failed to post mode change event: queue full");
+		return -ENOMEM;
+	}
+
+	shell_print(sh, "Mode change to %s requested", mode_name);
+	return 0;
+}
+
+/* motor state mode torque */
+int cmd_motor_state_mode_torque(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_TORQUE, "torque");
+}
+
+/* motor state mode velocity_open */
+int cmd_motor_state_mode_velocity_open(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_OPEN, "velocity_open");
+}
+
+/* motor state mode velocity_closed */
+int cmd_motor_state_mode_velocity_closed(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_CLOSED, "velocity_closed");
+}
+
+/* motor state mode position */
+int cmd_motor_state_mode_position(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION, "position");
+}
+
+/* motor safety timeout <ms> */
+int cmd_motor_safety_timeout(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor safety timeout <ms>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	char *endp = NULL;
+	long timeout_ms = strtol(argv[1], &endp, 10);
+	if (endp == argv[1] || *endp != '\0' || timeout_ms < 0) {
+		shell_error(sh, "Timeout must be a non-negative integer in milliseconds.");
+		return -EINVAL;
+	}
+
+	int ret = motor_api_set_param("command_timeout_ms", (float)timeout_ms);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set command timeout (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Command timeout set to %ld ms%s",
+		    timeout_ms, timeout_ms == 0 ? " (disabled)" : "");
+	return 0;
+}
+
+/* motor safety pet */
+int cmd_motor_safety_pet(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Command watchdog fed");
+	return 0;
+}
+
+/* motor safety status */
+int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t now_ms = k_uptime_get_32();
+	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	bool timeout_enabled = g_motor_params->command_timeout_ms > 0U;
+	bool timeout_expired = timeout_enabled && (age_ms > g_motor_params->command_timeout_ms);
+
+	shell_print(sh, "Safety Status:");
+	shell_print(sh, "  Armed:              %s",
+		    motor_control_is_armed(g_motor_params) ? "YES" : "NO");
+	shell_print(sh, "  Timeout enabled:    %s", timeout_enabled ? "YES" : "NO");
+	shell_print(sh, "  Timeout value:      %u ms", g_motor_params->command_timeout_ms);
+	shell_print(sh, "  Command age:        %u ms", age_ms);
+	shell_print(sh, "  Timeout expired:    %s", timeout_expired ? "YES" : "NO");
+	shell_print(sh, "  Timeout latch:      %s",
+		    g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
+	shell_print(sh, "  Timeout count:      %u", g_motor_params->command_timeout_count);
+#if CONFIG_ENCODER_MAGNET_CHECK_ON_ARM
+	shell_print(sh, "  Magnet check arm:   ENABLED (Kconfig)");
+#else
+	shell_print(sh, "  Magnet check arm:   DISABLED (Kconfig)");
+#endif
+
+#if MOTOR_ENCODER_IS_AEAT9955
+	uint8_t mag_status = 0U;
+	bool mhi = false;
+	bool mlo = false;
+	int mag_ret = motor_encoder_read_aeat_alarm(&mag_status, &mhi, &mlo);
+	if (mag_ret == 0) {
+		shell_print(sh, "  Magnet raw status:  0x%02X", mag_status);
+		shell_print(sh, "  Magnet MHI:         %s", mhi ? "SET" : "CLEAR");
+		shell_print(sh, "  Magnet MLO:         %s", mlo ? "SET" : "CLEAR");
+	} else {
+		shell_print(sh, "  Magnet status err:  %d", mag_ret);
+	}
+#endif
+
+	return 0;
+}
+
+/* motor info config */
+int cmd_motor_info_config(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	shell_print(sh, "Motor Configuration:");
+	shell_print(sh, "  Pole pairs:     %d", MOTOR_POLE_PAIRS);
+	shell_print(sh, "  Max current:    %.3f A", (double)MOTOR_MAX_CURRENT_A);
+	shell_print(sh, "  Rated voltage:  %.3f V", (double)NOMINAL_VOLTAGE_V);
+	shell_print(sh, "  Control freq:   %u Hz", (uint32_t)CONTROL_LOOP_FREQUENCY_HZ);
+	shell_print(sh, "  PWM freq:       %u Hz", (uint32_t)PWM_FREQUENCY_HZ);
+	shell_print(sh, "  Observer BW:    %.1f Hz", (double)ANGLE_OBSERVER_BANDWIDTH_HZ);
+	shell_print(sh, "  PI Id BW:       %.1f Hz", (double)CURRENT_LOOP_BANDWIDTH_HZ);
+	shell_print(sh, "  PI Iq BW:       %.1f Hz", (double)CURRENT_LOOP_BANDWIDTH_HZ);
+	shell_print(sh, "  Overcurrent:    %.3f A", (double)OVERCURRENT_THRESHOLD_A);
+	shell_print(sh, "  Overvoltage:    %.1f V", (double)VBUS_MAX_V);
+	
+	return 0;
+}
+
+/* motor info measured */
+int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	
+	shell_print(sh, "Measured Parameters:");
+	shell_print(sh, "  Rs:             %.6f Ohm", (double)g_motor_params->Rs_measured_ohm);
+	shell_print(sh, "  L:              %.9f H", (double)g_motor_params->Ls_measured_H);
+	shell_print(sh, "  R/L:            %.3f rad/s", (double)g_motor_params->R_over_L_measured);
+	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
+	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);
+	
+	return 0;
+}
+
+/* motor info live */
+int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	
+	int state = motor_api_get_state();
+	int error = motor_api_get_error();
+	
+	shell_print(sh, "Live Telemetry:");
+	shell_print(sh, "  State:          %s", motor_state_to_string(state));
+	shell_print(sh, "  Error:          %s", motor_error_to_string(error));
+	shell_print(sh, "  Angle (mech):   %.1f deg", (double)(g_motor_params->position_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Angle (elec):   %.1f deg", (double)(g_motor_params->elec_angle_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Speed:          %.3f Hz (%.1f RPM)", 
+		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32)),
+		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32) * 60.0f));
+	shell_print(sh, "  Id reference:   %.3f A", (double)g_motor_params->Id_ref_A);
+	shell_print(sh, "  Iq reference:   %.3f A", (double)g_motor_params->Iq_ref_A);
+	shell_print(sh, "  Id measured:    %.3f A", (double)g_motor_params->Id_A);
+	shell_print(sh, "  Iq measured:    %.3f A", (double)g_motor_params->Iq_A);
+	shell_print(sh, "  Ia:             %.3f A", (double)g_motor_params->Ia_A);
+	shell_print(sh, "  Ib:             %.3f A", (double)g_motor_params->Ib_A);
+	shell_print(sh, "  Vd:             %.3f V", (double)g_motor_params->Vd_V);
+	shell_print(sh, "  Vq:             %.3f V", (double)g_motor_params->Vq_V);
+	shell_print(sh, "  Va:             %.3f V", (double)g_motor_params->Va_V);
+	shell_print(sh, "  Vb:             %.3f V", (double)g_motor_params->Vb_V);
+	shell_print(sh, "  Vmag(max):      %.3f V", (double)g_motor_params->max_voltage_magnitude_V);
+	shell_print(sh, "  Vbus:           %.1f V", (double)g_motor_params->dc_bus_voltage_V);
+	shell_print(sh, "  Encoder OK:     %s", g_motor_params->encoder_fault_counter == 0 ? "yes" : "no");
+	shell_print(sh, "  Encoder faults: %u", g_motor_params->encoder_fault_counter);
+	
+	return 0;
+}
+
+/* motor info stats */
+int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	
+	uint32_t avg_cycles = 0;
+	if (g_motor_params->control_loop_count > 0) {
+		avg_cycles = g_motor_params->total_isr_cycles / g_motor_params->control_loop_count;
+	}
+	
+	shell_print(sh, "Performance Statistics:");
+	shell_print(sh, "  ISR count:              %u", g_motor_params->control_loop_count);
+	shell_print(sh, "  ISR max cycles:         %u", g_motor_params->max_isr_cycles);
+	shell_print(sh, "  ISR avg cycles:         %u", avg_cycles);
+	shell_print(sh, "  Encoder faults:         %u", g_motor_params->encoder_fault_counter);
+	
+	return 0;
+}
+
+/* motor encoder alarm */
+int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955
+	shell_error(sh, "encoder1 is not AEAT-9955 on this build");
+	return -ENOTSUP;
+#else
+	uint8_t status = 0U;
+	bool mhi = false;
+	bool mlo = false;
+	int ret = motor_encoder_read_aeat_alarm(&status, &mhi, &mlo);
+	if (ret < 0) {
+		shell_error(sh, "Failed to read AEAT alarm status (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "AEAT-9955 alarm/error status:");
+	shell_print(sh, "  Raw status: 0x%02X", status);
+	shell_print(sh, "  MHI:        %s", mhi ? "SET" : "CLEAR");
+	shell_print(sh, "  MLO:        %s", mlo ? "SET" : "CLEAR");
+
+	return 0;
+#endif
+}
+
