@@ -24,8 +24,6 @@
 #include <soc.h>
 #include <stm32_bitops.h>
 #include <stm32_cache.h>
-#include <zephyr/pm/device.h>
-#include <zephyr/pm/policy.h>
 #include <stm32_ll_adc.h>
 #include <stm32_ll_system.h>
 #if defined(CONFIG_SOC_SERIES_STM32N6X) || defined(CONFIG_SOC_SERIES_STM32U3X) ||                  \
@@ -38,7 +36,6 @@
 LOG_MODULE_REGISTER(adc_stm32_injected);
 
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
-#include <zephyr/dt-bindings/adc/stm32_adc.h>
 #include <zephyr/irq.h>
 
 #include <zephyr/linker/linker-defs.h>
@@ -137,6 +134,7 @@ struct adc_stm32_data {
 	q31_t inj_values[STM32_NB_INJECTED_CHANNELS];
 	uint8_t resolution;
 	int8_t acq_time_index[2];
+	bool enabled;
 };
 
 struct adc_stm32_cfg {
@@ -147,7 +145,10 @@ struct adc_stm32_cfg {
 	const struct stm32_pclken pclken_pre;
 	uint32_t clk_prescaler;
 	const struct pinctrl_dev_config *pcfg;
+	const uint8_t *table_raw_resolution;
+	const uint32_t *table_ll_resolution;
 	const uint16_t sampling_time_table[STM32_NB_SAMPLING_TIME];
+	int8_t table_resolution_size;
 	int8_t num_sampling_time_common_channels;
 	int8_t sequencer_type;
 	int8_t internal_regulator;
@@ -163,9 +164,7 @@ struct adc_stm32_cfg {
 	bool channel_differential[STM32_NB_INJECTED_CHANNELS];
 	uint32_t trigger_source;
 	uint32_t trigger_edge;
-	int8_t res_table_size;
 	uint8_t resolution_bits;
-	const uint32_t res_table[];
 };
 
 static int adc_stm32_configure_injected_channels(const struct device *dev);
@@ -475,76 +474,32 @@ static int adc_stm32_calibrate(const struct device *dev, bool force)
 }
 #endif /* !defined(STM32F4XX_ADC) */
 
-static uint8_t get_reg_value(const struct device *dev, uint32_t reg, uint32_t shift, uint32_t mask)
-{
-	const struct adc_stm32_cfg *config = dev->config;
-	ADC_TypeDef *adc = config->base;
-
-	uintptr_t addr = (uintptr_t)adc + reg;
-
-	return ((*(volatile uint32_t *)addr >> shift) & mask);
-}
-
-static void set_reg_value(const struct device *dev, uint32_t reg, uint32_t shift, uint32_t mask,
-			  uint32_t value)
-{
-	const struct adc_stm32_cfg *config = dev->config;
-	size_t reg32_offset = reg / sizeof(uint32_t);
-	volatile uint32_t *addr = (volatile uint32_t *)config->base + reg32_offset;
-
-	stm32_reg_modify_bits(addr, mask << shift, value << shift);
-}
-
 static int set_resolution(const struct device *dev, uint8_t resolution)
 {
 	const struct adc_stm32_cfg *config = dev->config;
-	ADC_TypeDef *adc = config->base;
-	uint8_t res_reg_addr = 0xFF;
-	uint8_t res_shift = 0;
-	uint8_t res_mask = 0;
-	uint8_t res_reg_val = 0;
+	__maybe_unused ADC_TypeDef *adc = config->base;
 	int err = 0;
 	int i;
 
-	for (i = 0; i < config->res_table_size; i++) {
-		if (resolution == STM32_ADC_GET_REAL_VAL(config->res_table[i])) {
-			res_reg_addr = STM32_ADC_GET_REG(config->res_table[i]);
-			res_shift = STM32_ADC_GET_SHIFT(config->res_table[i]);
-			res_mask = STM32_ADC_GET_MASK(config->res_table[i]);
-			res_reg_val = STM32_ADC_GET_REG_VAL(config->res_table[i]);
+	for (i = 0; i < config->table_resolution_size; i++) {
+		if (resolution == config->table_raw_resolution[i]) {
 			break;
 		}
 	}
 
-	if (i == config->res_table_size) {
+	if (i == config->table_resolution_size) {
 		LOG_ERR("Invalid resolution");
 		return -EINVAL;
 	}
 
-	/*
-	 * Some MCUs (like STM32F1x) have no register to configure resolution.
-	 * These MCUs have a register address value of 0xFF and should be
-	 * ignored.
-	 */
-	if (res_reg_addr != 0xFF) {
-		/*
-		 * We don't use LL_ADC_SetResolution and LL_ADC_GetResolution
-		 * because they don't strictly use hardware resolution values
-		 * and makes internal conversions for some series.
-		 * (see stm32h7xx_ll_adc.h)
-		 * Instead we set the register ourselves if needed.
-		 */
-		if (get_reg_value(dev, res_reg_addr, res_shift, res_mask) != res_reg_val) {
-			/*
-			 * Writing ADC_CFGR1 register while ADEN bit is set
-			 * resets RES[1:0] bitfield. We need to disable and enable adc.
-			 */
-			err = adc_stm32_disable(adc, false);
-			if (err == 0) {
-				set_reg_value(dev, res_reg_addr, res_shift, res_mask, res_reg_val);
-			}
+#if !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc)
+	if (LL_ADC_GetResolution(adc) != config->table_ll_resolution[i]) {
+		err = adc_stm32_disable(adc, false);
+		if (err == 0) {
+			LL_ADC_SetResolution(adc, config->table_ll_resolution[i]);
 		}
 	}
+#endif /* !DT_HAS_COMPAT_STATUS_OKAY(st_stm32f1_adc) */
 
 	return err;
 }
@@ -721,17 +676,6 @@ static void adc_stm32_enable_analog_supply(void)
 #endif /* CONFIG_SOC_SERIES_STM32U5X */
 }
 
-#ifdef CONFIG_PM_DEVICE
-static void adc_stm32_disable_analog_supply(void)
-{
-#if defined(CONFIG_SOC_SERIES_STM32N6X)
-	LL_PWR_DisableVddADC();
-#elif defined(CONFIG_SOC_SERIES_STM32U5X) || defined(CONFIG_SOC_SERIES_STM32U3X)
-	LL_PWR_DisableVDDA();
-#endif /* CONFIG_SOC_SERIES_STM32U5X */
-}
-#endif
-
 static int adc_stm32_init(const struct device *dev)
 {
 	struct adc_stm32_data *data = dev->data;
@@ -748,6 +692,7 @@ static int adc_stm32_init(const struct device *dev)
 	}
 
 	data->dev = dev;
+	data->enabled = false;
 
 	/* Initialize acquisition time tracking */
 	data->acq_time_index[0] = -1;
@@ -821,8 +766,11 @@ static int adc_stm32_init(const struct device *dev)
 #endif /* HAS_CALIBRATION */
 
 	/* Set resolution from DT property or use first from resolutions table */
-	if (config->res_table_size > 0) {
+	if (config->table_resolution_size > 0) {
 		uint8_t resolution = config->resolution_bits;
+		if (resolution == 0U) {
+			resolution = config->table_raw_resolution[0];
+		}
 
 		err = set_resolution(dev, resolution);
 		if (err < 0) {
@@ -864,72 +812,14 @@ static int adc_stm32_init(const struct device *dev)
 		}
 	}
 
-	return 0;
-}
-
-#ifdef CONFIG_PM_DEVICE
-static int adc_stm32_suspend_setup(const struct device *dev)
-{
-	const struct adc_stm32_cfg *config = dev->config;
-	ADC_TypeDef *adc = config->base;
-	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
-	int err;
-
-	/* Disable ADC */
-	adc_stm32_disable(adc, true);
-
-#if ANY_ADC_INTERNAL_REGULATOR_TYPE_IS(INTERNAL_REGULATOR_STARTUP_SW_DELAY) ||                     \
-	ANY_ADC_INTERNAL_REGULATOR_TYPE_IS(INTERNAL_REGULATOR_STARTUP_HW_STATUS)
-	if (config->internal_regulator != INTERNAL_REGULATOR_NONE) {
-		LL_ADC_DisableInternalRegulator(adc);
-	}
-#endif /* INTERNAL_REGULATOR_STARTUP_SW_DELAY || INTERNAL_REGULATOR_STARTUP_HW_STATUS */
-
-#if ANY_ADC_HAS_DEEP_POWERDOWN
-	if (config->has_deep_powerdown) {
-		LL_ADC_EnableDeepPowerDown(adc);
-	}
-#endif
-
-	adc_stm32_disable_analog_supply();
-
-	/* Stop device clock. Note: fixed clocks are not handled yet. */
-	err = clock_control_off(clk, (clock_control_subsys_t)&config->pclken);
-	if (err != 0) {
-		LOG_ERR("Could not disable ADC clock");
-		return err;
-	}
-
-	/* Move pins to sleep state */
-	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_SLEEP);
-	if ((err < 0) && (err != -ENOENT)) {
-		/*
-		 * If returning -ENOENT, no pins where defined for sleep mode :
-		 * Do not output on console (might sleep already) when going to sleep,
-		 * "ADC pinctrl sleep state not available"
-		 * and don't block PM suspend.
-		 * Else return the error.
-		 */
+	/* Keep init deterministic: enable happens via adc_injected_enable(). */
+	err = adc_stm32_disable(adc, true);
+	if (err < 0) {
 		return err;
 	}
 
 	return 0;
 }
-
-static int adc_stm32_pm_action(const struct device *dev, enum pm_device_action action)
-{
-	switch (action) {
-	case PM_DEVICE_ACTION_RESUME:
-		return adc_stm32_init(dev);
-	case PM_DEVICE_ACTION_SUSPEND:
-		return adc_stm32_suspend_setup(dev);
-	default:
-		return -ENOTSUP;
-	}
-
-	return 0;
-}
-#endif /* CONFIG_PM_DEVICE */
 
 /*
  * Injected ADC API implementation
@@ -938,10 +828,29 @@ static int adc_stm32_pm_action(const struct device *dev, enum pm_device_action a
 static int adc_stm32_set_callback(const struct device *dev, adc_injected_callback_t callback,
 				  void *user_data)
 {
+	const struct adc_stm32_cfg *config = dev->config;
+	ADC_TypeDef *adc = config->base;
 	struct adc_stm32_data *data = dev->data;
+	bool restore_jeos_irq = data->enabled;
 
-	data->callback = callback;
-	data->user_data = user_data;
+	/* Prevent JEOS ISR from observing partially updated callback state. */
+	if (restore_jeos_irq) {
+		LL_ADC_DisableIT_JEOS(adc);
+	}
+
+	if (callback == NULL) {
+		data->callback = NULL;
+		__DMB();
+		data->user_data = user_data;
+	} else {
+		data->user_data = user_data;
+		__DMB();
+		data->callback = callback;
+	}
+
+	if (restore_jeos_irq) {
+		LL_ADC_EnableIT_JEOS(adc);
+	}
 
 	return 0;
 }
@@ -949,10 +858,28 @@ static int adc_stm32_set_callback(const struct device *dev, adc_injected_callbac
 static int adc_stm32_set_error_callback(const struct device *dev,
 					adc_injected_error_callback_t callback, void *user_data)
 {
+	const struct adc_stm32_cfg *config = dev->config;
+	ADC_TypeDef *adc = config->base;
 	struct adc_stm32_data *data = dev->data;
+	bool restore_jeos_irq = data->enabled;
 
-	data->error_callback = callback;
-	data->error_user_data = user_data;
+	if (restore_jeos_irq) {
+		LL_ADC_DisableIT_JEOS(adc);
+	}
+
+	if (callback == NULL) {
+		data->error_callback = NULL;
+		__DMB();
+		data->error_user_data = user_data;
+	} else {
+		data->error_user_data = user_data;
+		__DMB();
+		data->error_callback = callback;
+	}
+
+	if (restore_jeos_irq) {
+		LL_ADC_EnableIT_JEOS(adc);
+	}
 
 	return 0;
 }
@@ -960,8 +887,14 @@ static int adc_stm32_set_error_callback(const struct device *dev,
 static int adc_stm32_inj_enable(const struct device *dev)
 {
 	const struct adc_stm32_cfg *config = dev->config;
+	struct adc_stm32_data *data = dev->data;
 	ADC_TypeDef *adc = config->base;
 	int err;
+
+	if (config->num_channels == 0U || config->num_channels > STM32_NB_INJECTED_CHANNELS) {
+		LOG_ERR("Invalid injected channel count: %u", config->num_channels);
+		return -EINVAL;
+	}
 
 	/* Enable ADC if not already enabled */
 	err = adc_stm32_enable(adc);
@@ -969,8 +902,17 @@ static int adc_stm32_inj_enable(const struct device *dev)
 		return err;
 	}
 
+#if defined(LL_ADC_FLAG_JQOVF)
+	LL_ADC_ClearFlag_JQOVF(adc);
+#endif
+#if defined(LL_ADC_FLAG_OVR)
+	LL_ADC_ClearFlag_OVR(adc);
+#endif
+	LL_ADC_ClearFlag_JEOS(adc);
+
 	/* Enable JEOS (end of injected sequence) interrupt */
 	LL_ADC_EnableIT_JEOS(adc);
+	data->enabled = true;
 
 	/* Start injected conversions (external trigger starts them) */
 #if defined(STM32F1XX_ADC) || defined(STM32F4XX_ADC)
@@ -987,10 +929,12 @@ static int adc_stm32_inj_enable(const struct device *dev)
 static int adc_stm32_inj_disable(const struct device *dev)
 {
 	const struct adc_stm32_cfg *config = dev->config;
+	struct adc_stm32_data *data = dev->data;
 	ADC_TypeDef *adc = config->base;
 
 	/* Disable JEOS interrupt */
 	LL_ADC_DisableIT_JEOS(adc);
+	data->enabled = false;
 
 	/* Stop injected conversions */
 #if !defined(STM32F1XX_ADC) && !defined(STM32F4XX_ADC)
@@ -1002,7 +946,7 @@ static int adc_stm32_inj_disable(const struct device *dev)
 
 /*
  * Configure injected channels from devicetree
- * This must be called during init after ADC is enabled
+ * This must be called during init while ADC is disabled
  */
 static int adc_stm32_configure_injected_channels(const struct device *dev)
 {
@@ -1040,14 +984,16 @@ static int adc_stm32_configure_injected_channels(const struct device *dev)
 		}
 
 		/* Configure differential mode if needed */
+		if (config->channel_differential[i] && !config->has_differential_support) {
+			LOG_ERR("Differential mode not supported on channel %u", config->channel_ids[i]);
+			return -EINVAL;
+		}
 #if ANY_ADC_HAS_DIFFERENTIAL_SUPPORT
-		if (config->has_differential_support && config->channel_differential[i]) {
-			LL_ADC_SetChannelSingleDiff(adc, channel, LL_ADC_DIFFERENTIAL_ENDED);
-		} else {
-			/* Single-ended mode */
-			if (config->has_differential_support) {
-				LL_ADC_SetChannelSingleDiff(adc, channel, LL_ADC_SINGLE_ENDED);
-			}
+		if (config->has_differential_support) {
+			LL_ADC_SetChannelSingleDiff(adc, channel,
+						    config->channel_differential[i] ?
+							    LL_ADC_DIFFERENTIAL_ENDED :
+							    LL_ADC_SINGLE_ENDED);
 		}
 #endif
 
@@ -1304,24 +1250,22 @@ static DEVICE_API(adc_injected, api_stm32_driver_api) = {
  * by index) and the function for setting up the ISR.
  */
 
-/* Helper macro for H7 overrun check - conditionally included */
-#if defined(CONFIG_SOC_SERIES_STM32H7X)
-#define ADC_INJ_CHECK_OVERRUN(adc, data, dev)                                                      \
-	if (LL_ADC_IsActiveFlag_JQOVF(adc)) {                                                      \
-		/* Clear overrun flag */                                                           \
-		LL_ADC_ClearFlag_JQOVF(adc);                                                       \
-                                                                                                   \
-		/* Call error callback if registered */                                            \
-		if (data->error_callback != NULL) {                                                \
-			data->error_callback(dev, ADC_INJ_ERROR_OVERRUN, data->error_user_data);   \
-		}                                                                                  \
-                                                                                                   \
-		/* Return without processing conversions */                                        \
-		return 0;                                                                          \
+static inline bool adc_stm32_inj_check_and_clear_overrun(ADC_TypeDef *adc)
+{
+#if defined(LL_ADC_FLAG_JQOVF)
+	if (LL_ADC_IsActiveFlag_JQOVF(adc)) {
+		LL_ADC_ClearFlag_JQOVF(adc);
+		return true;
 	}
-#else
-#define ADC_INJ_CHECK_OVERRUN(adc, data, dev)
 #endif
+#if defined(LL_ADC_FLAG_OVR)
+	if (LL_ADC_IsActiveFlag_OVR(adc)) {
+		LL_ADC_ClearFlag_OVR(adc);
+		return true;
+	}
+#endif
+	return false;
+}
 
 /* Debug helper function to process ADC conversions */
 static inline void adc_stm32_process_injected_conversions(const struct device *dev,
@@ -1329,6 +1273,8 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
 							   struct adc_stm32_data *data,
 							   const struct adc_stm32_cfg *config)
 {
+	adc_injected_callback_t callback = data->callback;
+	void *user_data = data->user_data;
 	uint32_t num_channels = config->num_channels;
 
 	/* Read all injected conversions in rank order and convert to Q31 */
@@ -1341,9 +1287,8 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
 	LL_ADC_ClearFlag_JEOS(adc);
 
 	/* Call user callback if registered */
-	if (data->callback != NULL) {
-		data->callback(dev, (const q31_t *)data->inj_values, num_channels,
-			       data->user_data);
+	if (callback != NULL) {
+		callback(dev, (const q31_t *)data->inj_values, num_channels, user_data);
 	}
 }
 
@@ -1354,9 +1299,18 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
 		const struct adc_stm32_cfg *config = dev->config;                                  \
 		struct adc_stm32_data *data = dev->data;                                           \
 		ADC_TypeDef *adc = config->base;                                                   \
+		adc_injected_error_callback_t err_cb;                                              \
+		void *err_user_data;                                                               \
                                                                                                    \
 		/* Check for overrun error first */                                                \
-		ADC_INJ_CHECK_OVERRUN(adc, data, dev)                                              \
+		if (adc_stm32_inj_check_and_clear_overrun(adc)) {                                 \
+			err_cb = data->error_callback;                                             \
+			err_user_data = data->error_user_data;                                     \
+			if (err_cb != NULL) {                                                      \
+				err_cb(dev, ADC_INJ_ERROR_OVERRUN, err_user_data);                 \
+			}                                                                          \
+			return 0;                                                                  \
+		}                                                                                  \
                                                                                                    \
 		/* Check JEOS flag */                                                              \
 		if (LL_ADC_IsActiveFlag_JEOS(adc)) {                                               \
@@ -1445,11 +1399,25 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 /* Build the injected config structure if we have trigger source defined */
 #define ADC_INJ_HAS_CONFIG(inst) DT_INST_NODE_HAS_PROP(inst, st_adc_trigger_source)
 
+#define LIST_RESOLUTION(i, index)                                                                \
+	CONCAT(LL_ADC_RESOLUTION_, DT_INST_PROP_BY_IDX(index, st_adc_resolutions, i), B)
+
 #define ADC_STM32_INIT(index)                                                                      \
                                                                                                    \
 	ADC_STM32_CHECK_DT_CLOCK(index);                                                           \
                                                                                                    \
 	PINCTRL_DT_INST_DEFINE(index);                                                             \
+                                                                                                   \
+	BUILD_ASSERT(DT_INST_CHILD_NUM_STATUS_OKAY(index) <= STM32_NB_INJECTED_CHANNELS,         \
+		     "Injected ADC supports at most 4 channels");                               \
+                                                                                                   \
+	static const uint8_t table_raw_resolution##index[] =		\
+		DT_INST_PROP(index, st_adc_resolutions);			\
+                                                                                                   \
+	static const uint32_t table_ll_resolution##index[] = {		\
+		LISTIFY(DT_INST_PROP_LEN(index, st_adc_resolutions),		\
+			LIST_RESOLUTION, (,), index),				\
+	};								\
                                                                                                    \
 	static const struct adc_stm32_cfg adc_stm32_cfg_##index = {		\
 	.base = (ADC_TypeDef *)DT_INST_REG_ADDR(index),			\
@@ -1478,9 +1446,9 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 	.num_sampling_time_common_channels =				\
 		DT_INST_PROP_OR(index, num_sampling_time_common_channels, 0),\
 	IF_ENABLED(ADC_INJ_HAS_CONFIG(index),				\
-		   (.num_channels = DT_INST_CHILD_NUM_STATUS_OKAY(index), \
-		    .channel_ids = {					\
-			DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\
+			   (.num_channels = DT_INST_CHILD_NUM_STATUS_OKAY(index), \
+			    .channel_ids = {					\
+				DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\
 				ADC_INJ_INIT_CHANNEL_ID, (,))		\
 		    },							\
 		    .channel_acq_times = {				\
@@ -1491,18 +1459,17 @@ DT_INST_FOREACH_STATUS_OKAY(GENERATE_ISR)
 			DT_INST_FOREACH_CHILD_STATUS_OKAY_SEP(index,	\
 				ADC_INJ_INIT_CHANNEL_DIFF, (,))		\
 		    },							\
-		    .trigger_source = ADC_INJ_DT_TRIGGER_SRC(index),	\
-		    .trigger_edge = ADC_INJ_DT_TRIGGER_EDGE(index),))	\
-	.res_table_size = DT_INST_PROP_LEN(index, resolutions),		\
-	.res_table = DT_INST_PROP(index, resolutions),			\
+			    .trigger_source = ADC_INJ_DT_TRIGGER_SRC(index),	\
+			    .trigger_edge = ADC_INJ_DT_TRIGGER_EDGE(index),))	\
+	.table_resolution_size = DT_INST_PROP_LEN(index, st_adc_resolutions),	\
+	.table_raw_resolution = table_raw_resolution##index,		\
+	.table_ll_resolution = table_ll_resolution##index,		\
 	.resolution_bits = DT_INST_PROP_OR(index, resolution, 0),	\
-};                             \
+	};                             \
                                                                                                    \
 	static struct adc_stm32_data adc_stm32_data_##index = {};                                  \
                                                                                                    \
-	PM_DEVICE_DT_INST_DEFINE(index, adc_stm32_pm_action);                                      \
-                                                                                                   \
-	DEVICE_DT_INST_DEFINE(index, adc_stm32_init, PM_DEVICE_DT_INST_GET(index),                 \
+	DEVICE_DT_INST_DEFINE(index, adc_stm32_init, NULL,                                         \
 			      &adc_stm32_data_##index, &adc_stm32_cfg_##index, POST_KERNEL,        \
 			      CONFIG_ADC_INIT_PRIORITY, &api_stm32_driver_api);
 

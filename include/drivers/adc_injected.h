@@ -128,7 +128,7 @@ struct adc_injected_dt_spec {
 #define ADC_INJECTED_DT_SPEC_GET(node_id)				\
 	{								\
 		.dev = DEVICE_DT_GET(node_id),				\
-		.num_channels = DT_PROP(node_id, st_adc_num_channels),	\
+		.num_channels = DT_CHILD_NUM_STATUS_OKAY(node_id),	\
 	}
 
 /**
