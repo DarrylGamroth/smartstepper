@@ -52,7 +52,7 @@ static inline bool motor_state_allows_arm(int state)
 	       motor_state_is_online_submode(state);
 }
 
-static inline void motor_command_touch(struct motor_parameters *params)
+static inline void motor_command_feed_watchdog(struct motor_parameters *params)
 {
 	if (!params) {
 		return;
@@ -112,7 +112,7 @@ static int cmd_motor_params_set(const struct shell *sh, size_t argc, char **argv
 	float value = strtof(argv[2], NULL);
 	
 	if (motor_api_set_param(name, value) == 0) {
-		motor_command_touch(g_motor_params);
+		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh, "Set %s = %.6f", name, (double)value);
 		return 0;
 	} else {
@@ -163,7 +163,7 @@ static int cmd_motor_current_id(const struct shell *sh, size_t argc, char **argv
 	}
 	
 	if (motor_api_set_param("Id_setpoint_A", id_amps) == 0) {
-		motor_command_touch(g_motor_params);
+		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh, "Id setpoint = %.3f A", (double)id_amps);
 		return 0;
 	} else {
@@ -192,7 +192,7 @@ static int cmd_motor_current_iq(const struct shell *sh, size_t argc, char **argv
 	}
 	
 	if (motor_api_set_param("Iq_setpoint_A", iq_amps) == 0) {
-		motor_command_touch(g_motor_params);
+		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh, "Iq setpoint = %.3f A", (double)iq_amps);
 		return 0;
 	} else {
@@ -223,7 +223,7 @@ static int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv
 	}
 	
 	if (motor_api_set_currents(id_amps, iq_amps) == 0) {
-		motor_command_touch(g_motor_params);
+		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh, "Id = %.3f A, Iq = %.3f A", (double)id_amps, (double)iq_amps);
 		return 0;
 	} else {
@@ -341,7 +341,7 @@ static int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	atomic_set(&g_motor_params->control_armed, 1);
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Control armed (state=%s)", motor_state_to_string(state));
 	return 0;
 }
@@ -359,7 +359,7 @@ static int cmd_motor_disarm(const struct shell *sh, size_t argc, char **argv)
 
 	atomic_set(&g_motor_params->control_armed, 0);
 	motor_zero_control_targets(g_motor_params);
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 
 	int ret = motor_api_request_idle();
 	if (ret != 0) {
@@ -494,7 +494,7 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 
 	/* Set trajectory target (thread-safe access) */
 	traj_set_target_value(&g_motor_params->traj_velocity, target_clamped);
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Velocity target set to %.2f Hz", (double)(target_clamped / (2.0f * PI_F32)));
 	return 0;
@@ -576,7 +576,7 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		return -EINVAL;
 	}
 
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Iq limit=%.3f A",
 		    (double)kp, (double)iq_limit);
 	return 0;
@@ -603,7 +603,7 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 	float target_deg = strtof(argv[1], NULL);
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
 	g_motor_params->position_target_rad = target_rad;
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Position target set to %.2f deg", (double)(target_rad * 180.0f / PI_F32));
 	return 0;
@@ -656,7 +656,7 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		return -EINVAL;
 	}
 
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Position gain set: Kp=%.5f (rad/s)/rad", (double)kp);
 	return 0;
 }
@@ -682,7 +682,7 @@ static int cmd_motor_profile_set(const struct shell *sh, size_t argc, char **arg
 		return -EINVAL;
 	}
 
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Profile limits set: vmax=%.2f Hz, amax=%.2f Hz/s",
 		    (double)max_hz, (double)max_accel_hz_s);
 	return 0;
@@ -737,7 +737,7 @@ static int cmd_motor_safety_timeout(const struct shell *sh, size_t argc, char **
 		return ret;
 	}
 
-	motor_command_touch(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Command timeout set to %ld ms%s",
 		    timeout_ms, timeout_ms == 0 ? " (disabled)" : "");
 	return 0;
@@ -754,8 +754,8 @@ static int cmd_motor_safety_pet(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	motor_command_touch(g_motor_params);
-	shell_print(sh, "Command watchdog petted");
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Command watchdog fed");
 	return 0;
 }
 
