@@ -1,0 +1,10 @@
+tests:
+  chopper.traj.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - traj
+    harness: ztest
+    integration_platforms:
+      - native_sim
