@@ -8,22 +8,14 @@
 #include <math.h>
 #include <errno.h>
 
-#include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/sensor.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
-#include <zephyr/timing/timing.h>
 #include <zephyr/sys/atomic.h>
-#include <drivers/mcpwm.h>
-#include <drivers/adc_injected.h>
-#include <drivers/pwm/mcpwm_stm32.h>
-#include <drivers/gate_driver/ti_drv8328.h>
+#include <dsp/controller_functions.h>
 
+#include "motor_control_loop.h"
 #include "motor_control_api.h"
-#include "motor_isr.h"
 #include "motor_states.h"
 #include "math_constants.h"
 #include "config.h"
@@ -35,7 +27,6 @@
 #include "angle_gen.h"
 #include "angle_wrap.h"
 #include "motor_autonomy.h"
-#include "motor_encoder_pipeline.h"
 #include "motor_state_utils.h"
 
 /**
@@ -64,47 +55,31 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 	return normalized * VBUS_FULL_SCALE_V;
 }
 
-LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
-
 #define VBUS_MIN_VALID_V 0.1f
 
-void gate_driver_a_break_callback(const struct device *dev, void *user_data)
+void motor_control_loop_step(struct motor_parameters *params,
+			     const q31_t *values,
+			     uint8_t count,
+			     const struct motor_control_encoder_sample *encoder_sample,
+			     struct motor_control_pwm_output *pwm_out)
 {
-	/* Hardware has already disabled PWM via break input
-	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault)
-	 */
+	ARG_UNUSED(count);
+	if (params == NULL || values == NULL || pwm_out == NULL) {
+		return;
+	}
 
-	drv8328_disable_all_channels(gate_driver_a);
-
-	/* Post error after driver handles disable all channels */
-	motor_api_post_error(ERROR_HARDWARE_BREAK);
-}
-
-void gate_driver_b_break_callback(const struct device *dev, void *user_data)
-{
-	/* Hardware has already disabled PWM via break input
-	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault)
-	 */
-
-	drv8328_disable_all_channels(gate_driver_b);
-
-	/* Post error after driver handles disable all channels */
-	motor_api_post_error(ERROR_HARDWARE_BREAK);
-}
-
-void adc_callback(const struct device *dev, const q31_t *values,
-                  uint8_t count, void *user_data)
-{
-	gpio_pin_set_dt(&trig, 1);
-
-	/* Start ISR cycle counter */
-	timing_t cycles_start = timing_counter_get();
-
-	struct motor_parameters *params = (struct motor_parameters *)user_data;
 	const struct smf_state *state = params->state_for_isr;
 	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool control_armed = atomic_get(&params->control_armed) != 0;
 	bool autonomous_keepalive = false;
+
+	if (pwm_out != NULL) {
+		pwm_out->update_pwm = false;
+		pwm_out->da_hb1_pu = 0.0f;
+		pwm_out->da_hb2_pu = 0.0f;
+		pwm_out->db_hb1_pu = 0.0f;
+		pwm_out->db_hb2_pu = 0.0f;
+	}
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
@@ -164,17 +139,15 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	uint8_t encoder_frame_status = 0U;
 	bool encoder_frame_warning = false;
 	bool encoder_frame_error = false;
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		/* Consume async encoder sample (enqueue happens in encoder timer callback). */
-		struct motor_encoder_sample encoder_sample = {0};
-		int encoder_ret = motor_encoder_pipeline_poll(&encoder_sample);
-		angle_raw_degrees = encoder_sample.angle_deg;
-		encoder_frame_status = encoder_sample.status;
-		encoder_frame_warning = encoder_sample.warning;
-		encoder_frame_error = encoder_sample.error;
-		if (encoder_ret < 0) {
-			/* EAGAIN means transfer is still in-flight; don't count as a hard fault. */
-			if (encoder_ret != -EAGAIN) {
+	if (encoder_sample != NULL && encoder_sample->enabled) {
+		angle_raw_degrees = encoder_sample->angle_deg;
+		encoder_frame_status = encoder_sample->status;
+		encoder_frame_warning = encoder_sample->warning;
+		encoder_frame_error = encoder_sample->error;
+		fresh_encoder_sample = encoder_sample->fresh;
+
+		if (!fresh_encoder_sample) {
+			if (encoder_sample->io_fault) {
 				params->encoder_fault_counter++;
 			}
 			if (encoder_frame_warning) {
@@ -183,11 +156,9 @@ void adc_callback(const struct device *dev, const q31_t *values,
 			if (encoder_frame_error) {
 				params->encoder_error_count++;
 			}
-
 		} else {
-			/* Reset fault counter on successful read */
+			/* Reset fault counter on successful read. */
 			params->encoder_fault_counter = 0;
-			fresh_encoder_sample = true;
 			if (encoder_frame_warning) {
 				params->encoder_warning_count++;
 			}
@@ -200,7 +171,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 			params->encoder_last_status = encoder_frame_status;
 		}
 
-		/* Fault detection: Too many consecutive encoder failures */
+		/* Fault detection: too many consecutive encoder failures. */
 		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
 			motor_api_post_error(ERROR_ENCODER_FAULT);
 			goto isr_done;
@@ -510,12 +481,11 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		}
 	}
 
-	/* Output PWM values to H-bridges
-	 * Winding A: pwm1 ch1 and ch2 drive the two sides of H-bridge A
-	 * Winding B: pwm8 ch1 and ch2 drive the two sides of H-bridge B
-	 */
-	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1, Da_hb1_pu, Da_hb2_pu);
-	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, Db_hb1_pu, Db_hb2_pu);
+	pwm_out->da_hb1_pu = Da_hb1_pu;
+	pwm_out->da_hb2_pu = Da_hb2_pu;
+	pwm_out->db_hb1_pu = Db_hb1_pu;
+	pwm_out->db_hb2_pu = Db_hb2_pu;
+	pwm_out->update_pwm = true;
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* D-axis RLS parameter estimation with comprehensive gating */
@@ -659,64 +629,5 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	params->dc_bus_voltage_V = Vbus_V;
 
 isr_done:
-	/* Measure ISR execution time */
-	timing_t cycles_end = timing_counter_get();
-	uint64_t cycles_elapsed = timing_cycles_get(&cycles_start, &cycles_end);
-	params->total_isr_cycles += (uint32_t)cycles_elapsed;
-	if (cycles_elapsed > params->max_isr_cycles) {
-		params->max_isr_cycles = (uint32_t)cycles_elapsed;
-	}
-
-	gpio_pin_set_dt(&trig, 0);
-}
-
-void encoder1_callback(const struct device *dev, uint32_t channel,
-                       void *user_data)
-{
-	struct motor_parameters *params = (struct motor_parameters *)user_data;
-	ARG_UNUSED(dev);
-	ARG_UNUSED(channel);
-
-	if (params == NULL) {
-		return;
-	}
-
-	/* Trigger continuous encoder reads when feature is enabled
-	 * This keeps SPI bus free during calibration and reduces interrupt load
-	 */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		int ret = motor_encoder_pipeline_kick();
-		if (ret < 0 && ret != -EALREADY) {
-			params->encoder_fault_counter++;
-		}
-	}
-
-	/* Hardware-timer-driven position-sequence tick source. */
-	if (params->profile_sequence_running &&
-	    atomic_get(&params->control_armed) != 0 &&
-	    params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
-	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
-		uint32_t period_ticks = params->profile_sequence_period_ticks;
-		if (period_ticks == 0U) {
-			period_ticks = 1U;
-		}
-
-		uint32_t tick_counter = params->profile_sequence_tick_counter + 1U;
-		if (tick_counter >= period_ticks) {
-			struct motor_event evt = {
-				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
-			};
-			int ret;
-
-			params->profile_sequence_tick_counter = 0U;
-			ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
-			if (ret != 0) {
-				params->profile_sequence_event_drop_count++;
-			}
-		} else {
-			params->profile_sequence_tick_counter = tick_counter;
-		}
-	} else {
-		params->profile_sequence_tick_counter = 0U;
-	}
+	return;
 }
