@@ -17,6 +17,7 @@ target_sources(app PRIVATE
 	src/config.c
 	src/shell_commands.c
 	src/shell_commands_state.c
+	src/shell_parse.c
 	src/shell_motion_profile.c
 	src/shell_motion_sequence.c
 	src/shell_motion_chopper_calib.c

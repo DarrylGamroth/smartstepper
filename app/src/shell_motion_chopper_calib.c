@@ -19,6 +19,7 @@
 #include "config.h"
 #include "angle_wrap.h"
 #include "traj.h"
+#include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -256,29 +257,27 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 		return -EACCES;
 	}
 
-	char *endp = NULL;
-	unsigned long slots_ul = strtoul(argv[1], &endp, 10);
-	if (endp == argv[1] || *endp != '\0' || slots_ul == 0UL ||
-	    slots_ul > CHOPPER_CAL_MAX_SLOTS) {
+	uint32_t slots_u32 = 0U;
+	if (!shell_parse_u32(argv[1], &slots_u32) || slots_u32 == 0U ||
+	    slots_u32 > CHOPPER_CAL_MAX_SLOTS) {
 		shell_error(sh, "slots must be 1..%u", CHOPPER_CAL_MAX_SLOTS);
 		return -EINVAL;
 	}
 
-	endp = NULL;
-	unsigned long revs_ul = strtoul(argv[2], &endp, 10);
-	if (endp == argv[2] || *endp != '\0' || revs_ul == 0UL || revs_ul > 10000UL) {
+	uint32_t revs_u32 = 0U;
+	if (!shell_parse_u32(argv[2], &revs_u32) || revs_u32 == 0U || revs_u32 > 10000U) {
 		shell_error(sh, "revs must be 1..10000");
 		return -EINVAL;
 	}
 
-	float speed_hz = strtof(argv[3], &endp);
-	if (endp == argv[3] || *endp != '\0' || !isfinite(speed_hz) || speed_hz <= 0.0f) {
+	float speed_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[3], &speed_hz) || speed_hz <= 0.0f) {
 		shell_error(sh, "speed_hz must be a positive finite value");
 		return -EINVAL;
 	}
 
-	uint16_t slots = (uint16_t)slots_ul;
-	uint16_t revs = (uint16_t)revs_ul;
+	uint16_t slots = (uint16_t)slots_u32;
+	uint16_t revs = (uint16_t)revs_u32;
 	uint64_t edges_target_u64 = 2ULL * (uint64_t)slots * (uint64_t)revs;
 	if (edges_target_u64 > UINT32_MAX) {
 		shell_error(sh, "Edge target too large");

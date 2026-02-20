@@ -13,6 +13,7 @@
 #include "motor_state_utils.h"
 #include "config.h"
 #include "angle_wrap.h"
+#include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -29,8 +30,13 @@ int cmd_motor_profile_set(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	float max_hz = strtof(argv[1], NULL);
-	float max_accel_hz_s = strtof(argv[2], NULL);
+	float max_hz = 0.0f;
+	float max_accel_hz_s = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &max_hz) ||
+	    !shell_parse_finite_float(argv[2], &max_accel_hz_s)) {
+		shell_error(sh, "max_hz/max_accel_hz_s must be finite numbers");
+		return -EINVAL;
+	}
 	if (motor_api_set_param("profile_max_velocity_hz", max_hz) != 0 ||
 	    motor_api_set_param("profile_max_accel_hz_s", max_accel_hz_s) != 0) {
 		shell_error(sh, "Failed to update profile limits");
@@ -61,9 +67,15 @@ int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **argv)
 		return -EACCES;
 	}
 
-	float target_deg = strtof(argv[1], NULL);
-	float end_vel_hz = strtof(argv[2], NULL);
-	float duration_ms = strtof(argv[3], NULL);
+	float target_deg = 0.0f;
+	float end_vel_hz = 0.0f;
+	float duration_ms = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &target_deg) ||
+	    !shell_parse_finite_float(argv[2], &end_vel_hz) ||
+	    !shell_parse_finite_float(argv[3], &duration_ms)) {
+		shell_error(sh, "target_deg/end_vel_hz/duration_ms must be finite numbers");
+		return -EINVAL;
+	}
 	if (duration_ms <= 0.0f) {
 		shell_error(sh, "duration_ms must be > 0");
 		return -EINVAL;

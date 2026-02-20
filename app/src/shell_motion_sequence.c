@@ -20,6 +20,7 @@
 #include "motor_state_utils.h"
 #include "config.h"
 #include "angle_wrap.h"
+#include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -63,6 +64,72 @@ static const char *motor_profile_seq_trigger_edge_to_string(uint8_t edge)
 	default:
 		return "UNKNOWN";
 	}
+}
+
+static bool motor_profile_seq_parse_trigger_source(const char *text, uint8_t *source_out)
+{
+	if (text == NULL || source_out == NULL) {
+		return false;
+	}
+
+	if (strcmp(text, "timer") == 0 || strcmp(text, "internal") == 0) {
+		*source_out = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
+		return true;
+	}
+	if (strcmp(text, "external") == 0) {
+		*source_out = PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL;
+		return true;
+	}
+
+	return false;
+}
+
+static int motor_profile_seq_set_period_ms(struct motor_parameters *params, uint32_t period_ms)
+{
+	if (!params) {
+		return -ENODEV;
+	}
+	if (period_ms == 0U) {
+		return -EINVAL;
+	}
+
+	params->profile_sequence_period_ms = period_ms;
+	params->profile_sequence_period_ticks = motor_profile_period_ms_to_ticks(period_ms);
+	params->profile_sequence_tick_counter = 0U;
+	return 0;
+}
+
+static int motor_profile_seq_set_move_ms(struct motor_parameters *params, uint32_t move_ms)
+{
+	if (!params) {
+		return -ENODEV;
+	}
+	if (move_ms == 0U) {
+		return -EINVAL;
+	}
+
+	params->profile_sequence_move_duration_s = (float32_t)move_ms * 0.001f;
+	return 0;
+}
+
+static int motor_profile_seq_set_end_vel_hz(struct motor_parameters *params, float end_vel_hz)
+{
+	if (!params || !isfinite(end_vel_hz)) {
+		return -EINVAL;
+	}
+
+	params->profile_sequence_end_velocity_rad_s = end_vel_hz * 2.0f * PI_F32;
+	return 0;
+}
+
+static int motor_profile_seq_set_loop(struct motor_parameters *params, bool loop_enabled)
+{
+	if (!params) {
+		return -ENODEV;
+	}
+
+	params->profile_sequence_loop = loop_enabled;
+	return 0;
 }
 
 static int motor_profile_seq_post_tick_event(struct motor_parameters *params, bool external_trigger)
@@ -286,9 +353,9 @@ int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv)
 		return -ENOMEM;
 	}
 
-	float target_deg = strtof(argv[1], NULL);
-	if (!isfinite(target_deg)) {
-		shell_error(sh, "Invalid target_deg");
+	float target_deg = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &target_deg)) {
+		shell_error(sh, "target_deg must be a finite number");
 		return -EINVAL;
 	}
 
@@ -300,6 +367,130 @@ int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv)
 
 	shell_print(sh, "Added seq[%u] = %.2f deg", (unsigned int)idx,
 		    (double)(target_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+/* motor profile seq period_ms <ms> */
+int cmd_motor_profile_seq_period_ms(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor profile seq period_ms <ms>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t period_ms = 0U;
+	if (!shell_parse_u32(argv[1], &period_ms) || period_ms == 0U) {
+		shell_error(sh, "period_ms must be a positive integer");
+		return -EINVAL;
+	}
+
+	int ret = motor_profile_seq_set_period_ms(g_motor_params, period_ms);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set period_ms (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Sequence period set to %u ms (%u ticks)",
+		    g_motor_params->profile_sequence_period_ms,
+		    g_motor_params->profile_sequence_period_ticks);
+	return 0;
+}
+
+/* motor profile seq move_ms <ms> */
+int cmd_motor_profile_seq_move_ms(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor profile seq move_ms <ms>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t move_ms = 0U;
+	if (!shell_parse_u32(argv[1], &move_ms) || move_ms == 0U) {
+		shell_error(sh, "move_ms must be a positive integer");
+		return -EINVAL;
+	}
+
+	int ret = motor_profile_seq_set_move_ms(g_motor_params, move_ms);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set move_ms (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Sequence move duration set to %.1f ms",
+		    (double)(g_motor_params->profile_sequence_move_duration_s * 1000.0f));
+	return 0;
+}
+
+/* motor profile seq end_vel_hz <hz> */
+int cmd_motor_profile_seq_end_vel_hz(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor profile seq end_vel_hz <hz>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	float end_vel_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &end_vel_hz)) {
+		shell_error(sh, "end_vel_hz must be a finite number");
+		return -EINVAL;
+	}
+
+	int ret = motor_profile_seq_set_end_vel_hz(g_motor_params, end_vel_hz);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set end_vel_hz (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Sequence end velocity set to %.2f Hz",
+		    (double)(g_motor_params->profile_sequence_end_velocity_rad_s / (2.0f * PI_F32)));
+	return 0;
+}
+
+/* motor profile seq loop <0|1> */
+int cmd_motor_profile_seq_loop(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor profile seq loop <0|1>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	bool loop_enabled = false;
+	if (!shell_parse_bool01(argv[1], &loop_enabled)) {
+		shell_error(sh, "loop must be 0 or 1");
+		return -EINVAL;
+	}
+
+	int ret = motor_profile_seq_set_loop(g_motor_params, loop_enabled);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set loop (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Sequence loop set to %s", g_motor_params->profile_sequence_loop ? "YES" : "NO");
 	return 0;
 }
 
@@ -316,41 +507,52 @@ int cmd_motor_profile_seq_config(const struct shell *sh, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	char *endp = NULL;
-	unsigned long period_ms_ul = strtoul(argv[1], &endp, 10);
-	if (endp == argv[1] || *endp != '\0' || period_ms_ul == 0UL || period_ms_ul > UINT32_MAX) {
+	uint32_t period_ms = 0U;
+	if (!shell_parse_u32(argv[1], &period_ms) || period_ms == 0U) {
 		shell_error(sh, "period_ms must be a positive integer");
 		return -EINVAL;
 	}
 
-	endp = NULL;
-	unsigned long move_ms_ul = strtoul(argv[2], &endp, 10);
-	if (endp == argv[2] || *endp != '\0' || move_ms_ul == 0UL || move_ms_ul > UINT32_MAX) {
+	uint32_t move_ms = 0U;
+	if (!shell_parse_u32(argv[2], &move_ms) || move_ms == 0U) {
 		shell_error(sh, "move_ms must be a positive integer");
 		return -EINVAL;
 	}
 
-	float end_vel_hz = strtof(argv[3], &endp);
-	if (endp == argv[3] || *endp != '\0' || !isfinite(end_vel_hz)) {
+	float end_vel_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[3], &end_vel_hz)) {
 		shell_error(sh, "end_vel_hz must be a finite number");
 		return -EINVAL;
 	}
 
-	endp = NULL;
-	unsigned long loop_ul = strtoul(argv[4], &endp, 10);
-	if (endp == argv[4] || *endp != '\0' || loop_ul > 1UL) {
+	bool loop_enabled = false;
+	if (!shell_parse_bool01(argv[4], &loop_enabled)) {
 		shell_error(sh, "loop must be 0 or 1");
 		return -EINVAL;
 	}
 
-	uint32_t period_ms = (uint32_t)period_ms_ul;
-	uint32_t move_ms = (uint32_t)move_ms_ul;
-	g_motor_params->profile_sequence_period_ms = period_ms;
-	g_motor_params->profile_sequence_period_ticks = motor_profile_period_ms_to_ticks(period_ms);
-	g_motor_params->profile_sequence_move_duration_s = (float32_t)move_ms * 0.001f;
-	g_motor_params->profile_sequence_end_velocity_rad_s = end_vel_hz * 2.0f * PI_F32;
-	g_motor_params->profile_sequence_loop = (loop_ul != 0UL);
-	g_motor_params->profile_sequence_tick_counter = 0U;
+	int ret = motor_profile_seq_set_period_ms(g_motor_params, period_ms);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply period_ms (err %d)", ret);
+		return ret;
+	}
+	ret = motor_profile_seq_set_move_ms(g_motor_params, move_ms);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply move_ms (err %d)", ret);
+		return ret;
+	}
+	ret = motor_profile_seq_set_end_vel_hz(g_motor_params, end_vel_hz);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply end_vel_hz (err %d)", ret);
+		return ret;
+	}
+	ret = motor_profile_seq_set_loop(g_motor_params, loop_enabled);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply loop (err %d)", ret);
+		return ret;
+	}
+
+	shell_warn(sh, "Legacy command: prefer period_ms/move_ms/end_vel_hz/loop subcommands.");
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Sequence config: period=%u ms (%u ticks), move=%u ms, vend=%.2f Hz, loop=%s",
@@ -377,13 +579,9 @@ int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, ch
 		return -EBUSY;
 	}
 
-	uint8_t source;
-	if (strcmp(argv[1], "timer") == 0 || strcmp(argv[1], "internal") == 0) {
-		source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
-	} else if (strcmp(argv[1], "external") == 0) {
-		source = PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL;
-	} else {
-		shell_error(sh, "Source must be 'timer' or 'external'");
+	uint8_t source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
+	if (!motor_profile_seq_parse_trigger_source(argv[1], &source)) {
+		shell_error(sh, "Source must be 'timer' or 'external' (alias: 'internal').");
 		return -EINVAL;
 	}
 
@@ -458,14 +656,13 @@ int cmd_motor_profile_seq_trigger_channel(const struct shell *sh, size_t argc, c
 		return -EBUSY;
 	}
 
-	char *endp = NULL;
-	unsigned long channel_ul = strtoul(argv[1], &endp, 10);
-	if (endp == argv[1] || *endp != '\0' || channel_ul > 3UL) {
+	uint32_t channel = 0U;
+	if (!shell_parse_u32(argv[1], &channel) || channel > 3U) {
 		shell_error(sh, "channel must be 0..3");
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_trigger_channel = (uint8_t)channel_ul;
+	g_motor_params->profile_sequence_trigger_channel = (uint8_t)channel;
 	g_motor_params->profile_sequence_ext_last_capture_valid = false;
 
 	int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
@@ -493,14 +690,13 @@ int cmd_motor_profile_seq_trigger_min_interval(const struct shell *sh, size_t ar
 		return -ENODEV;
 	}
 
-	char *endp = NULL;
-	unsigned long interval_ul = strtoul(argv[1], &endp, 10);
-	if (endp == argv[1] || *endp != '\0' || interval_ul > UINT32_MAX) {
+	uint32_t interval = 0U;
+	if (!shell_parse_u32(argv[1], &interval)) {
 		shell_error(sh, "min_interval_us must be an integer in [0, 4294967295]");
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_ext_min_interval_us = (uint32_t)interval_ul;
+	g_motor_params->profile_sequence_ext_min_interval_us = interval;
 	g_motor_params->profile_sequence_ext_last_capture_valid = false;
 
 	int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);

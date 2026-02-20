@@ -21,6 +21,7 @@
 #include "motor_hardware.h"
 #include "config.h"
 #include "angle_wrap.h"
+#include "shell_parse.h"
 
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
@@ -391,9 +392,8 @@ int cmd_motor_safety_timeout(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	char *endp = NULL;
-	long timeout_ms = strtol(argv[1], &endp, 10);
-	if (endp == argv[1] || *endp != '\0' || timeout_ms < 0) {
+	uint32_t timeout_ms = 0U;
+	if (!shell_parse_u32(argv[1], &timeout_ms)) {
 		shell_error(sh, "Timeout must be a non-negative integer in milliseconds.");
 		return -EINVAL;
 	}
@@ -405,7 +405,7 @@ int cmd_motor_safety_timeout(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Command timeout set to %ld ms%s",
+	shell_print(sh, "Command timeout set to %u ms%s",
 		    timeout_ms, timeout_ms == 0 ? " (disabled)" : "");
 	return 0;
 }

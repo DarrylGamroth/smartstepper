@@ -7,6 +7,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
+#include <math.h>
 #include <string.h>
 
 #include <zephyr/logging/log.h>
@@ -231,6 +232,9 @@ int motor_api_update_param(const char *name, float value)
 	}
 
 	if (motor_param_requires_positive(param_id) && value <= 0.0f) {
+		return -EINVAL;
+	}
+	if (!isfinite(value)) {
 		return -EINVAL;
 	}
 
@@ -477,73 +481,80 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		return;
 	}
 
+	float value = params->event.param_update.value;
+	if (!isfinite(value)) {
+		LOG_ERR("Rejected non-finite parameter value for id %u",
+			params->event.param_update.param_id);
+		return;
+	}
+
 	/* Direct write to setpoint fields based on param_id */
 	switch (params->event.param_update.param_id) {
 	case PARAM_ID_ID_SETPOINT_A:
-		params->Id_setpoint_A = params->event.param_update.value;
-		LOG_DBG("Updated Id_setpoint_A = %.3f A", (double)params->event.param_update.value);
+		params->Id_setpoint_A = value;
+		LOG_DBG("Updated Id_setpoint_A = %.3f A", (double)value);
 		break;
 	case PARAM_ID_IQ_SETPOINT_A:
-		params->Iq_setpoint_A = params->event.param_update.value;
-		LOG_DBG("Updated Iq_setpoint_A = %.3f A", (double)params->event.param_update.value);
+		params->Iq_setpoint_A = value;
+		LOG_DBG("Updated Iq_setpoint_A = %.3f A", (double)value);
 		break;
 	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
-		if (params->event.param_update.value <= 0.0f) {
+		if (value <= 0.0f) {
 			LOG_ERR("Rejected velocity_cl_kp_A_per_rad_s <= 0");
 			break;
 		}
-		params->velocity_cl_kp_A_per_rad_s = params->event.param_update.value;
+		params->velocity_cl_kp_A_per_rad_s = value;
 		LOG_DBG("Updated velocity_cl_kp_A_per_rad_s = %.6f",
-			(double)params->event.param_update.value);
+			(double)value);
 		break;
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
-		if (params->event.param_update.value <= 0.0f) {
+		if (value <= 0.0f) {
 			LOG_ERR("Rejected velocity_cl_iq_limit_A <= 0");
 			break;
 		}
-		params->velocity_cl_iq_limit_A = params->event.param_update.value;
+		params->velocity_cl_iq_limit_A = value;
 		LOG_DBG("Updated velocity_cl_iq_limit_A = %.6f",
-			(double)params->event.param_update.value);
+			(double)value);
 		break;
 	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
-		if (params->event.param_update.value <= 0.0f) {
+		if (value <= 0.0f) {
 			LOG_ERR("Rejected position_cl_kp_rad_s_per_rad <= 0");
 			break;
 		}
-		params->position_cl_kp_rad_s_per_rad = params->event.param_update.value;
+		params->position_cl_kp_rad_s_per_rad = value;
 		LOG_DBG("Updated position_cl_kp_rad_s_per_rad = %.6f",
-			(double)params->event.param_update.value);
+			(double)value);
 		break;
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
-		if (params->event.param_update.value <= 0.0f) {
+		if (value <= 0.0f) {
 			LOG_ERR("Rejected profile_max_velocity_hz <= 0");
 			break;
 		}
-		params->profile_max_velocity_rad_s = params->event.param_update.value * 2.0f * PI_F32;
+		params->profile_max_velocity_rad_s = value * 2.0f * PI_F32;
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_velocity_hz = %.6f",
-			(double)params->event.param_update.value);
+			(double)value);
 		break;
 	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
-		if (params->event.param_update.value <= 0.0f) {
+		if (value <= 0.0f) {
 			LOG_ERR("Rejected profile_max_accel_hz_s <= 0");
 			break;
 		}
-		params->profile_max_accel_rad_s2 = params->event.param_update.value * 2.0f * PI_F32;
+		params->profile_max_accel_rad_s2 = value * 2.0f * PI_F32;
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_accel_hz_s = %.6f",
-			(double)params->event.param_update.value);
+			(double)value);
 		break;
 	case PARAM_ID_COMMAND_TIMEOUT_MS:
-		if (params->event.param_update.value < 0.0f) {
+		if (value < 0.0f) {
 			LOG_ERR("Rejected command_timeout_ms < 0");
 			break;
 		}
-		if (params->event.param_update.value > (float)UINT32_MAX) {
+		if (value > (float)UINT32_MAX) {
 			LOG_ERR("Rejected command_timeout_ms > UINT32_MAX");
 			break;
 		}
-		params->command_timeout_ms = (uint32_t)(params->event.param_update.value + 0.5f);
+		params->command_timeout_ms = (uint32_t)(value + 0.5f);
 		if (params->command_timeout_ms == 0U) {
 			params->command_timeout_latched = false;
 		}

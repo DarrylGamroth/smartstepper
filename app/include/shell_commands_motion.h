@@ -32,6 +32,10 @@ int cmd_motor_chopper_calib_apply(const struct shell *sh, size_t argc, char **ar
 /* Sequence playback commands */
 int cmd_motor_profile_seq_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_profile_seq_period_ms(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_profile_seq_move_ms(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_profile_seq_end_vel_hz(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_profile_seq_loop(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_profile_seq_config(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_profile_seq_trigger_edge(const struct shell *sh, size_t argc, char **argv);

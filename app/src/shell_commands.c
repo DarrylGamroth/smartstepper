@@ -20,6 +20,7 @@
 #include "angle_wrap.h"
 #include "shell_commands_motion.h"
 #include "shell_commands_state.h"
+#include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -60,22 +61,6 @@ void motor_command_feed_watchdog(struct motor_parameters *params)
 	params->command_timeout_latched = false;
 }
 
-static bool shell_parse_finite_float(const char *text, float *value_out)
-{
-	if (text == NULL || value_out == NULL) {
-		return false;
-	}
-
-	char *endp = NULL;
-	float value = strtof(text, &endp);
-	if (endp == text || *endp != '\0' || !isfinite(value)) {
-		return false;
-	}
-
-	*value_out = value;
-	return true;
-}
-
 /*============================================================================
  * Shell Command Implementations
  *============================================================================*/
@@ -109,7 +94,11 @@ static int cmd_motor_params_set(const struct shell *sh, size_t argc, char **argv
 	}
 
 	const char *name = argv[1];
-	float value = strtof(argv[2], NULL);
+	float value = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &value)) {
+		shell_error(sh, "value must be a finite number");
+		return -EINVAL;
+	}
 	
 	if (motor_api_set_param(name, value) == 0) {
 		motor_command_feed_watchdog(g_motor_params);
@@ -156,7 +145,11 @@ static int cmd_motor_current_id(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	float id_amps = strtof(argv[1], NULL);
+	float id_amps = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &id_amps)) {
+		shell_error(sh, "id current must be a finite number");
+		return -EINVAL;
+	}
 	if (fabsf(id_amps) > 1e-6f && !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero current commands.");
 		return -EACCES;
@@ -185,7 +178,11 @@ static int cmd_motor_current_iq(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	float iq_amps = strtof(argv[1], NULL);
+	float iq_amps = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &iq_amps)) {
+		shell_error(sh, "iq current must be a finite number");
+		return -EINVAL;
+	}
 	if (fabsf(iq_amps) > 1e-6f && !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero current commands.");
 		return -EACCES;
@@ -214,8 +211,13 @@ static int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	float id_amps = strtof(argv[1], NULL);
-	float iq_amps = strtof(argv[2], NULL);
+	float id_amps = 0.0f;
+	float iq_amps = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &id_amps) ||
+	    !shell_parse_finite_float(argv[2], &iq_amps)) {
+		shell_error(sh, "id/iq currents must be finite numbers");
+		return -EINVAL;
+	}
 	if ((fabsf(id_amps) > 1e-6f || fabsf(iq_amps) > 1e-6f) &&
 	    !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero current commands.");
@@ -252,7 +254,11 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 		return -EACCES;
 	}
 
-	float target_hz = strtof(argv[1], NULL);
+	float target_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &target_hz)) {
+		shell_error(sh, "target must be a finite number");
+		return -EINVAL;
+	}
 	if (fabsf(target_hz) > 1e-6f && !motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' before non-zero velocity commands.");
 		return -EACCES;
@@ -342,8 +348,12 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	float kp = strtof(argv[1], NULL);
-	float iq_limit = strtof(argv[2], NULL);
+	float kp = 0.0f;
+	float iq_limit = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &kp) || !shell_parse_finite_float(argv[2], &iq_limit)) {
+		shell_error(sh, "kp/iq_limit must be finite numbers");
+		return -EINVAL;
+	}
 	if (motor_api_set_param("velocity_cl_kp_A_per_rad_s", kp) != 0 ||
 	    motor_api_set_param("velocity_cl_iq_limit_A", iq_limit) != 0) {
 		shell_error(sh, "Failed to update velocity gains");
@@ -374,7 +384,11 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 		return -EACCES;
 	}
 
-	float target_deg = strtof(argv[1], NULL);
+	float target_deg = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &target_deg)) {
+		shell_error(sh, "target must be a finite number");
+		return -EINVAL;
+	}
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
 	g_motor_params->profile_sequence_running = false;
 	g_motor_params->profile_sequence_tick_counter = 0U;
@@ -431,7 +445,11 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	float kp = strtof(argv[1], NULL);
+	float kp = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &kp)) {
+		shell_error(sh, "kp must be a finite number");
+		return -EINVAL;
+	}
 	if (motor_api_set_param("position_cl_kp_rad_s_per_rad", kp) != 0) {
 		shell_error(sh, "Failed to update position gain");
 		return -EINVAL;
@@ -846,7 +864,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 
 /* motor profile seq subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq_trigger,
-	SHELL_CMD_ARG(source, NULL, "Set trigger source <timer|external>",
+	SHELL_CMD_ARG(source, NULL, "Set trigger source <timer|external> (alias: internal)",
 		      cmd_motor_profile_seq_trigger_source, 2, 0),
 	SHELL_CMD_ARG(edge, NULL, "Set external edge <rising|falling|both>",
 		      cmd_motor_profile_seq_trigger_edge, 2, 0),
@@ -864,8 +882,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq_trigger,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq,
 	SHELL_CMD(clear, NULL, "Clear sequence points", cmd_motor_profile_seq_clear),
 	SHELL_CMD_ARG(add, NULL, "Add sequence point <target_deg>", cmd_motor_profile_seq_add, 2, 0),
+	SHELL_CMD_ARG(period_ms, NULL, "Set trigger period <ms>", cmd_motor_profile_seq_period_ms, 2, 0),
+	SHELL_CMD_ARG(move_ms, NULL, "Set move duration <ms>", cmd_motor_profile_seq_move_ms, 2, 0),
+	SHELL_CMD_ARG(end_vel_hz, NULL, "Set segment end velocity <hz>",
+		      cmd_motor_profile_seq_end_vel_hz, 2, 0),
+	SHELL_CMD_ARG(loop, NULL, "Set loop enable <0|1>", cmd_motor_profile_seq_loop, 2, 0),
 	SHELL_CMD_ARG(config, NULL,
-		      "Set sequence config <period_ms> <move_ms> <end_vel_hz> <loop:0|1>",
+		      "Legacy bulk set <period_ms> <move_ms> <end_vel_hz> <loop:0|1>",
 		      cmd_motor_profile_seq_config, 5, 0),
 	SHELL_CMD(trigger, &sub_motor_profile_seq_trigger, "Sequence trigger source config", NULL),
 	SHELL_CMD(start, NULL, "Start sequence playback using configured trigger source",
