@@ -23,9 +23,6 @@ extern const struct device *const gate_driver_b;
 /* Global GPIO specs - accessed by ISR */
 extern const struct gpio_dt_spec trig;
 
-/* RTIO context for encoder */
-extern struct rtio encoder_rtio_ctx;
-
 /* ISR callback functions */
 
 /**

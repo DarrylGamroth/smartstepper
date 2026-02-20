@@ -34,6 +34,8 @@
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
+#include "motor_autonomy.h"
+#include "motor_encoder_pipeline.h"
 #include "motor_state_utils.h"
 
 /**
@@ -62,111 +64,9 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 	return normalized * VBUS_FULL_SCALE_V;
 }
 
-/* Include encoder-specific headers based on devicetree */
-#if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
-#include <drivers/sensor/brcm_aeat9955.h>
-#define encoder_decode_position_f32 aeat9955_decode_position_f32
-#define ENCODER_FRAME_WARNING_BIT 0x80U
-#define ENCODER_FRAME_ERROR_BIT 0x40U
-
-static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					       bool *warning, bool *error)
-{
-	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	uint8_t frame_status = sample->raw[0] & (ENCODER_FRAME_WARNING_BIT | ENCODER_FRAME_ERROR_BIT);
-
-	if (status != NULL) {
-		*status = frame_status;
-	}
-	if (warning != NULL) {
-		*warning = (frame_status & ENCODER_FRAME_WARNING_BIT) != 0U;
-	}
-	if (error != NULL) {
-		*error = (frame_status & ENCODER_FRAME_ERROR_BIT) != 0U;
-	}
-}
-#elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
-#include <drivers/sensor/magntek_mt6835.h>
-#define encoder_decode_position_f32 mt6835_decode_position_f32
-
-static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					       bool *warning, bool *error)
-{
-	ARG_UNUSED(buffer);
-	if (status != NULL) {
-		*status = 0U;
-	}
-	if (warning != NULL) {
-		*warning = false;
-	}
-	if (error != NULL) {
-		*error = false;
-	}
-}
-#else
-#error "Unsupported encoder type for encoder1 alias"
-#endif
-
 LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
-SENSOR_DT_READ_IODEV(encoder1_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
-RTIO_DEFINE_WITH_MEMPOOL(encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
-static atomic_t encoder_read_in_flight;
-
 #define VBUS_MIN_VALID_V 0.1f
-
-static inline int encoder_read(struct rtio *ctx, float32_t *angle, uint8_t *status,
-			       bool *warning, bool *error)
-{
-	struct rtio_cqe *cqe;
-	uint8_t *buf;
-	uint32_t buf_len;
-	int rc;
-	uint8_t frame_status = 0U;
-	bool frame_warning = false;
-	bool frame_error = false;
-
-	/* Non-blocking: check if a completion is ready */
-	cqe = rtio_cqe_consume(ctx);
-	if (cqe == NULL) {
-		/* Distinguish a pending transfer from a missing transfer source. */
-		return (atomic_get(&encoder_read_in_flight) != 0) ? -EAGAIN : -ENODATA;
-	}
-
-	if (cqe->result != 0) {
-		rtio_cqe_release(ctx, cqe);
-		atomic_set(&encoder_read_in_flight, 0);
-		return -EIO;
-	}
-
-	rc = rtio_cqe_get_mempool_buffer(ctx, cqe, &buf, &buf_len);
-	if (rc != 0) {
-		rtio_cqe_release(ctx, cqe);
-		atomic_set(&encoder_read_in_flight, 0);
-		return -EIO;
-	}
-
-	rtio_cqe_release(ctx, cqe);
-	atomic_set(&encoder_read_in_flight, 0);
-
-	/* Fast-path decode: directly extract angle from RTIO buffer */
-	*angle = encoder_decode_position_f32(buf);
-	encoder_parse_frame_flags(buf, &frame_status, &frame_warning, &frame_error);
-
-	if (status != NULL) {
-		*status = frame_status;
-	}
-	if (warning != NULL) {
-		*warning = frame_warning;
-	}
-	if (error != NULL) {
-		*error = frame_error;
-	}
-
-	rtio_release_buffer(ctx, buf, buf_len);
-
-	return frame_error ? -EIO : 0;
-}
 
 void gate_driver_a_break_callback(const struct device *dev, void *user_data)
 {
@@ -227,20 +127,12 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
 
-	if (online_control_state && control_armed) {
-		/* Autonomous modes self-refresh timeout age so control can run unattended. */
-		autonomous_keepalive =
-			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION) ||
-			params->profile_sequence_running || params->chopper_cal_active ||
-			motion_profile_quintic_is_active(&params->position_profile);
-
-		if (autonomous_keepalive) {
-			now_ms = k_uptime_get_32();
-			params->last_command_update_ms = now_ms;
-			params->command_timeout_latched = false;
-		}
+	autonomous_keepalive =
+		motor_autonomous_keepalive_active(params, state, control_armed);
+	if (autonomous_keepalive) {
+		now_ms = k_uptime_get_32();
+		params->last_command_update_ms = now_ms;
+		params->command_timeout_latched = false;
 	}
 
 	/* Timeout disarms output commands when command updates stop. */
@@ -266,10 +158,13 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	bool encoder_frame_warning = false;
 	bool encoder_frame_error = false;
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		/* Read encoder to consume RTIO queue data (callback keeps queuing reads) */
-		int encoder_ret = encoder_read(&encoder_rtio_ctx, &angle_raw_degrees,
-					       &encoder_frame_status,
-					       &encoder_frame_warning, &encoder_frame_error);
+		/* Consume async encoder sample (enqueue happens in encoder timer callback). */
+		struct motor_encoder_sample encoder_sample = {0};
+		int encoder_ret = motor_encoder_pipeline_poll(&encoder_sample);
+		angle_raw_degrees = encoder_sample.angle_deg;
+		encoder_frame_status = encoder_sample.status;
+		encoder_frame_warning = encoder_sample.warning;
+		encoder_frame_error = encoder_sample.error;
 		if (encoder_ret < 0) {
 			/* EAGAIN means transfer is still in-flight; don't count as a hard fault. */
 			if (encoder_ret != -EAGAIN) {
@@ -783,11 +678,9 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	 * This keeps SPI bus free during calibration and reduces interrupt load
 	 */
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		if (atomic_cas(&encoder_read_in_flight, 0, 1)) {
-			int ret = sensor_read_async_mempool(&encoder1_iodev, &encoder_rtio_ctx, NULL);
-			if (ret != 0) {
-				atomic_set(&encoder_read_in_flight, 0);
-			}
+		int ret = motor_encoder_pipeline_kick();
+		if (ret < 0 && ret != -EALREADY) {
+			params->encoder_fault_counter++;
 		}
 	}
 

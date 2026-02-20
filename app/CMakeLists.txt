@@ -22,6 +22,8 @@ target_sources(app PRIVATE
 	src/shell_commands_state.c
 	src/shell_commands_motion.c
 	src/motor_control_api.c
+	src/motor_autonomy.c
+	src/motor_encoder_pipeline.c
 	src/motor_isr.c
 	src/motor_states.c
 	src/motor_states_calibration.c
