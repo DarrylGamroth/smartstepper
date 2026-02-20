@@ -1,0 +1,11 @@
+tests:
+  chopper.pi_filter.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - pi
+      - filter
+    harness: ztest
+    integration_platforms:
+      - native_sim

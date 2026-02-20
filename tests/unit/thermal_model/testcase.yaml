@@ -1,0 +1,10 @@
+tests:
+  chopper.thermal_model.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - thermal
+    harness: ztest
+    integration_platforms:
+      - native_sim

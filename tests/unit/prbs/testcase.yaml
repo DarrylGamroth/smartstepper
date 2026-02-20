@@ -1,0 +1,10 @@
+tests:
+  chopper.prbs.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - prbs
+    harness: ztest
+    integration_platforms:
+      - native_sim

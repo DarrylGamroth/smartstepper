@@ -1,0 +1,10 @@
+tests:
+  chopper.rls_motor_est.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - rls
+    harness: ztest
+    integration_platforms:
+      - native_sim
