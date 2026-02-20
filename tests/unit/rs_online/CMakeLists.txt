@@ -3,11 +3,11 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(rs_online_unit_tests)
 
 target_include_directories(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../app/include
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/include
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../app/src/rs_online.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/rs_online.c
 	src/arm_sin_cos_stub.c
 	src/main.c
 )

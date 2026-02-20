@@ -7,9 +7,6 @@
 #include "angle_observer.h"
 #include "angle_wrap.h"
 #include <zephyr/dsp/types.h>
-#include <zephyr/logging/log.h>
-
-LOG_MODULE_REGISTER(angle_observer, CONFIG_APP_LOG_LEVEL);
 
 void angle_observer_init(struct angle_observer_state *obs,
 			 float32_t sample_period_s,

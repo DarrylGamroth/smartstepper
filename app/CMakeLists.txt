@@ -9,22 +9,18 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(app LANGUAGES C)
 
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../modules/motor_core
+		 ${CMAKE_CURRENT_BINARY_DIR}/motor_core)
+
 target_sources(app PRIVATE 
 	src/main.c
 	src/config.c
-	src/motion_profile.c
-	src/angle_observer.c
-	src/rs_online.c
-	src/prbs.c
-	src/rls_motor_est.c
-	src/thermal_model.c
 	src/shell_commands.c
 	src/shell_commands_state.c
 	src/shell_motion_profile.c
 	src/shell_motion_sequence.c
 	src/shell_motion_chopper_calib.c
 	src/motor_control_api.c
-	src/motor_autonomy.c
 	src/motor_encoder_pipeline.c
 	src/motor_control_loop.c
 	src/motor_isr_io.c
@@ -33,7 +29,11 @@ target_sources(app PRIVATE
 	src/motor_states_online.c
 	src/motor_hardware.c
 )
-target_include_directories(app PRIVATE include)
+target_include_directories(app PRIVATE
+	include
+)
+
+target_link_libraries(app PRIVATE motor_core)
 
 # Place interrupt stack in fast memory using code relocation
 # The z_interrupt_stacks is in noinit sections from kernel/init.c
