@@ -35,6 +35,9 @@ struct rls_motor_est {
 	float32_t lambda;                    /* Forgetting factor (0.9999 typical) */
 	float32_t control_freq;              /* Control loop frequency for dI/dt */
 	float32_t convergence_threshold;     /* Trace(P) threshold for convergence */
+	float32_t Rs_init;                   /* Initial Rs estimate for full reset */
+	float32_t L_init;                    /* Initial L estimate for full reset */
+	float32_t P_init;                    /* Initial covariance diagonal for full reset */
 
 	/* Statistics and diagnostics */
 	uint32_t num_updates;                /* Total RLS updates performed */
@@ -74,6 +77,7 @@ void rls_motor_est_init(struct rls_motor_est *rls,
  * @param omega Electrical angular velocity (rad/s)
  * @param L_cross Cross-coupling inductance (Lq for d-axis, Ld for q-axis)
  * @param I_cross Cross-coupling current (Iq for d-axis, Id for q-axis)
+ * @param sample_period_s Effective sample period between I and I_prev [s]
  */
 void rls_motor_est_update(struct rls_motor_est *rls,
                           float32_t V_meas,
@@ -81,10 +85,14 @@ void rls_motor_est_update(struct rls_motor_est *rls,
                           float32_t I_prev,
                           float32_t omega,
                           float32_t L_cross,
-                          float32_t I_cross);
+                          float32_t I_cross,
+                          float32_t sample_period_s);
 
 /**
- * @brief Reset RLS estimator to initial state
+ * @brief Reset RLS estimator to configured initial state
+ *
+ * Restores initial parameters and covariance captured at init time,
+ * and clears all convergence/residual statistics.
  *
  * @param rls RLS estimator state
  */

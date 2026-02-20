@@ -25,6 +25,7 @@
 		rs-est-current-ma = <100>;       /* Same as RoverL */
 		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
 		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
+		rls-excitation-current-ma = <100>; /* PRBS amplitude for RLS identification */
 		velocity-max-hz = <50>;         /* Maximum velocity (50 Hz = 3000 RPM) */
 		velocity-max-accel-hz-per-s = <10>; /* Acceleration limit */
 		velocity-initial-hz = <0>;      /* Start from stopped */

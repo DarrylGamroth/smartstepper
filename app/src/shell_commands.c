@@ -694,9 +694,24 @@ static int cmd_motor_rls_reset(const struct shell *sh, size_t argc, char **argv)
 	/* Reset both RLS estimators */
 	rls_motor_est_reset(&g_motor_params->rls_d);
 	rls_motor_est_reset(&g_motor_params->rls_q);
-	
-	shell_print(sh, "RLS estimators reset");
-	
+	prbs_reset(&g_motor_params->prbs_gen);
+
+	/* Reset estimator side-state used by ISR update gating/derivative timing. */
+	g_motor_params->Id_rls_prev = 0.0f;
+	g_motor_params->Iq_rls_prev = 0.0f;
+	g_motor_params->rls_d_prev_cycle = g_motor_params->control_loop_count;
+	g_motor_params->rls_q_prev_cycle = g_motor_params->control_loop_count;
+	g_motor_params->rls_d_prev_valid = 0u;
+	g_motor_params->rls_q_prev_valid = 0u;
+
+	/* Restore synthesized values to reset estimator baselines. */
+	g_motor_params->Ld_est = rls_motor_est_get_L(&g_motor_params->rls_d);
+	g_motor_params->Lq_est = rls_motor_est_get_L(&g_motor_params->rls_q);
+	g_motor_params->Rs_measured_ohm = rls_motor_est_get_Rs(&g_motor_params->rls_d);
+	g_motor_params->T_rls_C = THERMAL_T_AMBIENT;
+
+	shell_print(sh, "RLS estimators fully reset (state, covariance, PRBS, side-state)");
+
 	return 0;
 }
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */

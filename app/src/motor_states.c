@@ -433,11 +433,15 @@ static void motor_state_ctrl_init_entry(void *obj)
 	if (params->rls_stagger_offset >= params->rls_decimation) {
 		params->rls_stagger_offset &= (params->rls_decimation - 1u);
 	}
-	params->prbs_amplitude_V = PRBS_AMPLITUDE_V;
+	params->rls_excitation_current_A = RLS_EXCITATION_CURRENT_A;
 	params->Ld_est = params->Ls_measured_H;  /* Initial estimate from calibration */
 	params->Lq_est = RLS_INITIAL_LQ_H;
 	params->Id_rls_prev = 0.0f;  /* Initialize previous RLS current for dI/dt */
 	params->Iq_rls_prev = 0.0f;
+	params->rls_d_prev_cycle = 0u;
+	params->rls_q_prev_cycle = 0u;
+	params->rls_d_prev_valid = 0u;
+	params->rls_q_prev_valid = 0u;
 
 	/* Initialize d-axis RLS estimator */
 	rls_motor_est_init(&params->rls_d,

@@ -498,10 +498,18 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	/* PRBS injection for parameter estimation (d-axis current reference) */
 	const uint32_t rls_mask = params->rls_decimation - 1u;
 	float32_t I_prbs_d = 0.0f;
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	bool rls_feature_enabled =
+		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION);
+	bool rls_control_enabled =
+		rls_feature_enabled && online_control_state && control_armed;
+	bool rls_encoder_ok = fresh_encoder_sample && !encoder_frame_error &&
+			      (encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER);
+	bool rls_runtime_enabled =
+		rls_control_enabled && rls_encoder_ok;
+	if (rls_runtime_enabled &&
 	    (params->control_loop_count & rls_mask) == 0u) {
 		uint32_t prbs_bit = prbs_advance(&params->prbs_gen);
-		I_prbs_d = (2.0f * (float32_t)prbs_bit - 1.0f) * ROVERL_EST_CURRENT_A;
+		I_prbs_d = (2.0f * (float32_t)prbs_bit - 1.0f) * params->rls_excitation_current_A;
 	}
 
 	/* Apply PRBS excitation to d-axis current reference */
@@ -585,39 +593,61 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* D-axis RLS parameter estimation with comprehensive gating */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	if (rls_runtime_enabled &&
 	    (params->control_loop_count & rls_mask) == 0u) {
 		/* Gating conditions for robust estimation:
 		 * 1. Voltage within valid measurement range
 		 * 2. PI controller not saturated (would corrupt voltage measurement)
-		 * 3. Speed sufficient for back-EMF observability (bypassed in open-loop)
+		 * 3. Speed sufficient for back-EMF observability
 		 * Note: D-axis current check omitted since we command Id=0 (only PRBS excitation)
 		 */
-		float32_t Vd_abs = fabsf(Vd_V);
+		/* Use previously applied d-axis voltage to align voltage/current timing. */
+		float32_t Vd_applied_V = params->Vd_V;
+		float32_t Vd_abs = fabsf(Vd_applied_V);
 		float32_t omega_elec;
 
 		omega_elec = angle_observer_get_elec_speed(&params->observer);
 
 		bool voltage_ok = (Vd_abs < params->rls_max_voltage_V);
-		bool pi_ok = (fabsf(Vd_V - pi_get_out_max(&params->pi_Id)) > 0.1f) &&
-		             (fabsf(Vd_V - pi_get_out_min(&params->pi_Id)) > 0.1f);
+		bool pi_ok = (fabsf(Vd_applied_V - pi_get_out_max(&params->pi_Id)) > 0.1f) &&
+		             (fabsf(Vd_applied_V - pi_get_out_min(&params->pi_Id)) > 0.1f);
 		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
+		bool residual_ok = (params->rls_max_residual <= 0.0f) ||
+				   (params->rls_d.num_updates == 0u) ||
+				   (fabsf(params->rls_d.residual) <= params->rls_max_residual);
 
-		if (voltage_ok && pi_ok && speed_ok) {
-			rls_motor_est_update(&params->rls_d, Vd_V, Id_A, params->Id_rls_prev,
-			                     omega_elec, params->Lq_est, Iq_A);
-			params->Id_rls_prev = Id_A;  /* Store for next RLS update */
+		if (voltage_ok && pi_ok && speed_ok && residual_ok) {
+			if (params->rls_d_prev_valid == 0u) {
+				params->Id_rls_prev = Id_A;
+				params->rls_d_prev_cycle = params->control_loop_count;
+				params->rls_d_prev_valid = 1u;
+			} else {
+				uint32_t sample_cycles =
+					params->control_loop_count - params->rls_d_prev_cycle;
+				if (sample_cycles == 0u) {
+					sample_cycles = 1u;
+				}
+				float32_t sample_period_s =
+					(float32_t)sample_cycles / CONTROL_LOOP_FREQUENCY_HZ;
+
+				rls_motor_est_update(&params->rls_d, Vd_applied_V, Id_A, params->Id_rls_prev,
+						     omega_elec, params->Lq_est, Iq_A, sample_period_s);
+				params->Id_rls_prev = Id_A;
+				params->rls_d_prev_cycle = params->control_loop_count;
+			}
 		}
 	}
 
 	/* Q-axis RLS parameter estimation (staggered by offset for load spreading) */
 	const uint32_t rls_offset = params->rls_stagger_offset;
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	if (rls_runtime_enabled &&
 	    ((params->control_loop_count & rls_mask) == rls_offset)) {
 		/* Compensate back-EMF first for gating check */
 		float32_t omega_elec = angle_observer_get_elec_speed(&params->observer);
 		float32_t V_bemf = omega_elec * MOTOR_FLUX_LINKAGE_WB;
-		float32_t Vq_compensated = Vq_V - V_bemf;
+		/* Use previously applied q-axis voltage to align voltage/current timing. */
+		float32_t Vq_applied_V = params->Vq_V;
+		float32_t Vq_compensated = Vq_applied_V - V_bemf;
 		
 		/* Gating conditions using compensated voltage */
 		float32_t Iq_abs = fabsf(Iq_A);
@@ -625,15 +655,33 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 		bool current_ok = (Iq_abs > params->rls_min_current_A);
 		bool voltage_ok = (Vq_comp_abs < params->rls_max_voltage_V);
-		bool pi_ok = (fabsf(Vq_V - pi_get_out_max(&params->pi_Iq)) > 0.1f) &&
-		             (fabsf(Vq_V - pi_get_out_min(&params->pi_Iq)) > 0.1f);
+		bool pi_ok = (fabsf(Vq_applied_V - pi_get_out_max(&params->pi_Iq)) > 0.1f) &&
+		             (fabsf(Vq_applied_V - pi_get_out_min(&params->pi_Iq)) > 0.1f);
 		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
+		bool residual_ok = (params->rls_max_residual <= 0.0f) ||
+				   (params->rls_q.num_updates == 0u) ||
+				   (fabsf(params->rls_q.residual) <= params->rls_max_residual);
 
-		if (current_ok && voltage_ok && pi_ok && speed_ok) {
-			/* Q-axis: Pass -omega to RLS so it subtracts cross-coupling ω·Ld·Id */
-			rls_motor_est_update(&params->rls_q, Vq_compensated, Iq_A, params->Iq_rls_prev,
-			                     -omega_elec, params->Ld_est, Id_A);
-			params->Iq_rls_prev = Iq_A;  /* Store for next RLS update */
+		if (current_ok && voltage_ok && pi_ok && speed_ok && residual_ok) {
+			if (params->rls_q_prev_valid == 0u) {
+				params->Iq_rls_prev = Iq_A;
+				params->rls_q_prev_cycle = params->control_loop_count;
+				params->rls_q_prev_valid = 1u;
+			} else {
+				uint32_t sample_cycles =
+					params->control_loop_count - params->rls_q_prev_cycle;
+				if (sample_cycles == 0u) {
+					sample_cycles = 1u;
+				}
+				float32_t sample_period_s =
+					(float32_t)sample_cycles / CONTROL_LOOP_FREQUENCY_HZ;
+
+				/* Q-axis: Pass -omega to RLS so it subtracts cross-coupling ω·Ld·Id */
+				rls_motor_est_update(&params->rls_q, Vq_compensated, Iq_A, params->Iq_rls_prev,
+						     -omega_elec, params->Ld_est, Id_A, sample_period_s);
+				params->Iq_rls_prev = Iq_A;
+				params->rls_q_prev_cycle = params->control_loop_count;
+			}
 		}
 
 		/* Parameter synthesis: update cross-coupling estimates and average Rs */
@@ -658,7 +706,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	/* Thermal model update (heavily decimated, ~10Hz) */
 	const uint32_t thermal_mask = params->thermal_decimation - 1u;
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION) &&
+	if (rls_control_enabled &&
 	    (params->control_loop_count & thermal_mask) == 0u) {
 		thermal_model_update(&params->thermal, Id_A, Iq_A, params->Rs_measured_ohm);
 	}

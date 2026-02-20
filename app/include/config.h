@@ -182,11 +182,15 @@ struct motor_parameters {
 	struct rls_motor_est rls_q;      /* Q-axis RLS estimator */
 	uint32_t rls_decimation;         /* RLS update rate decimation (power-of-2) */
 	uint32_t rls_stagger_offset;     /* Q-axis RLS stagger offset for load spreading */
-	float32_t prbs_amplitude_V;      /* PRBS voltage amplitude (volts) */
+	float32_t rls_excitation_current_A; /* PRBS d-axis current excitation amplitude */
 	float32_t Ld_est;                /* D-axis inductance estimate for cross-coupling */
 	float32_t Lq_est;                /* Q-axis inductance estimate for cross-coupling */
-	float32_t Id_A_rls_prev;         /* Previous RLS update Id for dI/dt calculation */
-	float32_t Iq_A_rls_prev;         /* Previous RLS update Iq for dI/dt calculation */
+	float32_t Id_rls_prev;           /* Previous accepted RLS Id sample for dI/dt */
+	float32_t Iq_rls_prev;           /* Previous accepted RLS Iq sample for dI/dt */
+	uint32_t rls_d_prev_cycle;       /* Control-loop count of previous accepted d-axis sample */
+	uint32_t rls_q_prev_cycle;       /* Control-loop count of previous accepted q-axis sample */
+	uint8_t rls_d_prev_valid;        /* Previous d-axis sample initialized */
+	uint8_t rls_q_prev_valid;        /* Previous q-axis sample initialized */
 
 	/* Thermal model */
 	struct thermal_model thermal;    /* Thermal model state */
@@ -214,8 +218,6 @@ struct motor_parameters {
 	float32_t Iq_ref_A;	
 	float32_t Id_A;
 	float32_t Iq_A;
-	float32_t Id_rls_prev;	/* Previous RLS update current (for dI/dt) */
-	float32_t Iq_rls_prev;	/* Previous RLS update current (for dI/dt) */
 	float32_t Ia_A;
 	float32_t Ib_A;
 	float32_t Va_V;
@@ -256,7 +258,14 @@ struct motor_parameters {
 
 /* RLS and Thermal parameters - all values from devicetree (motor/system specific) */
 #define RLS_DECIMATION DT_PROP(USER_PARAMS_NODE, rls_decimation)
-#define PRBS_AMPLITUDE_V ((float32_t)DT_PROP(USER_PARAMS_NODE, prbs_amplitude_millivolts) / 1000.0f)
+#if DT_NODE_HAS_PROP(USER_PARAMS_NODE, rls_excitation_current_ma)
+#define RLS_EXCITATION_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_excitation_current_ma) / 1000.0f)
+#elif DT_NODE_HAS_PROP(USER_PARAMS_NODE, prbs_amplitude_millivolts)
+/* Backward compatibility: legacy property name interpreted as current in mA. */
+#define RLS_EXCITATION_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, prbs_amplitude_millivolts) / 1000.0f)
+#else
+#define RLS_EXCITATION_CURRENT_A ROVERL_EST_CURRENT_A
+#endif
 #define RLS_LAMBDA ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_lambda_mppu) / 10000.0f)
 #define RLS_CONVERGENCE_THRESHOLD ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_convergence_threshold_mpu) / 1000.0f)
 #define RLS_INITIAL_COVARIANCE ((float32_t)DT_PROP(USER_PARAMS_NODE, rls_initial_covariance_mpu) / 1000.0f)

@@ -91,10 +91,15 @@ properties:
     default: 16
     description: RLS update rate decimation (power-of-2, default 16 = 1.25 kHz @ 20 kHz loop)
 
+  rls-excitation-current-ma:
+    type: int
+    default: 100
+    description: RLS PRBS excitation amplitude in milliamps applied to d-axis current reference
+
   prbs-amplitude-millivolts:
     type: int
-    default: 1000
-    description: PRBS voltage amplitude in millivolts (default 1000 mV = 1.0 V)
+    default: 100
+    description: Legacy RLS PRBS amplitude property (interpreted as milliamps for compatibility)
 
   rls-lambda-mppu:
     type: int

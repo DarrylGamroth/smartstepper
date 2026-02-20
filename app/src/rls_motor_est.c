@@ -34,31 +34,15 @@ void rls_motor_est_init(struct rls_motor_est *rls,
                         float32_t L_init,
                         float32_t P_init)
 {
-	/* Initialize parameter estimates */
-	rls->theta[0] = Rs_init;    /* Rs */
-	rls->theta[1] = L_init;     /* Ld or Lq */
-	rls->theta[2] = 0.0f;       /* Vbias */
-	rls->theta[3] = 0.0f;       /* Vdt_sign */
-
-	/* Initialize covariance as diagonal matrix (P = P_init * I) */
-	for (int i = 0; i < 4; i++) {
-		for (int j = 0; j < 4; j++) {
-			rls->P[i][j] = (i == j) ? P_init : 0.0f;
-		}
-	}
-
 	/* Configuration */
 	rls->lambda = lambda;
 	rls->control_freq = control_freq;
 	rls->convergence_threshold = convergence_threshold;
+	rls->Rs_init = Rs_init;
+	rls->L_init = L_init;
+	rls->P_init = fmaxf(P_init, P_MIN);
 
-	/* Statistics */
-	rls->num_updates = 0;
-	rls->num_rejected = 0;
-	rls->residual = 0.0f;
-	rls->residual_sum_sq = 0.0f;
-	rls->converged = false;
-	rls->convergence_count = 0;
+	rls_motor_est_reset(rls);
 }
 
 void rls_motor_est_update(struct rls_motor_est *rls,
@@ -67,13 +51,22 @@ void rls_motor_est_update(struct rls_motor_est *rls,
                           float32_t I_prev,
                           float32_t omega,
                           float32_t L_cross,
-                          float32_t I_cross)
+                          float32_t I_cross,
+                          float32_t sample_period_s)
 {
 	/* Compensate cross-coupling: V_compensated = V_meas + ω*L_cross*I_cross */
 	float32_t V_compensated = V_meas + omega * L_cross * I_cross;
 
-	/* Calculate current derivative */
-	float32_t dI_dt = (I - I_prev) * rls->control_freq;
+	/* Calculate current derivative with effective elapsed sample period */
+	float32_t Ts = sample_period_s;
+	if (Ts <= 0.0f && rls->control_freq > 0.0f) {
+		Ts = 1.0f / rls->control_freq;
+	}
+	if (Ts <= 0.0f) {
+		rls->num_rejected++;
+		return;
+	}
+	float32_t dI_dt = (I - I_prev) / Ts;
 
 	/* Build regression vector φ[k] = [I, dI/dt, 1, sign(I)]ᵀ */
 	float32_t phi[4];
@@ -185,7 +178,20 @@ void rls_motor_est_update(struct rls_motor_est *rls,
 
 void rls_motor_est_reset(struct rls_motor_est *rls)
 {
-	/* Reset statistics only - keep estimated parameters and covariance */
+	/* Restore estimator state to init-time values */
+	rls->theta[0] = clampf(rls->Rs_init, RS_MIN_OHM, RS_MAX_OHM);
+	rls->theta[1] = clampf(rls->L_init, LD_MIN_H, LD_MAX_H);
+	rls->theta[2] = 0.0f;
+	rls->theta[3] = 0.0f;
+
+	/* Reset covariance as diagonal matrix (P = P_init * I) */
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			rls->P[i][j] = (i == j) ? rls->P_init : 0.0f;
+		}
+	}
+
+	/* Reset statistics */
 	rls->num_updates = 0;
 	rls->num_rejected = 0;
 	rls->residual = 0.0f;
