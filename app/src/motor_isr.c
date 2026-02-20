@@ -203,6 +203,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	const struct smf_state *state = params->state_for_isr;
 	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool control_armed = atomic_get(&params->control_armed) != 0;
+	bool autonomous_keepalive = false;
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
@@ -223,10 +224,28 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
+	uint32_t now_ms = 0U;
+
+	if (online_control_state && control_armed) {
+		/* Autonomous modes self-refresh timeout age so control can run unattended. */
+		autonomous_keepalive =
+			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+			motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION) ||
+			params->profile_sequence_running || params->chopper_cal_active ||
+			motion_profile_quintic_is_active(&params->position_profile);
+
+		if (autonomous_keepalive) {
+			now_ms = k_uptime_get_32();
+			params->last_command_update_ms = now_ms;
+			params->command_timeout_latched = false;
+		}
+	}
 
 	/* Timeout disarms output commands when command updates stop. */
-	if (online_control_state && control_armed && params->command_timeout_ms > 0U) {
-		uint32_t now_ms = k_uptime_get_32();
+	if (online_control_state && control_armed && !autonomous_keepalive &&
+	    params->command_timeout_ms > 0U) {
+		now_ms = k_uptime_get_32();
 		uint32_t elapsed_ms = now_ms - params->last_command_update_ms;
 
 		if (elapsed_ms > params->command_timeout_ms) {
