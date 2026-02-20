@@ -20,7 +20,9 @@ target_sources(app PRIVATE
 	src/thermal_model.c
 	src/shell_commands.c
 	src/shell_commands_state.c
-	src/shell_commands_motion.c
+	src/shell_motion_profile.c
+	src/shell_motion_sequence.c
+	src/shell_motion_chopper_calib.c
 	src/motor_control_api.c
 	src/motor_autonomy.c
 	src/motor_encoder_pipeline.c
