@@ -2,6 +2,7 @@
 
 add_library(motor_core STATIC
 	src/angle_observer.c
+	src/motor_foc_voltage_pwm.c
 	src/motion_profile.c
 	src/motor_autonomy.c
 	src/prbs.c

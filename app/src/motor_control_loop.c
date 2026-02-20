@@ -22,11 +22,11 @@
 #include "pi.h"
 #include "filter_fo.h"
 #include "traj.h"
-#include "pwmgen.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
 #include "motor_autonomy.h"
+#include "motor_foc_voltage_pwm.h"
 #include "motor_state_utils.h"
 
 /**
@@ -87,16 +87,16 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t angle_raw_degrees = 0;
 	float32_t sin_theta, cos_theta;
 	float32_t Ia_A, Ib_A;
-	float32_t Vbus_V, Vbus_inv;
+	float32_t Vbus_V;
 	float32_t Id_A, Iq_A;
 	float32_t Va_V, Vb_V;
 	float32_t Ua_pu, Ub_pu;
 	float32_t Da_pu, Db_pu;
 	float32_t Da_hb1_pu, Da_hb2_pu, Db_hb1_pu, Db_hb2_pu;
-	float32_t Vq_limit_V;
 	float32_t Id_ref_A = 0.0f, Iq_ref_A = 0.0f;
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
+	float32_t inv_park_angle_rad;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
@@ -230,8 +230,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 		goto isr_done;
 	}
 
-	Vbus_inv = 1.0f / Vbus_V;
-
 	/* Handle offset measurement (no control, just filtering) */
 	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
 		filter_fo_run(&params->filter_Ia, Ia_A);
@@ -255,11 +253,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	/* Select control frame angle based on state and transform currents */
-	float32_t ctrl_angle_rad = angle_observer_get_elec_angle(&params->observer);
+	float32_t park_angle_rad = angle_observer_get_elec_angle(&params->observer);
 
 	/* Park transform to dq frame - convert to degrees for arm_sin_cos_f32 */
-	float32_t ctrl_angle_deg = ctrl_angle_rad * (180.0f / PI_F32);
-	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
+	float32_t park_angle_deg = park_angle_rad * (180.0f / PI_F32);
+	arm_sin_cos_f32(park_angle_deg, &sin_theta, &cos_theta);
 	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
 
 	/* R/L measurement: set current reference and accumulate V/I in rotating frame */
@@ -413,14 +411,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	Id_ref_A += I_prbs_d;
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 
-	max_voltage_magnitude_V = params->max_modulation_index * Vbus_V;
-	pi_set_min_max(&params->pi_Id, -max_voltage_magnitude_V, max_voltage_magnitude_V);
-	pi_run_series(&params->pi_Id, Id_ref_A, Id_A, 0.0f, &Vd_V);
-
-	Vq_limit_V = sqrtf((max_voltage_magnitude_V * max_voltage_magnitude_V) - (Vd_V * Vd_V));
-	pi_set_min_max(&params->pi_Iq, -Vq_limit_V, Vq_limit_V);
-	pi_run_series(&params->pi_Iq, Iq_ref_A, Iq_A, 0.0f, &Vq_V);
-
 	/* Advance angle generator if enabled
 	 * This compensates for the fact that computed voltages will be applied in the next cycle
 	 */
@@ -428,58 +418,43 @@ void motor_control_loop_step(struct motor_parameters *params,
 		angle_gen_run(&params->angle_gen);
 	}
 
-	ctrl_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
+	inv_park_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
 
-	/* Calculate sin and cos of control angle - convert to degrees for arm_sin_cos_f32 */
-	ctrl_angle_deg = ctrl_angle_rad * (180.0f / PI_F32);
-	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
-
-	/* Transform voltages to stationary frame */
-	arm_inv_park_f32(Vd_V, Vq_V, &Va_V, &Vb_V, sin_theta, cos_theta);
-
-	/* Normalize voltage commands to available bus voltage */
-	Ua_pu = Va_V * Vbus_inv;
-	Ub_pu = Vb_V * Vbus_inv;
-
-	/* Apply SVPWM modulation - outputs duty cycles in [0,1] range */
-	pwmgen_spwm_2phase_f32(Ua_pu, Ub_pu, &Da_pu, &Db_pu);
-
-	/* Complementary PWM for H-bridge control
-	 * Half-bridge 1: Da_pu [0,1]
-	 * Half-bridge 2: inverted (1 - Da_pu) [0,1]
-	 * Creates bidirectional voltage across winding
-	 */
-	Da_hb1_pu = Da_pu;
-	Da_hb2_pu = 1.0f - Da_pu;
-	Db_hb1_pu = Db_pu;
-	Db_hb2_pu = 1.0f - Db_pu;
-
-	/* Vbus-regulated braking: blend between regen and short-circuit
-	 * Only active during ONLINE modes (not calibration states)
-	 * Braking occurs when torque opposes motion (Iq and speed have opposite signs)
-	 */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING)) {
-		float32_t speed_rad_s = angle_observer_get_mech_speed(&params->observer);
-		bool is_braking = (params->Iq_ref_A * speed_rad_s) < 0.0f;  /* Opposite signs = braking */
-
-		/* Braking mode (ignore near-zero speeds, 0.628 rad/s = 0.1 Hz) */
-		if (is_braking && fabsf(speed_rad_s) > 0.628f) {
-			if (Vbus_V > VBUS_REGEN_LIMIT_V) {
-				/* Calculate short-circuit duty based on overvoltage */
-				float32_t overvoltage = Vbus_V - VBUS_REGEN_LIMIT_V;
-				float32_t short_duty = fminf(1.0f, overvoltage * VBUS_VOLTAGE_MARGIN_INV);
-
-				/* Scale down FOC PWM and add offset to hb2 for short-circuit braking
-				 * As short_duty → 1.0, hb1 → 0, hb2 → 1.0 (full short-circuit)
-				 */
-				float32_t scale = 1.0f - short_duty;
-				Da_hb1_pu *= scale;
-				Da_hb2_pu = Da_hb2_pu * scale + short_duty;
-				Db_hb1_pu *= scale;
-				Db_hb2_pu = Db_hb2_pu * scale + short_duty;
-			}
-		}
+	struct motor_foc_voltage_pwm_inputs foc_inputs = {
+		.id_ref_a = Id_ref_A,
+		.iq_ref_a = Iq_ref_A,
+		.id_a = Id_A,
+		.iq_a = Iq_A,
+		.vbus_v = Vbus_V,
+		.max_modulation_index = params->max_modulation_index,
+		.inv_park_angle_rad = inv_park_angle_rad,
+		.braking_enabled =
+			atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING),
+		.braking_iq_ref_a = params->Iq_ref_A,
+		.braking_speed_rad_s = angle_observer_get_mech_speed(&params->observer),
+		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
+		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
+	};
+	struct motor_foc_voltage_pwm_outputs foc_outputs = {0};
+	int foc_ret = motor_foc_voltage_pwm_step(&params->pi_Id, &params->pi_Iq,
+						 &foc_inputs, &foc_outputs);
+	if (foc_ret != 0) {
+		goto isr_done;
 	}
+
+	Vd_V = foc_outputs.vd_v;
+	Vq_V = foc_outputs.vq_v;
+	Va_V = foc_outputs.va_v;
+	Vb_V = foc_outputs.vb_v;
+	Ua_pu = foc_outputs.ua_pu;
+	Ub_pu = foc_outputs.ub_pu;
+	Da_pu = foc_outputs.da_pu;
+	Db_pu = foc_outputs.db_pu;
+	Da_hb1_pu = foc_outputs.da_hb1_pu;
+	Da_hb2_pu = foc_outputs.da_hb2_pu;
+	Db_hb1_pu = foc_outputs.db_hb1_pu;
+	Db_hb2_pu = foc_outputs.db_hb2_pu;
+	max_voltage_magnitude_V = foc_outputs.max_voltage_magnitude_v;
 
 	pwm_out->da_hb1_pu = Da_hb1_pu;
 	pwm_out->da_hb2_pu = Da_hb2_pu;
@@ -625,7 +600,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->Va_V = Va_V;
 	params->Vb_V = Vb_V;
 	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
-	params->elec_angle_rad = ctrl_angle_rad;
+	params->elec_angle_rad = inv_park_angle_rad;
 	params->dc_bus_voltage_V = Vbus_V;
 
 isr_done:
