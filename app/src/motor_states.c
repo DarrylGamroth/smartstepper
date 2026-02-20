@@ -221,6 +221,7 @@ const char *motor_event_to_string(enum motor_event_type event_type)
 	case MOTOR_EVENT_OFFLINE:           return "OFFLINE";
 	case MOTOR_EVENT_ONLINE:            return "ONLINE";
 	case MOTOR_EVENT_CALIBRATE_REQUEST: return "CALIBRATE_REQUEST";
+	case MOTOR_EVENT_COMMISSION_REQUEST: return "COMMISSION_REQUEST";
 	case MOTOR_EVENT_MODE_CHANGE:       return "MODE_CHANGE";
 	case MOTOR_EVENT_PARAM_UPDATE:      return "PARAM_UPDATE";
 	case MOTOR_EVENT_CLEAR_ERROR:       return "CLEAR_ERROR";
@@ -357,11 +358,22 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_cl_kp_rad_s_per_rad = params->profile_max_velocity_rad_s / PI_F32;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
+	params->velocity_filtered_rad_s = 0.0f;
+	params->Rs_measured_ohm = MOTOR_RESISTANCE_OHM;
+	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
+	params->R_over_L_measured =
+		(params->Ls_measured_H > 0.0f) ? (params->Rs_measured_ohm / params->Ls_measured_H) : 0.0f;
+	params->Ld_est = MOTOR_INDUCTANCE_D_H;
+	params->Lq_est = MOTOR_INDUCTANCE_Q_H;
 	atomic_set(&params->control_armed, 0);
 	params->command_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
 	params->last_command_update_ms = k_uptime_get_32();
 	params->command_timeout_count = 0U;
 	params->command_timeout_latched = false;
+	params->calibration_complete = false;
+	params->calibration_running = false;
+	params->commissioning_complete = false;
+	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
 
 	traj_init(&params->traj_velocity);
 	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
@@ -538,7 +550,14 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_CALIBRATE_REQUEST:
-		LOG_INF("Calibrate request received, forcing recalibration");
+		LOG_INF("Calibrate request received, running boot calibration");
+		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		return SMF_EVENT_HANDLED;
+
+	case MOTOR_EVENT_COMMISSION_REQUEST:
+		LOG_INF("Commission request received, running commissioning sequence");
+		params->calibration_mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
@@ -573,6 +592,12 @@ static void motor_state_offline_entry(void *obj)
 
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
+
+	/* First OFFLINE entry after boot runs fast boot calibration sequence. */
+	if (!params->calibration_complete &&
+	    params->calibration_mode != MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+	}
 }
 
 static void motor_state_offline_exit(void *obj)
@@ -588,17 +613,6 @@ static void motor_state_offline_exit(void *obj)
 static enum smf_state_result motor_state_offline_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	/* Check if calibration is needed on first run */
-	if (!params->calibration_complete) {
-		/* SMF will automatically enter CALIBRATION child state */
-		/* Just propagate events to child states */
-	} else {
-		/* Calibration already done, skip to ONLINE */
-		LOG_INF("Calibration already complete, transitioning to ONLINE");
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
-		return SMF_EVENT_HANDLED;
-	}
 
 	/* Process current event */
 	switch (params->event.type) {
@@ -619,10 +633,33 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 		motor_api_apply_param_update(params);
 		return SMF_EVENT_HANDLED;
 
+	case MOTOR_EVENT_CALIBRATE_REQUEST:
+		LOG_INF("Calibrate request received, running boot calibration");
+		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		return SMF_EVENT_HANDLED;
+
+	case MOTOR_EVENT_COMMISSION_REQUEST:
+		LOG_INF("Commission request received, running commissioning sequence");
+		params->calibration_mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		return SMF_EVENT_HANDLED;
+
 	default:
-		/* Propagate events to child states (CALIBRATION sequence) */
-		return SMF_EVENT_PROPAGATE;
+		break;
 	}
+
+	/* Auto-enter ONLINE once OFFLINE has no active calibration and the required
+	 * boot calibration has already completed.
+	 */
+	if (!params->calibration_running && params->calibration_complete) {
+		LOG_INF("Calibration already complete, transitioning to ONLINE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		return SMF_EVENT_HANDLED;
+	}
+
+	/* Propagate events to child states (CALIBRATION sequence). */
+	return SMF_EVENT_PROPAGATE;
 }
 
 /* State: ERROR - Fault condition */

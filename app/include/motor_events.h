@@ -17,6 +17,7 @@ enum motor_event_type {
 	MOTOR_EVENT_OFFLINE,             /* Request transition to OFFLINE state */
 	MOTOR_EVENT_ONLINE,              /* Request transition to ONLINE state */
 	MOTOR_EVENT_CALIBRATE_REQUEST,   /* Request calibration sequence */
+	MOTOR_EVENT_COMMISSION_REQUEST,  /* Request commissioning sequence */
 	MOTOR_EVENT_MODE_CHANGE,         /* Request control mode change */
 	MOTOR_EVENT_PARAM_UPDATE,        /* Update control parameter */
 	MOTOR_EVENT_CLEAR_ERROR,         /* Clear error condition */

@@ -80,6 +80,17 @@ int motor_api_request_online(void);
 int motor_api_request_calibrate(void);
 
 /**
+ * @brief Request commissioning sequence (thread-safe)
+ *
+ * Posts commissioning request to state machine. Commissioning runs the
+ * extended electrical identification flow (R/L and Rs measurements) and
+ * is intended for explicit bring-up/tuning sessions.
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int motor_api_request_commission(void);
+
+/**
  * @brief Update control parameter by name (thread-safe)
  * 
  * Posts parameter update to state machine thread via message queue.

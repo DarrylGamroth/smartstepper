@@ -37,9 +37,19 @@ void motor_state_calibration_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("=== Starting Motor Calibration Sequence ===");
+	const bool commissioning =
+		(params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING);
 
-	params->calibration_complete = false;
+	LOG_INF("=== Starting %s Sequence ===",
+		commissioning ? "Motor Commissioning" : "Motor Calibration");
+
+	params->calibration_running = true;
+
+	if (!commissioning) {
+		params->calibration_complete = false;
+	}
+
+	params->commissioning_complete = false;
 }
 
 enum smf_state_result motor_state_calibration_run(void *obj)
@@ -53,13 +63,20 @@ enum smf_state_result motor_state_calibration_run(void *obj)
 void motor_state_calibration_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
+	const bool commissioning =
+		(params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING);
 
-	LOG_INF("=== Calibration Complete ===");
+	LOG_INF("=== %s Complete ===", commissioning ? "Commissioning" : "Calibration");
 	LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
 	LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
 	LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
 
 	params->calibration_complete = true;
+	params->calibration_running = false;
+	if (commissioning) {
+		params->commissioning_complete = true;
+	}
+	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
 }
 
 /* State: OFFSET_MEAS - Measure current sensor offsets */
@@ -101,7 +118,11 @@ enum smf_state_result motor_state_offset_meas_run(void *obj)
 	switch (params->event.type) {
 	case MOTOR_EVENT_TIMEOUT:
 		/* Offset measurement complete */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
+		if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
+		} else {
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
+		}
 		return SMF_EVENT_HANDLED;
 
 	default:
@@ -443,8 +464,14 @@ enum smf_state_result motor_state_align_sample_run(void *obj)
 		LOG_INF("Alignment complete: mech_angle=%.2f deg, offset=%.2f deg",
 			(double)mech_angle_deg, (double)offset_deg);
 
-		/* Transition from CALIBRATION (ALIGN_SAMPLE) to ONLINE */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		/* Boot calibration resumes normal flow to ONLINE. Commissioning ends in IDLE
+		 * so the user can inspect measurements without immediately entering control.
+		 */
+		if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+		} else {
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		}
 		return SMF_EVENT_HANDLED;
 	}
 
@@ -463,4 +490,3 @@ void motor_state_align_sample_exit(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 			      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
-

@@ -54,6 +54,18 @@ static const char *motor_encoder_input_source_to_string(uint8_t source)
 	}
 }
 
+static const char *motor_calibration_mode_to_string(uint8_t mode)
+{
+	switch (mode) {
+	case MOTOR_CALIBRATION_MODE_BOOT:
+		return "boot";
+	case MOTOR_CALIBRATION_MODE_COMMISSIONING:
+		return "commissioning";
+	default:
+		return "unknown";
+	}
+}
+
 static inline void motor_zero_control_targets(struct motor_parameters *params)
 {
 	if (!params) {
@@ -185,10 +197,25 @@ int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argv);
 	
 	if (motor_api_request_calibrate() == 0) {
-		shell_print(sh, "Calibration sequence started");
+		shell_print(sh, "Boot calibration sequence started");
 		return 0;
 	} else {
 		shell_error(sh, "Failed to start calibration");
+		return -EIO;
+	}
+}
+
+/* motor state commission */
+int cmd_motor_state_commission(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (motor_api_request_commission() == 0) {
+		shell_print(sh, "Commissioning sequence started");
+		return 0;
+	} else {
+		shell_error(sh, "Failed to start commissioning");
 		return -EIO;
 	}
 }
@@ -318,6 +345,12 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Timeout latch: %s", g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
 	shell_print(sh, "  Timeout count: %u", g_motor_params->command_timeout_count);
 	shell_print(sh, "  Auto keepalive: %s", autonomous_keepalive ? "ACTIVE" : "INACTIVE");
+	shell_print(sh, "  Cal complete: %s", g_motor_params->calibration_complete ? "YES" : "NO");
+	shell_print(sh, "  Cal running:  %s", g_motor_params->calibration_running ? "YES" : "NO");
+	shell_print(sh, "  Cal mode:     %s",
+		    motor_calibration_mode_to_string(g_motor_params->calibration_mode));
+	shell_print(sh, "  Commissioned: %s",
+		    g_motor_params->commissioning_complete ? "YES" : "NO");
 	
 	return 0;
 }
@@ -526,6 +559,7 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  R/L:            %.3f rad/s", (double)g_motor_params->R_over_L_measured);
 	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
 	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);
+	shell_print(sh, "  Commissioned:   %s", g_motor_params->commissioning_complete ? "YES" : "NO");
 	
 	return 0;
 }

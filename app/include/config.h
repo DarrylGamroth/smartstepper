@@ -9,8 +9,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
+#include <zephyr/sys/util.h>
 #include "pi.h"
 #include "filter_fo.h"
+#include "filter_so.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "rs_online.h"
@@ -38,6 +40,9 @@
 #define MOTOR_ANGLE_INPUT_SRC_ENCODER 1U
 #define MOTOR_ANGLE_INPUT_SRC_PROPAGATED 2U
 
+#define MOTOR_CALIBRATION_MODE_BOOT 0U
+#define MOTOR_CALIBRATION_MODE_COMMISSIONING 1U
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -59,6 +64,7 @@ struct motor_parameters {
 	/* Current sensing filters and offsets */
 	struct filter_fo_f32 filter_Ia;
 	struct filter_fo_f32 filter_Ib;
+	struct filter_so_f32 filter_velocity_notch; /* Optional speed notch for velocity loop */
 	float32_t Ia_offset;
 	float32_t Ib_offset;
 
@@ -171,6 +177,9 @@ struct motor_parameters {
 
 	/* Calibration status */
 	bool calibration_complete;  /* True if calibration has been run successfully */
+	bool calibration_running;   /* True while calibration/commissioning state machine is active */
+	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
+	uint8_t calibration_mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
 
 	/* ISR feature flags (atomic for thread-safe access) */
 	atomic_t feature_flags;
@@ -209,6 +218,7 @@ struct motor_parameters {
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
 	float32_t velocity_rad_s;
+	float32_t velocity_filtered_rad_s;
 	float32_t encoder_raw_deg;
 	float32_t encoder_raw_rad;
 	float32_t encoder_observer_input_rad;
@@ -335,6 +345,28 @@ struct motor_parameters {
 #define VELOCITY_MAX_ACCEL_RAD_S2 (VELOCITY_MAX_ACCEL_HZ_S * 2.0f * PI_F32)
 #define VELOCITY_INITIAL_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_initial_hz))
 #define COMMAND_TIMEOUT_DEFAULT_MS 1000U
+#define CURRENT_DECOUPLING_ENABLED IS_ENABLED(CONFIG_MOTOR_CURRENT_DECOUPLING)
+#define VELOCITY_NOTCH_FILTER_ENABLED IS_ENABLED(CONFIG_MOTOR_VELOCITY_NOTCH_FILTER)
+#if defined(CONFIG_MOTOR_VELOCITY_NOTCH_FREQ_HZ)
+#define VELOCITY_NOTCH_FREQ_HZ_CFG ((float32_t)CONFIG_MOTOR_VELOCITY_NOTCH_FREQ_HZ)
+#else
+#define VELOCITY_NOTCH_FREQ_HZ_CFG 300.0f
+#endif
+#if defined(CONFIG_MOTOR_VELOCITY_NOTCH_Q_MILLI)
+#define VELOCITY_NOTCH_Q_CFG ((float32_t)CONFIG_MOTOR_VELOCITY_NOTCH_Q_MILLI / 1000.0f)
+#else
+#define VELOCITY_NOTCH_Q_CFG 2.0f
+#endif
+#if DT_NODE_HAS_PROP(USER_PARAMS_NODE, velocity_notch_freq_hz)
+#define VELOCITY_NOTCH_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_notch_freq_hz))
+#else
+#define VELOCITY_NOTCH_FREQ_HZ VELOCITY_NOTCH_FREQ_HZ_CFG
+#endif
+#if DT_NODE_HAS_PROP(USER_PARAMS_NODE, velocity_notch_q_milli)
+#define VELOCITY_NOTCH_Q ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_notch_q_milli) / 1000.0f)
+#else
+#define VELOCITY_NOTCH_Q VELOCITY_NOTCH_Q_CFG
+#endif
 
 /**
  * @brief Initialize filters with devicetree parameters

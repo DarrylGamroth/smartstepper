@@ -13,6 +13,7 @@ int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_idle(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_online(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_commission(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_mode_torque(const struct shell *sh, size_t argc, char **argv);

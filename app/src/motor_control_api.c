@@ -219,6 +219,23 @@ int motor_api_request_calibrate(void)
 	return 0;
 }
 
+int motor_api_request_commission(void)
+{
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_COMMISSION_REQUEST,
+	};
+
+	/* Non-blocking post to queue */
+	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	if (ret != 0) {
+		LOG_ERR("Failed to post commission request: queue full");
+		return -ENOMEM;
+	}
+
+	LOG_DBG("Commission request posted");
+	return 0;
+}
+
 int motor_api_update_param(const char *name, float value)
 {
 	struct motor_event evt = {
