@@ -1,0 +1,10 @@
+tests:
+  chopper.rs_online.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - rs
+    harness: ztest
+    integration_platforms:
+      - native_sim

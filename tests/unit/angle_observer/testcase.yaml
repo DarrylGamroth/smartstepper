@@ -1,0 +1,10 @@
+tests:
+  chopper.angle_observer.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - observer
+    harness: ztest
+    integration_platforms:
+      - native_sim
