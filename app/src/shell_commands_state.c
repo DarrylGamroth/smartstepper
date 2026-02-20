@@ -296,10 +296,17 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	const char *error_str = motor_error_to_string(error);
 	uint32_t now_ms = k_uptime_get_32();
 	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	bool control_armed = motor_control_is_armed(g_motor_params);
+	bool autonomous_mode_active =
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
-		motor_autonomous_keepalive_active(g_motor_params,
-						 g_motor_params->state_for_isr,
-						 motor_control_is_armed(g_motor_params));
+		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+						 g_motor_params->profile_sequence_running,
+						 g_motor_params->chopper_cal_active,
+						 motion_profile_quintic_is_active(
+							 &g_motor_params->position_profile));
 	
 	shell_print(sh, "Motor Status:");
 	shell_print(sh, "  State: %s (%d)", state_str, state);
@@ -433,10 +440,17 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	uint32_t now_ms = k_uptime_get_32();
 	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
 	bool timeout_enabled = g_motor_params->command_timeout_ms > 0U;
+	bool control_armed = motor_control_is_armed(g_motor_params);
+	bool autonomous_mode_active =
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
-		motor_autonomous_keepalive_active(g_motor_params,
-						 g_motor_params->state_for_isr,
-						 motor_control_is_armed(g_motor_params));
+		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+						 g_motor_params->profile_sequence_running,
+						 g_motor_params->chopper_cal_active,
+						 motion_profile_quintic_is_active(
+							 &g_motor_params->position_profile));
 	bool timeout_expired = timeout_enabled && !autonomous_keepalive &&
 			       (age_ms > g_motor_params->command_timeout_ms);
 

@@ -5,21 +5,10 @@
 
 #include "motor_autonomy.h"
 
-#include "config.h"
-#include "motion_profile.h"
-#include "motor_state_utils.h"
-
-bool motor_autonomous_keepalive_active(const struct motor_parameters *params,
-				       const struct smf_state *state,
-				       bool control_armed)
+bool motor_autonomy_should_keepalive(bool control_armed, bool autonomous_mode_active,
+				     bool profile_sequence_running, bool chopper_cal_active,
+				     bool quintic_profile_active)
 {
-	if (params == NULL || state == NULL || !control_armed) {
-		return false;
-	}
-
-	return motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION) ||
-	       params->profile_sequence_running || params->chopper_cal_active ||
-	       motion_profile_quintic_is_active(&params->position_profile);
+	return control_armed && (autonomous_mode_active || profile_sequence_running ||
+				 chopper_cal_active || quintic_profile_active);
 }

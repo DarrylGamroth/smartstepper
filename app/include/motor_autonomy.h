@@ -7,18 +7,15 @@
 #define MOTOR_AUTONOMY_H_
 
 #include <stdbool.h>
-#include <zephyr/smf.h>
-
-struct motor_parameters;
 
 /**
  * @brief Return true when timeout keepalive should be auto-petted.
  *
- * This is used by the ISR timeout gate and shell status reporting so both
- * paths use identical autonomy criteria.
+ * Keepalive is active only when control is armed and at least one autonomous
+ * motion source is active.
  */
-bool motor_autonomous_keepalive_active(const struct motor_parameters *params,
-				       const struct smf_state *state,
-				       bool control_armed);
+bool motor_autonomy_should_keepalive(bool control_armed, bool autonomous_mode_active,
+				     bool profile_sequence_running, bool chopper_cal_active,
+				     bool quintic_profile_active);
 
 #endif /* MOTOR_AUTONOMY_H_ */

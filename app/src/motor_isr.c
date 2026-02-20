@@ -126,9 +126,16 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
+	bool autonomous_mode_active =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
 
 	autonomous_keepalive =
-		motor_autonomous_keepalive_active(params, state, control_armed);
+		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+						 params->profile_sequence_running,
+						 params->chopper_cal_active,
+						 motion_profile_quintic_is_active(&params->position_profile));
 	if (autonomous_keepalive) {
 		now_ms = k_uptime_get_32();
 		params->last_command_update_ms = now_ms;
