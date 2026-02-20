@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <errno.h>
 
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
@@ -128,21 +129,21 @@ static inline int encoder_read(struct rtio *ctx, float32_t *angle, uint8_t *stat
 	/* Non-blocking: check if a completion is ready */
 	cqe = rtio_cqe_consume(ctx);
 	if (cqe == NULL) {
-		/* No completion ready yet */
-		return -1;
+		/* Distinguish a pending transfer from a missing transfer source. */
+		return (atomic_get(&encoder_read_in_flight) != 0) ? -EAGAIN : -ENODATA;
 	}
 
 	if (cqe->result != 0) {
 		rtio_cqe_release(ctx, cqe);
 		atomic_set(&encoder_read_in_flight, 0);
-		return -1;
+		return -EIO;
 	}
 
 	rc = rtio_cqe_get_mempool_buffer(ctx, cqe, &buf, &buf_len);
 	if (rc != 0) {
 		rtio_cqe_release(ctx, cqe);
 		atomic_set(&encoder_read_in_flight, 0);
-		return -1;
+		return -EIO;
 	}
 
 	rtio_cqe_release(ctx, cqe);
@@ -164,7 +165,7 @@ static inline int encoder_read(struct rtio *ctx, float32_t *angle, uint8_t *stat
 
 	rtio_release_buffer(ctx, buf, buf_len);
 
-	return frame_error ? -1 : 0;
+	return frame_error ? -EIO : 0;
 }
 
 void gate_driver_a_break_callback(const struct device *dev, void *user_data)
@@ -266,10 +267,14 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	bool encoder_frame_error = false;
 	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
 		/* Read encoder to consume RTIO queue data (callback keeps queuing reads) */
-		if (encoder_read(&encoder_rtio_ctx, &angle_raw_degrees, &encoder_frame_status,
-				 &encoder_frame_warning, &encoder_frame_error) < 0) {
-			/* No new encoder data this cycle. */
-			params->encoder_fault_counter++;
+		int encoder_ret = encoder_read(&encoder_rtio_ctx, &angle_raw_degrees,
+					       &encoder_frame_status,
+					       &encoder_frame_warning, &encoder_frame_error);
+		if (encoder_ret < 0) {
+			/* EAGAIN means transfer is still in-flight; don't count as a hard fault. */
+			if (encoder_ret != -EAGAIN) {
+				params->encoder_fault_counter++;
+			}
 			if (encoder_frame_warning) {
 				params->encoder_warning_count++;
 			}

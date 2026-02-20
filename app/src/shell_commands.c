@@ -60,6 +60,22 @@ void motor_command_feed_watchdog(struct motor_parameters *params)
 	params->command_timeout_latched = false;
 }
 
+static bool shell_parse_finite_float(const char *text, float *value_out)
+{
+	if (text == NULL || value_out == NULL) {
+		return false;
+	}
+
+	char *endp = NULL;
+	float value = strtof(text, &endp);
+	if (endp == text || *endp != '\0' || !isfinite(value)) {
+		return false;
+	}
+
+	*value_out = value;
+	return true;
+}
+
 /*============================================================================
  * Shell Command Implementations
  *============================================================================*/
@@ -470,23 +486,33 @@ static int cmd_motor_pi_set(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before changing PI gains.");
+		return -EACCES;
+	}
+
 	const char *controller = argv[1];
-	float kp = strtof(argv[2], NULL);
-	float ki = strtof(argv[3], NULL);
-	
-	/* TODO: PI controllers are NOT double buffered - need API extension */
-	/* For now, write directly (safe because PI gains not used in ISR context) */
+	float kp;
+	float ki;
+	if (!shell_parse_finite_float(argv[2], &kp) || !shell_parse_finite_float(argv[3], &ki)) {
+		shell_error(sh, "kp/ki must be finite numbers");
+		return -EINVAL;
+	}
+	if (kp <= 0.0f || ki < 0.0f) {
+		shell_error(sh, "kp must be > 0 and ki must be >= 0");
+		return -EINVAL;
+	}
+
 	if (strcmp(controller, "id") == 0) {
-		g_motor_params->pi_Id.kp = kp;
-		g_motor_params->pi_Id.ki = ki;
+		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
 	} else if (strcmp(controller, "iq") == 0) {
-		g_motor_params->pi_Iq.kp = kp;
-		g_motor_params->pi_Iq.ki = ki;
+		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
 	} else {
 		shell_error(sh, "Controller must be 'id' or 'iq'");
 		return -EINVAL;
 	}
-	
+
+	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Set PI_%s: Kp = %.6f, Ki = %.6f", controller, (double)kp, (double)ki);
 	return 0;
 }
@@ -504,8 +530,17 @@ static int cmd_motor_pi_bandwidth(const struct shell *sh, size_t argc, char **ar
 		return -ENODEV;
 	}
 
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before tuning PI bandwidth.");
+		return -EACCES;
+	}
+
 	const char *controller = argv[1];
-	float bw_hz = strtof(argv[2], NULL);
+	float bw_hz;
+	if (!shell_parse_finite_float(argv[2], &bw_hz)) {
+		shell_error(sh, "Bandwidth must be a finite number.");
+		return -EINVAL;
+	}
 	
 	/* Validate bandwidth */
 	if (bw_hz <= 0.0f || bw_hz > CONTROL_LOOP_FREQUENCY_HZ / 2.0f) {
@@ -520,18 +555,24 @@ static int cmd_motor_pi_bandwidth(const struct shell *sh, size_t argc, char **ar
 	float32_t kp, ki;
 	
 	if (strcmp(controller, "id") == 0) {
+		if (MOTOR_INDUCTANCE_D_H <= 0.0f) {
+			shell_error(sh, "Invalid D-axis inductance in configuration");
+			return -ERANGE;
+		}
 		kp = MOTOR_INDUCTANCE_D_H * bw_rps;
 		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_D_H) * T_sample;
-		g_motor_params->pi_Id.kp = kp;
-		g_motor_params->pi_Id.ki = ki;
+		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
 		shell_print(sh, "D-axis PI tuned to %.1f Hz bandwidth:", (double)bw_hz);
 		shell_print(sh, "  Kp = %.6f", (double)kp);
 		shell_print(sh, "  Ki = %.6f", (double)ki);
 	} else if (strcmp(controller, "iq") == 0) {
+		if (MOTOR_INDUCTANCE_Q_H <= 0.0f) {
+			shell_error(sh, "Invalid Q-axis inductance in configuration");
+			return -ERANGE;
+		}
 		kp = MOTOR_INDUCTANCE_Q_H * bw_rps;
 		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_Q_H) * T_sample;
-		g_motor_params->pi_Iq.kp = kp;
-		g_motor_params->pi_Iq.ki = ki;
+		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
 		shell_print(sh, "Q-axis PI tuned to %.1f Hz bandwidth:", (double)bw_hz);
 		shell_print(sh, "  Kp = %.6f", (double)kp);
 		shell_print(sh, "  Ki = %.6f", (double)ki);
@@ -539,7 +580,8 @@ static int cmd_motor_pi_bandwidth(const struct shell *sh, size_t argc, char **ar
 		shell_error(sh, "Controller must be 'id' or 'iq'");
 		return -EINVAL;
 	}
-	
+
+	motor_command_feed_watchdog(g_motor_params);
 	return 0;
 }
 

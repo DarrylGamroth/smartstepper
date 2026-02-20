@@ -52,6 +52,24 @@ static const char *motor_encoder_input_source_to_string(uint8_t source)
 	}
 }
 
+static bool motor_autonomous_keepalive_active(const struct motor_parameters *params)
+{
+	if (params == NULL || atomic_get(&params->control_armed) == 0) {
+		return false;
+	}
+
+	const struct smf_state *state = params->state_for_isr;
+	if (state == NULL) {
+		return false;
+	}
+
+	return motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION) ||
+	       params->profile_sequence_running || params->chopper_cal_active ||
+	       motion_profile_quintic_is_active(&params->position_profile);
+}
+
 static inline void motor_zero_control_targets(struct motor_parameters *params)
 {
 	if (!params) {
@@ -295,6 +313,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	const char *error_str = motor_error_to_string(error);
 	uint32_t now_ms = k_uptime_get_32();
 	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	bool autonomous_keepalive = motor_autonomous_keepalive_active(g_motor_params);
 	
 	shell_print(sh, "Motor Status:");
 	shell_print(sh, "  State: %s (%d)", state_str, state);
@@ -304,6 +323,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Command age: %u ms", age_ms);
 	shell_print(sh, "  Timeout latch: %s", g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
 	shell_print(sh, "  Timeout count: %u", g_motor_params->command_timeout_count);
+	shell_print(sh, "  Auto keepalive: %s", autonomous_keepalive ? "ACTIVE" : "INACTIVE");
 	
 	return 0;
 }
@@ -427,7 +447,9 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	uint32_t now_ms = k_uptime_get_32();
 	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
 	bool timeout_enabled = g_motor_params->command_timeout_ms > 0U;
-	bool timeout_expired = timeout_enabled && (age_ms > g_motor_params->command_timeout_ms);
+	bool autonomous_keepalive = motor_autonomous_keepalive_active(g_motor_params);
+	bool timeout_expired = timeout_enabled && !autonomous_keepalive &&
+			       (age_ms > g_motor_params->command_timeout_ms);
 
 	shell_print(sh, "Safety Status:");
 	shell_print(sh, "  Armed:              %s",
@@ -436,6 +458,7 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Timeout value:      %u ms", g_motor_params->command_timeout_ms);
 	shell_print(sh, "  Command age:        %u ms", age_ms);
 	shell_print(sh, "  Timeout expired:    %s", timeout_expired ? "YES" : "NO");
+	shell_print(sh, "  Auto keepalive:     %s", autonomous_keepalive ? "ACTIVE" : "INACTIVE");
 	shell_print(sh, "  Timeout latch:      %s",
 		    g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
 	shell_print(sh, "  Timeout count:      %u", g_motor_params->command_timeout_count);
