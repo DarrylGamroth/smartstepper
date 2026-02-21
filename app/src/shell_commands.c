@@ -73,11 +73,11 @@ static int motor_parse_gains_profile(const char *token, enum motor_gains_profile
 		return -EINVAL;
 	}
 
-	if (strcmp(token, "nominal") == 0 || strcmp(token, "default") == 0) {
+	if (strcmp(token, "nominal") == 0) {
 		*profile = MOTOR_GAINS_PROFILE_NOMINAL;
 		return 0;
 	}
-	if (strcmp(token, "safe") == 0 || strcmp(token, "conservative") == 0) {
+	if (strcmp(token, "safe") == 0) {
 		*profile = MOTOR_GAINS_PROFILE_SAFE;
 		return 0;
 	}
@@ -326,6 +326,147 @@ static int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv
 	}
 }
 
+/* motor current gain get <id|iq> */
+static int cmd_motor_current_gain_get(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor current gain get <id|iq>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	const char *controller = argv[1];
+	float kp = 0.0f;
+	float ki = 0.0f;
+
+	if (strcmp(controller, "id") == 0) {
+		kp = g_motor_params->pi_Id.kp;
+		ki = g_motor_params->pi_Id.ki;
+	} else if (strcmp(controller, "iq") == 0) {
+		kp = g_motor_params->pi_Iq.kp;
+		ki = g_motor_params->pi_Iq.ki;
+	} else {
+		shell_error(sh, "Controller must be 'id' or 'iq'");
+		return -EINVAL;
+	}
+
+	shell_print(sh, "Current PI %s: Kp=%.6f, Ki=%.6f",
+		    controller, (double)kp, (double)ki);
+	return 0;
+}
+
+/* motor current gain set <id|iq> <kp> <ki> */
+static int cmd_motor_current_gain_set(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 4) {
+		shell_error(sh, "Usage: motor current gain set <id|iq> <kp> <ki>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before changing current PI gains.");
+		return -EACCES;
+	}
+
+	const char *controller = argv[1];
+	float kp = 0.0f;
+	float ki = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &kp) ||
+	    !shell_parse_finite_float(argv[3], &ki)) {
+		shell_error(sh, "kp/ki must be finite numbers");
+		return -EINVAL;
+	}
+	if (kp <= 0.0f || ki < 0.0f) {
+		shell_error(sh, "kp must be > 0 and ki must be >= 0");
+		return -EINVAL;
+	}
+
+	if (strcmp(controller, "id") == 0) {
+		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
+	} else if (strcmp(controller, "iq") == 0) {
+		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
+	} else {
+		shell_error(sh, "Controller must be 'id' or 'iq'");
+		return -EINVAL;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Current PI %s gains set: Kp=%.6f, Ki=%.6f",
+		    controller, (double)kp, (double)ki);
+	return 0;
+}
+
+/* motor current gain bandwidth <id|iq> <hz> */
+static int cmd_motor_current_gain_bandwidth(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 3) {
+		shell_error(sh, "Usage: motor current gain bandwidth <id|iq> <hz>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before tuning current PI bandwidth.");
+		return -EACCES;
+	}
+
+	const char *controller = argv[1];
+	float bw_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &bw_hz)) {
+		shell_error(sh, "Bandwidth must be a finite number.");
+		return -EINVAL;
+	}
+	if (bw_hz <= 0.0f || bw_hz > CONTROL_LOOP_FREQUENCY_HZ / 2.0f) {
+		shell_error(sh, "Bandwidth must be positive and below Nyquist (%.1f Hz)",
+			    (double)(CONTROL_LOOP_FREQUENCY_HZ / 2.0f));
+		return -EINVAL;
+	}
+
+	float32_t bw_rps = 2.0f * PI_F32 * bw_hz;
+	float32_t t_sample = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	float32_t kp = 0.0f;
+	float32_t ki = 0.0f;
+
+	if (strcmp(controller, "id") == 0) {
+		if (MOTOR_INDUCTANCE_D_H <= 0.0f) {
+			shell_error(sh, "Invalid D-axis inductance in configuration");
+			return -ERANGE;
+		}
+		kp = MOTOR_INDUCTANCE_D_H * bw_rps;
+		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_D_H) * t_sample;
+		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
+	} else if (strcmp(controller, "iq") == 0) {
+		if (MOTOR_INDUCTANCE_Q_H <= 0.0f) {
+			shell_error(sh, "Invalid Q-axis inductance in configuration");
+			return -ERANGE;
+		}
+		kp = MOTOR_INDUCTANCE_Q_H * bw_rps;
+		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_Q_H) * t_sample;
+		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
+	} else {
+		shell_error(sh, "Controller must be 'id' or 'iq'");
+		return -EINVAL;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Current PI %s tuned to %.1f Hz: Kp=%.6f, Ki=%.6f",
+		    controller, (double)bw_hz, (double)kp, (double)ki);
+	return 0;
+}
+
 /* motor velocity target <hz> */
 static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char **argv)
 {
@@ -513,37 +654,9 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
-	/* Legacy form for backward compatibility. */
-	if (argc != 3 && argc != 4) {
-		shell_error(sh, "Usage: motor velocity gains <kp> [ki] <iq_limit>");
-		return -EINVAL;
-	}
-
-	float kp = 0.0f;
-	float ki = g_motor_params->velocity_cl_ki_A_per_rad;
-	float iq_limit = 0.0f;
-	bool ok = shell_parse_finite_float(argv[1], &kp);
-	if (argc == 4) {
-		ok = ok && shell_parse_finite_float(argv[2], &ki) &&
-		     shell_parse_finite_float(argv[3], &iq_limit);
-	} else {
-		ok = ok && shell_parse_finite_float(argv[2], &iq_limit);
-	}
-	if (!ok) {
-		shell_error(sh, "kp/ki/iq_limit must be finite numbers");
-		return -EINVAL;
-	}
-
-	int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
-	if (ret != 0) {
-		shell_error(sh, "Failed to update velocity gains (err %d)", ret);
-		return ret;
-	}
-
-	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Velocity gains set (legacy): Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
-		    (double)kp, (double)ki, (double)iq_limit);
-	return 0;
+	shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
+		    "motor velocity gains defaults <safe|nominal>");
+	return -EINVAL;
 }
 
 /* motor position target <deg> */
@@ -696,176 +809,9 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
-	/* Legacy form for backward compatibility. */
-	if (argc != 2 && argc != 3) {
-		shell_error(sh, "Usage: motor position gains <kp> [ki]");
-		return -EINVAL;
-	}
-
-	float kp = 0.0f;
-	float ki = g_motor_params->position_cl_ki_rad_s2_per_rad;
-	bool ok = shell_parse_finite_float(argv[1], &kp);
-	if (argc == 3) {
-		ok = ok && shell_parse_finite_float(argv[2], &ki);
-	}
-	if (!ok) {
-		shell_error(sh, "kp/ki must be finite numbers");
-		return -EINVAL;
-	}
-
-	int ret = motor_apply_position_gains(kp, ki);
-	if (ret != 0) {
-		shell_error(sh, "Failed to update position gains (err %d)", ret);
-		return ret;
-	}
-
-	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Position gains set (legacy): Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
-		    (double)kp, (double)ki);
-	return 0;
-}
-
-/* motor pi get <controller> */
-static int cmd_motor_pi_get(const struct shell *sh, size_t argc, char **argv)
-{
-	if (argc != 2) {
-		shell_error(sh, "Usage: motor pi get <id|iq>");
-		return -EINVAL;
-	}
-
-	if (!g_motor_params) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-
-	const char *controller = argv[1];
-	float kp, ki;
-	
-	if (strcmp(controller, "id") == 0) {
-		kp = g_motor_params->pi_Id.kp;
-		ki = g_motor_params->pi_Id.ki;
-	} else if (strcmp(controller, "iq") == 0) {
-		kp = g_motor_params->pi_Iq.kp;
-		ki = g_motor_params->pi_Iq.ki;
-	} else {
-		shell_error(sh, "Controller must be 'id' or 'iq'");
-		return -EINVAL;
-	}
-	
-	shell_print(sh, "PI_%s: Kp = %.6f, Ki = %.6f", controller, (double)kp, (double)ki);
-	return 0;
-}
-
-/* motor pi set <controller> <kp> <ki> */
-static int cmd_motor_pi_set(const struct shell *sh, size_t argc, char **argv)
-{
-	if (argc != 4) {
-		shell_error(sh, "Usage: motor pi set <id|iq> <kp> <ki>");
-		return -EINVAL;
-	}
-
-	if (!g_motor_params) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-
-	if (motor_control_is_armed(g_motor_params)) {
-		shell_error(sh, "Disarm control before changing PI gains.");
-		return -EACCES;
-	}
-
-	const char *controller = argv[1];
-	float kp;
-	float ki;
-	if (!shell_parse_finite_float(argv[2], &kp) || !shell_parse_finite_float(argv[3], &ki)) {
-		shell_error(sh, "kp/ki must be finite numbers");
-		return -EINVAL;
-	}
-	if (kp <= 0.0f || ki < 0.0f) {
-		shell_error(sh, "kp must be > 0 and ki must be >= 0");
-		return -EINVAL;
-	}
-
-	if (strcmp(controller, "id") == 0) {
-		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
-	} else if (strcmp(controller, "iq") == 0) {
-		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
-	} else {
-		shell_error(sh, "Controller must be 'id' or 'iq'");
-		return -EINVAL;
-	}
-
-	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Set PI_%s: Kp = %.6f, Ki = %.6f", controller, (double)kp, (double)ki);
-	return 0;
-}
-
-/* motor pi bandwidth <controller> <hz> */
-static int cmd_motor_pi_bandwidth(const struct shell *sh, size_t argc, char **argv)
-{
-	if (argc != 3) {
-		shell_error(sh, "Usage: motor pi bandwidth <id|iq> <hz>");
-		return -EINVAL;
-	}
-
-	if (!g_motor_params) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-
-	if (motor_control_is_armed(g_motor_params)) {
-		shell_error(sh, "Disarm control before tuning PI bandwidth.");
-		return -EACCES;
-	}
-
-	const char *controller = argv[1];
-	float bw_hz;
-	if (!shell_parse_finite_float(argv[2], &bw_hz)) {
-		shell_error(sh, "Bandwidth must be a finite number.");
-		return -EINVAL;
-	}
-	
-	/* Validate bandwidth */
-	if (bw_hz <= 0.0f || bw_hz > CONTROL_LOOP_FREQUENCY_HZ / 2.0f) {
-		shell_error(sh, "Bandwidth must be positive and below Nyquist (%.1f Hz)",
-		            (double)(CONTROL_LOOP_FREQUENCY_HZ / 2.0f));
-		return -EINVAL;
-	}
-	
-	/* Calculate PI gains from bandwidth */
-	float32_t bw_rps = 2.0f * PI_F32 * bw_hz;
-	float32_t T_sample = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
-	float32_t kp, ki;
-	
-	if (strcmp(controller, "id") == 0) {
-		if (MOTOR_INDUCTANCE_D_H <= 0.0f) {
-			shell_error(sh, "Invalid D-axis inductance in configuration");
-			return -ERANGE;
-		}
-		kp = MOTOR_INDUCTANCE_D_H * bw_rps;
-		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_D_H) * T_sample;
-		pi_set_gains(&g_motor_params->pi_Id, kp, ki);
-		shell_print(sh, "D-axis PI tuned to %.1f Hz bandwidth:", (double)bw_hz);
-		shell_print(sh, "  Kp = %.6f", (double)kp);
-		shell_print(sh, "  Ki = %.6f", (double)ki);
-	} else if (strcmp(controller, "iq") == 0) {
-		if (MOTOR_INDUCTANCE_Q_H <= 0.0f) {
-			shell_error(sh, "Invalid Q-axis inductance in configuration");
-			return -ERANGE;
-		}
-		kp = MOTOR_INDUCTANCE_Q_H * bw_rps;
-		ki = (MOTOR_RESISTANCE_OHM / MOTOR_INDUCTANCE_Q_H) * T_sample;
-		pi_set_gains(&g_motor_params->pi_Iq, kp, ki);
-		shell_print(sh, "Q-axis PI tuned to %.1f Hz bandwidth:", (double)bw_hz);
-		shell_print(sh, "  Kp = %.6f", (double)kp);
-		shell_print(sh, "  Ki = %.6f", (double)ki);
-	} else {
-		shell_error(sh, "Controller must be 'id' or 'iq'");
-		return -EINVAL;
-	}
-
-	motor_command_feed_watchdog(g_motor_params);
-	return 0;
+	shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
+		    "motor position gains defaults <safe|nominal>");
+	return -EINVAL;
 }
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
@@ -1054,10 +1000,19 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_params,
 );
 
 /* motor current subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current_gain,
+	SHELL_CMD(get, NULL, "Get current-loop PI gains <id|iq>", cmd_motor_current_gain_get),
+	SHELL_CMD(set, NULL, "Set current-loop PI gains <id|iq> <kp> <ki>", cmd_motor_current_gain_set),
+	SHELL_CMD(bandwidth, NULL, "Set current-loop PI bandwidth <id|iq> <hz>", cmd_motor_current_gain_bandwidth),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor current subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 	SHELL_CMD(id, NULL, "Set Id current (A)", cmd_motor_current_id),
 	SHELL_CMD(iq, NULL, "Set Iq current (A)", cmd_motor_current_iq),
 	SHELL_CMD(dq, NULL, "Set Id and Iq currents", cmd_motor_current_dq),
+	SHELL_CMD(gain, &sub_motor_current_gain, "Current-loop PI gain tuning", NULL),
 	SHELL_SUBCMD_SET_END
 );
 
@@ -1080,14 +1035,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(clear_error, NULL, "Clear error state", cmd_motor_state_clear_error),
 	SHELL_CMD(status, NULL, "Show motor status", cmd_motor_state_status),
 	SHELL_CMD(mode, &sub_motor_state_mode, "Switch control mode", NULL),
-	SHELL_SUBCMD_SET_END
-);
-
-/* motor pi subcommands */
-SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_pi,
-	SHELL_CMD(get, NULL, "Get PI gains", cmd_motor_pi_get),
-	SHELL_CMD(set, NULL, "Set PI gains", cmd_motor_pi_set),
-	SHELL_CMD(bandwidth, NULL, "Set bandwidth (auto-tune)", cmd_motor_pi_bandwidth),
 	SHELL_SUBCMD_SET_END
 );
 
@@ -1248,7 +1195,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(arm, NULL, "Arm torque-producing control output", cmd_motor_arm),
 	SHELL_CMD(disarm, NULL, "Disarm control output and request IDLE", cmd_motor_disarm),
 	SHELL_CMD(safety, &sub_motor_safety, "Safety interlock and timeout", NULL),
-	SHELL_CMD(pi, &sub_motor_pi, "PI controller tuning", NULL),
 	SHELL_CMD(info, &sub_motor_info, "Motor information", NULL),
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),
