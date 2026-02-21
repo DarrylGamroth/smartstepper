@@ -445,7 +445,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.vbus_v = Vbus_V,
 		.max_modulation_index = params->max_modulation_index,
 		.inv_park_angle_rad = inv_park_angle_rad,
-		.decoupling_enabled = CURRENT_DECOUPLING_ENABLED,
+		/* Keep decoupling/feedforward in ONLINE control only; calibration states
+		 * (ALIGN/RS_EST/ROVERL) can have transient observer speed spikes.
+		 */
+		.decoupling_enabled = CURRENT_DECOUPLING_ENABLED && online_control_state,
 		.electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer),
 		.ld_h = params->Ld_est,
 		.lq_h = params->Lq_est,
