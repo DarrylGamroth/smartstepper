@@ -29,6 +29,7 @@
 #include "motor_rls_runtime.h"
 #include "motor_foc_voltage_pwm.h"
 #include "motor_state_utils.h"
+#include "motor_commission.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -73,6 +74,25 @@ void motor_control_loop_step(struct motor_parameters *params,
 	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool control_armed = atomic_get(&params->control_armed) != 0;
 	bool autonomous_keepalive = false;
+	struct motor_commission_observation commission_obs = {
+		.control_loop_count = 0U,
+		.state = state,
+		.control_armed = control_armed,
+		.encoder_fresh = false,
+		.encoder_warning = false,
+		.encoder_error = false,
+		.encoder_status = 0U,
+		.fault_active = false,
+		.saturation = false,
+		.data_valid = false,
+		.vbus_v = 0.0f,
+		.id_a = 0.0f,
+		.iq_a = 0.0f,
+		.vd_v = 0.0f,
+		.vq_v = 0.0f,
+		.mech_speed_rad_s = 0.0f,
+		.elec_speed_rad_s = 0.0f,
+	};
 
 	if (pwm_out != NULL) {
 		pwm_out->update_pwm = false;
@@ -84,6 +104,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
+	commission_obs.control_loop_count = params->control_loop_count;
 
 	float32_t angle_raw_degrees = 0;
 	float32_t sin_theta, cos_theta;
@@ -100,6 +121,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t inv_park_angle_rad;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
+	float32_t speed_mech_filtered_rad_s = 0.0f;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
 	bool autonomous_mode_active =
@@ -171,6 +193,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 		if (fresh_encoder_sample || encoder_frame_warning || encoder_frame_error) {
 			params->encoder_last_status = encoder_frame_status;
 		}
+		commission_obs.encoder_fresh = fresh_encoder_sample;
+		commission_obs.encoder_warning = encoder_frame_warning;
+		commission_obs.encoder_error = encoder_frame_error;
+		commission_obs.encoder_status = encoder_frame_status;
 
 		/* Fault detection: too many consecutive encoder failures. */
 		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
@@ -183,6 +209,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 		params->encoder_sample_fresh = 0U;
 		params->encoder_sample_warning = 0U;
 		params->encoder_sample_error = 0U;
+		commission_obs.encoder_fresh = false;
+		commission_obs.encoder_warning = false;
+		commission_obs.encoder_error = false;
 	}
 	
 	/* Select angle source based on feature flag */
@@ -209,6 +238,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	angle_observer_update(&params->observer, angle_raw_rad);
 	params->encoder_observer_input_rad = angle_raw_rad;
 	params->encoder_input_source = encoder_input_source;
+	speed_mech_filtered_rad_s = angle_observer_get_mech_speed(&params->observer);
 
 	/* Skip control if PWM output not enabled */
 	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PWM_OUTPUT)) {
@@ -218,6 +248,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	Ia_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_0], CURRENT_SENSE_POLARITY_0);
 	Ib_A = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_1], CURRENT_SENSE_POLARITY_1);
 	Vbus_V = adc_to_vbus_v(values[VBUS_ADC_BUFFER_INDEX]);
+	commission_obs.vbus_v = Vbus_V;
 
 	/* Validate bus voltage before reciprocal to avoid Inf/NaN propagation. */
 	if (Vbus_V < VBUS_MIN_VALID_V) {
@@ -357,7 +388,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
 	    state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
 		float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
-		float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_rad_s;
+		speed_mech_filtered_rad_s = filter_so_run(&params->filter_velocity_notch,
+							 speed_mech_rad_s);
+		float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_filtered_rad_s;
 
 		Id_ref_A = params->Id_setpoint_A;
 		Iq_ref_A =
@@ -412,6 +445,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.vbus_v = Vbus_V,
 		.max_modulation_index = params->max_modulation_index,
 		.inv_park_angle_rad = inv_park_angle_rad,
+		.decoupling_enabled = CURRENT_DECOUPLING_ENABLED,
+		.electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer),
+		.ld_h = params->Ld_est,
+		.lq_h = params->Lq_est,
+		.flux_linkage_wb = params->flux_linkage_wb_active,
 		.braking_enabled =
 			atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING),
 		.braking_iq_ref_a = params->Iq_ref_A,
@@ -439,6 +477,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 	Db_hb1_pu = foc_outputs.db_hb1_pu;
 	Db_hb2_pu = foc_outputs.db_hb2_pu;
 	max_voltage_magnitude_V = foc_outputs.max_voltage_magnitude_v;
+	float32_t voltage_norm_sq = Vd_V * Vd_V + Vq_V * Vq_V;
+	float32_t voltage_limit = 0.98f * max_voltage_magnitude_V;
+	bool voltage_saturated = max_voltage_magnitude_V > 0.0f &&
+				 voltage_norm_sq >= (voltage_limit * voltage_limit);
 
 	pwm_out->da_hb1_pu = Da_hb1_pu;
 	pwm_out->da_hb2_pu = Da_hb2_pu;
@@ -451,6 +493,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	/* Update telemetry snapshot (observer already returns rad/rad_s) */
 	params->position_rad = angle_observer_get_mech_angle(&params->observer);
 	params->velocity_rad_s = angle_observer_get_mech_speed(&params->observer);
+	params->velocity_filtered_rad_s = speed_mech_filtered_rad_s;
 	params->velocity_target_rad_s = velocity_target_rad_s;
 	params->velocity_ref_rad_s = velocity_ref_rad_s;
 
@@ -468,6 +511,19 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->elec_angle_rad = inv_park_angle_rad;
 	params->dc_bus_voltage_V = Vbus_V;
 
+	commission_obs.data_valid = true;
+	commission_obs.id_a = Id_A;
+	commission_obs.iq_a = Iq_A;
+	commission_obs.vd_v = Vd_V;
+	commission_obs.vq_v = Vq_V;
+	commission_obs.mech_speed_rad_s = params->velocity_rad_s;
+	commission_obs.elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
+	commission_obs.saturation = voltage_saturated;
+
 isr_done:
+	commission_obs.control_armed = control_armed;
+	commission_obs.state = state;
+	commission_obs.fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
+	motor_commission_update(params, &commission_obs);
 	return;
 }

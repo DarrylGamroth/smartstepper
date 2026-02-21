@@ -32,6 +32,7 @@
 #include "motor_state_utils.h"
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
+#include "motor_commission.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -363,6 +364,10 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
 	params->R_over_L_measured =
 		(params->Ls_measured_H > 0.0f) ? (params->Rs_measured_ohm / params->Ls_measured_H) : 0.0f;
+	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
+	params->inertia_kgm2_active = MOTOR_INERTIA_KGM2;
+	params->viscous_friction_nm_per_rad_s_active = 0.0f;
+	params->coulomb_friction_nm_active = 0.0f;
 	params->Ld_est = MOTOR_INDUCTANCE_D_H;
 	params->Lq_est = MOTOR_INDUCTANCE_Q_H;
 	atomic_set(&params->control_armed, 0);
@@ -374,6 +379,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration_running = false;
 	params->commissioning_complete = false;
 	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+	motor_commission_init(params);
 
 	traj_init(&params->traj_velocity);
 	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);

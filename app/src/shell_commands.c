@@ -19,6 +19,7 @@
 #include "config.h"
 #include "angle_wrap.h"
 #include "shell_commands_motion.h"
+#include "shell_commands_commission.h"
 #include "shell_commands_state.h"
 #include "shell_parse.h"
 
@@ -940,6 +941,33 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_safety,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission flux subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_flux,
+	SHELL_CMD_ARG(run, NULL,
+		      "Run flux capture <min_hz> <max_hz> <steps> <settle_ms> <sample_ms> <iq_limit_a>",
+		      cmd_motor_commission_flux_run, 7, 0),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor commission mech subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
+	SHELL_CMD_ARG(run, NULL,
+		      "Run mechanical capture <coast_hz> <prbs_amp_a> <prbs_period_ms> <duration_ms>",
+		      cmd_motor_commission_mech_run, 5, 0),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor commission subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
+	SHELL_CMD(status, NULL, "Show commissioning status and capture stats", cmd_motor_commission_status),
+	SHELL_CMD(clear, NULL, "Clear commissioning context and captured data", cmd_motor_commission_clear),
+	SHELL_CMD(abort, NULL, "Abort active commissioning run", cmd_motor_commission_abort),
+	SHELL_CMD(apply, NULL, "Apply valid commissioning estimates to active runtime params", cmd_motor_commission_apply),
+	SHELL_CMD(flux, &sub_motor_commission_flux, "Flux-linkage commissioning", NULL),
+	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
+	SHELL_SUBCMD_SET_END
+);
+
 /* Top-level motor command */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(params, &sub_motor_params, "Parameter access", NULL),
@@ -957,6 +985,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(position, &sub_motor_position, "Position control", NULL),
 	SHELL_CMD(profile, &sub_motor_profile, "Motion profile settings", NULL),
 	SHELL_CMD(chopper, &sub_motor_chopper, "Optical chopper utilities", NULL),
+	SHELL_CMD(commission, &sub_motor_commission, "Commissioning workflows", NULL),
 	SHELL_CMD(encoder, &sub_motor_encoder, "Encoder diagnostics", NULL),
 	SHELL_SUBCMD_SET_END
 );

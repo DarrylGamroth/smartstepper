@@ -18,6 +18,7 @@
 #include "rs_online.h"
 #include "traj.h"
 #include "motion_profile.h"
+#include "motor_commission.h"
 #include "motor_events.h"
 #include "motor_states.h"
 #include "prbs.h"
@@ -153,6 +154,10 @@ struct motor_parameters {
 	float32_t R_over_L_measured;
 	float32_t Ls_measured_H;
 	float32_t Rs_measured_ohm;
+	float32_t flux_linkage_wb_active;             /* Active psi_f used by FOC */
+	float32_t inertia_kgm2_active;                /* Active inertia estimate */
+	float32_t viscous_friction_nm_per_rad_s_active; /* Active viscous friction */
+	float32_t coulomb_friction_nm_active;         /* Active Coulomb friction */
 
 	/* R/L estimation accumulators and angle generator */
 	float32_t roverl_accumulator_Vd_Id;
@@ -180,6 +185,7 @@ struct motor_parameters {
 	bool calibration_running;   /* True while calibration/commissioning state machine is active */
 	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
 	uint8_t calibration_mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
+	struct motor_commission_ctx commission; /* Commissioning runtime and capture buffers */
 
 	/* ISR feature flags (atomic for thread-safe access) */
 	atomic_t feature_flags;

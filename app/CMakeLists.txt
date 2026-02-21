@@ -21,8 +21,10 @@ target_sources(app PRIVATE
 	src/shell_motion_profile.c
 	src/shell_motion_sequence.c
 	src/shell_motion_chopper_calib.c
+	src/shell_motion_commission.c
 	src/motor_control_api.c
 	src/motor_rls_runtime.c
+	src/motor_commission.c
 	src/motor_encoder_pipeline.c
 	src/motor_control_loop.c
 	src/motor_isr_io.c
