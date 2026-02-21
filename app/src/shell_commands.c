@@ -930,6 +930,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper,
 /* motor encoder subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
+	SHELL_CMD(pipeline, NULL, "Show encoder RTIO pipeline status/counters",
+		  cmd_motor_encoder_pipeline),
+	SHELL_CMD(pipeline_reset, NULL, "Reset encoder RTIO pipeline counters",
+		  cmd_motor_encoder_pipeline_reset),
 	SHELL_SUBCMD_SET_END
 );
 

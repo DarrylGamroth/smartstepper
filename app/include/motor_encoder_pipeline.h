@@ -19,6 +19,17 @@ struct motor_encoder_sample {
 	bool fresh;
 };
 
+struct motor_encoder_pipeline_stats {
+	uint32_t request_ok;
+	uint32_t request_busy;
+	uint32_t request_disabled;
+	uint32_t request_error;
+	uint32_t collect_ok;
+	uint32_t collect_pending;
+	uint32_t collect_empty;
+	uint32_t collect_error;
+};
+
 /**
  * @brief Enable or disable async encoder read requests.
  *
@@ -37,6 +48,16 @@ bool motor_encoder_pipeline_is_enabled(void);
  * @brief Return true when one async encoder read is currently in flight.
  */
 bool motor_encoder_pipeline_is_busy(void);
+
+/**
+ * @brief Get a snapshot of encoder pipeline counters.
+ */
+void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats);
+
+/**
+ * @brief Reset encoder pipeline counters to zero.
+ */
+void motor_encoder_pipeline_reset_stats(void);
 
 /**
  * @brief Request one async encoder read if enabled and not already in flight.

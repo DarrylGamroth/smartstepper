@@ -649,6 +649,40 @@ int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* motor encoder pipeline */
+int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct motor_encoder_pipeline_stats stats = {0};
+	motor_encoder_pipeline_get_stats(&stats);
+
+	shell_print(sh, "Encoder RTIO pipeline:");
+	shell_print(sh, "  State:    %s, %s",
+		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
+		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
+	shell_print(sh, "  Request:  ok=%u busy=%u disabled=%u error=%u",
+		    stats.request_ok, stats.request_busy,
+		    stats.request_disabled, stats.request_error);
+	shell_print(sh, "  Collect:  ok=%u pending=%u empty=%u error=%u",
+		    stats.collect_ok, stats.collect_pending,
+		    stats.collect_empty, stats.collect_error);
+
+	return 0;
+}
+
+/* motor encoder pipeline_reset */
+int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	motor_encoder_pipeline_reset_stats();
+	shell_print(sh, "Encoder RTIO pipeline counters reset");
+	return 0;
+}
+
 /* motor encoder alarm */
 int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
 {
