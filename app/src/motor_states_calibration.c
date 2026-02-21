@@ -32,6 +32,20 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 	params->feature_flags_next &= ~mask;
 }
 
+static inline bool motor_calibration_timeout_elapsed(struct motor_parameters *params)
+{
+	if (params->event.type == MOTOR_EVENT_TIMEOUT) {
+		return true;
+	}
+
+	if (k_timer_status_get(&params->state_timer) > 0U) {
+		LOG_WRN("State timer expired without queued timeout event; proceeding");
+		return true;
+	}
+
+	return false;
+}
+
 /* State: CALIBRATION - Hierarchical parent state for all calibration sub-states */
 void motor_state_calibration_entry(void *obj)
 {
@@ -114,9 +128,7 @@ enum smf_state_result motor_state_offset_meas_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Process current event */
-	switch (params->event.type) {
-	case MOTOR_EVENT_TIMEOUT:
+	if (motor_calibration_timeout_elapsed(params)) {
 		/* Offset measurement complete */
 		if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
@@ -124,11 +136,10 @@ enum smf_state_result motor_state_offset_meas_run(void *obj)
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
 		}
 		return SMF_EVENT_HANDLED;
-
-	default:
-		/* Propagate unhandled events */
-		return SMF_EVENT_PROPAGATE;
 	}
+
+	/* Propagate unhandled events */
+	return SMF_EVENT_PROPAGATE;
 }
 
 /* State: ROVERL_MEAS - Measure R/L time constant via sinusoidal excitation (TI method) */
@@ -182,9 +193,7 @@ enum smf_state_result motor_state_roverl_meas_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Process current event */
-	switch (params->event.type) {
-	case MOTOR_EVENT_TIMEOUT:
+	if (motor_calibration_timeout_elapsed(params)) {
 		if (params->roverl_accumulator_Id2 <= 1e-9f) {
 			LOG_ERR("RoverL failed: insufficient excitation (sum(Id^2)=%.3e)",
 				(double)params->roverl_accumulator_Id2);
@@ -237,11 +246,10 @@ enum smf_state_result motor_state_roverl_meas_run(void *obj)
 
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_RS_EST]);
 		return SMF_EVENT_HANDLED;
-
-	default:
-		/* Propagate unhandled events */
-		return SMF_EVENT_PROPAGATE;
 	}
+
+	/* Propagate unhandled events */
+	return SMF_EVENT_PROPAGATE;
 }
 
 void motor_state_roverl_meas_exit(void *obj)
@@ -318,9 +326,7 @@ enum smf_state_result motor_state_rs_est_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Process current event */
-	switch (params->event.type) {
-	case MOTOR_EVENT_TIMEOUT:
+	if (motor_calibration_timeout_elapsed(params)) {
 		/* Get final filtered values */
 		float32_t V_est = filter_fo_get_y1(&params->filter_rs_est_V);
 		float32_t I_est = filter_fo_get_y1(&params->filter_rs_est_I);
@@ -343,11 +349,10 @@ enum smf_state_result motor_state_rs_est_run(void *obj)
 
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
 		return SMF_EVENT_HANDLED;
-
-	default:
-		/* Propagate unhandled events */
-		return SMF_EVENT_PROPAGATE;
 	}
+
+	/* Propagate unhandled events */
+	return SMF_EVENT_PROPAGATE;
 }
 
 void motor_state_rs_est_exit(void *obj)
@@ -399,17 +404,14 @@ enum smf_state_result motor_state_align_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	/* Process current event */
-	switch (params->event.type) {
-	case MOTOR_EVENT_TIMEOUT:
+	if (motor_calibration_timeout_elapsed(params)) {
 		/* Move to Phase 2: switch observer input to encoder and let it converge. */
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_SAMPLE]);
 		return SMF_EVENT_HANDLED;
-
-	default:
-		/* Propagate unhandled events */
-		return SMF_EVENT_PROPAGATE;
 	}
+
+	/* Propagate unhandled events */
+	return SMF_EVENT_PROPAGATE;
 }
 
 void motor_state_align_exit(void *obj)
@@ -446,8 +448,7 @@ enum smf_state_result motor_state_align_sample_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	switch (params->event.type) {
-	case MOTOR_EVENT_TIMEOUT: {
+	if (motor_calibration_timeout_elapsed(params)) {
 		/* Get the current mechanical angle from the observer (now encoder-driven). */
 		float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
 
@@ -475,9 +476,7 @@ enum smf_state_result motor_state_align_sample_run(void *obj)
 		return SMF_EVENT_HANDLED;
 	}
 
-	default:
-		return SMF_EVENT_PROPAGATE;
-	}
+	return SMF_EVENT_PROPAGATE;
 }
 
 void motor_state_align_sample_exit(void *obj)
