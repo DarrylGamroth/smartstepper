@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_identification.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - commissioning
+      - identification
+    harness: ztest
+    integration_platforms:
+      - native_sim

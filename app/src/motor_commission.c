@@ -11,6 +11,7 @@
 
 #include "motor_commission.h"
 #include "config.h"
+#include "motor_identification.h"
 #include "motor_state_utils.h"
 #include "motor_states.h"
 
@@ -21,69 +22,6 @@
 #define MOTOR_COMMISSION_MIN_SPEED_RAD_S (2.0f * PI_F32)
 #define MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S 0.5f
 #define MOTOR_COMMISSION_MIN_KT_NM_PER_A 1.0e-6f
-
-static bool motor_commission_solve_4x4(float32_t A[4][4], float32_t b[4], float32_t x[4])
-{
-	float32_t aug[4][5];
-
-	for (uint32_t i = 0U; i < 4U; i++) {
-		for (uint32_t j = 0U; j < 4U; j++) {
-			aug[i][j] = A[i][j];
-		}
-		aug[i][4] = b[i];
-	}
-
-	for (uint32_t col = 0U; col < 4U; col++) {
-		uint32_t pivot = col;
-		float32_t pivot_abs = fabsf(aug[pivot][col]);
-
-		for (uint32_t row = col + 1U; row < 4U; row++) {
-			float32_t a = fabsf(aug[row][col]);
-			if (a > pivot_abs) {
-				pivot = row;
-				pivot_abs = a;
-			}
-		}
-
-		if (pivot_abs < 1.0e-9f) {
-			return false;
-		}
-
-		if (pivot != col) {
-			for (uint32_t j = col; j < 5U; j++) {
-				float32_t tmp = aug[col][j];
-				aug[col][j] = aug[pivot][j];
-				aug[pivot][j] = tmp;
-			}
-		}
-
-		float32_t inv_pivot = 1.0f / aug[col][col];
-		for (uint32_t j = col; j < 5U; j++) {
-			aug[col][j] *= inv_pivot;
-		}
-
-		for (uint32_t row = 0U; row < 4U; row++) {
-			if (row == col) {
-				continue;
-			}
-
-			float32_t f = aug[row][col];
-			if (f == 0.0f) {
-				continue;
-			}
-
-			for (uint32_t j = col; j < 5U; j++) {
-				aug[row][j] -= f * aug[col][j];
-			}
-		}
-	}
-
-	for (uint32_t i = 0U; i < 4U; i++) {
-		x[i] = aug[i][4];
-	}
-
-	return true;
-}
 
 static inline uint32_t motor_commission_default_decimation(void)
 {
@@ -167,102 +105,68 @@ static void motor_commission_estimate_flux(struct motor_parameters *params)
 {
 	struct motor_commission_ctx *ctx = &params->commission;
 	struct motor_commission_results *res = &ctx->results;
-	float32_t rs = params->Rs_measured_ohm;
-	float32_t ld = params->Ld_est;
-	float32_t lq = params->Lq_est;
-	float32_t sx = 0.0f;
-	float32_t sy = 0.0f;
-	float32_t sxx = 0.0f;
-	float32_t sxy = 0.0f;
-	float32_t min_x = 1.0e30f;
-	float32_t max_x = -1.0e30f;
-	uint32_t n = 0U;
+	struct motor_flux_id_state estimator;
+	struct motor_flux_id_result estimate;
+	const struct motor_flux_id_config cfg = {
+		.rs_ohm = params->Rs_measured_ohm,
+		.ld_h = params->Ld_est,
+		.lq_h = params->Lq_est,
+		.min_abs_speed_rad_s = MOTOR_COMMISSION_MIN_SPEED_RAD_S,
+		.min_speed_span_rad_s = 2.0f * MOTOR_COMMISSION_MIN_SPEED_RAD_S,
+		.min_samples = MOTOR_COMMISSION_MIN_FLUX_SAMPLES,
+		.min_r2 = 0.2f,
+		.require_positive_psi = true,
+	};
 
 	res->psi_f_valid = false;
 	res->psi_f_sample_count = 0U;
+	res->psi_f_wb = 0.0f;
 	res->psi_f_bias_v = 0.0f;
 	res->psi_f_residual_rms_v = 0.0f;
 	res->psi_f_r2 = 0.0f;
 
+	motor_flux_id_init(&estimator, &cfg);
 	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
 		const struct motor_commission_sample *s = &ctx->samples[i];
-		float32_t x = s->elec_speed_rad_s;
-
-		if (!isfinite(x) || !isfinite(s->id_a) || !isfinite(s->iq_a) ||
-		    !isfinite(s->diq_dt_a_s) || !isfinite(s->vq_v)) {
-			continue;
-		}
-		if (fabsf(x) < MOTOR_COMMISSION_MIN_SPEED_RAD_S) {
-			continue;
-		}
-
-		float32_t y = s->vq_v - rs * s->iq_a - lq * s->diq_dt_a_s - x * ld * s->id_a;
-		sx += x;
-		sy += y;
-		sxx += x * x;
-		sxy += x * y;
-		min_x = MIN(min_x, x);
-		max_x = MAX(max_x, x);
-		n++;
+		(void)motor_flux_id_accumulate(&estimator, s->elec_speed_rad_s, s->id_a, s->iq_a,
+					       s->diq_dt_a_s, s->vq_v);
 	}
 
-	res->psi_f_sample_count = (uint16_t)MIN(n, UINT16_MAX);
-	if (n < MOTOR_COMMISSION_MIN_FLUX_SAMPLES ||
-	    (max_x - min_x) < (2.0f * MOTOR_COMMISSION_MIN_SPEED_RAD_S)) {
+	if (motor_flux_id_finalize(&estimator, &estimate) < 0) {
 		return;
 	}
 
-	float32_t n_f = (float32_t)n;
-	float32_t den = n_f * sxx - sx * sx;
-	if (fabsf(den) < 1.0e-8f) {
-		return;
-	}
-
-	float32_t psi_f = (n_f * sxy - sx * sy) / den;
-	float32_t bias = (sy - psi_f * sx) / n_f;
-	float32_t y_mean = sy / n_f;
-	float32_t sse = 0.0f;
-	float32_t sst = 0.0f;
-
-	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
-		const struct motor_commission_sample *s = &ctx->samples[i];
-		float32_t x = s->elec_speed_rad_s;
-
-		if (fabsf(x) < MOTOR_COMMISSION_MIN_SPEED_RAD_S) {
-			continue;
-		}
-
-		float32_t y = s->vq_v - rs * s->iq_a - lq * s->diq_dt_a_s - x * ld * s->id_a;
-		float32_t y_hat = psi_f * x + bias;
-		float32_t e = y - y_hat;
-		float32_t d = y - y_mean;
-		sse += e * e;
-		sst += d * d;
-	}
-
-	res->psi_f_wb = psi_f;
-	res->psi_f_bias_v = bias;
-	res->psi_f_residual_rms_v = sqrtf(sse / n_f);
-	res->psi_f_r2 = (sst > 1.0e-8f) ? (1.0f - sse / sst) : 0.0f;
-	res->psi_f_valid =
-		isfinite(psi_f) && psi_f > 0.0f && isfinite(res->psi_f_r2) && res->psi_f_r2 > 0.2f;
+	res->psi_f_sample_count = estimate.sample_count;
+	res->psi_f_wb = estimate.psi_f_wb;
+	res->psi_f_bias_v = estimate.bias_v;
+	res->psi_f_residual_rms_v = estimate.residual_rms_v;
+	res->psi_f_r2 = estimate.r2;
+	res->psi_f_valid = estimate.valid;
 }
 
 static void motor_commission_estimate_mech(struct motor_parameters *params)
 {
 	struct motor_commission_ctx *ctx = &params->commission;
 	struct motor_commission_results *res = &ctx->results;
-	float32_t psi_f = res->psi_f_valid ? res->psi_f_wb : params->flux_linkage_wb_active;
-	float32_t kt = 1.5f * (float32_t)MOTOR_POLE_PAIRS * psi_f;
-	float32_t A[4][4] = {0};
-	float32_t b[4] = {0};
-	float32_t theta[4] = {0};
-	uint32_t n = 0U;
-	float32_t sum_z = 0.0f;
-	float32_t sum_z2 = 0.0f;
+	struct motor_mech_id_state estimator;
+	struct motor_mech_id_result estimate;
+	const float32_t psi_f = res->psi_f_valid ? res->psi_f_wb : params->flux_linkage_wb_active;
+	const float32_t kt = 1.5f * (float32_t)MOTOR_POLE_PAIRS * psi_f;
+	const struct motor_mech_id_config cfg = {
+		.kt_nm_per_a = kt,
+		.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
+		.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
+		.min_r2 = 0.0f,
+		.require_positive_inertia = true,
+		.require_nonnegative_viscous = true,
+	};
 
 	res->mech_valid = false;
 	res->mech_sample_count = 0U;
+	res->inertia_kgm2 = 0.0f;
+	res->viscous_friction_nm_per_rad_s = 0.0f;
+	res->coulomb_friction_nm = 0.0f;
+	res->offset_friction_nm = 0.0f;
 	res->mech_residual_rms_nm = 0.0f;
 	res->mech_r2 = 0.0f;
 
@@ -270,84 +174,25 @@ static void motor_commission_estimate_mech(struct motor_parameters *params)
 		return;
 	}
 
+	motor_mech_id_init(&estimator, &cfg);
 	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
 		const struct motor_commission_sample *s = &ctx->samples[i];
-
-		if (!isfinite(s->mech_speed_rad_s) || !isfinite(s->mech_accel_rad_s2) ||
-		    !isfinite(s->iq_a)) {
-			continue;
-		}
-
-		float32_t sign_term = 0.0f;
-		if (s->mech_speed_rad_s > MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
-			sign_term = 1.0f;
-		} else if (s->mech_speed_rad_s < -MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
-			sign_term = -1.0f;
-		}
-
-		float32_t phi[4] = {
-			s->mech_accel_rad_s2,
-			s->mech_speed_rad_s,
-			sign_term,
-			1.0f,
-		};
-		float32_t z = kt * s->iq_a;
-
-		for (uint32_t r = 0U; r < 4U; r++) {
-			b[r] += phi[r] * z;
-			for (uint32_t c = 0U; c < 4U; c++) {
-				A[r][c] += phi[r] * phi[c];
-			}
-		}
-
-		sum_z += z;
-		sum_z2 += z * z;
-		n++;
+		(void)motor_mech_id_accumulate(&estimator, s->mech_speed_rad_s,
+					       s->mech_accel_rad_s2, s->iq_a);
 	}
 
-	res->mech_sample_count = (uint16_t)MIN(n, UINT16_MAX);
-	if (n < MOTOR_COMMISSION_MIN_MECH_SAMPLES) {
-		return;
-	}
-	if (!motor_commission_solve_4x4(A, b, theta)) {
+	if (motor_mech_id_finalize(&estimator, &estimate) < 0) {
 		return;
 	}
 
-	float32_t sse = 0.0f;
-	float32_t mean_z = sum_z / (float32_t)n;
-	float32_t sst = sum_z2 - (float32_t)n * mean_z * mean_z;
-
-	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
-		const struct motor_commission_sample *s = &ctx->samples[i];
-		float32_t sign_term = 0.0f;
-		if (s->mech_speed_rad_s > MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
-			sign_term = 1.0f;
-		} else if (s->mech_speed_rad_s < -MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
-			sign_term = -1.0f;
-		}
-		float32_t phi[4] = {
-			s->mech_accel_rad_s2,
-			s->mech_speed_rad_s,
-			sign_term,
-			1.0f,
-		};
-		float32_t z = kt * s->iq_a;
-		float32_t z_hat = theta[0] * phi[0] + theta[1] * phi[1] + theta[2] * phi[2] +
-				  theta[3] * phi[3];
-		float32_t e = z - z_hat;
-		sse += e * e;
-	}
-
-	res->inertia_kgm2 = theta[0];
-	res->viscous_friction_nm_per_rad_s = theta[1];
-	res->coulomb_friction_nm = fabsf(theta[2]);
-	res->offset_friction_nm = theta[3];
-	res->mech_residual_rms_nm = sqrtf(sse / (float32_t)n);
-	res->mech_r2 = (sst > 1.0e-8f) ? (1.0f - sse / sst) : 0.0f;
-	res->mech_valid = isfinite(res->inertia_kgm2) && res->inertia_kgm2 > 0.0f &&
-			  isfinite(res->viscous_friction_nm_per_rad_s) &&
-			  res->viscous_friction_nm_per_rad_s >= 0.0f && isfinite(res->mech_r2) &&
-			  res->mech_r2 > 0.0f;
+	res->mech_sample_count = estimate.sample_count;
+	res->inertia_kgm2 = estimate.inertia_kgm2;
+	res->viscous_friction_nm_per_rad_s = estimate.viscous_friction_nm_per_rad_s;
+	res->coulomb_friction_nm = estimate.coulomb_friction_nm;
+	res->offset_friction_nm = estimate.offset_friction_nm;
+	res->mech_residual_rms_nm = estimate.residual_rms_nm;
+	res->mech_r2 = estimate.r2;
+	res->mech_valid = estimate.valid;
 }
 
 static void motor_commission_finalize(struct motor_parameters *params)
