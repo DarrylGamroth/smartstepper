@@ -19,6 +19,7 @@
 #include "motor_state_utils.h"
 #include "motor_autonomy.h"
 #include "motor_hardware.h"
+#include "motor_encoder_pipeline.h"
 #include "config.h"
 #include "angle_wrap.h"
 #include "shell_parse.h"
@@ -594,6 +595,9 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    g_motor_params->encoder_last_status,
 		    g_motor_params->encoder_sample_warning ? "SET" : "CLEAR",
 		    g_motor_params->encoder_sample_error ? "SET" : "CLEAR");
+	shell_print(sh, "  Enc pipeline:   %s, %s",
+		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
+		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
 	shell_print(sh, "  Enc flag count: warn=%u err=%u",
 		    g_motor_params->encoder_warning_count,
 		    g_motor_params->encoder_error_count);

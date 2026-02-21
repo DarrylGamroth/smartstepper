@@ -61,10 +61,30 @@ static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *sta
 
 SENSOR_DT_READ_IODEV(motor_encoder_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(motor_encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
+static atomic_t motor_encoder_pipeline_enabled;
 static atomic_t motor_encoder_read_in_flight;
 
-int motor_encoder_pipeline_kick(void)
+void motor_encoder_pipeline_set_enabled(bool enabled)
 {
+	atomic_set(&motor_encoder_pipeline_enabled, enabled ? 1 : 0);
+}
+
+bool motor_encoder_pipeline_is_enabled(void)
+{
+	return atomic_get(&motor_encoder_pipeline_enabled) != 0;
+}
+
+bool motor_encoder_pipeline_is_busy(void)
+{
+	return atomic_get(&motor_encoder_read_in_flight) != 0;
+}
+
+int motor_encoder_pipeline_request_sample(void)
+{
+	if (!motor_encoder_pipeline_is_enabled()) {
+		return -ESHUTDOWN;
+	}
+
 	if (atomic_cas(&motor_encoder_read_in_flight, 0, 1) == 0) {
 		return -EALREADY;
 	}
@@ -78,10 +98,11 @@ int motor_encoder_pipeline_kick(void)
 	return 0;
 }
 
-int motor_encoder_pipeline_poll(struct motor_encoder_sample *sample)
+int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 {
+	struct motor_encoder_sample scratch = {0};
 	if (sample == NULL) {
-		return -EINVAL;
+		sample = &scratch;
 	}
 
 	memset(sample, 0, sizeof(*sample));

@@ -68,7 +68,7 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	timing_t cycles_start = timing_counter_get();
 
 	struct motor_control_encoder_sample encoder_sample = {
-		.enabled = atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ),
+		.enabled = false,
 		.fresh = false,
 		.warning = false,
 		.error = false,
@@ -77,16 +77,25 @@ void adc_callback(const struct device *dev, const q31_t *values,
 		.angle_deg = 0.0f,
 	};
 
-	if (encoder_sample.enabled) {
-		struct motor_encoder_sample sample = {0};
-		int ret = motor_encoder_pipeline_poll(&sample);
+	bool encoder_enabled =
+		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
+	/* Publish policy then always collect once to drain any completed CQE/buffer,
+	 * even if encoder reads were just disabled this cycle.
+	 */
+	motor_encoder_pipeline_set_enabled(encoder_enabled);
 
+	struct motor_encoder_sample sample = {0};
+	int ret = motor_encoder_pipeline_collect(&sample);
+
+	encoder_sample.enabled = encoder_enabled;
+	if (encoder_enabled) {
 		encoder_sample.angle_deg = sample.angle_deg;
 		encoder_sample.status = sample.status;
 		encoder_sample.warning = sample.warning;
 		encoder_sample.error = sample.error;
 		encoder_sample.fresh = (ret == 0);
-		encoder_sample.io_fault = (ret < 0 && ret != -EAGAIN);
+		encoder_sample.io_fault =
+			(ret < 0 && ret != -EAGAIN && ret != -ENODATA);
 	}
 
 	struct motor_control_pwm_output pwm_out = {0};
@@ -122,8 +131,11 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	/* Trigger continuous encoder reads when feature is enabled
 	 * This keeps SPI bus free during calibration and reduces interrupt load.
 	 */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ)) {
-		int ret = motor_encoder_pipeline_kick();
+	bool encoder_enabled =
+		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
+	motor_encoder_pipeline_set_enabled(encoder_enabled);
+	if (encoder_enabled) {
+		int ret = motor_encoder_pipeline_request_sample();
 		if (ret < 0 && ret != -EALREADY) {
 			params->encoder_fault_counter++;
 		}
