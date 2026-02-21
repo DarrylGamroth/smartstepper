@@ -485,7 +485,8 @@ void motor_state_align_sample_exit(void *obj)
 
 	LOG_INF("Exiting ALIGN_SAMPLE state");
 
-	/* Clear this phase's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-			      BIT(MOTOR_FEATURE_PI_CONTROL));
+	/* Keep encoder read active across this boundary to avoid tearing down SPI
+	 * while an asynchronous encoder transfer is completing.
+	 */
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PI_CONTROL));
 }
