@@ -13,6 +13,10 @@
 
 #include "pwmgen.h"
 
+#define DECOUPLING_FLUX_BACKEMF_HEADROOM_RATIO 0.60f
+#define DECOUPLING_TOTAL_FEEDFORWARD_LIMIT_RATIO 0.70f
+#define DECOUPLING_MIN_SPEED_FOR_FLUX_CLAMP_RAD_S 1.0f
+
 int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 			       const struct motor_foc_voltage_pwm_inputs *in,
 			       struct motor_foc_voltage_pwm_outputs *out)
@@ -27,10 +31,47 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	float32_t sin_theta;
 	float32_t cos_theta;
 	float32_t ctrl_angle_deg;
+	float32_t vd_ff_v = 0.0f;
+	float32_t vq_ff_v = 0.0f;
+	float32_t max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
 
-	out->max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
+	if (in->decoupling_enabled) {
+		float32_t omega_elec = in->electrical_speed_rad_s;
+		float32_t ld_h = fmaxf(in->ld_h, 0.0f);
+		float32_t lq_h = fmaxf(in->lq_h, 0.0f);
+		float32_t psi_f_wb = in->flux_linkage_wb;
+
+		if (!isfinite(psi_f_wb) || psi_f_wb < 0.0f) {
+			psi_f_wb = 0.0f;
+		}
+
+		float32_t omega_abs = fabsf(omega_elec);
+		if (omega_abs > DECOUPLING_MIN_SPEED_FOR_FLUX_CLAMP_RAD_S) {
+			float32_t psi_f_max_wb =
+				(DECOUPLING_FLUX_BACKEMF_HEADROOM_RATIO * max_voltage_magnitude_v) /
+				omega_abs;
+			psi_f_wb = fminf(psi_f_wb, psi_f_max_wb);
+		}
+
+		vd_ff_v = -(omega_elec * lq_h * in->iq_a);
+		vq_ff_v = omega_elec * ((ld_h * in->id_a) + psi_f_wb);
+
+		/* Keep feedforward bounded so PI still has regulation headroom. */
+		float32_t ff_limit_v =
+			DECOUPLING_TOTAL_FEEDFORWARD_LIMIT_RATIO * max_voltage_magnitude_v;
+		float32_t ff_mag_sq = vd_ff_v * vd_ff_v + vq_ff_v * vq_ff_v;
+		if (ff_limit_v > 0.0f && ff_mag_sq > (ff_limit_v * ff_limit_v)) {
+			float32_t scale = ff_limit_v / sqrtf(ff_mag_sq);
+			vd_ff_v *= scale;
+			vq_ff_v *= scale;
+		}
+	}
+
+	out->max_voltage_magnitude_v = max_voltage_magnitude_v;
+	out->vd_ff_v = vd_ff_v;
+	out->vq_ff_v = vq_ff_v;
 	pi_set_min_max(pi_id, -out->max_voltage_magnitude_v, out->max_voltage_magnitude_v);
-	pi_run_series(pi_id, in->id_ref_a, in->id_a, 0.0f, &out->vd_v);
+	pi_run_series(pi_id, in->id_ref_a, in->id_a, vd_ff_v, &out->vd_v);
 
 	float32_t vq_limit_sq = (out->max_voltage_magnitude_v * out->max_voltage_magnitude_v) -
 				(out->vd_v * out->vd_v);
@@ -39,7 +80,7 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	}
 	out->vq_limit_v = sqrtf(vq_limit_sq);
 	pi_set_min_max(pi_iq, -out->vq_limit_v, out->vq_limit_v);
-	pi_run_series(pi_iq, in->iq_ref_a, in->iq_a, 0.0f, &out->vq_v);
+	pi_run_series(pi_iq, in->iq_ref_a, in->iq_a, vq_ff_v, &out->vq_v);
 
 	/* CMSIS arm_sin_cos_f32 expects angle in degrees. */
 	ctrl_angle_deg = in->inv_park_angle_rad * (180.0f / PI_F32);
