@@ -21,6 +21,7 @@
 #include "motor_commission.h"
 #include "motor_events.h"
 #include "motor_states.h"
+#include "motor_mpr.h"
 #include "prbs.h"
 #include "rls_motor_est.h"
 #include "thermal_model.h"
@@ -43,6 +44,9 @@
 
 #define MOTOR_CALIBRATION_MODE_BOOT 0U
 #define MOTOR_CALIBRATION_MODE_COMMISSIONING 1U
+
+#define MOTOR_OUTER_LOOP_MODE_PI 0U
+#define MOTOR_OUTER_LOOP_MODE_MPR 1U
 
 /**
  * @brief Main motor control parameters structure
@@ -144,6 +148,7 @@ struct motor_parameters {
 	float32_t chopper_blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
+	uint8_t outer_loop_mode;                /* MOTOR_OUTER_LOOP_MODE_* */
 	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */
 	float32_t velocity_cl_ki_A_per_rad;     /* Velocity I gain: speed error integral -> Iq reference */
 	float32_t velocity_cl_iq_limit_A;       /* Closed-loop velocity Iq limit */
@@ -153,6 +158,10 @@ struct motor_parameters {
 	float32_t position_cl_i_term_rad_s;     /* Position PI integrator state */
 	float32_t profile_max_velocity_rad_s;   /* Motion profile velocity limit */
 	float32_t profile_max_accel_rad_s2;     /* Motion profile acceleration limit */
+	struct motor_mpr_velocity_config velocity_mpr_cfg; /* Velocity MPR tuning */
+	struct motor_mpr_velocity_state velocity_mpr_state; /* Velocity MPR runtime */
+	struct motor_mpr_position_config position_mpr_cfg; /* Position MPR tuning */
+	struct motor_mpr_position_state position_mpr_state; /* Position MPR runtime */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
@@ -357,6 +366,11 @@ struct motor_parameters {
 #define COMMAND_TIMEOUT_DEFAULT_MS 1000U
 #define CURRENT_DECOUPLING_ENABLED IS_ENABLED(CONFIG_MOTOR_CURRENT_DECOUPLING)
 #define VELOCITY_NOTCH_FILTER_ENABLED IS_ENABLED(CONFIG_MOTOR_VELOCITY_NOTCH_FILTER)
+#if defined(CONFIG_MOTOR_OUTER_LOOP_MPR)
+#define OUTER_LOOP_MPR_DEFAULT_ENABLED IS_ENABLED(CONFIG_MOTOR_OUTER_LOOP_MPR)
+#else
+#define OUTER_LOOP_MPR_DEFAULT_ENABLED 1
+#endif
 #if defined(CONFIG_MOTOR_VELOCITY_NOTCH_FREQ_HZ)
 #define VELOCITY_NOTCH_FREQ_HZ_CFG ((float32_t)CONFIG_MOTOR_VELOCITY_NOTCH_FREQ_HZ)
 #else

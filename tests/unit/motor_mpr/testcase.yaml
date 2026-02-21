@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_mpr.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - control
+      - mpr
+    harness: ztest
+    integration_platforms:
+      - native_sim

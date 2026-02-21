@@ -630,9 +630,29 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	shell_print(sh, "  Error:      %.2f Hz", (double)error_hz);
 	shell_print(sh, "  At Target:  %s", at_target ? "YES" : "NO");
 	shell_print(sh, "  Motion:     %s", motion_str);
-	shell_print(sh, "  Kp:         %.5f A/(rad/s)", (double)g_motor_params->velocity_cl_kp_A_per_rad_s);
-	shell_print(sh, "  Ki:         %.5f A/rad", (double)g_motor_params->velocity_cl_ki_A_per_rad);
-	shell_print(sh, "  I term:     %.5f A", (double)g_motor_params->velocity_cl_i_term_A);
+	shell_print(sh, "  Outer loop: %s",
+		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?
+			    "MPR" :
+			    "PI");
+	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
+		shell_print(sh, "  MPR q/r:    %.4f / %.4f",
+			    (double)g_motor_params->velocity_mpr_cfg.q_speed,
+			    (double)g_motor_params->velocity_mpr_cfg.r_delta_iq);
+		shell_print(sh, "  Horizon:    %u", g_motor_params->velocity_mpr_cfg.horizon);
+		shell_print(sh, "  dIq max:    %.4f A/sample",
+			    (double)g_motor_params->velocity_mpr_cfg.max_delta_iq_a);
+		shell_print(sh, "  Dist KI:    %.4f Nm/(rad/s)",
+			    (double)g_motor_params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s);
+		shell_print(sh, "  Iq cmd:     %.5f A",
+			    (double)g_motor_params->velocity_mpr_state.iq_cmd_a);
+	} else {
+		shell_print(sh, "  Kp:         %.5f A/(rad/s)",
+			    (double)g_motor_params->velocity_cl_kp_A_per_rad_s);
+		shell_print(sh, "  Ki:         %.5f A/rad",
+			    (double)g_motor_params->velocity_cl_ki_A_per_rad);
+		shell_print(sh, "  I term:     %.5f A",
+			    (double)g_motor_params->velocity_cl_i_term_A);
+	}
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
 
 	return 0;
@@ -654,6 +674,10 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
+	}
+	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
+		shell_warn(sh,
+			   "outer_loop_mode=MPR; velocity PI gains are inactive unless outer_loop_mode is set to 0");
 	}
 
 	if (strcmp(argv[1], "defaults") == 0) {
@@ -839,9 +863,28 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 		    motion_profile_quintic_is_active(&g_motor_params->position_profile) ?
 			    "ACTIVE" :
 			    (g_motor_params->position_profile.valid ? "COMPLETE" : "OFF"));
-	shell_print(sh, "  Kp:         %.5f (rad/s)/rad", (double)g_motor_params->position_cl_kp_rad_s_per_rad);
-	shell_print(sh, "  Ki:         %.5f (rad/s^2)/rad", (double)g_motor_params->position_cl_ki_rad_s2_per_rad);
-	shell_print(sh, "  I term:     %.5f rad/s", (double)g_motor_params->position_cl_i_term_rad_s);
+	shell_print(sh, "  Outer loop: %s",
+		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?
+			    "MPR" :
+			    "PI");
+	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
+		shell_print(sh, "  MPR q_pos:  %.4f", (double)g_motor_params->position_mpr_cfg.q_position);
+		shell_print(sh, "  MPR q_vel:  %.4f", (double)g_motor_params->position_mpr_cfg.q_velocity_ff);
+		shell_print(sh, "  MPR r:      %.4f",
+			    (double)g_motor_params->position_mpr_cfg.r_delta_velocity);
+		shell_print(sh, "  Horizon:    %u", g_motor_params->position_mpr_cfg.horizon);
+		shell_print(sh, "  dVel max:   %.4f rad/s/sample",
+			    (double)g_motor_params->position_mpr_cfg.max_delta_velocity_rad_s);
+		shell_print(sh, "  Vel cmd:    %.4f rad/s",
+			    (double)g_motor_params->position_mpr_state.velocity_cmd_rad_s);
+	} else {
+		shell_print(sh, "  Kp:         %.5f (rad/s)/rad",
+			    (double)g_motor_params->position_cl_kp_rad_s_per_rad);
+		shell_print(sh, "  Ki:         %.5f (rad/s^2)/rad",
+			    (double)g_motor_params->position_cl_ki_rad_s2_per_rad);
+		shell_print(sh, "  I term:     %.5f rad/s",
+			    (double)g_motor_params->position_cl_i_term_rad_s);
+	}
 	return 0;
 }
 
@@ -861,6 +904,10 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
+	}
+	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
+		shell_warn(sh,
+			   "outer_loop_mode=MPR; position PI gains are inactive unless outer_loop_mode is set to 0");
 	}
 
 	if (strcmp(argv[1], "defaults") == 0) {

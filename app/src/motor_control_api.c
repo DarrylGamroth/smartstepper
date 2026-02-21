@@ -28,6 +28,17 @@ enum motor_param_id {
 	PARAM_ID_VELOCITY_IQ_LIMIT_A,
 	PARAM_ID_POSITION_KP_RAD_S_PER_RAD,
 	PARAM_ID_POSITION_KI_RAD_S2_PER_RAD,
+	PARAM_ID_OUTER_LOOP_MODE,
+	PARAM_ID_VELOCITY_MPR_Q_SPEED,
+	PARAM_ID_VELOCITY_MPR_R_DELTA_IQ,
+	PARAM_ID_VELOCITY_MPR_HORIZON,
+	PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A,
+	PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S,
+	PARAM_ID_POSITION_MPR_Q_POSITION,
+	PARAM_ID_POSITION_MPR_Q_VELOCITY_FF,
+	PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY,
+	PARAM_ID_POSITION_MPR_HORIZON,
+	PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S,
 	PARAM_ID_PROFILE_MAX_VELOCITY_HZ,
 	PARAM_ID_PROFILE_MAX_ACCEL_HZ_S,
 	PARAM_ID_COMMAND_TIMEOUT_MS,
@@ -42,6 +53,19 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_VELOCITY_IQ_LIMIT_A] = "velocity_cl_iq_limit_A",
 	[PARAM_ID_POSITION_KP_RAD_S_PER_RAD] = "position_cl_kp_rad_s_per_rad",
 	[PARAM_ID_POSITION_KI_RAD_S2_PER_RAD] = "position_cl_ki_rad_s2_per_rad",
+	[PARAM_ID_OUTER_LOOP_MODE] = "outer_loop_mode",
+	[PARAM_ID_VELOCITY_MPR_Q_SPEED] = "velocity_mpr_q_speed",
+	[PARAM_ID_VELOCITY_MPR_R_DELTA_IQ] = "velocity_mpr_r_delta_iq",
+	[PARAM_ID_VELOCITY_MPR_HORIZON] = "velocity_mpr_horizon",
+	[PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A] = "velocity_mpr_max_delta_iq_a",
+	[PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S] =
+		"velocity_mpr_disturbance_ki_nm_per_rad_s",
+	[PARAM_ID_POSITION_MPR_Q_POSITION] = "position_mpr_q_position",
+	[PARAM_ID_POSITION_MPR_Q_VELOCITY_FF] = "position_mpr_q_velocity_ff",
+	[PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY] = "position_mpr_r_delta_velocity",
+	[PARAM_ID_POSITION_MPR_HORIZON] = "position_mpr_horizon",
+	[PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S] =
+		"position_mpr_max_delta_velocity_rad_s",
 	[PARAM_ID_PROFILE_MAX_VELOCITY_HZ] = "profile_max_velocity_hz",
 	[PARAM_ID_PROFILE_MAX_ACCEL_HZ_S] = "profile_max_accel_hz_s",
 	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
@@ -55,6 +79,11 @@ static bool motor_param_requires_positive(uint8_t param_id)
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
 	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
 	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
+	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
+	case PARAM_ID_VELOCITY_MPR_R_DELTA_IQ:
+	case PARAM_ID_VELOCITY_MPR_HORIZON:
+	case PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY:
+	case PARAM_ID_POSITION_MPR_HORIZON:
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
 		return true;
@@ -106,6 +135,39 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
 		*value = params->position_cl_ki_rad_s2_per_rad;
+		return 0;
+	case PARAM_ID_OUTER_LOOP_MODE:
+		*value = (float32_t)params->outer_loop_mode;
+		return 0;
+	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
+		*value = params->velocity_mpr_cfg.q_speed;
+		return 0;
+	case PARAM_ID_VELOCITY_MPR_R_DELTA_IQ:
+		*value = params->velocity_mpr_cfg.r_delta_iq;
+		return 0;
+	case PARAM_ID_VELOCITY_MPR_HORIZON:
+		*value = (float32_t)params->velocity_mpr_cfg.horizon;
+		return 0;
+	case PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A:
+		*value = params->velocity_mpr_cfg.max_delta_iq_a;
+		return 0;
+	case PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S:
+		*value = params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s;
+		return 0;
+	case PARAM_ID_POSITION_MPR_Q_POSITION:
+		*value = params->position_mpr_cfg.q_position;
+		return 0;
+	case PARAM_ID_POSITION_MPR_Q_VELOCITY_FF:
+		*value = params->position_mpr_cfg.q_velocity_ff;
+		return 0;
+	case PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY:
+		*value = params->position_mpr_cfg.r_delta_velocity;
+		return 0;
+	case PARAM_ID_POSITION_MPR_HORIZON:
+		*value = (float32_t)params->position_mpr_cfg.horizon;
+		return 0;
+	case PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S:
+		*value = params->position_mpr_cfg.max_delta_velocity_rad_s;
 		return 0;
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 		*value = params->profile_max_velocity_rad_s / (2.0f * PI_F32);
@@ -551,6 +613,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->velocity_cl_iq_limit_A = value;
+		params->velocity_mpr_cfg.iq_limit_a = value;
 		LOG_DBG("Updated velocity_cl_iq_limit_A = %.6f",
 			(double)value);
 		break;
@@ -572,12 +635,107 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		LOG_DBG("Updated position_cl_ki_rad_s2_per_rad = %.6f",
 			(double)value);
 		break;
+	case PARAM_ID_OUTER_LOOP_MODE:
+		if (value < 0.0f || value > 1.0f) {
+			LOG_ERR("Rejected outer_loop_mode outside [0,1]");
+			break;
+		}
+		params->outer_loop_mode = (uint8_t)(value + 0.5f);
+		motor_mpr_velocity_reset(&params->velocity_mpr_state, params->velocity_rad_s,
+					 params->Iq_ref_A);
+		motor_mpr_position_reset(&params->position_mpr_state, params->velocity_ref_rad_s);
+		LOG_DBG("Updated outer_loop_mode = %u", params->outer_loop_mode);
+		break;
+	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected velocity_mpr_q_speed <= 0");
+			break;
+		}
+		params->velocity_mpr_cfg.q_speed = value;
+		LOG_DBG("Updated velocity_mpr_q_speed = %.6f", (double)value);
+		break;
+	case PARAM_ID_VELOCITY_MPR_R_DELTA_IQ:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected velocity_mpr_r_delta_iq <= 0");
+			break;
+		}
+		params->velocity_mpr_cfg.r_delta_iq = value;
+		LOG_DBG("Updated velocity_mpr_r_delta_iq = %.6f", (double)value);
+		break;
+	case PARAM_ID_VELOCITY_MPR_HORIZON:
+		if (value <= 0.0f || value > 256.0f) {
+			LOG_ERR("Rejected velocity_mpr_horizon outside (0,256]");
+			break;
+		}
+		params->velocity_mpr_cfg.horizon = (uint16_t)(value + 0.5f);
+		LOG_DBG("Updated velocity_mpr_horizon = %u", params->velocity_mpr_cfg.horizon);
+		break;
+	case PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected velocity_mpr_max_delta_iq_a < 0");
+			break;
+		}
+		params->velocity_mpr_cfg.max_delta_iq_a = value;
+		LOG_DBG("Updated velocity_mpr_max_delta_iq_a = %.6f", (double)value);
+		break;
+	case PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected velocity_mpr_disturbance_ki_nm_per_rad_s < 0");
+			break;
+		}
+		params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = value;
+		LOG_DBG("Updated velocity_mpr_disturbance_ki_nm_per_rad_s = %.6f",
+			(double)value);
+		break;
+	case PARAM_ID_POSITION_MPR_Q_POSITION:
+		if (value < 0.0f ||
+		    (value == 0.0f && params->position_mpr_cfg.q_velocity_ff <= 0.0f)) {
+			LOG_ERR("Rejected position_mpr_q_position; q_position + q_velocity_ff must stay > 0");
+			break;
+		}
+		params->position_mpr_cfg.q_position = value;
+		LOG_DBG("Updated position_mpr_q_position = %.6f", (double)value);
+		break;
+	case PARAM_ID_POSITION_MPR_Q_VELOCITY_FF:
+		if (value < 0.0f ||
+		    (value == 0.0f && params->position_mpr_cfg.q_position <= 0.0f)) {
+			LOG_ERR("Rejected position_mpr_q_velocity_ff; q_position + q_velocity_ff must stay > 0");
+			break;
+		}
+		params->position_mpr_cfg.q_velocity_ff = value;
+		LOG_DBG("Updated position_mpr_q_velocity_ff = %.6f", (double)value);
+		break;
+	case PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected position_mpr_r_delta_velocity <= 0");
+			break;
+		}
+		params->position_mpr_cfg.r_delta_velocity = value;
+		LOG_DBG("Updated position_mpr_r_delta_velocity = %.6f", (double)value);
+		break;
+	case PARAM_ID_POSITION_MPR_HORIZON:
+		if (value <= 0.0f || value > 256.0f) {
+			LOG_ERR("Rejected position_mpr_horizon outside (0,256]");
+			break;
+		}
+		params->position_mpr_cfg.horizon = (uint16_t)(value + 0.5f);
+		LOG_DBG("Updated position_mpr_horizon = %u", params->position_mpr_cfg.horizon);
+		break;
+	case PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected position_mpr_max_delta_velocity_rad_s < 0");
+			break;
+		}
+		params->position_mpr_cfg.max_delta_velocity_rad_s = value;
+		LOG_DBG("Updated position_mpr_max_delta_velocity_rad_s = %.6f", (double)value);
+		break;
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 		if (value <= 0.0f) {
 			LOG_ERR("Rejected profile_max_velocity_hz <= 0");
 			break;
 		}
 		params->profile_max_velocity_rad_s = value * 2.0f * PI_F32;
+		params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_velocity_hz = %.6f",
 			(double)value);
@@ -588,6 +746,8 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->profile_max_accel_rad_s2 = value * 2.0f * PI_F32;
+		params->position_mpr_cfg.max_delta_velocity_rad_s =
+			params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_accel_hz_s = %.6f",
 			(double)value);

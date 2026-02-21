@@ -84,6 +84,10 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	pi_set_ui(&params->pi_Id, 0.0f);
 	pi_set_ui(&params->pi_Iq, 0.0f);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state,
+				 angle_observer_get_mech_speed(&params->observer),
+				 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 }
 
 static struct motor_parameters motor_params;
@@ -380,6 +384,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_target_rad = 0.0f;
 	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
+	params->outer_loop_mode = OUTER_LOOP_MPR_DEFAULT_ENABLED ?
+		MOTOR_OUTER_LOOP_MODE_MPR : MOTOR_OUTER_LOOP_MODE_PI;
 	params->velocity_cl_iq_limit_A = MOTOR_MAX_CURRENT_A;
 	params->velocity_cl_kp_A_per_rad_s =
 		MOTOR_MAX_CURRENT_A / MAX(params->profile_max_velocity_rad_s, 1.0f);
@@ -388,6 +394,24 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_cl_ki_rad_s2_per_rad = 0.5f * params->position_cl_kp_rad_s_per_rad;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	params->velocity_mpr_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->velocity_mpr_cfg.horizon = 8U;
+	params->velocity_mpr_cfg.q_speed = 1.5f;
+	params->velocity_mpr_cfg.r_delta_iq = 0.05f;
+	params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
+	params->velocity_mpr_cfg.max_delta_iq_a = 0.0f;
+	params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = 0.02f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
+
+	params->position_mpr_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->position_mpr_cfg.horizon = 16U;
+	params->position_mpr_cfg.q_position = 2.0f;
+	params->position_mpr_cfg.q_velocity_ff = 0.4f;
+	params->position_mpr_cfg.r_delta_velocity = 0.2f;
+	params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
+	params->position_mpr_cfg.max_delta_velocity_rad_s =
+		params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	params->velocity_filtered_rad_s = 0.0f;

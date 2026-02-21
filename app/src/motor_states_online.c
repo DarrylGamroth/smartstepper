@@ -155,6 +155,10 @@ void motor_state_online_torque_entry(void *obj)
 	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state,
+				 angle_observer_get_mech_speed(&params->observer),
+				 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 }
 
 void motor_state_online_torque_exit(void *obj)
@@ -207,6 +211,8 @@ void motor_state_online_velocity_open_entry(void *obj)
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 
 	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
 		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
@@ -263,6 +269,8 @@ void motor_state_online_velocity_closed_entry(void *obj)
 	params->velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
+	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
 }
 
 enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
@@ -312,6 +320,8 @@ void motor_state_online_position_entry(void *obj)
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
+	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
 }
 
 enum smf_state_result motor_state_online_position_run(void *obj)
@@ -386,6 +396,8 @@ void motor_state_online_position_exit(void *obj)
 	params->profile_sequence_tick_counter = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
