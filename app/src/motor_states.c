@@ -15,6 +15,7 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 #include <drivers/mcpwm.h>
+#include <drivers/pwm/mcpwm_stm32.h>
 #include <drivers/adc_injected.h>
 #include <drivers/gate_driver/ti_drv8328.h>
 #include <dt-bindings/pwm/stm32-mcpwm.h>
@@ -57,6 +58,30 @@ static inline void motor_enable_isr_feature_flags(struct motor_parameters *param
 static inline void motor_disable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
 {
 	params->feature_flags_next &= ~mask;
+}
+
+static inline void motor_force_safe_pwm_outputs(void)
+{
+	/* Program a neutral duty vector so re-enabling gate drivers never replays
+	 * stale PWM compare values from a previous control mode/fault condition.
+	 */
+	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1, 0.5f, 0.5f);
+	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, 0.5f, 0.5f);
+}
+
+static inline void motor_reset_control_runtime(struct motor_parameters *params)
+{
+	params->Id_setpoint_A = 0.0f;
+	params->Iq_setpoint_A = 0.0f;
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+	traj_set_target_value(&params->traj_Id, 0.0f);
+	traj_set_int_value(&params->traj_Id, 0.0f);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+	pi_set_ui(&params->pi_Id, 0.0f);
+	pi_set_ui(&params->pi_Iq, 0.0f);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 }
 
 static struct motor_parameters motor_params;
@@ -530,8 +555,8 @@ static void motor_state_idle_entry(void *obj)
 	drv8328_disable_all_channels(gate_driver_b);
 
 	atomic_set(&params->control_armed, 0);
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
+	motor_reset_control_runtime(params);
+	motor_force_safe_pwm_outputs();
 }
 
 static enum smf_state_result motor_state_idle_run(void *obj)
@@ -590,14 +615,15 @@ static void motor_state_offline_entry(void *obj)
 	 */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PWM_OUTPUT));
 
+	/* Ensure a clean bumpless restart after any fault or mode transition. */
+	motor_reset_control_runtime(params);
+	motor_force_safe_pwm_outputs();
+
 	/* Enable gate driver channels - motor now energized */
 	drv8328_enable_channel(gate_driver_a, 0);
 	drv8328_enable_channel(gate_driver_a, 1);
 	drv8328_enable_channel(gate_driver_b, 0);
 	drv8328_enable_channel(gate_driver_b, 1);
-
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
 
 	/* First OFFLINE entry after boot runs fast boot calibration sequence. */
 	if (!params->calibration_complete &&
@@ -698,8 +724,8 @@ static void motor_state_error_entry(void *obj)
 	drv8328_disable_all_channels(gate_driver_b);
 
 	atomic_set(&params->control_armed, 0);
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
+	motor_reset_control_runtime(params);
+	motor_force_safe_pwm_outputs();
 }
 
 static enum smf_state_result motor_state_error_run(void *obj)
