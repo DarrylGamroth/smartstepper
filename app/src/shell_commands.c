@@ -67,6 +67,11 @@ enum motor_gains_profile {
 	MOTOR_GAINS_PROFILE_SAFE,
 };
 
+#define OUTER_LOOP_ZETA_DEFAULT 1.0f
+#define OUTER_LOOP_ZETA_MIN 0.2f
+#define OUTER_LOOP_ZETA_MAX 2.0f
+#define POSITION_TO_VELOCITY_BW_RATIO_MAX 0.2f
+
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
 {
 	if (token == NULL || profile == NULL) {
@@ -150,6 +155,69 @@ static int motor_apply_position_gains(float kp, float ki)
 		g_motor_params->position_cl_i_term_rad_s = 0.0f;
 	}
 
+	return 0;
+}
+
+static int motor_compute_velocity_bandwidth_gains(const struct motor_parameters *params,
+						  float bw_hz, float zeta,
+						  float *kp_out, float *ki_out,
+						  float *kt_out)
+{
+	if (params == NULL || kp_out == NULL || ki_out == NULL || kt_out == NULL) {
+		return -EINVAL;
+	}
+	if (!isfinite(bw_hz) || !isfinite(zeta) || bw_hz <= 0.0f ||
+	    zeta < OUTER_LOOP_ZETA_MIN || zeta > OUTER_LOOP_ZETA_MAX) {
+		return -EINVAL;
+	}
+
+	float j = params->inertia_kgm2_active;
+	float b = params->viscous_friction_nm_per_rad_s_active;
+	float psi_f = params->flux_linkage_wb_active;
+	float kt = 1.5f * (float)MOTOR_POLE_PAIRS * psi_f;
+	float omega = 2.0f * PI_F32 * bw_hz;
+
+	if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f) {
+		return -ERANGE;
+	}
+	if (!isfinite(b) || b < 0.0f) {
+		b = 0.0f;
+	}
+
+	float kp = ((2.0f * zeta * omega * j) - b) / kt;
+	float ki = (omega * omega * j) / kt;
+	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
+		return -ERANGE;
+	}
+
+	*kp_out = kp;
+	*ki_out = ki;
+	*kt_out = kt;
+	return 0;
+}
+
+static int motor_estimate_velocity_bandwidth_hz(const struct motor_parameters *params,
+						float *bw_hz_out)
+{
+	if (params == NULL || bw_hz_out == NULL) {
+		return -EINVAL;
+	}
+
+	float j = params->inertia_kgm2_active;
+	float psi_f = params->flux_linkage_wb_active;
+	float ki = params->velocity_cl_ki_A_per_rad;
+	float kt = 1.5f * (float)MOTOR_POLE_PAIRS * psi_f;
+	if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f ||
+	    !isfinite(ki) || ki <= 0.0f) {
+		return -ERANGE;
+	}
+
+	float omega = sqrtf((kt * ki) / j);
+	if (!isfinite(omega) || omega <= 0.0f) {
+		return -ERANGE;
+	}
+
+	*bw_hz_out = omega / (2.0f * PI_F32);
 	return 0;
 }
 
@@ -572,13 +640,14 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 
 /* motor velocity gains set <kp_a_per_rad_s> <ki_a_per_rad> <iq_limit_a>
  * motor velocity gains defaults <safe|nominal>
- * legacy: motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>
+ * motor velocity gains bandwidth <hz> [zeta]
  */
 static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc < 3 || argc > 5) {
 		shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
-			    "motor velocity gains defaults <safe|nominal>");
+			    "motor velocity gains defaults <safe|nominal> | "
+			    "motor velocity gains bandwidth <hz> [zeta]");
 		return -EINVAL;
 	}
 
@@ -654,8 +723,57 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
+	if (strcmp(argv[1], "bandwidth") == 0) {
+		if (argc != 3 && argc != 4) {
+			shell_error(sh, "Usage: motor velocity gains bandwidth <hz> [zeta]");
+			return -EINVAL;
+		}
+
+		float bw_hz = 0.0f;
+		float zeta = OUTER_LOOP_ZETA_DEFAULT;
+		if (!shell_parse_finite_float(argv[2], &bw_hz) ||
+		    (argc == 4 && !shell_parse_finite_float(argv[3], &zeta))) {
+			shell_error(sh, "Bandwidth/zeta must be finite numbers");
+			return -EINVAL;
+		}
+		if (bw_hz <= 0.0f || bw_hz > (CONTROL_LOOP_FREQUENCY_HZ * 0.25f)) {
+			shell_error(sh, "Bandwidth must be in (0, %.1f] Hz",
+				    (double)(CONTROL_LOOP_FREQUENCY_HZ * 0.25f));
+			return -EINVAL;
+		}
+
+		float kp = 0.0f;
+		float ki = 0.0f;
+		float kt = 0.0f;
+		int ret = motor_compute_velocity_bandwidth_gains(g_motor_params, bw_hz, zeta,
+								 &kp, &ki, &kt);
+		if (ret != 0) {
+			if (ret == -ERANGE) {
+				shell_error(sh,
+					    "Need valid active commissioning params (J, psi_f) to tune by bandwidth");
+			} else {
+				shell_error(sh, "Invalid bandwidth/zeta; zeta range is %.1f..%.1f",
+					    (double)OUTER_LOOP_ZETA_MIN, (double)OUTER_LOOP_ZETA_MAX);
+			}
+			return ret;
+		}
+
+		ret = motor_apply_velocity_gains(kp, ki, g_motor_params->velocity_cl_iq_limit_A);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply velocity bandwidth gains (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Velocity bandwidth tuned: bw=%.2f Hz zeta=%.2f -> Kp=%.5f A/(rad/s), Ki=%.5f A/rad (Kt=%.6f Nm/A)",
+			    (double)bw_hz, (double)zeta, (double)kp, (double)ki, (double)kt);
+		return 0;
+	}
+
 	shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
-		    "motor velocity gains defaults <safe|nominal>");
+		    "motor velocity gains defaults <safe|nominal> | "
+		    "motor velocity gains bandwidth <hz> [zeta]");
 	return -EINVAL;
 }
 
@@ -729,13 +847,14 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 
 /* motor position gains set <kp_rad_s_per_rad> <ki_rad_s2_per_rad>
  * motor position gains defaults <safe|nominal>
- * legacy: motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]
+ * motor position gains bandwidth <hz> [zeta]
  */
 static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc < 2 || argc > 4) {
+	if (argc < 3 || argc > 4) {
 		shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
-			    "motor position gains defaults <safe|nominal>");
+			    "motor position gains defaults <safe|nominal> | "
+			    "motor position gains bandwidth <hz> [zeta]");
 		return -EINVAL;
 	}
 
@@ -809,8 +928,60 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
+	if (strcmp(argv[1], "bandwidth") == 0) {
+		if (argc != 3 && argc != 4) {
+			shell_error(sh, "Usage: motor position gains bandwidth <hz> [zeta]");
+			return -EINVAL;
+		}
+
+		float bw_hz = 0.0f;
+		float zeta = OUTER_LOOP_ZETA_DEFAULT;
+			if (!shell_parse_finite_float(argv[2], &bw_hz) ||
+			    (argc == 4 && !shell_parse_finite_float(argv[3], &zeta))) {
+				shell_error(sh, "Bandwidth/zeta must be finite numbers");
+				return -EINVAL;
+			}
+			if (bw_hz <= 0.0f || bw_hz > (CONTROL_LOOP_FREQUENCY_HZ * 0.25f) ||
+			    zeta < OUTER_LOOP_ZETA_MIN || zeta > OUTER_LOOP_ZETA_MAX) {
+				shell_error(sh, "Invalid bandwidth/zeta; bw in (0, %.1f] Hz, zeta in %.1f..%.1f",
+					    (double)(CONTROL_LOOP_FREQUENCY_HZ * 0.25f),
+					    (double)OUTER_LOOP_ZETA_MIN, (double)OUTER_LOOP_ZETA_MAX);
+				return -EINVAL;
+			}
+
+		float vel_bw_hz = 0.0f;
+		int ret_bw = motor_estimate_velocity_bandwidth_hz(g_motor_params, &vel_bw_hz);
+		if (ret_bw == 0) {
+			float max_pos_bw_hz = vel_bw_hz * POSITION_TO_VELOCITY_BW_RATIO_MAX;
+			if (bw_hz > max_pos_bw_hz) {
+				shell_warn(sh,
+					   "Requested position BW %.2f Hz exceeds %.2f Hz (velocity BW/5); clamping",
+					   (double)bw_hz, (double)max_pos_bw_hz);
+				bw_hz = max_pos_bw_hz;
+			}
+		} else {
+			shell_warn(sh, "Velocity BW estimate unavailable; skipping BW/5 cascade guard");
+		}
+
+		float omega = 2.0f * PI_F32 * bw_hz;
+		float kp = 2.0f * zeta * omega;
+		float ki = omega * omega;
+		int ret = motor_apply_position_gains(kp, ki);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply position bandwidth gains (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Position bandwidth tuned: bw=%.2f Hz zeta=%.2f -> Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+			    (double)bw_hz, (double)zeta, (double)kp, (double)ki);
+		return 0;
+	}
+
 	shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
-		    "motor position gains defaults <safe|nominal>");
+		    "motor position gains defaults <safe|nominal> | "
+		    "motor position gains bandwidth <hz> [zeta]");
 	return -EINVAL;
 }
 
@@ -1063,7 +1234,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
 	SHELL_CMD_ARG(gains, NULL,
-		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal>",
+		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_velocity_gains, 3, 2),
 	SHELL_CMD(status, NULL, "Show velocity status", cmd_motor_velocity_status),
 	SHELL_SUBCMD_SET_END
@@ -1073,8 +1244,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_CMD_ARG(target, NULL, "Set position target <deg>", cmd_motor_position_target, 2, 0),
 	SHELL_CMD_ARG(gains, NULL,
-		      "Configure position PI gains: set <kp> <ki> | defaults <safe|nominal>",
-		      cmd_motor_position_gains, 2, 2),
+		      "Configure position PI gains: set <kp> <ki> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
+		      cmd_motor_position_gains, 3, 1),
 	SHELL_CMD(status, NULL, "Show position status", cmd_motor_position_status),
 	SHELL_SUBCMD_SET_END
 );
