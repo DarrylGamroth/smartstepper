@@ -119,6 +119,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 	float32_t inv_park_angle_rad;
+	float32_t dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
 	float32_t speed_mech_filtered_rad_s = 0.0f;
@@ -335,6 +336,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
 		float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
 		float32_t position_error_rad;
+		float32_t position_fb_velocity_rad_s;
+		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
 
 		/* Position mode supports optional quintic profile feedforward. */
 		if (motion_profile_quintic_is_active(&params->position_profile)) {
@@ -344,26 +347,34 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 			float32_t profile_pos_rad =
 				motion_profile_quintic_get_position(&params->position_profile);
-			float32_t profile_vel_rad_s =
-				motion_profile_quintic_get_velocity(&params->position_profile);
 			params->position_target_rad = wrap_rad_2pi(profile_pos_rad);
 			position_error_rad = wrap_rad_pi(profile_pos_rad - position_mech_rad);
-			velocity_target_rad_s =
-				profile_vel_rad_s +
-				params->position_cl_kp_rad_s_per_rad * position_error_rad;
 		} else if (params->position_profile.valid) {
 			/* Completed profile: hold final position with pure feedback. */
 			float32_t profile_pos_rad =
 				motion_profile_quintic_get_position(&params->position_profile);
 			params->position_target_rad = wrap_rad_2pi(profile_pos_rad);
 			position_error_rad = wrap_rad_pi(profile_pos_rad - position_mech_rad);
-			velocity_target_rad_s =
-				params->position_cl_kp_rad_s_per_rad * position_error_rad;
 		} else {
 			position_error_rad =
 				wrap_rad_pi(params->position_target_rad - position_mech_rad);
-			velocity_target_rad_s =
-				params->position_cl_kp_rad_s_per_rad * position_error_rad;
+		}
+
+		float32_t pos_i_next =
+			params->position_cl_i_term_rad_s +
+			(params->position_cl_ki_rad_s2_per_rad * position_error_rad * dt_s);
+		pos_i_next = clampf(pos_i_next, -pos_i_limit_rad_s, pos_i_limit_rad_s);
+		params->position_cl_i_term_rad_s = pos_i_next;
+		position_fb_velocity_rad_s =
+			params->position_cl_kp_rad_s_per_rad * position_error_rad +
+			params->position_cl_i_term_rad_s;
+
+		if (motion_profile_quintic_is_active(&params->position_profile)) {
+			float32_t profile_vel_rad_s =
+				motion_profile_quintic_get_velocity(&params->position_profile);
+			velocity_target_rad_s = profile_vel_rad_s + position_fb_velocity_rad_s;
+		} else {
+			velocity_target_rad_s = position_fb_velocity_rad_s;
 		}
 
 		velocity_target_rad_s =
@@ -391,10 +402,17 @@ void motor_control_loop_step(struct motor_parameters *params,
 		speed_mech_filtered_rad_s = filter_so_run(&params->filter_velocity_notch,
 							 speed_mech_rad_s);
 		float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_filtered_rad_s;
+		float32_t vel_i_next =
+			params->velocity_cl_i_term_A +
+			(params->velocity_cl_ki_A_per_rad * speed_error_rad_s * dt_s);
+		vel_i_next = clampf(vel_i_next, -params->velocity_cl_iq_limit_A,
+				   params->velocity_cl_iq_limit_A);
+		params->velocity_cl_i_term_A = vel_i_next;
 
 		Id_ref_A = params->Id_setpoint_A;
 		Iq_ref_A =
-			clampf(params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s,
+			clampf((params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s) +
+			       params->velocity_cl_i_term_A,
 			       -params->velocity_cl_iq_limit_A,
 			       params->velocity_cl_iq_limit_A);
 	}
@@ -416,6 +434,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		velocity_ref_rad_s = 0.0f;
 		params->velocity_target_rad_s = 0.0f;
 		params->velocity_ref_rad_s = 0.0f;
+		params->velocity_cl_i_term_A = 0.0f;
+		params->position_cl_i_term_rad_s = 0.0f;
 		traj_set_target_value(&params->traj_velocity, 0.0f);
 		traj_set_int_value(&params->traj_velocity, 0.0f);
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);

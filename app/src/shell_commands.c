@@ -331,16 +331,18 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	shell_print(sh, "  At Target:  %s", at_target ? "YES" : "NO");
 	shell_print(sh, "  Motion:     %s", motion_str);
 	shell_print(sh, "  Kp:         %.5f A/(rad/s)", (double)g_motor_params->velocity_cl_kp_A_per_rad_s);
+	shell_print(sh, "  Ki:         %.5f A/rad", (double)g_motor_params->velocity_cl_ki_A_per_rad);
+	shell_print(sh, "  I term:     %.5f A", (double)g_motor_params->velocity_cl_i_term_A);
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
 
 	return 0;
 }
 
-/* motor velocity gains <kp_a_per_rad_s> <iq_limit_a> */
+/* motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a> */
 static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 3) {
-		shell_error(sh, "Usage: motor velocity gains <kp_a_per_rad_s> <iq_limit_a>");
+	if (argc != 3 && argc != 4) {
+		shell_error(sh, "Usage: motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>");
 		return -EINVAL;
 	}
 
@@ -350,20 +352,30 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 	}
 
 	float kp = 0.0f;
+	float ki = g_motor_params->velocity_cl_ki_A_per_rad;
 	float iq_limit = 0.0f;
-	if (!shell_parse_finite_float(argv[1], &kp) || !shell_parse_finite_float(argv[2], &iq_limit)) {
-		shell_error(sh, "kp/iq_limit must be finite numbers");
+	bool ok = shell_parse_finite_float(argv[1], &kp);
+	if (argc == 4) {
+		ok = ok && shell_parse_finite_float(argv[2], &ki) &&
+		     shell_parse_finite_float(argv[3], &iq_limit);
+	} else {
+		ok = ok && shell_parse_finite_float(argv[2], &iq_limit);
+	}
+	if (!ok) {
+		shell_error(sh, "kp/ki/iq_limit must be finite numbers");
 		return -EINVAL;
 	}
 	if (motor_api_set_param("velocity_cl_kp_A_per_rad_s", kp) != 0 ||
+	    motor_api_set_param("velocity_cl_ki_A_per_rad", ki) != 0 ||
 	    motor_api_set_param("velocity_cl_iq_limit_A", iq_limit) != 0) {
 		shell_error(sh, "Failed to update velocity gains");
 		return -EINVAL;
 	}
+	g_motor_params->velocity_cl_i_term_A = 0.0f;
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Iq limit=%.3f A",
-		    (double)kp, (double)iq_limit);
+	shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+		    (double)kp, (double)ki, (double)iq_limit);
 	return 0;
 }
 
@@ -430,14 +442,16 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 			    "ACTIVE" :
 			    (g_motor_params->position_profile.valid ? "COMPLETE" : "OFF"));
 	shell_print(sh, "  Kp:         %.5f (rad/s)/rad", (double)g_motor_params->position_cl_kp_rad_s_per_rad);
+	shell_print(sh, "  Ki:         %.5f (rad/s^2)/rad", (double)g_motor_params->position_cl_ki_rad_s2_per_rad);
+	shell_print(sh, "  I term:     %.5f rad/s", (double)g_motor_params->position_cl_i_term_rad_s);
 	return 0;
 }
 
-/* motor position gains <kp_rad_s_per_rad> */
+/* motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad] */
 static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 2) {
-		shell_error(sh, "Usage: motor position gains <kp_rad_s_per_rad>");
+	if (argc != 2 && argc != 3) {
+		shell_error(sh, "Usage: motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]");
 		return -EINVAL;
 	}
 
@@ -447,17 +461,25 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 	}
 
 	float kp = 0.0f;
-	if (!shell_parse_finite_float(argv[1], &kp)) {
-		shell_error(sh, "kp must be a finite number");
+	float ki = g_motor_params->position_cl_ki_rad_s2_per_rad;
+	bool ok = shell_parse_finite_float(argv[1], &kp);
+	if (argc == 3) {
+		ok = ok && shell_parse_finite_float(argv[2], &ki);
+	}
+	if (!ok) {
+		shell_error(sh, "kp/ki must be finite numbers");
 		return -EINVAL;
 	}
-	if (motor_api_set_param("position_cl_kp_rad_s_per_rad", kp) != 0) {
+	if (motor_api_set_param("position_cl_kp_rad_s_per_rad", kp) != 0 ||
+	    motor_api_set_param("position_cl_ki_rad_s2_per_rad", ki) != 0) {
 		shell_error(sh, "Failed to update position gain");
 		return -EINVAL;
 	}
+	g_motor_params->position_cl_i_term_rad_s = 0.0f;
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Position gain set: Kp=%.5f (rad/s)/rad", (double)kp);
+	shell_print(sh, "Position gains set: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+		    (double)kp, (double)ki);
 	return 0;
 }
 
@@ -851,7 +873,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
 /* motor velocity subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
-	SHELL_CMD_ARG(gains, NULL, "Set velocity gains <kp_a_per_rad_s> <iq_limit_a>", cmd_motor_velocity_gains, 3, 0),
+	SHELL_CMD_ARG(gains, NULL, "Set velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>", cmd_motor_velocity_gains, 3, 1),
 	SHELL_CMD(status, NULL, "Show velocity status", cmd_motor_velocity_status),
 	SHELL_SUBCMD_SET_END
 );
@@ -859,7 +881,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 /* motor position subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_CMD_ARG(target, NULL, "Set position target <deg>", cmd_motor_position_target, 2, 0),
-	SHELL_CMD_ARG(gains, NULL, "Set position gain <kp_rad_s_per_rad>", cmd_motor_position_gains, 2, 0),
+	SHELL_CMD_ARG(gains, NULL, "Set position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]", cmd_motor_position_gains, 2, 1),
 	SHELL_CMD(status, NULL, "Show position status", cmd_motor_position_status),
 	SHELL_SUBCMD_SET_END
 );

@@ -145,8 +145,12 @@ struct motor_parameters {
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
 	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */
+	float32_t velocity_cl_ki_A_per_rad;     /* Velocity I gain: speed error integral -> Iq reference */
 	float32_t velocity_cl_iq_limit_A;       /* Closed-loop velocity Iq limit */
+	float32_t velocity_cl_i_term_A;         /* Velocity PI integrator state */
 	float32_t position_cl_kp_rad_s_per_rad; /* Position P gain: position error -> velocity target */
+	float32_t position_cl_ki_rad_s2_per_rad;/* Position I gain: position error integral -> velocity */
+	float32_t position_cl_i_term_rad_s;     /* Position PI integrator state */
 	float32_t profile_max_velocity_rad_s;   /* Motion profile velocity limit */
 	float32_t profile_max_accel_rad_s2;     /* Motion profile acceleration limit */
 

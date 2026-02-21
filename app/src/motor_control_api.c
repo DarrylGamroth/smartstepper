@@ -24,8 +24,10 @@ enum motor_param_id {
 	PARAM_ID_ID_SETPOINT_A = 0,
 	PARAM_ID_IQ_SETPOINT_A,
 	PARAM_ID_VELOCITY_KP_A_PER_RAD_S,
+	PARAM_ID_VELOCITY_KI_A_PER_RAD,
 	PARAM_ID_VELOCITY_IQ_LIMIT_A,
 	PARAM_ID_POSITION_KP_RAD_S_PER_RAD,
+	PARAM_ID_POSITION_KI_RAD_S2_PER_RAD,
 	PARAM_ID_PROFILE_MAX_VELOCITY_HZ,
 	PARAM_ID_PROFILE_MAX_ACCEL_HZ_S,
 	PARAM_ID_COMMAND_TIMEOUT_MS,
@@ -36,8 +38,10 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_ID_SETPOINT_A] = "Id_setpoint_A",
 	[PARAM_ID_IQ_SETPOINT_A] = "Iq_setpoint_A",
 	[PARAM_ID_VELOCITY_KP_A_PER_RAD_S] = "velocity_cl_kp_A_per_rad_s",
+	[PARAM_ID_VELOCITY_KI_A_PER_RAD] = "velocity_cl_ki_A_per_rad",
 	[PARAM_ID_VELOCITY_IQ_LIMIT_A] = "velocity_cl_iq_limit_A",
 	[PARAM_ID_POSITION_KP_RAD_S_PER_RAD] = "position_cl_kp_rad_s_per_rad",
+	[PARAM_ID_POSITION_KI_RAD_S2_PER_RAD] = "position_cl_ki_rad_s2_per_rad",
 	[PARAM_ID_PROFILE_MAX_VELOCITY_HZ] = "profile_max_velocity_hz",
 	[PARAM_ID_PROFILE_MAX_ACCEL_HZ_S] = "profile_max_accel_hz_s",
 	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
@@ -47,8 +51,10 @@ static bool motor_param_requires_positive(uint8_t param_id)
 {
 	switch (param_id) {
 	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
+	case PARAM_ID_VELOCITY_KI_A_PER_RAD:
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
 	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
+	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
 		return true;
@@ -89,11 +95,17 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:
 		*value = params->velocity_cl_kp_A_per_rad_s;
 		return 0;
+	case PARAM_ID_VELOCITY_KI_A_PER_RAD:
+		*value = params->velocity_cl_ki_A_per_rad;
+		return 0;
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
 		*value = params->velocity_cl_iq_limit_A;
 		return 0;
 	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
 		*value = params->position_cl_kp_rad_s_per_rad;
+		return 0;
+	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
+		*value = params->position_cl_ki_rad_s2_per_rad;
 		return 0;
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 		*value = params->profile_max_velocity_rad_s / (2.0f * PI_F32);
@@ -524,6 +536,15 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		LOG_DBG("Updated velocity_cl_kp_A_per_rad_s = %.6f",
 			(double)value);
 		break;
+	case PARAM_ID_VELOCITY_KI_A_PER_RAD:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected velocity_cl_ki_A_per_rad <= 0");
+			break;
+		}
+		params->velocity_cl_ki_A_per_rad = value;
+		LOG_DBG("Updated velocity_cl_ki_A_per_rad = %.6f",
+			(double)value);
+		break;
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
 		if (value <= 0.0f) {
 			LOG_ERR("Rejected velocity_cl_iq_limit_A <= 0");
@@ -540,6 +561,15 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->position_cl_kp_rad_s_per_rad = value;
 		LOG_DBG("Updated position_cl_kp_rad_s_per_rad = %.6f",
+			(double)value);
+		break;
+	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected position_cl_ki_rad_s2_per_rad <= 0");
+			break;
+		}
+		params->position_cl_ki_rad_s2_per_rad = value;
+		LOG_DBG("Updated position_cl_ki_rad_s2_per_rad = %.6f",
 			(double)value);
 		break;
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:

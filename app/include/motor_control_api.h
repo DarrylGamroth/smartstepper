@@ -104,8 +104,8 @@ int motor_api_request_commission(void);
  *       when the state machine processes the PARAM_UPDATE event.
  *       Current table includes:
  *       Id_setpoint_A, Iq_setpoint_A,
- *       velocity_cl_kp_A_per_rad_s, velocity_cl_iq_limit_A,
- *       position_cl_kp_rad_s_per_rad,
+ *       velocity_cl_kp_A_per_rad_s, velocity_cl_ki_A_per_rad, velocity_cl_iq_limit_A,
+ *       position_cl_kp_rad_s_per_rad, position_cl_ki_rad_s2_per_rad,
  *       profile_max_velocity_hz, profile_max_accel_hz_s,
  *       command_timeout_ms.
  */

@@ -75,6 +75,8 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->Iq_setpoint_A = 0.0f;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
+	params->velocity_cl_i_term_A = 0.0f;
+	params->position_cl_i_term_rad_s = 0.0f;
 	traj_set_target_value(&params->traj_Id, 0.0f);
 	traj_set_int_value(&params->traj_Id, 0.0f);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
@@ -381,7 +383,11 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_cl_iq_limit_A = MOTOR_MAX_CURRENT_A;
 	params->velocity_cl_kp_A_per_rad_s =
 		MOTOR_MAX_CURRENT_A / MAX(params->profile_max_velocity_rad_s, 1.0f);
+	params->velocity_cl_ki_A_per_rad = 2.0f * params->velocity_cl_kp_A_per_rad_s;
 	params->position_cl_kp_rad_s_per_rad = params->profile_max_velocity_rad_s / PI_F32;
+	params->position_cl_ki_rad_s2_per_rad = 0.5f * params->position_cl_kp_rad_s_per_rad;
+	params->velocity_cl_i_term_A = 0.0f;
+	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	params->velocity_filtered_rad_s = 0.0f;
