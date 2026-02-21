@@ -82,6 +82,19 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "  Estimates:      psi_f=%s mech=%s",
 		    ctx->results.psi_f_valid ? "VALID" : "INVALID",
 		    ctx->results.mech_valid ? "VALID" : "INVALID");
+	shell_print(sh, "  Flux fit:       psi_f=%.8f Wb bias=%.4f V rms=%.4f V R2=%.4f N=%u",
+		    (double)ctx->results.psi_f_wb, (double)ctx->results.psi_f_bias_v,
+		    (double)ctx->results.psi_f_residual_rms_v, (double)ctx->results.psi_f_r2,
+		    ctx->results.psi_f_sample_count);
+	shell_print(sh, "  Mech fit:       J=%.8f kgm2 B=%.8f Nm/(rad/s) Tc=%.8f Nm T0=%.8f Nm",
+		    (double)ctx->results.inertia_kgm2,
+		    (double)ctx->results.viscous_friction_nm_per_rad_s,
+		    (double)ctx->results.coulomb_friction_nm,
+		    (double)ctx->results.offset_friction_nm);
+	shell_print(sh, "  Mech quality:   rms=%.6f Nm R2=%.4f N=%u",
+		    (double)ctx->results.mech_residual_rms_nm,
+		    (double)ctx->results.mech_r2,
+		    ctx->results.mech_sample_count);
 	shell_print(sh, "  Active params:  psi_f=%.8f Wb J=%.8f kgm2 B=%.8f Nm/(rad/s) Tc=%.8f Nm",
 		    (double)g_motor_params->flux_linkage_wb_active,
 		    (double)g_motor_params->inertia_kgm2_active,
@@ -234,4 +247,3 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 		    "Ensure control is armed and torque excitation is applied; capture expects ONLINE_TORQUE.");
 	return 0;
 }
-

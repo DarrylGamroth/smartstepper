@@ -70,10 +70,17 @@ struct motor_commission_sample {
 
 struct motor_commission_results {
 	float32_t psi_f_wb;
+	float32_t psi_f_bias_v;
+	float32_t psi_f_residual_rms_v;
+	float32_t psi_f_r2;
+	uint16_t psi_f_sample_count;
 	float32_t inertia_kgm2;
 	float32_t viscous_friction_nm_per_rad_s;
 	float32_t coulomb_friction_nm;
 	float32_t offset_friction_nm;
+	float32_t mech_residual_rms_nm;
+	float32_t mech_r2;
+	uint16_t mech_sample_count;
 	bool psi_f_valid;
 	bool mech_valid;
 };
@@ -152,4 +159,3 @@ const char *motor_commission_mode_to_string(uint8_t mode);
 const char *motor_commission_stage_to_string(uint8_t stage);
 
 #endif /* MOTOR_COMMISSION_H_ */
-
