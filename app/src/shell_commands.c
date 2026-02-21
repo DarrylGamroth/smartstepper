@@ -62,6 +62,97 @@ void motor_command_feed_watchdog(struct motor_parameters *params)
 	params->command_timeout_latched = false;
 }
 
+enum motor_gains_profile {
+	MOTOR_GAINS_PROFILE_NOMINAL = 0,
+	MOTOR_GAINS_PROFILE_SAFE,
+};
+
+static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
+{
+	if (token == NULL || profile == NULL) {
+		return -EINVAL;
+	}
+
+	if (strcmp(token, "nominal") == 0 || strcmp(token, "default") == 0) {
+		*profile = MOTOR_GAINS_PROFILE_NOMINAL;
+		return 0;
+	}
+	if (strcmp(token, "safe") == 0 || strcmp(token, "conservative") == 0) {
+		*profile = MOTOR_GAINS_PROFILE_SAFE;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static void motor_compute_nominal_outer_gains(const struct motor_parameters *params,
+					       float *vel_kp, float *vel_ki,
+					       float *vel_iq_limit,
+					       float *pos_kp, float *pos_ki)
+{
+	float max_vel = MAX(params->profile_max_velocity_rad_s, 1.0f);
+
+	*vel_kp = MOTOR_MAX_CURRENT_A / max_vel;
+	*vel_ki = 2.0f * (*vel_kp);
+	*vel_iq_limit = MOTOR_MAX_CURRENT_A;
+	*pos_kp = max_vel / PI_F32;
+	*pos_ki = 0.5f * (*pos_kp);
+}
+
+static void motor_compute_safe_outer_gains(const struct motor_parameters *params,
+					    float *vel_kp, float *vel_ki,
+					    float *vel_iq_limit,
+					    float *pos_kp, float *pos_ki)
+{
+	motor_compute_nominal_outer_gains(params, vel_kp, vel_ki, vel_iq_limit, pos_kp, pos_ki);
+
+	*vel_kp *= 0.5f;
+	*vel_ki = *vel_kp;
+	*vel_iq_limit *= 0.25f;
+	*pos_kp *= 0.5f;
+	*pos_ki *= 0.1f;
+}
+
+static int motor_apply_velocity_gains(float kp, float ki, float iq_limit)
+{
+	int ret = motor_api_set_param("velocity_cl_kp_A_per_rad_s", kp);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_set_param("velocity_cl_ki_A_per_rad", ki);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_set_param("velocity_cl_iq_limit_A", iq_limit);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (g_motor_params) {
+		g_motor_params->velocity_cl_i_term_A = 0.0f;
+	}
+
+	return 0;
+}
+
+static int motor_apply_position_gains(float kp, float ki)
+{
+	int ret = motor_api_set_param("position_cl_kp_rad_s_per_rad", kp);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_set_param("position_cl_ki_rad_s2_per_rad", ki);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (g_motor_params) {
+		g_motor_params->position_cl_i_term_rad_s = 0.0f;
+	}
+
+	return 0;
+}
+
 /*============================================================================
  * Shell Command Implementations
  *============================================================================*/
@@ -338,17 +429,94 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
-/* motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a> */
+/* motor velocity gains set <kp_a_per_rad_s> <ki_a_per_rad> <iq_limit_a>
+ * motor velocity gains defaults <safe|nominal>
+ * legacy: motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>
+ */
 static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 3 && argc != 4) {
-		shell_error(sh, "Usage: motor velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>");
+	if (argc < 3 || argc > 5) {
+		shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
+			    "motor velocity gains defaults <safe|nominal>");
 		return -EINVAL;
 	}
 
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "defaults") == 0) {
+		if (argc != 3) {
+			shell_error(sh, "Usage: motor velocity gains defaults <safe|nominal>");
+			return -EINVAL;
+		}
+
+		enum motor_gains_profile profile;
+		if (motor_parse_gains_profile(argv[2], &profile) != 0) {
+			shell_error(sh, "Profile must be 'safe' or 'nominal'");
+			return -EINVAL;
+		}
+
+		float kp = 0.0f;
+		float ki = 0.0f;
+		float iq_limit = 0.0f;
+		float pos_kp_dummy = 0.0f;
+		float pos_ki_dummy = 0.0f;
+		if (profile == MOTOR_GAINS_PROFILE_SAFE) {
+			motor_compute_safe_outer_gains(g_motor_params, &kp, &ki, &iq_limit,
+						      &pos_kp_dummy, &pos_ki_dummy);
+		} else {
+			motor_compute_nominal_outer_gains(g_motor_params, &kp, &ki, &iq_limit,
+							 &pos_kp_dummy, &pos_ki_dummy);
+		}
+
+		int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply velocity defaults (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Velocity %s defaults applied: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+			    (profile == MOTOR_GAINS_PROFILE_SAFE) ? "safe" : "nominal",
+			    (double)kp, (double)ki, (double)iq_limit);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "set") == 0) {
+		if (argc != 5) {
+			shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit>");
+			return -EINVAL;
+		}
+
+		float kp = 0.0f;
+		float ki = 0.0f;
+		float iq_limit = 0.0f;
+		if (!shell_parse_finite_float(argv[2], &kp) ||
+		    !shell_parse_finite_float(argv[3], &ki) ||
+		    !shell_parse_finite_float(argv[4], &iq_limit)) {
+			shell_error(sh, "kp/ki/iq_limit must be finite numbers");
+			return -EINVAL;
+		}
+
+		int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
+		if (ret != 0) {
+			shell_error(sh, "Failed to update velocity gains (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+			    (double)kp, (double)ki, (double)iq_limit);
+		return 0;
+	}
+
+	/* Legacy form for backward compatibility. */
+	if (argc != 3 && argc != 4) {
+		shell_error(sh, "Usage: motor velocity gains <kp> [ki] <iq_limit>");
+		return -EINVAL;
 	}
 
 	float kp = 0.0f;
@@ -365,16 +533,15 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "kp/ki/iq_limit must be finite numbers");
 		return -EINVAL;
 	}
-	if (motor_api_set_param("velocity_cl_kp_A_per_rad_s", kp) != 0 ||
-	    motor_api_set_param("velocity_cl_ki_A_per_rad", ki) != 0 ||
-	    motor_api_set_param("velocity_cl_iq_limit_A", iq_limit) != 0) {
-		shell_error(sh, "Failed to update velocity gains");
-		return -EINVAL;
+
+	int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
+	if (ret != 0) {
+		shell_error(sh, "Failed to update velocity gains (err %d)", ret);
+		return ret;
 	}
-	g_motor_params->velocity_cl_i_term_A = 0.0f;
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+	shell_print(sh, "Velocity gains set (legacy): Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
 		    (double)kp, (double)ki, (double)iq_limit);
 	return 0;
 }
@@ -447,17 +614,92 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
-/* motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad] */
+/* motor position gains set <kp_rad_s_per_rad> <ki_rad_s2_per_rad>
+ * motor position gains defaults <safe|nominal>
+ * legacy: motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]
+ */
 static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 2 && argc != 3) {
-		shell_error(sh, "Usage: motor position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]");
+	if (argc < 2 || argc > 4) {
+		shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
+			    "motor position gains defaults <safe|nominal>");
 		return -EINVAL;
 	}
 
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "defaults") == 0) {
+		if (argc != 3) {
+			shell_error(sh, "Usage: motor position gains defaults <safe|nominal>");
+			return -EINVAL;
+		}
+
+		enum motor_gains_profile profile;
+		if (motor_parse_gains_profile(argv[2], &profile) != 0) {
+			shell_error(sh, "Profile must be 'safe' or 'nominal'");
+			return -EINVAL;
+		}
+
+		float vel_kp_dummy = 0.0f;
+		float vel_ki_dummy = 0.0f;
+		float vel_iq_dummy = 0.0f;
+		float kp = 0.0f;
+		float ki = 0.0f;
+		if (profile == MOTOR_GAINS_PROFILE_SAFE) {
+			motor_compute_safe_outer_gains(g_motor_params, &vel_kp_dummy, &vel_ki_dummy,
+						      &vel_iq_dummy, &kp, &ki);
+		} else {
+			motor_compute_nominal_outer_gains(g_motor_params, &vel_kp_dummy, &vel_ki_dummy,
+							 &vel_iq_dummy, &kp, &ki);
+		}
+
+		int ret = motor_apply_position_gains(kp, ki);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply position defaults (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Position %s defaults applied: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+			    (profile == MOTOR_GAINS_PROFILE_SAFE) ? "safe" : "nominal",
+			    (double)kp, (double)ki);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "set") == 0) {
+		if (argc != 4) {
+			shell_error(sh, "Usage: motor position gains set <kp> <ki>");
+			return -EINVAL;
+		}
+
+		float kp = 0.0f;
+		float ki = 0.0f;
+		if (!shell_parse_finite_float(argv[2], &kp) ||
+		    !shell_parse_finite_float(argv[3], &ki)) {
+			shell_error(sh, "kp/ki must be finite numbers");
+			return -EINVAL;
+		}
+
+		int ret = motor_apply_position_gains(kp, ki);
+		if (ret != 0) {
+			shell_error(sh, "Failed to update position gains (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh, "Position gains set: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+			    (double)kp, (double)ki);
+		return 0;
+	}
+
+	/* Legacy form for backward compatibility. */
+	if (argc != 2 && argc != 3) {
+		shell_error(sh, "Usage: motor position gains <kp> [ki]");
+		return -EINVAL;
 	}
 
 	float kp = 0.0f;
@@ -470,15 +712,15 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "kp/ki must be finite numbers");
 		return -EINVAL;
 	}
-	if (motor_api_set_param("position_cl_kp_rad_s_per_rad", kp) != 0 ||
-	    motor_api_set_param("position_cl_ki_rad_s2_per_rad", ki) != 0) {
-		shell_error(sh, "Failed to update position gain");
-		return -EINVAL;
+
+	int ret = motor_apply_position_gains(kp, ki);
+	if (ret != 0) {
+		shell_error(sh, "Failed to update position gains (err %d)", ret);
+		return ret;
 	}
-	g_motor_params->position_cl_i_term_rad_s = 0.0f;
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Position gains set: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+	shell_print(sh, "Position gains set (legacy): Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
 		    (double)kp, (double)ki);
 	return 0;
 }
@@ -873,7 +1115,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
 /* motor velocity subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
-	SHELL_CMD_ARG(gains, NULL, "Set velocity gains <kp_a_per_rad_s> [ki_a_per_rad] <iq_limit_a>", cmd_motor_velocity_gains, 3, 1),
+	SHELL_CMD_ARG(gains, NULL,
+		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal>",
+		      cmd_motor_velocity_gains, 3, 2),
 	SHELL_CMD(status, NULL, "Show velocity status", cmd_motor_velocity_status),
 	SHELL_SUBCMD_SET_END
 );
@@ -881,7 +1125,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 /* motor position subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_CMD_ARG(target, NULL, "Set position target <deg>", cmd_motor_position_target, 2, 0),
-	SHELL_CMD_ARG(gains, NULL, "Set position gains <kp_rad_s_per_rad> [ki_rad_s2_per_rad]", cmd_motor_position_gains, 2, 1),
+	SHELL_CMD_ARG(gains, NULL,
+		      "Configure position PI gains: set <kp> <ki> | defaults <safe|nominal>",
+		      cmd_motor_position_gains, 2, 2),
 	SHELL_CMD(status, NULL, "Show position status", cmd_motor_position_status),
 	SHELL_SUBCMD_SET_END
 );
