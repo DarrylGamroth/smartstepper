@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_core_contracts.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - integration
+      - contracts
+    harness: ztest
+    integration_platforms:
+      - native_sim

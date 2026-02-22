@@ -26,8 +26,8 @@ Unit tests executed via:
 
 Result:
 
-- 16/16 suites passed
-- 127/127 test cases passed
+- 17/17 suites passed
+- 129/129 test cases passed
 
 ## Findings (Code Review)
 
@@ -154,6 +154,7 @@ Result:
 8. Add integration-style unit tests for module contracts.
    - `motion_profile` + `motor_motion_modules` completion boundary behavior.
    - `position_convert` + `mpr`/`dob` compatibility under stale/fresh transitions.
+   - Status: implemented in `tests/unit/motor_core_contracts` (`chopper.motor_core_contracts.unit`).
 
 ### Execution Order
 
