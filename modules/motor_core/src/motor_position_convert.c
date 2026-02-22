@@ -15,18 +15,6 @@
 
 #define MOTOR_POSITION_CONVERT_EPSILON 1e-9f
 
-static float32_t motor_position_convert_clampf(float32_t value, float32_t min_value,
-					       float32_t max_value)
-{
-	if (value < min_value) {
-		return min_value;
-	}
-	if (value > max_value) {
-		return max_value;
-	}
-	return value;
-}
-
 static bool motor_position_convert_is_finite_positive(float32_t value)
 {
 	return isfinite(value) && value > 0.0f;
@@ -46,7 +34,7 @@ static float32_t motor_position_convert_lpf_alpha(float32_t dt_s, float32_t cuto
 	float32_t tau_inv = 2.0f * PI_F32 * cutoff_hz;
 	float32_t alpha = 1.0f - expf(-tau_inv * dt_s);
 
-	return motor_position_convert_clampf(alpha, 0.0f, 1.0f);
+	return clampf(alpha, 0.0f, 1.0f);
 }
 
 int motor_position_convert_validate(const struct motor_position_convert_config *cfg)

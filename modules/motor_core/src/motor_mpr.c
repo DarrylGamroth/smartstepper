@@ -10,19 +10,10 @@
 #include <math.h>
 #include <stddef.h>
 
+#include "math_constants.h"
+
 #define MOTOR_MPR_EPSILON 1e-9f
 #define MOTOR_MPR_FRICTION_DEADBAND_RAD_S 1e-3f
-
-static float32_t motor_mpr_clampf(float32_t value, float32_t min_value, float32_t max_value)
-{
-	if (value < min_value) {
-		return min_value;
-	}
-	if (value > max_value) {
-		return max_value;
-	}
-	return value;
-}
 
 static bool motor_mpr_is_finite_positive(float32_t value)
 {
@@ -157,9 +148,9 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 
 		state->disturbance_nm += cfg->disturbance_ki_nm_per_rad_s * omega_pred_residual;
 		if (disturbance_limit > 0.0f) {
-			state->disturbance_nm = motor_mpr_clampf(state->disturbance_nm,
-								-disturbance_limit,
-								disturbance_limit);
+			state->disturbance_nm = clampf(state->disturbance_nm,
+						      -disturbance_limit,
+						      disturbance_limit);
 		}
 		d_term = b_d * (state->disturbance_nm - tau_coulomb_nm);
 	}
@@ -192,8 +183,8 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 	if (max_delta <= 0.0f) {
 		max_delta = cfg->iq_limit_a;
 	}
-	u_opt = motor_mpr_clampf(u_opt, u_prev - max_delta, u_prev + max_delta);
-	u_opt = motor_mpr_clampf(u_opt, -cfg->iq_limit_a, cfg->iq_limit_a);
+	u_opt = clampf(u_opt, u_prev - max_delta, u_prev + max_delta);
+	u_opt = clampf(u_opt, -cfg->iq_limit_a, cfg->iq_limit_a);
 
 	state->iq_cmd_a = u_opt;
 	state->omega_model_rad_s = omega_meas_rad_s;
@@ -292,9 +283,9 @@ int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 	if (max_delta <= 0.0f) {
 		max_delta = cfg->velocity_limit_rad_s;
 	}
-	v_opt = motor_mpr_clampf(v_opt, v_prev - max_delta, v_prev + max_delta);
-	v_opt = motor_mpr_clampf(v_opt, -cfg->velocity_limit_rad_s,
-				 cfg->velocity_limit_rad_s);
+	v_opt = clampf(v_opt, v_prev - max_delta, v_prev + max_delta);
+	v_opt = clampf(v_opt, -cfg->velocity_limit_rad_s,
+		       cfg->velocity_limit_rad_s);
 
 	state->velocity_cmd_rad_s = v_opt;
 	state->last_position_error_rad = position_error_rad;

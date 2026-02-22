@@ -10,19 +10,10 @@
 #include <math.h>
 #include <stddef.h>
 
+#include "math_constants.h"
+
 #define MOTOR_DOB_EPSILON 1e-9f
 #define MOTOR_DOB_FRICTION_DEADBAND_RAD_S 1e-3f
-
-static float32_t motor_dob_clampf(float32_t value, float32_t min_value, float32_t max_value)
-{
-	if (value < min_value) {
-		return min_value;
-	}
-	if (value > max_value) {
-		return max_value;
-	}
-	return value;
-}
 
 static bool motor_dob_is_finite_positive(float32_t value)
 {
@@ -157,9 +148,9 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	if (cfg->observer_gain_nm_per_rad_s > 0.0f) {
 		state->disturbance_nm += cfg->observer_gain_nm_per_rad_s * residual;
 		state->disturbance_nm =
-			motor_dob_clampf(state->disturbance_nm,
-					-cfg->torque_limit_nm,
-					cfg->torque_limit_nm);
+			clampf(state->disturbance_nm,
+			       -cfg->torque_limit_nm,
+			       cfg->torque_limit_nm);
 	}
 
 	float32_t iq_limit = cfg->iq_ff_limit_a;
@@ -175,7 +166,7 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 		return -ERANGE;
 	}
 
-	iq_ff = motor_dob_clampf(iq_ff, -iq_limit, iq_limit);
+	iq_ff = clampf(iq_ff, -iq_limit, iq_limit);
 	state->iq_ff_a = iq_ff;
 	state->omega_model_rad_s = omega_meas_rad_s;
 	*iq_ff_a_out = iq_ff;

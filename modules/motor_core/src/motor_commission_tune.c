@@ -16,17 +16,6 @@
 #define MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN 0.02f
 #define MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MAX 0.20f
 
-static float32_t tune_clampf(float32_t value, float32_t min_value, float32_t max_value)
-{
-	if (value < min_value) {
-		return min_value;
-	}
-	if (value > max_value) {
-		return max_value;
-	}
-	return value;
-}
-
 static bool tune_is_finite_positive(float32_t value)
 {
 	return isfinite(value) && value > 0.0f;
@@ -95,9 +84,9 @@ int motor_commission_tune_config_default(struct motor_commission_tune_config *cf
 	cfg->position_bw_ratio = MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MAX;
 	cfg->position_zeta = 1.0f;
 	cfg->max_current_a = max_current_a;
-	cfg->iq_limit_a = tune_clampf(0.30f * max_current_a,
-				      MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A,
-				      max_current_a);
+	cfg->iq_limit_a = clampf(0.30f * max_current_a,
+				 MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A,
+				 max_current_a);
 	cfg->profile_max_velocity_rad_s = profile_max_velocity_rad_s;
 	cfg->profile_max_accel_rad_s2 = profile_max_accel_rad_s2;
 	cfg->min_flux_r2 = 0.55f;
@@ -179,17 +168,17 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 		return -ERANGE;
 	}
 
-	float32_t iq_limit = tune_clampf(cfg->iq_limit_a,
-					 MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A,
-					 cfg->max_current_a);
+	float32_t iq_limit = clampf(cfg->iq_limit_a,
+				    MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A,
+				    cfg->max_current_a);
 	float32_t velocity_bw_hz = cfg->velocity_bw_hz;
 	float32_t velocity_omega = 2.0f * PI_F32 * velocity_bw_hz;
 	float32_t velocity_kp = ((2.0f * cfg->velocity_zeta * velocity_omega * inertia) - viscous) / kt;
 	float32_t velocity_ki = (velocity_omega * velocity_omega * inertia) / kt;
 
-	float32_t position_ratio = tune_clampf(cfg->position_bw_ratio,
-					       MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN,
-					       MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MAX);
+	float32_t position_ratio = clampf(cfg->position_bw_ratio,
+					  MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN,
+					  MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MAX);
 	float32_t position_bw_hz = velocity_bw_hz * position_ratio;
 	float32_t position_omega = 2.0f * PI_F32 * position_bw_hz;
 	float32_t position_kp = 2.0f * cfg->position_zeta * position_omega;
@@ -214,27 +203,27 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 
 	out->velocity_mpr_horizon = 8U;
 	out->velocity_mpr_q_speed =
-		tune_clampf((velocity_omega * inertia) / kt, 0.2f, 10.0f);
+		clampf((velocity_omega * inertia) / kt, 0.2f, 10.0f);
 	out->velocity_mpr_r_delta_iq =
-		tune_clampf(1.0f / (10.0f * out->velocity_mpr_q_speed), 0.01f, 0.5f);
+		clampf(1.0f / (10.0f * out->velocity_mpr_q_speed), 0.01f, 0.5f);
 	out->velocity_mpr_max_delta_iq_a =
-		tune_clampf(iq_limit * 0.15f, 0.01f, iq_limit);
+		clampf(iq_limit * 0.15f, 0.01f, iq_limit);
 	out->velocity_mpr_disturbance_ki_nm_per_rad_s =
-		tune_clampf(MAX(viscous, 0.005f), 0.005f, 0.2f);
+		clampf(MAX(viscous, 0.005f), 0.005f, 0.2f);
 
 	out->position_mpr_horizon = 16U;
-	out->position_mpr_q_position = tune_clampf(2.0f * position_omega, 0.5f, 20.0f);
-	out->position_mpr_q_velocity_ff = tune_clampf(position_omega * 0.5f, 0.1f, 10.0f);
+	out->position_mpr_q_position = clampf(2.0f * position_omega, 0.5f, 20.0f);
+	out->position_mpr_q_velocity_ff = clampf(position_omega * 0.5f, 0.1f, 10.0f);
 	out->position_mpr_r_delta_velocity =
-		tune_clampf(1.0f / (5.0f * out->position_mpr_q_position), 0.02f, 0.5f);
+		clampf(1.0f / (5.0f * out->position_mpr_q_position), 0.02f, 0.5f);
 	out->position_mpr_max_delta_velocity_rad_s =
-		tune_clampf(cfg->profile_max_accel_rad_s2 * cfg->dt_s,
-			    0.001f, cfg->profile_max_velocity_rad_s);
+		clampf(cfg->profile_max_accel_rad_s2 * cfg->dt_s,
+		       0.001f, cfg->profile_max_velocity_rad_s);
 
 	out->velocity_dob_enable = true;
 	out->velocity_dob_observer_gain_nm_per_rad_s =
-		tune_clampf(0.01f + (0.001f * velocity_bw_hz), 0.01f, 0.05f);
-	out->velocity_dob_iq_ff_limit_a = tune_clampf(iq_limit * 0.40f, 0.05f, iq_limit);
+		clampf(0.01f + (0.001f * velocity_bw_hz), 0.01f, 0.05f);
+	out->velocity_dob_iq_ff_limit_a = clampf(iq_limit * 0.40f, 0.05f, iq_limit);
 	out->velocity_dob_torque_limit_nm = kt * out->velocity_dob_iq_ff_limit_a;
 
 	return 0;
