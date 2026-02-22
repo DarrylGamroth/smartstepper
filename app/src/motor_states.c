@@ -105,6 +105,21 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->velocity_dob_residual_rad_s = 0.0f;
 }
 
+static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
+{
+	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+
+	if (params != NULL) {
+		mode = (enum motor_state)params->requested_online_mode;
+	}
+
+	if (!motor_state_is_online_submode(mode)) {
+		mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	}
+
+	return mode;
+}
+
 static struct motor_parameters motor_params;
 K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
 
@@ -407,6 +422,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	/* Initialize velocity/position scaffold defaults */
 	params->position_target_rad = 0.0f;
+	params->requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
 	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
 	params->outer_loop_mode = OUTER_LOOP_MPR_DEFAULT_ENABLED ?
@@ -660,8 +676,10 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	switch (params->event.type) {
 	case MOTOR_EVENT_ONLINE:
 		if (params->calibration_complete) {
+			enum motor_state online_mode =
+				motor_resolve_requested_online_mode(params);
 			LOG_INF("ONLINE request received, transitioning to ONLINE");
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+			smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 			return SMF_EVENT_HANDLED;
 		}
 
@@ -778,8 +796,9 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 	 * boot calibration has already completed.
 	 */
 	if (!params->calibration_running && params->calibration_complete) {
+		enum motor_state online_mode = motor_resolve_requested_online_mode(params);
 		LOG_INF("Calibration already complete, transitioning to ONLINE");
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 		return SMF_EVENT_HANDLED;
 	}
 

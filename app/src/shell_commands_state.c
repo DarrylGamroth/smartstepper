@@ -390,6 +390,8 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    motor_calibration_mode_to_string(g_motor_params->calibration_mode));
 	shell_print(sh, "  Commissioned: %s",
 		    g_motor_params->commissioning_complete ? "YES" : "NO");
+	shell_print(sh, "  Online mode:  %s",
+		    motor_state_to_string(g_motor_params->requested_online_mode));
 	
 	return 0;
 }
@@ -400,6 +402,17 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
+	}
+
+	int current_state = motor_api_get_state();
+	bool online_active = (current_state == MOTOR_STATE_ONLINE) ||
+			    motor_state_is_online_submode(current_state);
+	if (!online_active) {
+		g_motor_params->requested_online_mode = (uint8_t)target_state;
+		shell_print(sh,
+			    "Online mode set to %s (will apply on next ONLINE entry)",
+			    mode_name);
+		return 0;
 	}
 
 	/* Post mode change event to state machine */

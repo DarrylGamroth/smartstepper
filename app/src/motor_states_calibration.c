@@ -19,6 +19,7 @@
 #include "traj.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
+#include "motor_state_utils.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -44,6 +45,21 @@ static inline bool motor_calibration_timeout_elapsed(struct motor_parameters *pa
 	}
 
 	return false;
+}
+
+static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
+{
+	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+
+	if (params != NULL) {
+		mode = (enum motor_state)params->requested_online_mode;
+	}
+
+	if (!motor_state_is_online_submode(mode)) {
+		mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	}
+
+	return mode;
 }
 
 /* State: CALIBRATION - Hierarchical parent state for all calibration sub-states */
@@ -468,13 +484,15 @@ enum smf_state_result motor_state_align_sample_run(void *obj)
 		/* Boot calibration resumes normal flow to ONLINE. Commissioning ends in IDLE
 		 * so the user can inspect measurements without immediately entering control.
 		 */
-		if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-		} else {
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ONLINE]);
+			if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+				smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+			} else {
+				enum motor_state online_mode =
+					motor_resolve_requested_online_mode(params);
+				smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
+			}
+			return SMF_EVENT_HANDLED;
 		}
-		return SMF_EVENT_HANDLED;
-	}
 
 	return SMF_EVENT_PROPAGATE;
 }

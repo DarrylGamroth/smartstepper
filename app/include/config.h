@@ -232,6 +232,7 @@ struct motor_parameters {
 	bool calibration_running;   /* True while calibration/commissioning state machine is active */
 	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
 	uint8_t calibration_mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
+	uint8_t requested_online_mode; /* Requested ONLINE submode when entering ONLINE from non-ONLINE states */
 	struct motor_commission_ctx commission; /* Commissioning runtime and capture buffers */
 
 	/* ISR feature flags (atomic for thread-safe access) */
