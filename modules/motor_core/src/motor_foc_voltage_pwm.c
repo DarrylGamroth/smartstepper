@@ -9,7 +9,14 @@
 #include <errno.h>
 #include <math.h>
 
+#if defined(CONFIG_ARCH_POSIX)
+/* Native_sim unit tests provide local stubs for these CMSIS DSP helpers. */
+void arm_sin_cos_f32(float32_t theta, float32_t *pSinVal, float32_t *pCosVal);
+void arm_inv_park_f32(float32_t id, float32_t iq, float32_t *pAlpha, float32_t *pBeta,
+		      float32_t sinVal, float32_t cosVal);
+#else
 #include <dsp/controller_functions.h>
+#endif
 
 #include "pwmgen.h"
 

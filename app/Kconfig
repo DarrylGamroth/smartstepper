@@ -33,4 +33,43 @@ config ENCODER_MAGNET_CHECK_ON_ARM
 	  and rejects arming when MHI or MLO alarm bits are set.
 	  Keep disabled for bring-up if magnet alignment/strength is not finalized.
 
+config MOTOR_CURRENT_DECOUPLING
+	bool "Enable d/q decoupling and back-EMF feedforward"
+	default y
+	help
+	  Adds model-based feedforward terms to the d-axis and q-axis current loops:
+	  vd_ff = -omega_e * Lq * iq and
+	  vq_ff =  omega_e * (Ld * id + psi_f).
+
+config MOTOR_VELOCITY_NOTCH_FILTER
+	bool "Enable velocity feedback notch filter"
+	default n
+	help
+	  Enables a second-order notch filter on measured mechanical speed
+	  before velocity error computation.
+
+config MOTOR_VELOCITY_NOTCH_FREQ_HZ
+	int "Velocity notch center frequency (Hz)"
+	default 300
+	range 1 5000
+	depends on MOTOR_VELOCITY_NOTCH_FILTER
+	help
+	  Center frequency of the velocity notch filter.
+
+config MOTOR_VELOCITY_NOTCH_Q_MILLI
+	int "Velocity notch Q x1000"
+	default 2000
+	range 100 20000
+	depends on MOTOR_VELOCITY_NOTCH_FILTER
+	help
+	  Notch filter quality factor scaled by 1000.
+	  Example: 2000 => Q = 2.0.
+
+config MOTOR_OUTER_LOOP_MPR
+	bool "Use model-predictive outer loops (velocity + position)"
+	default y
+	help
+	  Enables SpinTAC-style model predictive regulators for the velocity and
+	  position outer loops. Disable to use legacy PI outer loops.
+
 endmenu

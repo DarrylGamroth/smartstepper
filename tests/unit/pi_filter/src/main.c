@@ -4,8 +4,10 @@
  */
 
 #include <zephyr/ztest.h>
+#include <math.h>
 
 #include "filter_fo.h"
+#include "filter_so.h"
 #include "pi.h"
 
 ZTEST(pi_filter, test_filter_form0_response)
@@ -34,6 +36,56 @@ ZTEST(pi_filter, test_filter_full_form_uses_x1_term)
 
 	zassert_within(y, 5.0f, 1e-6f, NULL);
 	zassert_within(filter_fo_get_x1(&f), 3.0f, 1e-6f, NULL);
+}
+
+ZTEST(pi_filter, test_filter_so_passthrough)
+{
+	struct filter_so_f32 f = {0};
+
+	filter_so_init(&f);
+	filter_so_set_passthrough(&f);
+
+	zassert_within(filter_so_run(&f, 0.25f), 0.25f, 1e-6f, NULL);
+	zassert_within(filter_so_run(&f, -0.75f), -0.75f, 1e-6f, NULL);
+	zassert_within(filter_so_run(&f, 1.0f), 1.0f, 1e-6f, NULL);
+}
+
+ZTEST(pi_filter, test_filter_so_notch_config_validation)
+{
+	struct filter_so_f32 f = {0};
+
+	zassert_equal(filter_so_config_notch(NULL, 1000.0f, 50.0f, 2.0f), -EINVAL, NULL);
+	zassert_equal(filter_so_config_notch(&f, 0.0f, 50.0f, 2.0f), -EINVAL, NULL);
+	zassert_equal(filter_so_config_notch(&f, 1000.0f, 0.0f, 2.0f), -EINVAL, NULL);
+	zassert_equal(filter_so_config_notch(&f, 1000.0f, 500.0f, 2.0f), -EINVAL, NULL);
+	zassert_equal(filter_so_config_notch(&f, 1000.0f, 50.0f, 0.0f), -EINVAL, NULL);
+}
+
+ZTEST(pi_filter, test_filter_so_notch_reduces_center_frequency_gain)
+{
+	struct filter_so_f32 f = {0};
+	const float32_t fs_hz = 1000.0f;
+	const float32_t f0_hz = 50.0f;
+	const float32_t q = 4.0f;
+	const float32_t dt = 1.0f / fs_hz;
+	float32_t t = 0.0f;
+	float32_t input_energy = 0.0f;
+	float32_t output_energy = 0.0f;
+
+	zassert_ok(filter_so_config_notch(&f, fs_hz, f0_hz, q), NULL);
+	filter_so_set_initial_conditions(&f, 0.0f, 0.0f, 0.0f, 0.0f);
+
+	for (int i = 0; i < 2000; i++) {
+		float32_t x = sinf(2.0f * PI_F32 * f0_hz * t);
+		float32_t y = filter_so_run(&f, x);
+		if (i > 400) {
+			input_energy += x * x;
+			output_energy += y * y;
+		}
+		t += dt;
+	}
+
+	zassert_true(output_energy < (0.2f * input_energy), NULL);
 }
 
 ZTEST(pi_filter, test_pi_parallel_no_integrator)

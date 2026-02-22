@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_foc_voltage_pwm.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - foc
+      - pwm
+    harness: ztest
+    integration_platforms:
+      - native_sim

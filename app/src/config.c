@@ -25,6 +25,23 @@ void config_init_filters(struct motor_parameters *params)
 	filter_fo_set_den_coeffs(&params->filter_Ib, a1);
 	filter_fo_set_num_coeffs(&params->filter_Ib, b0, 0.0f);
 
+	filter_so_init(&params->filter_velocity_notch);
+	filter_so_set_passthrough(&params->filter_velocity_notch);
+	if (VELOCITY_NOTCH_FILTER_ENABLED) {
+		int ret = filter_so_config_notch(&params->filter_velocity_notch,
+						 CONTROL_LOOP_FREQUENCY_HZ,
+						 VELOCITY_NOTCH_FREQ_HZ,
+						 VELOCITY_NOTCH_Q);
+		if (ret == 0) {
+			LOG_INF("Velocity notch enabled: f0=%.1f Hz, Q=%.3f",
+				(double)VELOCITY_NOTCH_FREQ_HZ, (double)VELOCITY_NOTCH_Q);
+		} else {
+			filter_so_set_passthrough(&params->filter_velocity_notch);
+			LOG_WRN("Velocity notch config invalid (err %d), falling back to passthrough",
+				ret);
+		}
+	}
+
 	LOG_DBG("Filters initialized: a1=%.6f, b0=%.6f",
 		(double)a1, (double)b0);
 }
@@ -95,6 +112,15 @@ void config_print_parameters(void)
 	LOG_INF("  Max current=%.1fA", (double)MOTOR_MAX_CURRENT_A);
 	LOG_INF("  Max speed=%.0fHz", (double)MOTOR_MAX_SPEED_HZ);
 	LOG_INF("  Inertia=%.3fkgcm²", (double)(MOTOR_INERTIA_KGM2 * 10000.0f));
+	LOG_INF("Control Options:");
+	LOG_INF("  DQ Decoupling=%s", CURRENT_DECOUPLING_ENABLED ? "ON" : "OFF");
+	LOG_INF("  Velocity notch=%s%s",
+		VELOCITY_NOTCH_FILTER_ENABLED ? "ON" : "OFF",
+		VELOCITY_NOTCH_FILTER_ENABLED ? "" : " (passthrough)");
+	if (VELOCITY_NOTCH_FILTER_ENABLED) {
+		LOG_INF("  Velocity notch f0=%.1fHz, Q=%.3f",
+			(double)VELOCITY_NOTCH_FREQ_HZ, (double)VELOCITY_NOTCH_Q);
+	}
 
 	LOG_INF("Alignment:");
 	LOG_INF("  Current=%.2fA, Duration=%.1fs",
