@@ -106,6 +106,8 @@ int motor_commission_tune_config_default(struct motor_commission_tune_config *cf
 					 float32_t profile_max_velocity_rad_s,
 					 float32_t profile_max_accel_rad_s2);
 
+int motor_commission_tune_validate_config(const struct motor_commission_tune_config *cfg);
+
 int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit,
 				  const struct motor_commission_tune_config *cfg,
 				  struct motor_commission_tune_output *out);

@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <errno.h>
 #include <zephyr/ztest.h>
 
 #include "rls_motor_est.h"
@@ -43,6 +44,17 @@ ZTEST(rls_motor_est, test_init_and_reset_restore_state)
 	zassert_false(rls.converged, NULL);
 	zassert_within(rls.theta[0], 1.2f, 1e-6f, NULL);
 	zassert_within(rls.theta[1], 0.003f, 1e-6f, NULL);
+}
+
+ZTEST(rls_motor_est, test_validate_config)
+{
+	zassert_ok(rls_motor_est_validate_config(0.99f, 20000.0f, 0.5f, 1.0f, 0.002f, 10.0f), NULL);
+	zassert_equal(rls_motor_est_validate_config(0.0f, 20000.0f, 0.5f, 1.0f, 0.002f, 10.0f),
+		      -EINVAL, NULL);
+	zassert_equal(rls_motor_est_validate_config(1.1f, 20000.0f, 0.5f, 1.0f, 0.002f, 10.0f),
+		      -EINVAL, NULL);
+	zassert_equal(rls_motor_est_validate_config(0.99f, 0.0f, 0.5f, 1.0f, 0.002f, 10.0f),
+		      -EINVAL, NULL);
 }
 
 ZTEST(rls_motor_est, test_init_clamps_seed_parameters_and_covariance_floor)
@@ -104,6 +116,11 @@ ZTEST(rls_motor_est, test_update_rejects_invalid_lambda)
 	for (size_t i = 0U; i < 4U; i++) {
 		zassert_within(rls.theta[i], theta_before[i], 1e-8f, NULL);
 	}
+
+	rls.lambda = 1.1f;
+	rls_motor_est_update(&rls, 1.2f, 0.2f, 0.1f, 0.0f, 0.0f, 0.0f, 0.001f);
+	zassert_equal(rls.num_updates, 0u, NULL);
+	zassert_equal(rls.num_rejected, 2u, NULL);
 }
 
 ZTEST(rls_motor_est, test_update_rejects_nonfinite_sample)

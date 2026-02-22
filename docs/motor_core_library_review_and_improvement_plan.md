@@ -27,7 +27,7 @@ Unit tests executed via:
 Result:
 
 - 16/16 suites passed
-- 115/115 test cases passed
+- 127/127 test cases passed
 
 ## Findings (Code Review)
 
@@ -164,8 +164,8 @@ Result:
 
 ## Deliverables Checklist
 
-- [ ] Hardened runtime validation and bounded outputs in core modules.
-- [ ] Deterministic profile completion semantics.
-- [ ] Unit consistency cleanup (`rad/s` API standardization).
-- [ ] Expanded unit tests for all hardened paths.
+- [x] Hardened runtime validation and bounded outputs in core modules.
+- [x] Deterministic profile completion semantics.
+- [x] Unit consistency cleanup (`rad/s` API standardization).
+- [x] Expanded unit tests for all hardened paths.
 - [ ] Updated module docs/comments reflecting final contracts.

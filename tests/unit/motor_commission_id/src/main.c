@@ -47,6 +47,80 @@ static float32_t mech_model_torque(float32_t inertia_kgm2,
 	       coulomb_nm * sign_term + offset_nm;
 }
 
+ZTEST(motor_commission_id, test_validate_flux_config)
+{
+	struct motor_flux_id_config cfg = {
+		.rs_ohm = 0.4f,
+		.ld_h = 0.0011f,
+		.lq_h = 0.0013f,
+		.min_abs_speed_rad_s = 5.0f,
+		.min_speed_span_rad_s = 10.0f,
+		.min_samples = 4U,
+		.min_r2 = 0.1f,
+		.require_positive_psi = true,
+	};
+
+	zassert_ok(motor_flux_id_validate_config(&cfg), NULL);
+	cfg.min_samples = 0U;
+	zassert_equal(motor_flux_id_validate_config(&cfg), -EINVAL, NULL);
+	cfg.min_samples = 4U;
+	cfg.min_r2 = 1.1f;
+	zassert_equal(motor_flux_id_validate_config(&cfg), -EINVAL, NULL);
+}
+
+ZTEST(motor_commission_id, test_validate_mech_config)
+{
+	struct motor_mech_id_config cfg = {
+		.kt_nm_per_a = 0.12f,
+		.sign_deadband_rad_s = 0.5f,
+		.min_samples = 4U,
+		.min_r2 = 0.2f,
+		.require_positive_inertia = true,
+		.require_nonnegative_viscous = true,
+	};
+
+	zassert_ok(motor_mech_id_validate_config(&cfg), NULL);
+	cfg.kt_nm_per_a = 0.0f;
+	zassert_equal(motor_mech_id_validate_config(&cfg), -EINVAL, NULL);
+	cfg.kt_nm_per_a = 0.12f;
+	cfg.min_r2 = -0.1f;
+	zassert_equal(motor_mech_id_validate_config(&cfg), -EINVAL, NULL);
+}
+
+ZTEST(motor_commission_id, test_init_with_invalid_config_disables_estimator)
+{
+	const struct motor_flux_id_config flux_cfg_bad = {
+		.rs_ohm = NAN,
+		.ld_h = 0.001f,
+		.lq_h = 0.001f,
+		.min_abs_speed_rad_s = 1.0f,
+		.min_speed_span_rad_s = 1.0f,
+		.min_samples = 4U,
+		.min_r2 = 0.0f,
+		.require_positive_psi = false,
+	};
+	const struct motor_mech_id_config mech_cfg_bad = {
+		.kt_nm_per_a = 0.0f,
+		.sign_deadband_rad_s = 0.5f,
+		.min_samples = 4U,
+		.min_r2 = 0.0f,
+		.require_positive_inertia = false,
+		.require_nonnegative_viscous = false,
+	};
+	struct motor_flux_id_state flux_state = {0};
+	struct motor_flux_id_result flux_result = {0};
+	struct motor_mech_id_state mech_state = {0};
+	struct motor_mech_id_result mech_result = {0};
+
+	motor_flux_id_init(&flux_state, &flux_cfg_bad);
+	motor_mech_id_init(&mech_state, &mech_cfg_bad);
+
+	zassert_false(motor_flux_id_accumulate(&flux_state, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f), NULL);
+	zassert_equal(motor_flux_id_finalize(&flux_state, &flux_result), -EINVAL, NULL);
+	zassert_false(motor_mech_id_accumulate(&mech_state, 1.0f, 1.0f, 0.5f), NULL);
+	zassert_equal(motor_mech_id_finalize(&mech_state, &mech_result), -EINVAL, NULL);
+}
+
 ZTEST(motor_commission_id, test_flux_init_and_rejects_bad_samples)
 {
 	const struct motor_flux_id_config cfg = {

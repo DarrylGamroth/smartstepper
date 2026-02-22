@@ -32,7 +32,7 @@ struct rls_motor_est {
 	float32_t P[4][4];
 
 	/* Configuration */
-	float32_t lambda;                    /* Forgetting factor (0.9999 typical) */
+	float32_t lambda;                    /* Forgetting factor (0,1] (0.9999 typical) */
 	float32_t control_freq;              /* Control loop frequency for dI/dt */
 	float32_t convergence_threshold;     /* Trace(P) threshold for convergence */
 	float32_t Rs_init;                   /* Initial Rs estimate for full reset */
@@ -66,6 +66,26 @@ void rls_motor_est_init(struct rls_motor_est *rls,
                         float32_t Rs_init,
                         float32_t L_init,
                         float32_t P_init);
+
+/**
+ * @brief Validate RLS configuration parameters.
+ *
+ * @param lambda Forgetting factor in range (0, 1]
+ * @param control_freq Control loop frequency in Hz (> 0)
+ * @param convergence_threshold Trace(P) threshold (> 0)
+ * @param Rs_init Initial resistance estimate (ohms, finite)
+ * @param L_init Initial inductance estimate (henries, finite)
+ * @param P_init Initial covariance diagonal value (finite, > 0)
+ *
+ * @retval 0 Configuration is valid
+ * @retval -EINVAL Configuration is invalid
+ */
+int rls_motor_est_validate_config(float32_t lambda,
+				  float32_t control_freq,
+				  float32_t convergence_threshold,
+				  float32_t Rs_init,
+				  float32_t L_init,
+				  float32_t P_init);
 
 /**
  * @brief Update RLS estimator with new measurement

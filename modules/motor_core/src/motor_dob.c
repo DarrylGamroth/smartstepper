@@ -61,6 +61,34 @@ static void motor_dob_discretize(const struct motor_dob_model *model,
 	*bd_out = dt_s / j;
 }
 
+static bool motor_dob_cache_matches(const struct motor_dob_state *state,
+				    const struct motor_dob_config *cfg,
+				    const struct motor_dob_model *model)
+{
+	return state->discretization_valid &&
+	       state->cached_dt_s == cfg->dt_s &&
+	       state->cached_inertia_kgm2 == model->inertia_kgm2 &&
+	       state->cached_viscous_friction_nm_per_rad_s ==
+		       model->viscous_friction_nm_per_rad_s &&
+	       state->cached_torque_constant_nm_per_a == model->torque_constant_nm_per_a;
+}
+
+static void motor_dob_refresh_discretization(struct motor_dob_state *state,
+					     const struct motor_dob_config *cfg,
+					     const struct motor_dob_model *model)
+{
+	if (motor_dob_cache_matches(state, cfg, model)) {
+		return;
+	}
+
+	motor_dob_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
+	state->cached_dt_s = cfg->dt_s;
+	state->cached_inertia_kgm2 = model->inertia_kgm2;
+	state->cached_viscous_friction_nm_per_rad_s = model->viscous_friction_nm_per_rad_s;
+	state->cached_torque_constant_nm_per_a = model->torque_constant_nm_per_a;
+	state->discretization_valid = true;
+}
+
 int motor_dob_validate(const struct motor_dob_config *cfg,
 		       const struct motor_dob_model *model)
 {
@@ -95,6 +123,14 @@ void motor_dob_reset(struct motor_dob_state *state,
 	state->disturbance_nm = 0.0f;
 	state->iq_ff_a = 0.0f;
 	state->residual_rad_s = 0.0f;
+	state->discretization_valid = false;
+	state->cached_dt_s = 0.0f;
+	state->cached_inertia_kgm2 = 0.0f;
+	state->cached_viscous_friction_nm_per_rad_s = 0.0f;
+	state->cached_torque_constant_nm_per_a = 0.0f;
+	state->a = 0.0f;
+	state->b_u = 0.0f;
+	state->b_d = 0.0f;
 }
 
 int motor_dob_step(const struct motor_dob_config *cfg,
@@ -126,10 +162,10 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 		return 0;
 	}
 
-	float32_t a = 0.0f;
-	float32_t b_u = 0.0f;
-	float32_t b_d = 0.0f;
-	motor_dob_discretize(model, cfg->dt_s, &a, &b_u, &b_d);
+	motor_dob_refresh_discretization(state, cfg, model);
+	float32_t a = state->a;
+	float32_t b_u = state->b_u;
+	float32_t b_d = state->b_d;
 
 	float32_t sign_speed = motor_dob_sign_with_deadband(state->omega_model_rad_s,
 						    MOTOR_DOB_FRICTION_DEADBAND_RAD_S);

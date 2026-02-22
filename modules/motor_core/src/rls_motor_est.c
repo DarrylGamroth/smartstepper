@@ -14,6 +14,7 @@
 
 #include "rls_motor_est.h"
 #include "math_constants.h"
+#include <errno.h>
 #include <zephyr/sys/util.h>
 #include <math.h>
 
@@ -26,6 +27,25 @@
 #define VDT_SIGN_MAX_V   2.0f
 #define P_MIN            1e-6f
 #define LAMBDA_MIN       1e-6f
+#define LAMBDA_MAX       1.0f
+
+int rls_motor_est_validate_config(float32_t lambda,
+				  float32_t control_freq,
+				  float32_t convergence_threshold,
+				  float32_t Rs_init,
+				  float32_t L_init,
+				  float32_t P_init)
+{
+	if (!isfinite(lambda) || lambda <= LAMBDA_MIN || lambda > LAMBDA_MAX ||
+	    !isfinite(control_freq) || control_freq <= 0.0f ||
+	    !isfinite(convergence_threshold) || convergence_threshold <= 0.0f ||
+	    !isfinite(Rs_init) || !isfinite(L_init) ||
+	    !isfinite(P_init) || P_init <= 0.0f) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 void rls_motor_est_init(struct rls_motor_est *rls,
                         float32_t lambda,
@@ -39,7 +59,7 @@ void rls_motor_est_init(struct rls_motor_est *rls,
 		return;
 	}
 
-	if (!isfinite(lambda) || lambda <= LAMBDA_MIN) {
+	if (!isfinite(lambda) || lambda <= LAMBDA_MIN || lambda > LAMBDA_MAX) {
 		lambda = 1.0f;
 	}
 	if (!isfinite(control_freq) || control_freq < 0.0f) {
@@ -81,7 +101,7 @@ void rls_motor_est_update(struct rls_motor_est *rls,
 	if (rls == NULL) {
 		return;
 	}
-	if (!isfinite(rls->lambda) || rls->lambda <= LAMBDA_MIN) {
+	if (!isfinite(rls->lambda) || rls->lambda <= LAMBDA_MIN || rls->lambda > LAMBDA_MAX) {
 		rls->num_rejected++;
 		return;
 	}

@@ -43,7 +43,7 @@ ZTEST(rs_online, test_update_keeps_estimate_within_bounds)
 		rs_online_update(&est,
 				 30.0f, -25.0f, /* vd, vq */
 				 10.0f, -8.0f,  /* id, iq */
-				 3600.0f);      /* omega_e_dps */
+				 62.831852f);   /* omega_e_rad_s */
 	}
 
 	zassert_true(est.Rs_est >= est.Rs_min && est.Rs_est <= est.Rs_max, NULL);

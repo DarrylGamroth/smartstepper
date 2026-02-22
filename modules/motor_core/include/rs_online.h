@@ -67,7 +67,7 @@ void rs_online_init(struct rs_online_estimator *est,
 void rs_online_update(struct rs_online_estimator *est,
                       float32_t vd, float32_t vq,
                       float32_t id, float32_t iq,
-                      float32_t omega_e_dps);
+                      float32_t omega_e_rad_s);
 
 /**
  * @brief Get the filtered Rs estimate

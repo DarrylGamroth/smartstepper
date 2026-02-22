@@ -60,6 +60,34 @@ static void motor_mpr_velocity_discretize(const struct motor_mpr_velocity_model 
 	*bd_out = dt_s / j;
 }
 
+static bool motor_mpr_velocity_cache_matches(const struct motor_mpr_velocity_state *state,
+					     const struct motor_mpr_velocity_config *cfg,
+					     const struct motor_mpr_velocity_model *model)
+{
+	return state->discretization_valid &&
+	       state->cached_dt_s == cfg->dt_s &&
+	       state->cached_inertia_kgm2 == model->inertia_kgm2 &&
+	       state->cached_viscous_friction_nm_per_rad_s ==
+		       model->viscous_friction_nm_per_rad_s &&
+	       state->cached_torque_constant_nm_per_a == model->torque_constant_nm_per_a;
+}
+
+static void motor_mpr_velocity_refresh_discretization(struct motor_mpr_velocity_state *state,
+						      const struct motor_mpr_velocity_config *cfg,
+						      const struct motor_mpr_velocity_model *model)
+{
+	if (motor_mpr_velocity_cache_matches(state, cfg, model)) {
+		return;
+	}
+
+	motor_mpr_velocity_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
+	state->cached_dt_s = cfg->dt_s;
+	state->cached_inertia_kgm2 = model->inertia_kgm2;
+	state->cached_viscous_friction_nm_per_rad_s = model->viscous_friction_nm_per_rad_s;
+	state->cached_torque_constant_nm_per_a = model->torque_constant_nm_per_a;
+	state->discretization_valid = true;
+}
+
 int motor_mpr_velocity_validate(const struct motor_mpr_velocity_config *cfg,
 				const struct motor_mpr_velocity_model *model)
 {
@@ -103,6 +131,14 @@ void motor_mpr_velocity_reset(struct motor_mpr_velocity_state *state,
 	state->omega_model_rad_s = isfinite(omega_initial_rad_s) ? omega_initial_rad_s : 0.0f;
 	state->disturbance_nm = 0.0f;
 	state->last_omega_error_rad_s = 0.0f;
+	state->discretization_valid = false;
+	state->cached_dt_s = 0.0f;
+	state->cached_inertia_kgm2 = 0.0f;
+	state->cached_viscous_friction_nm_per_rad_s = 0.0f;
+	state->cached_torque_constant_nm_per_a = 0.0f;
+	state->a = 0.0f;
+	state->b_u = 0.0f;
+	state->b_d = 0.0f;
 }
 
 int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
@@ -125,10 +161,10 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 		motor_mpr_velocity_reset(state, omega_meas_rad_s, 0.0f);
 	}
 
-	float32_t a = 0.0f;
-	float32_t b_u = 0.0f;
-	float32_t b_d = 0.0f;
-	motor_mpr_velocity_discretize(model, cfg->dt_s, &a, &b_u, &b_d);
+	motor_mpr_velocity_refresh_discretization(state, cfg, model);
+	float32_t a = state->a;
+	float32_t b_u = state->b_u;
+	float32_t b_d = state->b_d;
 
 	float32_t sign_speed = motor_mpr_sign_with_deadband(omega_meas_rad_s,
 							    MOTOR_MPR_FRICTION_DEADBAND_RAD_S);

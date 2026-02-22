@@ -26,7 +26,7 @@ static bool tune_is_finite_nonnegative(float32_t value)
 	return isfinite(value) && value >= 0.0f;
 }
 
-static int tune_validate_config(const struct motor_commission_tune_config *cfg)
+int motor_commission_tune_validate_config(const struct motor_commission_tune_config *cfg)
 {
 	if (cfg == NULL) {
 		return -EINVAL;
@@ -96,7 +96,7 @@ int motor_commission_tune_config_default(struct motor_commission_tune_config *cf
 	cfg->min_flux_samples = 24U;
 	cfg->min_mech_samples = 48U;
 
-	return 0;
+	return motor_commission_tune_validate_config(cfg);
 }
 
 int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit,
@@ -107,7 +107,7 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 		return -EINVAL;
 	}
 
-	int ret = tune_validate_config(cfg);
+	int ret = motor_commission_tune_validate_config(cfg);
 	if (ret != 0) {
 		return ret;
 	}

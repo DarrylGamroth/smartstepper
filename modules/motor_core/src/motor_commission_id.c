@@ -15,6 +15,11 @@
 #define MOTOR_COMMISSION_ID_VAR_EPS 1.0e-8f
 #define MOTOR_COMMISSION_ID_PIVOT_EPS 1.0e-9f
 
+static bool motor_commission_id_is_finite_nonnegative(float32_t value)
+{
+	return isfinite(value) && value >= 0.0f;
+}
+
 static bool motor_commission_id_solve_4x4(float32_t A[4][4], float32_t b[4], float32_t x[4])
 {
 	float32_t aug[4][5];
@@ -38,7 +43,7 @@ static bool motor_commission_id_solve_4x4(float32_t A[4][4], float32_t b[4], flo
 			}
 		}
 
-			if (pivot_abs < MOTOR_COMMISSION_ID_PIVOT_EPS) {
+		if (pivot_abs < MOTOR_COMMISSION_ID_PIVOT_EPS) {
 			return false;
 		}
 
@@ -78,6 +83,29 @@ static bool motor_commission_id_solve_4x4(float32_t A[4][4], float32_t b[4], flo
 	return true;
 }
 
+int motor_flux_id_validate_config(const struct motor_flux_id_config *cfg)
+{
+	if (cfg == NULL) {
+		return -EINVAL;
+	}
+
+	if (!motor_commission_id_is_finite_nonnegative(cfg->rs_ohm) ||
+	    !motor_commission_id_is_finite_nonnegative(cfg->ld_h) ||
+	    !motor_commission_id_is_finite_nonnegative(cfg->lq_h) ||
+	    !motor_commission_id_is_finite_nonnegative(cfg->min_abs_speed_rad_s) ||
+	    !motor_commission_id_is_finite_nonnegative(cfg->min_speed_span_rad_s) ||
+	    !isfinite(cfg->min_r2) ||
+	    cfg->min_samples == 0U) {
+		return -EINVAL;
+	}
+
+	if (cfg->min_r2 < 0.0f || cfg->min_r2 > 1.0f) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 void motor_flux_id_init(struct motor_flux_id_state *state,
 			const struct motor_flux_id_config *cfg)
 {
@@ -86,8 +114,9 @@ void motor_flux_id_init(struct motor_flux_id_state *state,
 	}
 
 	memset(state, 0, sizeof(*state));
-	if (cfg != NULL) {
+	if (motor_flux_id_validate_config(cfg) == 0) {
 		state->cfg = *cfg;
+		state->config_valid = true;
 	}
 
 	state->min_speed_rad_s = INFINITY;
@@ -98,6 +127,9 @@ bool motor_flux_id_accumulate(struct motor_flux_id_state *state, float32_t elec_
 			      float32_t iq_a, float32_t diq_dt_a_s, float32_t vq_v)
 {
 	if (state == NULL) {
+		return false;
+	}
+	if (!state->config_valid) {
 		return false;
 	}
 
@@ -139,6 +171,9 @@ bool motor_flux_id_accumulate(struct motor_flux_id_state *state, float32_t elec_
 int motor_flux_id_finalize(const struct motor_flux_id_state *state, struct motor_flux_id_result *result)
 {
 	if (state == NULL || result == NULL) {
+		return -EINVAL;
+	}
+	if (!state->config_valid) {
 		return -EINVAL;
 	}
 
@@ -192,6 +227,27 @@ int motor_flux_id_finalize(const struct motor_flux_id_state *state, struct motor
 	return 0;
 }
 
+int motor_mech_id_validate_config(const struct motor_mech_id_config *cfg)
+{
+	if (cfg == NULL) {
+		return -EINVAL;
+	}
+
+	if (!isfinite(cfg->kt_nm_per_a) ||
+	    fabsf(cfg->kt_nm_per_a) < MOTOR_COMMISSION_ID_PIVOT_EPS ||
+	    !motor_commission_id_is_finite_nonnegative(cfg->sign_deadband_rad_s) ||
+	    !isfinite(cfg->min_r2) ||
+	    cfg->min_samples == 0U) {
+		return -EINVAL;
+	}
+
+	if (cfg->min_r2 < 0.0f || cfg->min_r2 > 1.0f) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 void motor_mech_id_init(struct motor_mech_id_state *state,
 			const struct motor_mech_id_config *cfg)
 {
@@ -200,8 +256,9 @@ void motor_mech_id_init(struct motor_mech_id_state *state,
 	}
 
 	memset(state, 0, sizeof(*state));
-	if (cfg != NULL) {
+	if (motor_mech_id_validate_config(cfg) == 0) {
 		state->cfg = *cfg;
+		state->config_valid = true;
 	}
 }
 
@@ -209,6 +266,9 @@ bool motor_mech_id_accumulate(struct motor_mech_id_state *state, float32_t mech_
 			      float32_t mech_accel_rad_s2, float32_t iq_a)
 {
 	if (state == NULL) {
+		return false;
+	}
+	if (!state->config_valid) {
 		return false;
 	}
 
@@ -252,6 +312,9 @@ bool motor_mech_id_accumulate(struct motor_mech_id_state *state, float32_t mech_
 int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor_mech_id_result *result)
 {
 	if (state == NULL || result == NULL) {
+		return -EINVAL;
+	}
+	if (!state->config_valid) {
 		return -EINVAL;
 	}
 

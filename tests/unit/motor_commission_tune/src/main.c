@@ -47,11 +47,28 @@ ZTEST(motor_commission_tune, test_default_config_is_valid)
 {
 	struct motor_commission_tune_config cfg = default_cfg();
 
+	zassert_ok(motor_commission_tune_validate_config(&cfg), NULL);
 	zassert_true(cfg.velocity_bw_hz > 0.0f, NULL);
 	zassert_true(cfg.position_bw_ratio > 0.0f, NULL);
 	zassert_true(cfg.position_bw_ratio <= 0.2f, NULL);
 	zassert_true(cfg.iq_limit_a > 0.0f, NULL);
 	zassert_true(cfg.iq_limit_a <= cfg.max_current_a, NULL);
+}
+
+ZTEST(motor_commission_tune, test_validate_config_rejects_invalid_values)
+{
+	struct motor_commission_tune_config cfg = default_cfg();
+
+	cfg.position_bw_ratio = 0.25f;
+	zassert_equal(motor_commission_tune_validate_config(&cfg), -EINVAL, NULL);
+
+	cfg = default_cfg();
+	cfg.iq_limit_a = cfg.max_current_a + 0.1f;
+	zassert_equal(motor_commission_tune_validate_config(&cfg), -EINVAL, NULL);
+
+	cfg = default_cfg();
+	cfg.min_flux_samples = 0U;
+	zassert_equal(motor_commission_tune_validate_config(&cfg), -EINVAL, NULL);
 }
 
 ZTEST(motor_commission_tune, test_rejects_low_flux_r2)

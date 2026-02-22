@@ -45,6 +45,14 @@ struct motor_dob_state {
 	float32_t disturbance_nm;
 	float32_t iq_ff_a;
 	float32_t residual_rad_s;
+	bool discretization_valid;
+	float32_t cached_dt_s;
+	float32_t cached_inertia_kgm2;
+	float32_t cached_viscous_friction_nm_per_rad_s;
+	float32_t cached_torque_constant_nm_per_a;
+	float32_t a;
+	float32_t b_u;
+	float32_t b_d;
 };
 
 int motor_dob_validate(const struct motor_dob_config *cfg,

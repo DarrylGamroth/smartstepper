@@ -72,7 +72,7 @@ void rs_online_init(struct rs_online_estimator *est,
 void rs_online_update(struct rs_online_estimator *est,
                       float32_t vd, float32_t vq,
                       float32_t id, float32_t iq,
-                      float32_t omega_e_dps)
+                      float32_t omega_e_rad_s)
 {
     /*
      * Online Stator Resistance Estimator
@@ -81,9 +81,9 @@ void rs_online_update(struct rs_online_estimator *est,
      * The voltage error is projected onto a slowly rotating probe direction to
      * ensure persistent excitation and prevent the gradient from stalling.
      * 
-     * Model (with ωe in deg/s, converted to rad/s for voltage equations):
-     *   vd = Rs*id - (ωe*π/180)*Lq*iq + Ld*did/dt
-     *   vq = Rs*iq + (ωe*π/180)*(Ld*id + ψf) + Lq*diq/dt
+     * Model (with ωe in rad/s):
+     *   vd = Rs*id - ωe*Lq*iq + Ld*did/dt
+     *   vq = Rs*iq + ωe*(Ld*id + ψf) + Lq*diq/dt
      * 
      * Update law: Rs_est += γ * (e_par * i_par) / (ε + i_par²)
      * where e_par and i_par are error and current projected onto probe direction
@@ -103,8 +103,7 @@ void rs_online_update(struct rs_online_estimator *est,
     float32_t diq_dt = filter_fo_run_form_0(&est->diq_dt_filt, raw_diq_dt);
 
     // --- 1. Predict dq voltages using full model with di/dt terms ---
-    // Convert electrical speed from deg/s to rad/s for voltage model
-    float32_t omega_e_rads = omega_e_dps * PI_F32 / 180.0f;
+    float32_t omega_e_rads = omega_e_rad_s;
 
     float32_t vd_hat = est->Rs_est * id
                      - omega_e_rads * est->Lq * iq

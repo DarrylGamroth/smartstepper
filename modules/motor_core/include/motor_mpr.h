@@ -47,6 +47,14 @@ struct motor_mpr_velocity_state {
 	float32_t omega_model_rad_s;
 	float32_t disturbance_nm;
 	float32_t last_omega_error_rad_s;
+	bool discretization_valid;
+	float32_t cached_dt_s;
+	float32_t cached_inertia_kgm2;
+	float32_t cached_viscous_friction_nm_per_rad_s;
+	float32_t cached_torque_constant_nm_per_a;
+	float32_t a;
+	float32_t b_u;
+	float32_t b_d;
 };
 
 /**

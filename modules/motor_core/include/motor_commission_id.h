@@ -25,6 +25,7 @@ struct motor_flux_id_config {
 
 struct motor_flux_id_state {
 	struct motor_flux_id_config cfg;
+	bool config_valid;
 	uint32_t sample_count;
 	float32_t min_speed_rad_s;
 	float32_t max_speed_rad_s;
@@ -44,6 +45,7 @@ struct motor_flux_id_result {
 	bool valid;
 };
 
+int motor_flux_id_validate_config(const struct motor_flux_id_config *cfg);
 void motor_flux_id_init(struct motor_flux_id_state *state,
 			const struct motor_flux_id_config *cfg);
 bool motor_flux_id_accumulate(struct motor_flux_id_state *state,
@@ -66,6 +68,7 @@ struct motor_mech_id_config {
 
 struct motor_mech_id_state {
 	struct motor_mech_id_config cfg;
+	bool config_valid;
 	uint32_t sample_count;
 	float32_t A[4][4];
 	float32_t b[4];
@@ -84,6 +87,7 @@ struct motor_mech_id_result {
 	bool valid;
 };
 
+int motor_mech_id_validate_config(const struct motor_mech_id_config *cfg);
 void motor_mech_id_init(struct motor_mech_id_state *state,
 			const struct motor_mech_id_config *cfg);
 bool motor_mech_id_accumulate(struct motor_mech_id_state *state,
