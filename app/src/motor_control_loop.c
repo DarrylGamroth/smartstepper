@@ -12,6 +12,7 @@
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/util.h>
 #include <dsp/controller_functions.h>
 
 #include "motor_control_loop.h"
@@ -78,6 +79,14 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	const struct smf_state *state = params->state_for_isr;
+	atomic_val_t feature_flags = atomic_get(&params->feature_flags);
+	bool feature_angle_gen = (feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
+	bool feature_pwm_output = (feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
+	bool feature_pi_control = (feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
+	bool feature_velocity_traj = (feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0;
+	bool feature_use_commanded_currents =
+		(feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
+	bool feature_braking = (feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
 	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool control_armed = atomic_get(&params->control_armed) != 0;
 	bool autonomous_keepalive = false;
@@ -230,7 +239,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 	
 	/* Select angle source based on feature flag */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+	if (feature_angle_gen) {
 		/* Calibration/open-loop: use generated angle (no delay) */
 		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
 		angle_observer_set_delay(&params->observer, 0.0f);
@@ -305,7 +314,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	speed_mech_filtered_rad_s = speed_mech_rad_s;
 
 	/* Skip control if PWM output not enabled */
-	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PWM_OUTPUT)) {
+	if (!feature_pwm_output) {
 		goto isr_done;
 	}
 
@@ -344,7 +353,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	/* Skip PI control if not enabled */
-	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PI_CONTROL)) {
+	if (!feature_pi_control) {
 		goto isr_done;
 	}
 
@@ -451,13 +460,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	/* Update velocity trajectory if enabled */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_VELOCITY_TRAJ)) {
+	if (feature_velocity_traj) {
 		motor_velocity_plan_step(&params->traj_velocity,
 					&velocity_target_rad_s,
 					&velocity_ref_rad_s);
 
 		/* Open-loop commutation uses the trajectory directly. */
-		if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+		if (feature_angle_gen) {
 			angle_gen_set_velocity(&params->angle_gen, velocity_ref_rad_s);
 		}
 	}
@@ -563,7 +572,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	/* Select current references based on mode */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) {
+	if (feature_use_commanded_currents) {
 		/* Normal FOC operation: use commanded current references */
 		Id_ref_A = params->Id_setpoint_A;
 		Iq_ref_A = params->Iq_setpoint_A;
@@ -603,7 +612,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	/* Advance angle generator if enabled
 	 * This compensates for the fact that computed voltages will be applied in the next cycle
 	 */
-	if (atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ANGLE_GEN)) {
+	if (feature_angle_gen) {
 		angle_gen_run(&params->angle_gen);
 	}
 
@@ -626,7 +635,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.lq_h = params->Lq_est,
 		.flux_linkage_wb = params->flux_linkage_wb_active,
 		.braking_enabled =
-			atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING),
+			feature_braking,
 		.braking_iq_ref_a = params->Iq_ref_A,
 		.braking_speed_rad_s = speed_mech_rad_s,
 		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
