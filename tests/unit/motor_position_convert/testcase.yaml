@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_position_convert.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - position
+      - convert
+    harness: ztest
+    integration_platforms:
+      - native_sim

@@ -17,7 +17,6 @@
 #include "config.h"
 #include "pi.h"
 #include "traj.h"
-#include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
 #include "motor_dob.h"
@@ -149,11 +148,11 @@ void motor_state_online_torque_entry(void *obj)
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state,
-				 angle_observer_get_mech_speed(&params->observer),
+				 params->velocity_rad_s,
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state,
-			angle_observer_get_mech_speed(&params->observer));
+			params->velocity_rad_s);
 	params->velocity_dob_iq_ff_a = 0.0f;
 	params->velocity_dob_disturbance_nm = 0.0f;
 	params->velocity_dob_residual_rad_s = 0.0f;
@@ -183,7 +182,7 @@ enum smf_state_result motor_state_online_torque_run(void *obj)
 void motor_state_online_velocity_open_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
+	float32_t mech_angle_rad = params->position_rad;
 
 	LOG_INF("Entering ONLINE_VELOCITY_OPEN substate");
 
@@ -249,7 +248,7 @@ void motor_state_online_velocity_open_exit(void *obj)
 void motor_state_online_velocity_closed_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
+	float32_t speed_mech_rad_s = params->velocity_rad_s;
 
 	LOG_INF("Entering ONLINE_VELOCITY_CLOSED substate");
 
@@ -298,8 +297,8 @@ void motor_state_online_velocity_closed_exit(void *obj)
 void motor_state_online_position_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
-	float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
+	float32_t speed_mech_rad_s = params->velocity_rad_s;
+	float32_t position_mech_rad = params->position_rad;
 
 	LOG_INF("Entering ONLINE_POSITION substate");
 
@@ -395,7 +394,7 @@ void motor_state_online_position_exit(void *obj)
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	motion_profile_quintic_cancel(&params->position_profile,
-				      angle_observer_get_mech_angle(&params->observer));
+				      params->position_rad);
 	params->velocity_ref_rad_s = 0.0f;
 	params->profile_sequence_running = false;
 	params->profile_sequence_tick_counter = 0U;

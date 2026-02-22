@@ -86,11 +86,17 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	pi_set_ui(&params->pi_Iq, 0.0f);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state,
-				 angle_observer_get_mech_speed(&params->observer),
+				 params->velocity_rad_s,
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state,
-			angle_observer_get_mech_speed(&params->observer));
+			params->velocity_rad_s);
+	motor_position_convert_reset(&params->position_convert, params->position_rad);
+	params->position_quality_flags = 0U;
+	params->position_stale_count = 0U;
+	params->position_stale_events = 0U;
+	params->position_glitch_count = 0U;
+	params->position_jitter_count = 0U;
 	params->velocity_dob_iq_ff_a = 0.0f;
 	params->velocity_dob_disturbance_nm = 0.0f;
 	params->velocity_dob_residual_rad_s = 0.0f;
@@ -380,6 +386,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 			    ANGLE_OBSERVER_BANDWIDTH_HZ,
 			    MOTOR_POLE_PAIRS,
 			    1.0f); /* SPI4-16 pipelined reads have 1-cycle delay */
+	params->position_convert_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->position_convert_cfg.velocity_lpf_hz = 300.0f;
+	params->position_convert_cfg.accel_lpf_hz = 100.0f;
+	params->position_convert_cfg.max_step_rad = 0.95f * PI_F32;
+	params->position_convert_cfg.latency_samples_default = 0.0f;
+	params->position_convert_cfg.jitter_threshold_rad = 0.01f;
+	params->position_convert_cfg.stale_threshold_samples = 4U;
+	motor_position_convert_init(&params->position_convert,
+				    &params->position_convert_cfg,
+				    0.0f);
 
 	/* Initialize Id trajectory generator for smooth current ramping */
 	traj_init(&params->traj_Id);
@@ -430,6 +446,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	params->velocity_filtered_rad_s = 0.0f;
+	params->position_rad = 0.0f;
+	params->position_unwrapped_rad = 0.0f;
+	params->position_innovation_rad = 0.0f;
+	params->velocity_rad_s = 0.0f;
+	params->acceleration_rad_s2 = 0.0f;
+	params->position_quality_flags = 0U;
+	params->position_stale_count = 0U;
+	params->position_stale_events = 0U;
+	params->position_glitch_count = 0U;
+	params->position_jitter_count = 0U;
 	params->velocity_dob_iq_ff_a = 0.0f;
 	params->velocity_dob_disturbance_nm = 0.0f;
 	params->velocity_dob_residual_rad_s = 0.0f;

@@ -129,6 +129,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
+	float32_t position_mech_rad = params->position_rad;
+	float32_t speed_mech_rad_s = params->velocity_rad_s;
+	float32_t accel_mech_rad_s2 = params->acceleration_rad_s2;
 	float32_t speed_mech_filtered_rad_s = 0.0f;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
@@ -250,7 +253,56 @@ void motor_control_loop_step(struct motor_parameters *params,
 	angle_observer_update(&params->observer, angle_raw_rad);
 	params->encoder_observer_input_rad = angle_raw_rad;
 	params->encoder_input_source = encoder_input_source;
-	speed_mech_filtered_rad_s = angle_observer_get_mech_speed(&params->observer);
+	struct motor_position_convert_input pos_input = {
+		.sample_valid = false,
+		.sample_fresh = false,
+		.source_generated = false,
+		.warning = encoder_frame_warning,
+		.error = encoder_frame_error,
+		.measurement_wrapped_rad = 0.0f,
+		.latency_samples = 0.0f,
+	};
+	switch (encoder_input_source) {
+	case MOTOR_ANGLE_INPUT_SRC_GENERATED:
+		pos_input.sample_valid = true;
+		pos_input.sample_fresh = true;
+		pos_input.source_generated = true;
+		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
+		pos_input.latency_samples = 0.0f;
+		break;
+	case MOTOR_ANGLE_INPUT_SRC_ENCODER:
+		pos_input.sample_valid = true;
+		pos_input.sample_fresh = fresh_encoder_sample;
+		pos_input.source_generated = false;
+		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
+		pos_input.latency_samples = 1.0f;
+		break;
+	case MOTOR_ANGLE_INPUT_SRC_PROPAGATED:
+	default:
+		pos_input.sample_valid = false;
+		pos_input.sample_fresh = false;
+		pos_input.source_generated = false;
+		pos_input.measurement_wrapped_rad = 0.0f;
+		pos_input.latency_samples = 0.0f;
+		break;
+	}
+
+	int pos_ret = motor_position_convert_update(&params->position_convert,
+						    &params->position_convert_cfg,
+						    &pos_input);
+	if (pos_ret != 0) {
+		motor_position_convert_reset(&params->position_convert, wrap_rad_2pi(angle_raw_rad));
+	}
+	params->position_quality_flags = params->position_convert.quality_flags;
+	params->position_stale_count = params->position_convert.stale_count;
+	params->position_stale_events = params->position_convert.stale_event_count;
+	params->position_glitch_count = params->position_convert.glitch_count;
+	params->position_jitter_count = params->position_convert.jitter_count;
+
+	position_mech_rad = params->position_convert.position_wrapped_rad;
+	speed_mech_rad_s = params->position_convert.velocity_rad_s;
+	accel_mech_rad_s2 = params->position_convert.accel_rad_s2;
+	speed_mech_filtered_rad_s = speed_mech_rad_s;
 
 	/* Skip control if PWM output not enabled */
 	if (!atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_PWM_OUTPUT)) {
@@ -345,7 +397,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Position cascade: generate velocity target from position error. */
 	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
-		float32_t position_mech_rad = angle_observer_get_mech_angle(&params->observer);
 		float32_t position_error_rad;
 		float32_t profile_velocity_ff_rad_s = 0.0f;
 		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
@@ -414,7 +465,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
 	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
 	    state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
-		float32_t speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
 		speed_mech_filtered_rad_s = filter_so_run(&params->filter_velocity_notch,
 							 speed_mech_rad_s);
 		bool use_mpr = motor_outer_loop_use_mpr(params);
@@ -578,7 +628,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.braking_enabled =
 			atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_BRAKING),
 		.braking_iq_ref_a = params->Iq_ref_A,
-		.braking_speed_rad_s = angle_observer_get_mech_speed(&params->observer),
+		.braking_speed_rad_s = speed_mech_rad_s,
 		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
 		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
 	};
@@ -615,9 +665,12 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_rls_update_estimators(params, &rls_runtime, Id_A, Iq_A);
 
-	/* Update telemetry snapshot (observer already returns rad/rad_s) */
-	params->position_rad = angle_observer_get_mech_angle(&params->observer);
-	params->velocity_rad_s = angle_observer_get_mech_speed(&params->observer);
+	/* Update telemetry snapshot (position_convert provides mechanical domain signals). */
+	params->position_rad = position_mech_rad;
+	params->position_unwrapped_rad = params->position_convert.position_unwrapped_rad;
+	params->position_innovation_rad = params->position_convert.innovation_rad;
+	params->velocity_rad_s = speed_mech_rad_s;
+	params->acceleration_rad_s2 = accel_mech_rad_s2;
 	params->velocity_filtered_rad_s = speed_mech_filtered_rad_s;
 	params->velocity_target_rad_s = velocity_target_rad_s;
 	params->velocity_ref_rad_s = velocity_ref_rad_s;

@@ -5,6 +5,7 @@ add_library(motor_core STATIC
 	src/motor_dob.c
 	src/motor_mpr.c
 	src/motor_motion_modules.c
+	src/motor_position_convert.c
 	src/motor_foc_voltage_pwm.c
 	src/motor_identification.c
 	src/motion_profile.c

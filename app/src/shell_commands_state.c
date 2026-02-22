@@ -601,6 +601,24 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Enc flag count: warn=%u err=%u",
 		    g_motor_params->encoder_warning_count,
 		    g_motor_params->encoder_error_count);
+	shell_print(sh, "  Pos quality:    0x%02X (valid=%s fresh=%s stale=%s warn=%s err=%s glitch=%s jitter=%s gen=%s)",
+		    g_motor_params->position_quality_flags,
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_VALID) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_STALE) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_WARNING) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_ERROR) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_GLITCH) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_JITTER) ? "yes" : "no",
+		    (g_motor_params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_GENERATED) ? "yes" : "no");
+	shell_print(sh, "  Pos unwrapped:  %.6f rad", (double)g_motor_params->position_unwrapped_rad);
+	shell_print(sh, "  Pos innovation: %.6f rad", (double)g_motor_params->position_innovation_rad);
+	shell_print(sh, "  Pos accel:      %.3f rad/s^2", (double)g_motor_params->acceleration_rad_s2);
+	shell_print(sh, "  Pos counts:     stale=%u events=%u glitch=%u jitter=%u",
+		    g_motor_params->position_stale_count,
+		    g_motor_params->position_stale_events,
+		    g_motor_params->position_glitch_count,
+		    g_motor_params->position_jitter_count);
 	shell_print(sh, "  Speed:          %.3f Hz (%.1f RPM)", 
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32)),
 		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32) * 60.0f));

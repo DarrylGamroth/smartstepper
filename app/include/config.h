@@ -23,6 +23,7 @@
 #include "motor_states.h"
 #include "motor_dob.h"
 #include "motor_mpr.h"
+#include "motor_position_convert.h"
 #include "prbs.h"
 #include "rls_motor_est.h"
 #include "thermal_model.h"
@@ -98,6 +99,8 @@ struct motor_parameters {
 
 	/* Observers and estimators */
 	struct angle_observer_state observer;
+	struct motor_position_convert_config position_convert_cfg;
+	struct motor_position_convert_state position_convert;
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
@@ -239,7 +242,10 @@ struct motor_parameters {
 
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;
+	float32_t position_unwrapped_rad;
+	float32_t position_innovation_rad;
 	float32_t velocity_rad_s;
+	float32_t acceleration_rad_s2;
 	float32_t velocity_filtered_rad_s;
 	float32_t encoder_raw_deg;
 	float32_t encoder_raw_rad;
@@ -264,6 +270,11 @@ struct motor_parameters {
 	uint8_t encoder_sample_warning;
 	uint8_t encoder_sample_error;
 	uint8_t encoder_input_source;
+	uint8_t position_quality_flags;
+	uint16_t position_stale_count;
+	uint32_t position_stale_events;
+	uint32_t position_glitch_count;
+	uint32_t position_jitter_count;
 };
 
 /* Devicetree parameter extraction with unit conversion */
