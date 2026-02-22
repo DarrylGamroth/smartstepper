@@ -78,6 +78,28 @@ ZTEST(thermal_model, test_init_invalid_frequency_disables_updates)
 	zassert_within(m.P_loss, 0.0f, 1e-6f, NULL);
 }
 
+ZTEST(thermal_model, test_init_invalid_parameters_disable_updates)
+{
+	struct thermal_model m = {0};
+
+	thermal_model_init(&m, 0.0f, 20.0f, 25.0f, 100.0f);
+	zassert_within(m.dt, 0.0f, 1e-6f, NULL);
+	zassert_within(m.T_winding, 25.0f, 1e-6f, NULL);
+	thermal_model_update(&m, 2.0f, 2.0f, 1.0f);
+	zassert_within(m.T_winding, 25.0f, 1e-6f, NULL);
+
+	thermal_model_init(&m, 5.0f, 0.0f, 25.0f, 100.0f);
+	zassert_within(m.dt, 0.0f, 1e-6f, NULL);
+	zassert_within(m.T_winding, 25.0f, 1e-6f, NULL);
+	thermal_model_update(&m, 2.0f, 2.0f, 1.0f);
+	zassert_within(m.T_winding, 25.0f, 1e-6f, NULL);
+
+	thermal_model_init(&m, 5.0f, 20.0f, NAN, 100.0f);
+	zassert_within(m.dt, 0.0f, 1e-6f, NULL);
+	zassert_within(m.T_winding, 0.0f, 1e-6f, NULL);
+	zassert_within(m.T_ambient, 0.0f, 1e-6f, NULL);
+}
+
 ZTEST(thermal_model, test_update_ignores_nonfinite_input)
 {
 	struct thermal_model m = {0};
@@ -86,6 +108,10 @@ ZTEST(thermal_model, test_update_ignores_nonfinite_input)
 	m.P_loss = 1.0f;
 
 	thermal_model_update(&m, NAN, 1.0f, 1.0f);
+	zassert_within(m.T_winding, 30.0f, 1e-6f, NULL);
+	zassert_within(m.P_loss, 1.0f, 1e-6f, NULL);
+
+	thermal_model_update(&m, 1.0f, 1.0f, NAN);
 	zassert_within(m.T_winding, 30.0f, 1e-6f, NULL);
 	zassert_within(m.P_loss, 1.0f, 1e-6f, NULL);
 }

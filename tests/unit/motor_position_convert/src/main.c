@@ -248,4 +248,44 @@ ZTEST(motor_position_convert, test_latency_compensation_advances_measurement)
 		     NULL);
 }
 
+ZTEST(motor_position_convert, test_glitch_samples_escalate_to_stale_then_recover)
+{
+	struct motor_position_convert_state state = {0};
+	struct motor_position_convert_config cfg = test_cfg();
+	struct motor_position_convert_input glitch = {
+		.sample_valid = true,
+		.sample_fresh = true,
+		.source_generated = false,
+		.warning = false,
+		.error = false,
+		.measurement_wrapped_rad = 0.0f,
+		.latency_samples = 0.0f,
+	};
+
+	cfg.max_step_rad = 0.15f;
+	update_with_angle(&state, &cfg, 0.10f, true, false);
+	zassert_equal(state.glitch_count, 0U, NULL);
+	zassert_equal(state.stale_count, 0U, NULL);
+
+	for (int i = 0; i < 4; i++) {
+		glitch.measurement_wrapped_rad = 0.10f + 0.60f + 0.02f * (float32_t)i;
+		zassert_ok(motor_position_convert_update(&state, &cfg, &glitch), NULL);
+		zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_GLITCH) != 0U, NULL);
+		zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) == 0U, NULL);
+	}
+
+	zassert_true(state.glitch_count >= 4U, NULL);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_STALE) != 0U, NULL);
+	zassert_equal(state.stale_event_count, 1U, NULL);
+	zassert_true(isfinite(state.position_unwrapped_rad), NULL);
+	zassert_true(isfinite(state.velocity_rad_s), NULL);
+	zassert_true(isfinite(state.accel_rad_s2), NULL);
+
+	update_with_angle(&state, &cfg, 0.13f, true, false);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_GLITCH) == 0U, NULL);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U, NULL);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_STALE) == 0U, NULL);
+	zassert_equal(state.stale_count, 0U, NULL);
+}
+
 ZTEST_SUITE(motor_position_convert, NULL, NULL, NULL, NULL, NULL);

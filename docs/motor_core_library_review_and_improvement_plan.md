@@ -27,7 +27,7 @@ Unit tests executed via:
 Result:
 
 - 17/17 suites passed
-- 129/129 test cases passed
+- 132/132 test cases passed
 
 ## Findings (Code Review)
 
@@ -150,6 +150,9 @@ Result:
    - `motor_foc_voltage_pwm`: invalid modulation/braking parameter tests, duty bounds.
    - `rls_motor_est`: invalid `lambda` and finite-guard coverage.
    - `thermal_model`: invalid init parameters.
+   - Status: implemented and expanded across `tests/unit/motor_position_convert`,
+     `tests/unit/motor_foc_voltage_pwm`, `tests/unit/rls_motor_est`,
+     and `tests/unit/thermal_model`.
 
 8. Add integration-style unit tests for module contracts.
    - `motion_profile` + `motor_motion_modules` completion boundary behavior.

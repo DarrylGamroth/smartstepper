@@ -68,6 +68,10 @@ ZTEST(motor_foc_voltage_pwm, test_rejects_invalid_inputs)
 	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
 
 	in = make_base_inputs();
+	in.max_modulation_index = NAN;
+	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
+
+	in = make_base_inputs();
 	in.inv_park_angle_rad = NAN;
 	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
 
@@ -89,6 +93,17 @@ ZTEST(motor_foc_voltage_pwm, test_rejects_invalid_inputs)
 	in.braking_enabled = true;
 	in.braking_vbus_margin_inv = 1.0f;
 	in.braking_vbus_limit_v = -1.0f;
+	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
+
+	in = make_base_inputs();
+	in.braking_enabled = true;
+	in.braking_vbus_margin_inv = NAN;
+	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
+
+	in = make_base_inputs();
+	in.braking_enabled = true;
+	in.braking_vbus_margin_inv = 1.0f;
+	in.braking_vbus_limit_v = NAN;
 	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
 }
 
@@ -194,6 +209,40 @@ ZTEST(motor_foc_voltage_pwm, test_pwm_outputs_stay_bounded_under_braking)
 	in.braking_speed_rad_s = 100.0f;
 	in.braking_vbus_limit_v = 10.0f;
 	in.braking_vbus_margin_inv = 1000.0f;
+
+	zassert_ok(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), NULL);
+	zassert_true(out.da_pu >= 0.0f && out.da_pu <= 1.0f, NULL);
+	zassert_true(out.db_pu >= 0.0f && out.db_pu <= 1.0f, NULL);
+	zassert_true(out.da_hb1_pu >= 0.0f && out.da_hb1_pu <= 1.0f, NULL);
+	zassert_true(out.da_hb2_pu >= 0.0f && out.da_hb2_pu <= 1.0f, NULL);
+	zassert_true(out.db_hb1_pu >= 0.0f && out.db_hb1_pu <= 1.0f, NULL);
+	zassert_true(out.db_hb2_pu >= 0.0f && out.db_hb2_pu <= 1.0f, NULL);
+}
+
+ZTEST(motor_foc_voltage_pwm, test_pwm_outputs_stay_bounded_under_extreme_pi_drive)
+{
+	struct pi_f32 pi_d;
+	struct pi_f32 pi_q;
+	struct motor_foc_voltage_pwm_inputs in = make_base_inputs();
+	struct motor_foc_voltage_pwm_outputs out = {0};
+
+	pi_init(&pi_d);
+	pi_set_gains(&pi_d, 2000.0f, 0.0f);
+	pi_set_min_max(&pi_d, -1000.0f, 1000.0f);
+	pi_init(&pi_q);
+	pi_set_gains(&pi_q, 2000.0f, 0.0f);
+	pi_set_min_max(&pi_q, -1000.0f, 1000.0f);
+
+	in.id_ref_a = 50.0f;
+	in.iq_ref_a = -50.0f;
+	in.id_a = 0.0f;
+	in.iq_a = 0.0f;
+	in.inv_park_angle_rad = 1.1f;
+	in.braking_enabled = true;
+	in.braking_iq_ref_a = -1.0f;
+	in.braking_speed_rad_s = 120.0f;
+	in.braking_vbus_limit_v = 5.0f;
+	in.braking_vbus_margin_inv = 10.0f;
 
 	zassert_ok(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), NULL);
 	zassert_true(out.da_pu >= 0.0f && out.da_pu <= 1.0f, NULL);
