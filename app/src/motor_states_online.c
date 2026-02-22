@@ -10,6 +10,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
+#include <drivers/gate_driver/ti_drv8328.h>
 
 #include "motor_states.h"
 #include "motor_states_online.h"
@@ -22,6 +23,7 @@
 #include "motor_dob.h"
 #include "motor_motion_modules.h"
 #include "motor_state_utils.h"
+#include "motor_hardware.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -61,6 +63,14 @@ void motor_state_online_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ONLINE state");
+
+	/* ONLINE modes require power-stage channels enabled.
+	 * IDLE entry disables them, so re-enable on every ONLINE entry.
+	 */
+	drv8328_enable_channel(gate_driver_a, 0);
+	drv8328_enable_channel(gate_driver_a, 1);
+	drv8328_enable_channel(gate_driver_b, 0);
+	drv8328_enable_channel(gate_driver_b, 1);
 
 	/* ONLINE baseline requirements (shared by all ONLINE substates). */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_BRAKING) |
