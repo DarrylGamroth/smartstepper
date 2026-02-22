@@ -25,6 +25,7 @@
 #define VBIAS_MAX_V      5.0f
 #define VDT_SIGN_MAX_V   2.0f
 #define P_MIN            1e-6f
+#define LAMBDA_MIN       1e-6f
 
 void rls_motor_est_init(struct rls_motor_est *rls,
                         float32_t lambda,
@@ -34,6 +35,29 @@ void rls_motor_est_init(struct rls_motor_est *rls,
                         float32_t L_init,
                         float32_t P_init)
 {
+	if (rls == NULL) {
+		return;
+	}
+
+	if (!isfinite(lambda) || lambda <= LAMBDA_MIN) {
+		lambda = 1.0f;
+	}
+	if (!isfinite(control_freq) || control_freq < 0.0f) {
+		control_freq = 0.0f;
+	}
+	if (!isfinite(convergence_threshold) || convergence_threshold <= 0.0f) {
+		convergence_threshold = 1.0f;
+	}
+	if (!isfinite(Rs_init)) {
+		Rs_init = RS_MIN_OHM;
+	}
+	if (!isfinite(L_init)) {
+		L_init = LD_MIN_H;
+	}
+	if (!isfinite(P_init)) {
+		P_init = P_MIN;
+	}
+
 	/* Configuration */
 	rls->lambda = lambda;
 	rls->control_freq = control_freq;
@@ -54,19 +78,35 @@ void rls_motor_est_update(struct rls_motor_est *rls,
                           float32_t I_cross,
                           float32_t sample_period_s)
 {
+	if (rls == NULL) {
+		return;
+	}
+	if (!isfinite(rls->lambda) || rls->lambda <= LAMBDA_MIN) {
+		rls->num_rejected++;
+		return;
+	}
+
 	/* Compensate cross-coupling: V_compensated = V_meas + ω*L_cross*I_cross */
 	float32_t V_compensated = V_meas + omega * L_cross * I_cross;
+	if (!isfinite(V_compensated)) {
+		rls->num_rejected++;
+		return;
+	}
 
 	/* Calculate current derivative with effective elapsed sample period */
 	float32_t Ts = sample_period_s;
 	if (Ts <= 0.0f && rls->control_freq > 0.0f) {
 		Ts = 1.0f / rls->control_freq;
 	}
-	if (Ts <= 0.0f) {
+	if (!isfinite(Ts) || Ts <= 0.0f) {
 		rls->num_rejected++;
 		return;
 	}
 	float32_t dI_dt = (I - I_prev) / Ts;
+	if (!isfinite(dI_dt)) {
+		rls->num_rejected++;
+		return;
+	}
 
 	/* Build regression vector φ[k] = [I, dI/dt, 1, sign(I)]ᵀ */
 	float32_t phi[4];
@@ -97,11 +137,11 @@ void rls_motor_est_update(struct rls_motor_est *rls,
 
 	/* Denominator: λ + φᵀ * P * φ */
 	float32_t phi_P_phi = phi[0] * P_phi[0] + phi[1] * P_phi[1] +
-	                      phi[2] * P_phi[2] + phi[3] * P_phi[3];
+		                      phi[2] * P_phi[2] + phi[3] * P_phi[3];
 	float32_t denom = rls->lambda + phi_P_phi;
 
 	/* Guard against numerical issues */
-	if (denom < 1e-6f) {
+	if (!isfinite(denom) || denom < 1e-6f) {
 		rls->num_rejected++;
 		return;
 	}

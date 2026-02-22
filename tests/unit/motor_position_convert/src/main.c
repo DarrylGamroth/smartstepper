@@ -156,6 +156,36 @@ ZTEST(motor_position_convert, test_nonfresh_sample_not_marked_fresh_or_accepted)
 	zassert_within(state.position_unwrapped_rad, unwrap_before, 0.05f, NULL);
 }
 
+ZTEST(motor_position_convert, test_nonfinite_fresh_sample_is_rejected_without_state_poison)
+{
+	struct motor_position_convert_state state = {0};
+	struct motor_position_convert_config cfg = test_cfg();
+	struct motor_position_convert_input input = {
+		.sample_valid = true,
+		.sample_fresh = true,
+		.source_generated = false,
+		.warning = false,
+		.error = false,
+		.measurement_wrapped_rad = NAN,
+		.latency_samples = 0.0f,
+	};
+
+	update_with_angle(&state, &cfg, 0.40f, true, false);
+	float32_t wrapped_before = state.position_wrapped_rad;
+	float32_t unwrap_before = state.position_unwrapped_rad;
+
+	zassert_ok(motor_position_convert_update(&state, &cfg, &input), NULL);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_ERROR) != 0U, NULL);
+	zassert_true((state.quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) == 0U, NULL);
+	zassert_equal(state.stale_count, 1U, NULL);
+	zassert_true(isfinite(state.position_wrapped_rad), NULL);
+	zassert_true(isfinite(state.position_unwrapped_rad), NULL);
+	zassert_true(isfinite(state.velocity_rad_s), NULL);
+	zassert_true(isfinite(state.accel_rad_s2), NULL);
+	zassert_within(state.position_wrapped_rad, wrapped_before, 1e-5f, NULL);
+	zassert_within(state.position_unwrapped_rad, unwrap_before, 1e-5f, NULL);
+}
+
 ZTEST(motor_position_convert, test_jitter_flag_and_counter)
 {
 	struct motor_position_convert_state state = {0};

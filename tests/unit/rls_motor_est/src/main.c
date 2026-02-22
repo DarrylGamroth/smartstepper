@@ -89,16 +89,51 @@ ZTEST(rls_motor_est, test_update_rejects_invalid_sample_period_without_control_f
 	zassert_equal(rls.num_rejected, 1u, NULL);
 }
 
+ZTEST(rls_motor_est, test_update_rejects_invalid_lambda)
+{
+	struct rls_motor_est rls = {0};
+	float32_t theta_before[4];
+
+	rls_motor_est_init(&rls, 0.99f, 1000.0f, 0.5f, 1.0f, 0.002f, 20.0f);
+	memcpy(theta_before, rls.theta, sizeof(theta_before));
+	rls.lambda = 0.0f;
+
+	rls_motor_est_update(&rls, 1.2f, 0.2f, 0.1f, 0.0f, 0.0f, 0.0f, 0.001f);
+	zassert_equal(rls.num_updates, 0u, NULL);
+	zassert_equal(rls.num_rejected, 1u, NULL);
+	for (size_t i = 0U; i < 4U; i++) {
+		zassert_within(rls.theta[i], theta_before[i], 1e-8f, NULL);
+	}
+}
+
+ZTEST(rls_motor_est, test_update_rejects_nonfinite_sample)
+{
+	struct rls_motor_est rls = {0};
+	float32_t theta_before[4];
+
+	rls_motor_est_init(&rls, 0.99f, 1000.0f, 0.5f, 1.0f, 0.002f, 20.0f);
+	memcpy(theta_before, rls.theta, sizeof(theta_before));
+
+	rls_motor_est_update(&rls, NAN, 0.2f, 0.1f, 0.0f, 0.0f, 0.0f, 0.001f);
+	zassert_equal(rls.num_updates, 0u, NULL);
+	zassert_equal(rls.num_rejected, 1u, NULL);
+	for (size_t i = 0U; i < 4U; i++) {
+		zassert_within(rls.theta[i], theta_before[i], 1e-8f, NULL);
+	}
+}
+
 ZTEST(rls_motor_est, test_update_rejects_small_denominator_without_state_change)
 {
 	struct rls_motor_est rls = {0};
 	float32_t theta_before[4];
 
-	rls_motor_est_init(&rls, 0.0f, 20000.0f, 0.5f, 1.0f, 0.002f, 50.0f);
+	rls_motor_est_init(&rls, 0.1f, 20000.0f, 0.5f, 1.0f, 0.002f, 50.0f);
 	clear_covariance(&rls);
+	/* Force phiᵀPphi strongly negative so denom guard triggers. */
+	rls.P[0][0] = -0.2f;
 	memcpy(theta_before, rls.theta, sizeof(theta_before));
 
-	rls_motor_est_update(&rls, 2.0f, 0.4f, 0.3f, 0.0f, 0.0f, 0.0f, 0.001f);
+	rls_motor_est_update(&rls, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.001f);
 
 	zassert_equal(rls.num_updates, 0u, NULL);
 	zassert_equal(rls.num_rejected, 1u, NULL);

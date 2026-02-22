@@ -161,4 +161,29 @@ ZTEST(motor_motion_modules, test_position_move_resolve_active_and_complete)
 					    &velocity_ff), NULL);
 }
 
+ZTEST(motor_motion_modules, test_position_move_resolve_zeroes_ff_on_completion_step)
+{
+	struct motion_profile_quintic profile = {0};
+	float32_t target_wrapped = 0.0f;
+	float32_t position_error = 0.0f;
+	float32_t velocity_ff = 0.0f;
+
+	motion_profile_quintic_init(&profile, 0.01f);
+	zassert_ok(motor_position_move_plan_sequence_segment(&profile,
+					   0.0f,
+					   0.5f,
+					   0.02f,
+					   0.3f,
+					   0.01f,
+					   100.0f,
+					   10000.0f), NULL);
+
+	zassert_true(motor_position_move_resolve(&profile, true, 0.0f,
+					   &target_wrapped,
+					   &position_error,
+					   &velocity_ff), NULL);
+	zassert_false(motion_profile_quintic_is_active(&profile), NULL);
+	zassert_within(velocity_ff, 0.0f, 1e-6f, NULL);
+}
+
 ZTEST_SUITE(motor_motion_modules, NULL, NULL, NULL, NULL, NULL);

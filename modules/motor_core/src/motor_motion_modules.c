@@ -122,6 +122,7 @@ bool motor_position_move_resolve(struct motion_profile_quintic *profile,
 	bool active = motion_profile_quintic_is_active(profile);
 	if (active && advance) {
 		motion_profile_quintic_step(profile);
+		active = motion_profile_quintic_is_active(profile);
 	}
 
 	if (!active && !profile->valid) {

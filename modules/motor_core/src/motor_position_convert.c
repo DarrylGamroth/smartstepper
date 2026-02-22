@@ -113,8 +113,10 @@ int motor_position_convert_update(struct motor_position_convert_state *state,
 	}
 
 	if (!state->initialized) {
-		float32_t initial_wrapped = input->sample_valid ?
-			input->measurement_wrapped_rad : 0.0f;
+		float32_t initial_wrapped = 0.0f;
+		if (input->sample_valid && isfinite(input->measurement_wrapped_rad)) {
+			initial_wrapped = input->measurement_wrapped_rad;
+		}
 
 		motor_position_convert_reset(state, initial_wrapped);
 	}
@@ -135,7 +137,23 @@ int motor_position_convert_update(struct motor_position_convert_state *state,
 	float32_t dt_s = cfg->dt_s;
 	float32_t alpha_v = motor_position_convert_lpf_alpha(dt_s, cfg->velocity_lpf_hz);
 	float32_t alpha_a = motor_position_convert_lpf_alpha(dt_s, cfg->accel_lpf_hz);
+	if (!isfinite(state->prev_meas_wrapped_rad)) {
+		state->prev_meas_wrapped_rad = 0.0f;
+	}
+	if (!isfinite(state->position_wrapped_rad)) {
+		state->position_wrapped_rad = state->prev_meas_wrapped_rad;
+	}
+	if (!isfinite(state->position_unwrapped_rad)) {
+		state->position_unwrapped_rad = state->position_wrapped_rad;
+	}
 	float32_t prev_velocity = state->velocity_rad_s;
+	if (!isfinite(prev_velocity)) {
+		prev_velocity = 0.0f;
+		state->velocity_rad_s = 0.0f;
+	}
+	if (!isfinite(state->accel_rad_s2)) {
+		state->accel_rad_s2 = 0.0f;
+	}
 	float32_t raw_velocity = prev_velocity;
 
 	bool accepted_sample = false;
@@ -143,24 +161,29 @@ int motor_position_convert_update(struct motor_position_convert_state *state,
 	float32_t step_rad = prev_velocity * dt_s;
 
 	if (input->sample_valid && input->sample_fresh) {
-		float32_t latency_samples = input->latency_samples;
-		if (!isfinite(latency_samples) || latency_samples < 0.0f) {
-			latency_samples = cfg->latency_samples_default;
-		}
-
-		float32_t compensated_wrapped = wrap_rad_2pi(
-			input->measurement_wrapped_rad + latency_samples * dt_s * prev_velocity);
-		float32_t measured_step = wrap_rad_pi(compensated_wrapped - state->prev_meas_wrapped_rad);
-
-		if (fabsf(measured_step) > cfg->max_step_rad) {
-			glitch_sample = true;
+		if (!isfinite(input->measurement_wrapped_rad)) {
+			quality |= MOTOR_POSITION_CONVERT_QUALITY_ERROR;
 		} else {
-			accepted_sample = true;
-			step_rad = measured_step;
-			state->prev_meas_wrapped_rad = compensated_wrapped;
-			state->position_wrapped_rad = compensated_wrapped;
-			state->stale_count = 0U;
-			quality |= MOTOR_POSITION_CONVERT_QUALITY_FRESH;
+			float32_t latency_samples = input->latency_samples;
+			if (!isfinite(latency_samples) || latency_samples < 0.0f) {
+				latency_samples = cfg->latency_samples_default;
+			}
+
+			float32_t compensated_wrapped = wrap_rad_2pi(
+				input->measurement_wrapped_rad + latency_samples * dt_s * prev_velocity);
+			float32_t measured_step =
+				wrap_rad_pi(compensated_wrapped - state->prev_meas_wrapped_rad);
+
+			if (fabsf(measured_step) > cfg->max_step_rad) {
+				glitch_sample = true;
+			} else {
+				accepted_sample = true;
+				step_rad = measured_step;
+				state->prev_meas_wrapped_rad = compensated_wrapped;
+				state->position_wrapped_rad = compensated_wrapped;
+				state->stale_count = 0U;
+				quality |= MOTOR_POSITION_CONVERT_QUALITY_FRESH;
+			}
 		}
 	}
 
@@ -178,6 +201,9 @@ int motor_position_convert_update(struct motor_position_convert_state *state,
 
 	state->position_unwrapped_rad += step_rad;
 	raw_velocity = step_rad / dt_s;
+	if (!isfinite(raw_velocity)) {
+		raw_velocity = 0.0f;
+	}
 
 	float32_t innovation = step_rad - prev_velocity * dt_s;
 	state->innovation_rad = innovation;
