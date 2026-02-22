@@ -7,6 +7,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
+#include "motor_motion_modules.h"
 #include <math.h>
 #include <string.h>
 
@@ -34,6 +35,10 @@ enum motor_param_id {
 	PARAM_ID_VELOCITY_MPR_HORIZON,
 	PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A,
 	PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S,
+	PARAM_ID_VELOCITY_DOB_ENABLE,
+	PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S,
+	PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM,
+	PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A,
 	PARAM_ID_POSITION_MPR_Q_POSITION,
 	PARAM_ID_POSITION_MPR_Q_VELOCITY_FF,
 	PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY,
@@ -60,6 +65,11 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_VELOCITY_MPR_MAX_DELTA_IQ_A] = "velocity_mpr_max_delta_iq_a",
 	[PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S] =
 		"velocity_mpr_disturbance_ki_nm_per_rad_s",
+	[PARAM_ID_VELOCITY_DOB_ENABLE] = "velocity_dob_enable",
+	[PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S] =
+		"velocity_dob_observer_gain_nm_per_rad_s",
+	[PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM] = "velocity_dob_torque_limit_nm",
+	[PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A] = "velocity_dob_iq_ff_limit_a",
 	[PARAM_ID_POSITION_MPR_Q_POSITION] = "position_mpr_q_position",
 	[PARAM_ID_POSITION_MPR_Q_VELOCITY_FF] = "position_mpr_q_velocity_ff",
 	[PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY] = "position_mpr_r_delta_velocity",
@@ -154,6 +164,18 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 	case PARAM_ID_VELOCITY_MPR_DISTURBANCE_KI_NM_PER_RAD_S:
 		*value = params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s;
 		return 0;
+	case PARAM_ID_VELOCITY_DOB_ENABLE:
+		*value = params->velocity_dob_cfg.enabled ? 1.0f : 0.0f;
+		return 0;
+	case PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S:
+		*value = params->velocity_dob_cfg.observer_gain_nm_per_rad_s;
+		return 0;
+	case PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM:
+		*value = params->velocity_dob_cfg.torque_limit_nm;
+		return 0;
+	case PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A:
+		*value = params->velocity_dob_cfg.iq_ff_limit_a;
+		return 0;
 	case PARAM_ID_POSITION_MPR_Q_POSITION:
 		*value = params->position_mpr_cfg.q_position;
 		return 0;
@@ -185,18 +207,10 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 
 static void motor_param_apply_profile_limits(struct motor_parameters *params)
 {
-	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
-	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
-	traj_set_max_delta(&params->traj_velocity,
-			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
-	traj_set_target_value(&params->traj_velocity,
-			      clampf(traj_get_target_value(&params->traj_velocity),
-				     -params->profile_max_velocity_rad_s,
-				     params->profile_max_velocity_rad_s));
-	traj_set_int_value(&params->traj_velocity,
-			   clampf(traj_get_int_value(&params->traj_velocity),
-				  -params->profile_max_velocity_rad_s,
-				  params->profile_max_velocity_rad_s));
+	motor_velocity_plan_update_limits(&params->traj_velocity,
+					  params->profile_max_velocity_rad_s,
+					  params->profile_max_accel_rad_s2,
+					  1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	params->velocity_target_rad_s =
 		clampf(params->velocity_target_rad_s,
 		       -params->profile_max_velocity_rad_s,
@@ -614,6 +628,10 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->velocity_cl_iq_limit_A = value;
 		params->velocity_mpr_cfg.iq_limit_a = value;
+		if (params->velocity_dob_cfg.iq_ff_limit_a <= 0.0f ||
+		    params->velocity_dob_cfg.iq_ff_limit_a > value) {
+			params->velocity_dob_cfg.iq_ff_limit_a = value;
+		}
 		LOG_DBG("Updated velocity_cl_iq_limit_A = %.6f",
 			(double)value);
 		break;
@@ -644,6 +662,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		motor_mpr_velocity_reset(&params->velocity_mpr_state, params->velocity_rad_s,
 					 params->Iq_ref_A);
 		motor_mpr_position_reset(&params->position_mpr_state, params->velocity_ref_rad_s);
+		motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
 		LOG_DBG("Updated outer_loop_mode = %u", params->outer_loop_mode);
 		break;
 	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
@@ -686,6 +705,39 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = value;
 		LOG_DBG("Updated velocity_mpr_disturbance_ki_nm_per_rad_s = %.6f",
 			(double)value);
+		break;
+	case PARAM_ID_VELOCITY_DOB_ENABLE:
+		if (value < 0.0f || value > 1.0f) {
+			LOG_ERR("Rejected velocity_dob_enable outside [0,1]");
+			break;
+		}
+		params->velocity_dob_cfg.enabled = (value >= 0.5f);
+		motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
+		LOG_DBG("Updated velocity_dob_enable = %u", params->velocity_dob_cfg.enabled ? 1U : 0U);
+		break;
+	case PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected velocity_dob_observer_gain_nm_per_rad_s < 0");
+			break;
+		}
+		params->velocity_dob_cfg.observer_gain_nm_per_rad_s = value;
+		LOG_DBG("Updated velocity_dob_observer_gain_nm_per_rad_s = %.6f", (double)value);
+		break;
+	case PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected velocity_dob_torque_limit_nm <= 0");
+			break;
+		}
+		params->velocity_dob_cfg.torque_limit_nm = value;
+		LOG_DBG("Updated velocity_dob_torque_limit_nm = %.6f", (double)value);
+		break;
+	case PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected velocity_dob_iq_ff_limit_a < 0");
+			break;
+		}
+		params->velocity_dob_cfg.iq_ff_limit_a = value;
+		LOG_DBG("Updated velocity_dob_iq_ff_limit_a = %.6f", (double)value);
 		break;
 	case PARAM_ID_POSITION_MPR_Q_POSITION:
 		if (value < 0.0f ||

@@ -653,6 +653,19 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 		shell_print(sh, "  I term:     %.5f A",
 			    (double)g_motor_params->velocity_cl_i_term_A);
 	}
+	shell_print(sh, "  DOB:        %s",
+		    g_motor_params->velocity_dob_cfg.enabled ? "ENABLED" : "DISABLED");
+	if (g_motor_params->velocity_dob_cfg.enabled) {
+		shell_print(sh, "  DOB gain:   %.5f Nm/(rad/s)",
+			    (double)g_motor_params->velocity_dob_cfg.observer_gain_nm_per_rad_s);
+		shell_print(sh, "  DOB lim:    %.5f Nm, %.5f A",
+			    (double)g_motor_params->velocity_dob_cfg.torque_limit_nm,
+			    (double)g_motor_params->velocity_dob_cfg.iq_ff_limit_a);
+		shell_print(sh, "  DOB est:    %.5f Nm, iq_ff=%.5f A, res=%.5f rad/s",
+			    (double)g_motor_params->velocity_dob_disturbance_nm,
+			    (double)g_motor_params->velocity_dob_iq_ff_a,
+			    (double)g_motor_params->velocity_dob_residual_rad_s);
+	}
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
 
 	return 0;
@@ -799,6 +812,116 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		    "motor velocity gains defaults <safe|nominal> | "
 		    "motor velocity gains bandwidth <hz> [zeta]");
 	return -EINVAL;
+}
+
+/* motor velocity dob status
+ * motor velocity dob enable <0|1>
+ * motor velocity dob gain <observer_gain_nm_per_rad_s>
+ * motor velocity dob torque_limit <nm>
+ * motor velocity dob iq_limit <a>
+ */
+static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2 || argc > 3) {
+		shell_error(sh, "Usage: motor velocity dob status | "
+			    "motor velocity dob enable <0|1> | "
+			    "motor velocity dob gain <nm_per_rad_s> | "
+			    "motor velocity dob torque_limit <nm> | "
+			    "motor velocity dob iq_limit <a>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		if (argc != 2) {
+			shell_error(sh, "Usage: motor velocity dob status");
+			return -EINVAL;
+		}
+		shell_print(sh, "Velocity DOB:");
+		shell_print(sh, "  Enabled:     %s",
+			    g_motor_params->velocity_dob_cfg.enabled ? "YES" : "NO");
+		shell_print(sh, "  Gain:        %.6f Nm/(rad/s)",
+			    (double)g_motor_params->velocity_dob_cfg.observer_gain_nm_per_rad_s);
+		shell_print(sh, "  Torque limit %.6f Nm",
+			    (double)g_motor_params->velocity_dob_cfg.torque_limit_nm);
+		shell_print(sh, "  Iq FF limit: %.6f A",
+			    (double)g_motor_params->velocity_dob_cfg.iq_ff_limit_a);
+		shell_print(sh, "  State:       d=%.6f Nm, ff=%.6f A, res=%.6f rad/s",
+			    (double)g_motor_params->velocity_dob_disturbance_nm,
+			    (double)g_motor_params->velocity_dob_iq_ff_a,
+			    (double)g_motor_params->velocity_dob_residual_rad_s);
+		return 0;
+	}
+
+	if (argc != 3) {
+		shell_error(sh, "Usage: motor velocity dob <enable|gain|torque_limit|iq_limit> <value>");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "enable") == 0) {
+		bool enabled = false;
+		if (!shell_parse_bool01(argv[2], &enabled)) {
+			shell_error(sh, "enable value must be 0 or 1");
+			return -EINVAL;
+		}
+		int ret = motor_api_set_param("velocity_dob_enable", enabled ? 1.0f : 0.0f);
+		if (ret != 0) {
+			shell_error(sh, "Failed to update velocity_dob_enable (err %d)", ret);
+			return ret;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh, "Velocity DOB %s", enabled ? "enabled" : "disabled");
+		return 0;
+	}
+
+	float value = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &value)) {
+		shell_error(sh, "value must be a finite number");
+		return -EINVAL;
+	}
+
+	const char *param_name = NULL;
+	const char *label = NULL;
+	if (strcmp(argv[1], "gain") == 0) {
+		if (value < 0.0f) {
+			shell_error(sh, "gain must be >= 0");
+			return -EINVAL;
+		}
+		param_name = "velocity_dob_observer_gain_nm_per_rad_s";
+		label = "gain";
+	} else if (strcmp(argv[1], "torque_limit") == 0) {
+		if (value <= 0.0f) {
+			shell_error(sh, "torque_limit must be > 0");
+			return -EINVAL;
+		}
+		param_name = "velocity_dob_torque_limit_nm";
+		label = "torque limit";
+	} else if (strcmp(argv[1], "iq_limit") == 0) {
+		if (value < 0.0f) {
+			shell_error(sh, "iq_limit must be >= 0");
+			return -EINVAL;
+		}
+		param_name = "velocity_dob_iq_ff_limit_a";
+		label = "Iq FF limit";
+	} else {
+		shell_error(sh, "Unknown DOB field '%s' (use enable|gain|torque_limit|iq_limit)",
+			    argv[1]);
+		return -EINVAL;
+	}
+
+	int ret = motor_api_set_param(param_name, value);
+	if (ret != 0) {
+		shell_error(sh, "Failed to update %s (err %d)", param_name, ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Velocity DOB %s set to %.6f", label, (double)value);
+	return 0;
 }
 
 /* motor position target <deg> */
@@ -1283,6 +1406,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(gains, NULL,
 		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_velocity_gains, 3, 2),
+	SHELL_CMD_ARG(dob, NULL,
+		      "Velocity disturbance observer: status | enable <0|1> | gain <nm_per_rad_s> | torque_limit <nm> | iq_limit <a>",
+		      cmd_motor_velocity_dob, 2, 1),
 	SHELL_CMD(status, NULL, "Show velocity status", cmd_motor_velocity_status),
 	SHELL_SUBCMD_SET_END
 );

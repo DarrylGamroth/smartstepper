@@ -1,0 +1,10 @@
+tests:
+  chopper.motor_motion_modules.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - motion
+    harness: ztest
+    integration_platforms:
+      - native_sim

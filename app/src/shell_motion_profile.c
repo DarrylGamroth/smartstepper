@@ -13,6 +13,7 @@
 #include "motor_state_utils.h"
 #include "config.h"
 #include "angle_wrap.h"
+#include "motor_motion_modules.h"
 #include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
@@ -84,35 +85,30 @@ int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **argv)
 	float start_pos_rad = g_motor_params->position_rad;
 	float start_vel_rad_s = g_motor_params->velocity_rad_s;
 	float target_wrapped_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
-	float delta_rad = wrap_rad_pi(target_wrapped_rad - start_pos_rad);
-	float end_pos_rad = start_pos_rad + delta_rad;
 	float end_vel_rad_s = end_vel_hz * 2.0f * PI_F32;
 	float duration_s = duration_ms * 0.001f;
 	g_motor_params->profile_sequence_running = false;
 	g_motor_params->profile_sequence_tick_counter = 0U;
 
-	int ret = motion_profile_quintic_plan(&g_motor_params->position_profile,
-					      start_pos_rad, start_vel_rad_s, 0.0f,
-					      end_pos_rad, end_vel_rad_s, 0.0f, duration_s);
+	int ret = motor_position_move_plan_sequence_segment(&g_motor_params->position_profile,
+							    start_pos_rad,
+							    start_vel_rad_s,
+							    target_wrapped_rad,
+							    end_vel_rad_s,
+							    duration_s,
+							    g_motor_params->profile_max_velocity_rad_s,
+							    g_motor_params->profile_max_accel_rad_s2);
 	if (ret != 0) {
 		shell_error(sh, "Failed to plan profile (err %d)", ret);
 		return ret;
 	}
-
+	float end_pos_rad = g_motor_params->position_profile.end_position_rad;
 	float peak_vel = 0.0f;
 	float peak_acc = 0.0f;
-	ret = motion_profile_quintic_check_limits(&g_motor_params->position_profile,
+	(void)motion_profile_quintic_check_limits(&g_motor_params->position_profile,
 						  g_motor_params->profile_max_velocity_rad_s,
 						  g_motor_params->profile_max_accel_rad_s2, 64U,
 						  &peak_vel, &peak_acc);
-	if (ret != 0) {
-		motion_profile_quintic_cancel(&g_motor_params->position_profile, start_pos_rad);
-		shell_error(sh,
-			    "Profile violates limits (peak %.2f Hz, %.2f Hz/s). Increase duration.",
-			    (double)(peak_vel / (2.0f * PI_F32)),
-			    (double)(peak_acc / (2.0f * PI_F32)));
-		return -ERANGE;
-	}
 
 	g_motor_params->position_target_rad = wrap_rad_2pi(start_pos_rad);
 	motor_command_feed_watchdog(g_motor_params);

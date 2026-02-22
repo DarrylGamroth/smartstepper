@@ -1,0 +1,10 @@
+tests:
+  chopper.motor_dob.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - dob
+    harness: ztest
+    integration_platforms:
+      - native_sim

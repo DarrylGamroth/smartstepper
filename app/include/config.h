@@ -21,6 +21,7 @@
 #include "motor_commission.h"
 #include "motor_events.h"
 #include "motor_states.h"
+#include "motor_dob.h"
 #include "motor_mpr.h"
 #include "prbs.h"
 #include "rls_motor_est.h"
@@ -162,6 +163,8 @@ struct motor_parameters {
 	struct motor_mpr_velocity_state velocity_mpr_state; /* Velocity MPR runtime */
 	struct motor_mpr_position_config position_mpr_cfg; /* Position MPR tuning */
 	struct motor_mpr_position_state position_mpr_state; /* Position MPR runtime */
+	struct motor_dob_config velocity_dob_cfg;  /* Velocity disturbance observer tuning */
+	struct motor_dob_state velocity_dob_state; /* Velocity disturbance observer runtime */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
@@ -243,6 +246,9 @@ struct motor_parameters {
 	float32_t encoder_observer_input_rad;
 	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
 	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
+	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */
+	float32_t velocity_dob_disturbance_nm; /* Estimated lumped disturbance torque */
+	float32_t velocity_dob_residual_rad_s; /* Observer speed residual */
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;	
 	float32_t Id_A;

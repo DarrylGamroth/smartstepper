@@ -30,6 +30,7 @@
 #include "traj.h"
 #include "angle_observer.h"
 #include "angle_wrap.h"
+#include "motor_motion_modules.h"
 #include "motor_state_utils.h"
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
@@ -88,6 +89,11 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 				 angle_observer_get_mech_speed(&params->observer),
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state,
+			angle_observer_get_mech_speed(&params->observer));
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 }
 
 static struct motor_parameters motor_params;
@@ -412,9 +418,21 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_mpr_cfg.max_delta_velocity_rad_s =
 		params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	params->velocity_dob_cfg.enabled = true;
+	params->velocity_dob_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->velocity_dob_cfg.observer_gain_nm_per_rad_s = 0.02f;
+	params->velocity_dob_cfg.iq_ff_limit_a = params->velocity_cl_iq_limit_A;
+	params->velocity_dob_cfg.torque_limit_nm =
+		1.5f * (float32_t)MOTOR_POLE_PAIRS *
+		MOTOR_FLUX_LINKAGE_WB *
+		params->velocity_cl_iq_limit_A;
+	motor_dob_reset(&params->velocity_dob_state, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	params->velocity_filtered_rad_s = 0.0f;
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 	params->Rs_measured_ohm = MOTOR_RESISTANCE_OHM;
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
 	params->R_over_L_measured =
@@ -436,13 +454,11 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
 	motor_commission_init(params);
 
-	traj_init(&params->traj_velocity);
-	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
-	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
-	traj_set_max_delta(&params->traj_velocity,
-			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, 0.0f);
+	motor_velocity_plan_init(&params->traj_velocity,
+				 params->profile_max_velocity_rad_s,
+				 params->profile_max_accel_rad_s2,
+				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+				 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	motion_profile_quintic_init(&params->position_profile, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <math.h>
 
 #include <zephyr/logging/log.h>
@@ -19,6 +20,8 @@
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
+#include "motor_dob.h"
+#include "motor_motion_modules.h"
 #include "motor_state_utils.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
@@ -35,29 +38,19 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 
 static int motor_position_plan_sequence_move(struct motor_parameters *params, float32_t target_wrapped_rad)
 {
-	float32_t start_pos_rad = params->position_rad;
-	float32_t start_vel_rad_s = params->velocity_rad_s;
-	float32_t delta_rad = wrap_rad_pi(target_wrapped_rad - start_pos_rad);
-	float32_t end_pos_rad = start_pos_rad + delta_rad;
-
-	int ret = motion_profile_quintic_plan(&params->position_profile,
-					      start_pos_rad, start_vel_rad_s, 0.0f,
-					      end_pos_rad, params->profile_sequence_end_velocity_rad_s,
-					      0.0f, params->profile_sequence_move_duration_s);
+	int ret = motor_position_move_plan_sequence_segment(&params->position_profile,
+							    params->position_rad,
+							    params->velocity_rad_s,
+							    target_wrapped_rad,
+							    params->profile_sequence_end_velocity_rad_s,
+							    params->profile_sequence_move_duration_s,
+							    params->profile_max_velocity_rad_s,
+							    params->profile_max_accel_rad_s2);
 	if (ret != 0) {
 		return ret;
 	}
 
-	ret = motion_profile_quintic_check_limits(&params->position_profile,
-						  params->profile_max_velocity_rad_s,
-						  params->profile_max_accel_rad_s2, 64U,
-						  NULL, NULL);
-	if (ret != 0) {
-		motion_profile_quintic_cancel(&params->position_profile, start_pos_rad);
-		return ret;
-	}
-
-	params->position_target_rad = wrap_rad_2pi(start_pos_rad);
+	params->position_target_rad = wrap_rad_2pi(params->position_rad);
 	params->last_command_update_ms = k_uptime_get_32();
 	params->command_timeout_latched = false;
 
@@ -159,6 +152,11 @@ void motor_state_online_torque_entry(void *obj)
 				 angle_observer_get_mech_speed(&params->observer),
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state,
+			angle_observer_get_mech_speed(&params->observer));
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 }
 
 void motor_state_online_torque_exit(void *obj)
@@ -202,17 +200,19 @@ void motor_state_online_velocity_open_entry(void *obj)
 	angle_gen_set_angle(&params->angle_gen, mech_angle_rad);
 
 	/* Initialize velocity trajectory */
-	traj_init(&params->traj_velocity);
-	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
-	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
-	traj_set_max_delta(&params->traj_velocity,
-			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, 0.0f);
+	motor_velocity_plan_init(&params->traj_velocity,
+				 params->profile_max_velocity_rad_s,
+				 params->profile_max_accel_rad_s2,
+				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+				 0.0f);
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state, 0.0f);
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 
 	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
 		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
@@ -259,18 +259,21 @@ void motor_state_online_velocity_closed_entry(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 
-	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
-	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
-	traj_set_max_delta(&params->traj_velocity,
-			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
-	traj_set_target_value(&params->traj_velocity, speed_mech_rad_s);
-	traj_set_int_value(&params->traj_velocity, speed_mech_rad_s);
+	motor_velocity_plan_init(&params->traj_velocity,
+				 params->profile_max_velocity_rad_s,
+				 params->profile_max_accel_rad_s2,
+				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+				 speed_mech_rad_s);
 	params->velocity_target_rad_s = speed_mech_rad_s;
 	params->velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
+	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 }
 
 enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
@@ -309,12 +312,12 @@ void motor_state_online_position_entry(void *obj)
 	params->position_target_rad = position_mech_rad;
 	motion_profile_quintic_cancel(&params->position_profile, position_mech_rad);
 
-	traj_set_min_value(&params->traj_velocity, -params->profile_max_velocity_rad_s);
-	traj_set_max_value(&params->traj_velocity, params->profile_max_velocity_rad_s);
-	traj_set_max_delta(&params->traj_velocity,
-			   params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ);
+	motor_velocity_plan_init(&params->traj_velocity,
+				 params->profile_max_velocity_rad_s,
+				 params->profile_max_accel_rad_s2,
+				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+				 speed_mech_rad_s);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, speed_mech_rad_s);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
@@ -322,6 +325,10 @@ void motor_state_online_position_entry(void *obj)
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
+	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 }
 
 enum smf_state_result motor_state_online_position_run(void *obj)
@@ -333,45 +340,43 @@ enum smf_state_result motor_state_online_position_run(void *obj)
 		if (!params->profile_sequence_running) {
 			return SMF_EVENT_HANDLED;
 		}
-		if (params->profile_sequence_count == 0U) {
-			params->profile_sequence_running = false;
-			params->profile_sequence_tick_counter = 0U;
-			return SMF_EVENT_HANDLED;
-		}
 		if (atomic_get(&params->control_armed) == 0) {
 			return SMF_EVENT_HANDLED;
 		}
 
-		uint16_t idx = params->profile_sequence_next_idx;
-		if (idx >= params->profile_sequence_count) {
-			if (params->profile_sequence_loop) {
-				idx = 0U;
-			} else {
-				params->profile_sequence_running = false;
-				params->profile_sequence_tick_counter = 0U;
-				return SMF_EVENT_HANDLED;
-			}
+		float32_t target_wrapped_rad = 0.0f;
+		bool complete_after_take = false;
+		int ret = motor_position_sequence_take_next(params->profile_sequence_points_rad,
+							    params->profile_sequence_count,
+							    params->profile_sequence_loop,
+							    &params->profile_sequence_next_idx,
+							    &target_wrapped_rad,
+							    &complete_after_take);
+		if (ret == -ENOENT) {
+			params->profile_sequence_running = false;
+			params->profile_sequence_tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
 		}
-
-		int ret = motor_position_plan_sequence_move(params, params->profile_sequence_points_rad[idx]);
 		if (ret != 0) {
-			LOG_ERR("Profile sequence move %u failed (%d), stopping", idx, ret);
+			LOG_ERR("Profile sequence index update failed (%d), stopping", ret);
 			params->profile_sequence_running = false;
 			params->profile_sequence_tick_counter = 0U;
 			return SMF_EVENT_HANDLED;
 		}
 
-		idx++;
-		if (idx >= params->profile_sequence_count) {
-			if (params->profile_sequence_loop) {
-				idx = 0U;
-			} else {
-				params->profile_sequence_running = false;
-				params->profile_sequence_tick_counter = 0U;
-				LOG_INF("Profile sequence completed");
-			}
+		ret = motor_position_plan_sequence_move(params, target_wrapped_rad);
+		if (ret != 0) {
+			LOG_ERR("Profile sequence move planning failed (%d), stopping", ret);
+			params->profile_sequence_running = false;
+			params->profile_sequence_tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
 		}
-		params->profile_sequence_next_idx = idx;
+
+		if (complete_after_take) {
+			params->profile_sequence_running = false;
+			params->profile_sequence_tick_counter = 0U;
+			LOG_INF("Profile sequence completed");
+		}
 		return SMF_EVENT_HANDLED;
 	}
 
@@ -398,6 +403,10 @@ void motor_state_online_position_exit(void *obj)
 	params->position_cl_i_term_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state, 0.0f);
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
 
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));

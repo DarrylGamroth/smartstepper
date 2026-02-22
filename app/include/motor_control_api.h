@@ -109,6 +109,8 @@ int motor_api_request_commission(void);
  *       outer_loop_mode (0=PI,1=MPR),
  *       velocity_mpr_q_speed, velocity_mpr_r_delta_iq, velocity_mpr_horizon,
  *       velocity_mpr_max_delta_iq_a, velocity_mpr_disturbance_ki_nm_per_rad_s,
+ *       velocity_dob_enable, velocity_dob_observer_gain_nm_per_rad_s,
+ *       velocity_dob_torque_limit_nm, velocity_dob_iq_ff_limit_a,
  *       position_mpr_q_position, position_mpr_q_velocity_ff,
  *       position_mpr_r_delta_velocity, position_mpr_horizon,
  *       position_mpr_max_delta_velocity_rad_s,
