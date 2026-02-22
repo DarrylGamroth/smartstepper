@@ -25,17 +25,6 @@
 #define MOTOR_COMMISSION_AUTO_POST_WAIT_MS 2500U
 #define MOTOR_COMMISSION_AUTO_SPINUP_MS 1200U
 
-static float32_t motor_commission_clampf(float32_t value, float32_t min_value, float32_t max_value)
-{
-	if (value < min_value) {
-		return min_value;
-	}
-	if (value > max_value) {
-		return max_value;
-	}
-	return value;
-}
-
 static int motor_post_mode_change(enum motor_state target_mode)
 {
 	struct motor_event evt = {
@@ -174,9 +163,9 @@ static int motor_commission_wait_for_capture_stop(uint32_t timeout_ms)
 static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 {
 	float32_t target_rad_s = target_hz * 2.0f * PI_F32;
-	float32_t limited = motor_commission_clampf(target_rad_s,
-						    -g_motor_params->profile_max_velocity_rad_s,
-						    g_motor_params->profile_max_velocity_rad_s);
+	float32_t limited = clampf(target_rad_s,
+				   -g_motor_params->profile_max_velocity_rad_s,
+				   g_motor_params->profile_max_velocity_rad_s);
 
 	traj_set_target_value(&g_motor_params->traj_velocity, limited);
 }
@@ -674,21 +663,21 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	struct motor_commission_mech_config mech_cfg = {0};
 	struct motor_commission_tune_config tune_cfg = {0};
 	float32_t max_velocity_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
-	float32_t iq_limit_default = motor_commission_clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
-							    0.10f, MOTOR_MAX_CURRENT_A);
+	float32_t iq_limit_default = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
+					    0.10f, MOTOR_MAX_CURRENT_A);
 
-	flux_cfg.max_speed_hz = motor_commission_clampf(max_velocity_hz * 0.25f, 3.0f, 20.0f);
-	flux_cfg.min_speed_hz = motor_commission_clampf(flux_cfg.max_speed_hz * 0.25f,
-							1.0f,
-							flux_cfg.max_speed_hz - 0.5f);
+	flux_cfg.max_speed_hz = clampf(max_velocity_hz * 0.25f, 3.0f, 20.0f);
+	flux_cfg.min_speed_hz = clampf(flux_cfg.max_speed_hz * 0.25f,
+				       1.0f,
+				       flux_cfg.max_speed_hz - 0.5f);
 	flux_cfg.steps = 6U;
 	flux_cfg.settle_ms = 250U;
 	flux_cfg.sample_ms = 250U;
 	flux_cfg.iq_limit_a = iq_limit_default;
 
-	mech_cfg.coast_speed_hz = motor_commission_clampf(flux_cfg.max_speed_hz * 0.5f, 2.0f, 10.0f);
-	mech_cfg.prbs_amp_a = motor_commission_clampf(0.35f * flux_cfg.iq_limit_a, 0.05f,
-						      flux_cfg.iq_limit_a);
+	mech_cfg.coast_speed_hz = clampf(flux_cfg.max_speed_hz * 0.5f, 2.0f, 10.0f);
+	mech_cfg.prbs_amp_a = clampf(0.35f * flux_cfg.iq_limit_a, 0.05f,
+				     flux_cfg.iq_limit_a);
 	mech_cfg.prbs_period_ms = 20U;
 	mech_cfg.duration_ms = 5000U;
 
