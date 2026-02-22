@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_commission_tune.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - commission
+      - tune
+    integration_platforms:
+      - native_sim
+    harness: ztest

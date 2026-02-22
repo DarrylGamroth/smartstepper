@@ -249,6 +249,16 @@ void motor_commission_reset(struct motor_parameters *params)
 	ctx->results.mech_sample_count = 0U;
 	ctx->results.psi_f_valid = false;
 	ctx->results.mech_valid = false;
+	ctx->auto_tune_staged = (struct motor_commission_tune_output){0};
+	ctx->auto_tune_valid = false;
+	ctx->auto_tune_applied = false;
+	ctx->auto_tune_last_error = 0;
+	(void)motor_commission_tune_config_default(&ctx->auto_tune_cfg,
+						   (float32_t)MOTOR_POLE_PAIRS,
+						   1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+						   MAX(MOTOR_MAX_CURRENT_A, 0.1f),
+						   MAX(params->profile_max_velocity_rad_s, 1.0f),
+						   MAX(params->profile_max_accel_rad_s2, 1.0f));
 	strncpy(ctx->last_abort_reason, "none", sizeof(ctx->last_abort_reason) - 1U);
 	ctx->last_abort_reason[sizeof(ctx->last_abort_reason) - 1U] = '\0';
 	motor_commission_reset_capture_state(ctx);
@@ -395,6 +405,107 @@ int motor_commission_apply_results(struct motor_parameters *params)
 		params->coulomb_friction_nm_active = results->coulomb_friction_nm;
 	}
 
+	return 0;
+}
+
+int motor_commission_stage_auto_tune(struct motor_parameters *params,
+				     const struct motor_commission_tune_config *cfg)
+{
+	if (params == NULL) {
+		return -EINVAL;
+	}
+
+	struct motor_commission_ctx *ctx = &params->commission;
+	const struct motor_commission_tune_config *cfg_sel = cfg;
+	if (cfg_sel == NULL) {
+		cfg_sel = &ctx->auto_tune_cfg;
+	}
+
+	if (cfg != NULL) {
+		ctx->auto_tune_cfg = *cfg;
+	}
+
+	const struct motor_commission_results *results = &ctx->results;
+	struct motor_commission_fit_summary fit = {
+		.psi_f_valid = results->psi_f_valid,
+		.psi_f_wb = results->psi_f_wb,
+		.psi_f_r2 = results->psi_f_r2,
+		.psi_f_residual_rms_v = results->psi_f_residual_rms_v,
+		.psi_f_sample_count = results->psi_f_sample_count,
+		.mech_valid = results->mech_valid,
+		.inertia_kgm2 = results->inertia_kgm2,
+		.viscous_friction_nm_per_rad_s = results->viscous_friction_nm_per_rad_s,
+		.mech_r2 = results->mech_r2,
+		.mech_residual_rms_nm = results->mech_residual_rms_nm,
+		.mech_sample_count = results->mech_sample_count,
+	};
+
+	ctx->auto_tune_staged = (struct motor_commission_tune_output){0};
+	int ret = motor_commission_tune_compute(&fit, cfg_sel, &ctx->auto_tune_staged);
+	ctx->auto_tune_valid = (ret == 0) && ctx->auto_tune_staged.accepted;
+	ctx->auto_tune_applied = false;
+	ctx->auto_tune_last_error = ret;
+	return ret;
+}
+
+int motor_commission_apply_staged_auto_tune(struct motor_parameters *params)
+{
+	if (params == NULL) {
+		return -EINVAL;
+	}
+
+	struct motor_commission_ctx *ctx = &params->commission;
+	const struct motor_commission_tune_output *staged = &ctx->auto_tune_staged;
+	if (!ctx->auto_tune_valid || !staged->accepted) {
+		return -ENOENT;
+	}
+
+	int ret = motor_commission_apply_results(params);
+	if (ret < 0) {
+		ctx->auto_tune_last_error = ret;
+		return ret;
+	}
+
+	params->velocity_cl_kp_A_per_rad_s = staged->velocity_kp_a_per_rad_s;
+	params->velocity_cl_ki_A_per_rad = staged->velocity_ki_a_per_rad;
+	params->velocity_cl_iq_limit_A = staged->velocity_iq_limit_a;
+	params->velocity_cl_i_term_A = 0.0f;
+
+	params->position_cl_kp_rad_s_per_rad = staged->position_kp_rad_s_per_rad;
+	params->position_cl_ki_rad_s2_per_rad = staged->position_ki_rad_s2_per_rad;
+	params->position_cl_i_term_rad_s = 0.0f;
+
+	params->velocity_mpr_cfg.horizon = staged->velocity_mpr_horizon;
+	params->velocity_mpr_cfg.q_speed = staged->velocity_mpr_q_speed;
+	params->velocity_mpr_cfg.r_delta_iq = staged->velocity_mpr_r_delta_iq;
+	params->velocity_mpr_cfg.iq_limit_a = staged->velocity_iq_limit_a;
+	params->velocity_mpr_cfg.max_delta_iq_a = staged->velocity_mpr_max_delta_iq_a;
+	params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s =
+		staged->velocity_mpr_disturbance_ki_nm_per_rad_s;
+
+	params->position_mpr_cfg.horizon = staged->position_mpr_horizon;
+	params->position_mpr_cfg.q_position = staged->position_mpr_q_position;
+	params->position_mpr_cfg.q_velocity_ff = staged->position_mpr_q_velocity_ff;
+	params->position_mpr_cfg.r_delta_velocity = staged->position_mpr_r_delta_velocity;
+	params->position_mpr_cfg.max_delta_velocity_rad_s =
+		staged->position_mpr_max_delta_velocity_rad_s;
+	params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
+
+	params->velocity_dob_cfg.enabled = staged->velocity_dob_enable;
+	params->velocity_dob_cfg.observer_gain_nm_per_rad_s =
+		staged->velocity_dob_observer_gain_nm_per_rad_s;
+	params->velocity_dob_cfg.torque_limit_nm = staged->velocity_dob_torque_limit_nm;
+	params->velocity_dob_cfg.iq_ff_limit_a = staged->velocity_dob_iq_ff_limit_a;
+
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, params->velocity_rad_s, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, params->position_rad);
+	motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
+	params->velocity_dob_iq_ff_a = 0.0f;
+	params->velocity_dob_disturbance_nm = 0.0f;
+	params->velocity_dob_residual_rad_s = 0.0f;
+
+	ctx->auto_tune_applied = true;
+	ctx->auto_tune_last_error = 0;
 	return 0;
 }
 

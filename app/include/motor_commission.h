@@ -13,6 +13,8 @@
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
 
+#include "motor_commission_tune.h"
+
 struct motor_parameters;
 
 #define MOTOR_COMMISSION_MAX_SAMPLES 512U
@@ -137,6 +139,11 @@ struct motor_commission_ctx {
 	struct motor_commission_flux_config flux_cfg;
 	struct motor_commission_mech_config mech_cfg;
 	struct motor_commission_results results;
+	struct motor_commission_tune_config auto_tune_cfg;
+	struct motor_commission_tune_output auto_tune_staged;
+	bool auto_tune_valid;
+	bool auto_tune_applied;
+	int32_t auto_tune_last_error;
 
 	uint16_t sample_count;
 	struct motor_commission_sample samples[MOTOR_COMMISSION_MAX_SAMPLES];
@@ -152,6 +159,9 @@ int motor_commission_start_mech(struct motor_parameters *params,
 				const struct motor_commission_mech_config *cfg);
 void motor_commission_abort(struct motor_parameters *params, const char *reason);
 int motor_commission_apply_results(struct motor_parameters *params);
+int motor_commission_stage_auto_tune(struct motor_parameters *params,
+				     const struct motor_commission_tune_config *cfg);
+int motor_commission_apply_staged_auto_tune(struct motor_parameters *params);
 void motor_commission_update(struct motor_parameters *params,
 			     const struct motor_commission_observation *obs);
 bool motor_commission_is_active(const struct motor_parameters *params);

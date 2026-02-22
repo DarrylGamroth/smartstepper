@@ -1611,6 +1611,17 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission auto subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
+	SHELL_CMD_ARG(run, NULL, "Run identify+tune workflow [apply]",
+		      cmd_motor_commission_auto_run, 1, 1),
+	SHELL_CMD(status, NULL, "Show staged auto-tune defaults and reject flags",
+		  cmd_motor_commission_auto_status),
+	SHELL_CMD(apply, NULL, "Apply staged auto-tune defaults to active runtime parameters",
+		  cmd_motor_commission_auto_apply),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(status, NULL, "Show commissioning status and capture stats", cmd_motor_commission_status),
@@ -1619,6 +1630,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(apply, NULL, "Apply valid commissioning estimates to active runtime params", cmd_motor_commission_apply),
 	SHELL_CMD(flux, &sub_motor_commission_flux, "Flux-linkage commissioning", NULL),
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
+	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),
 	SHELL_SUBCMD_SET_END
 );
 
