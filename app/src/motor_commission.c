@@ -14,6 +14,7 @@
 #include "motor_commission_id.h"
 #include "motor_state_utils.h"
 #include "motor_states.h"
+#include "motor_torque.h"
 
 #define MOTOR_COMMISSION_DERIV_ALPHA 0.2f
 #define MOTOR_COMMISSION_FLAG_SATURATED BIT(0)
@@ -150,8 +151,13 @@ static void motor_commission_estimate_mech(struct motor_parameters *params)
 	struct motor_commission_results *res = &ctx->results;
 	struct motor_mech_id_state estimator;
 	struct motor_mech_id_result estimate;
-	const float32_t psi_f = res->psi_f_valid ? res->psi_f_wb : params->flux_linkage_wb_active;
-	const float32_t kt = 1.5f * (float32_t)MOTOR_POLE_PAIRS * psi_f;
+	float32_t kt = motor_torque_gain_resolve_active(params);
+	if (res->psi_f_valid) {
+		float32_t derived_kt = motor_torque_gain_from_flux(res->psi_f_wb);
+		if (isfinite(derived_kt) && derived_kt > 0.0f) {
+			kt = derived_kt;
+		}
+	}
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = kt,
 		.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
@@ -397,12 +403,21 @@ int motor_commission_apply_results(struct motor_parameters *params)
 
 	if (results->psi_f_valid) {
 		params->flux_linkage_wb_active = results->psi_f_wb;
+		float32_t derived_kt = motor_torque_gain_from_flux(results->psi_f_wb);
+		if (isfinite(derived_kt) && derived_kt > MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+			params->torque_gain_nm_per_a_active = derived_kt;
+		}
 	}
 	if (results->mech_valid) {
 		params->inertia_kgm2_active = results->inertia_kgm2;
 		params->viscous_friction_nm_per_rad_s_active =
 			results->viscous_friction_nm_per_rad_s;
 		params->coulomb_friction_nm_active = results->coulomb_friction_nm;
+	}
+
+	if (!isfinite(params->torque_gain_nm_per_a_active) ||
+	    params->torque_gain_nm_per_a_active <= MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		params->torque_gain_nm_per_a_active = motor_torque_gain_resolve_active(params);
 	}
 
 	return 0;
@@ -470,6 +485,9 @@ int motor_commission_apply_staged_auto_tune(struct motor_parameters *params)
 	params->velocity_cl_ki_A_per_rad = staged->velocity_ki_a_per_rad;
 	params->velocity_cl_iq_limit_A = staged->velocity_iq_limit_a;
 	params->velocity_cl_i_term_A = 0.0f;
+	if (isfinite(staged->kt_nm_per_a) && staged->kt_nm_per_a > MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		params->torque_gain_nm_per_a_active = staged->kt_nm_per_a;
+	}
 
 	params->position_cl_kp_rad_s_per_rad = staged->position_kp_rad_s_per_rad;
 	params->position_cl_ki_rad_s2_per_rad = staged->position_ki_rad_s2_per_rad;

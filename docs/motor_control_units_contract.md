@@ -69,16 +69,18 @@ Source paths:
 
 ## Torque-Domain Contract (Current Implementation)
 
-- Current runtime torque conversion path is:
-  - `Kt = 1.5 * pole_pairs * flux_linkage_wb_active`
-- This feeds velocity MPR/DOB limits and commissioning/tuning outputs.
-- This is a temporary contract and will be replaced by explicit torque-gain parameterization in Phase 1.
+- Canonical runtime torque source is:
+  - `torque_gain_nm_per_a_active`
+- Flux-derived `Kt = 1.5 * pole_pairs * psi_f` remains a fallback/commissioning derivation path.
+- Velocity MPR, velocity DOB, commissioning application, and shell tuning helpers consume the canonical active torque gain.
 
 Source paths:
 
 - `app/src/motor_control_loop.c`
 - `app/src/motor_commission.c`
 - `app/src/shell_commands.c`
+- `app/src/motor_control_api.c`
+- `app/include/motor_torque.h`
 - `modules/motor_core/src/motor_commission_tune.c`
 
 ## Flux and Parameter Normalization Contract

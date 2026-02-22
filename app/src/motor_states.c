@@ -35,6 +35,7 @@
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
 #include "motor_commission.h"
+#include "motor_torque.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -448,14 +449,15 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_mpr_cfg.max_delta_velocity_rad_s =
 		params->profile_max_accel_rad_s2 * position_loop_dt_s;
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
+	params->torque_gain_nm_per_a_active =
+		motor_torque_gain_from_flux(params->flux_linkage_wb_active);
 	params->velocity_dob_cfg.enabled = true;
 	params->velocity_dob_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_dob_cfg.observer_gain_nm_per_rad_s = 0.02f;
 	params->velocity_dob_cfg.iq_ff_limit_a = params->velocity_cl_iq_limit_A;
-	params->velocity_dob_cfg.torque_limit_nm =
-		1.5f * (float32_t)MOTOR_POLE_PAIRS *
-		MOTOR_FLUX_LINKAGE_WB *
-		params->velocity_cl_iq_limit_A;
+	params->velocity_dob_cfg.torque_limit_nm = params->torque_gain_nm_per_a_active *
+						   params->velocity_cl_iq_limit_A;
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
@@ -477,7 +479,6 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
 	params->R_over_L_measured =
 		(params->Ls_measured_H > 0.0f) ? (params->Rs_measured_ohm / params->Ls_measured_H) : 0.0f;
-	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
 	params->inertia_kgm2_active = MOTOR_INERTIA_KGM2;
 	params->viscous_friction_nm_per_rad_s_active = 0.0f;
 	params->coulomb_friction_nm_active = 0.0f;

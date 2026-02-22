@@ -19,6 +19,7 @@
 #include "config.h"
 #include "traj.h"
 #include "math_constants.h"
+#include "motor_torque.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
@@ -406,8 +407,9 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)ctx->auto_tune_staged.velocity_dob_torque_limit_nm,
 		    (double)ctx->auto_tune_staged.velocity_dob_iq_ff_limit_a);
 	motor_commission_print_tune_reject_flags(sh, ctx->auto_tune_staged.reject_flags);
-	shell_print(sh, "  Active params:  psi_f=%.8f Wb J=%.8f kgm2 B=%.8f Nm/(rad/s) Tc=%.8f Nm",
+	shell_print(sh, "  Active params:  psi_f=%.8f Wb Kt=%.8f Nm/A J=%.8f kgm2 B=%.8f Nm/(rad/s) Tc=%.8f Nm",
 		    (double)g_motor_params->flux_linkage_wb_active,
+		    (double)motor_torque_gain_resolve_active(g_motor_params),
 		    (double)g_motor_params->inertia_kgm2_active,
 		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active,
 		    (double)g_motor_params->coulomb_friction_nm_active);

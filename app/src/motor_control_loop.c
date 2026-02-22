@@ -33,6 +33,7 @@
 #include "motor_commission.h"
 #include "motor_dob.h"
 #include "motor_motion_modules.h"
+#include "motor_torque.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -519,6 +520,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 			bool use_mpr = motor_outer_loop_use_mpr(params);
 			bool mpr_applied = false;
 			float32_t iq_cmd_pre_dob_a = 0.0f;
+			float32_t torque_gain_nm_per_a = motor_torque_gain_resolve_active(params);
 
 			if (use_mpr) {
 				struct motor_mpr_velocity_model mpr_model = {
@@ -526,9 +528,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 					.viscous_friction_nm_per_rad_s =
 						params->viscous_friction_nm_per_rad_s_active,
 					.coulomb_friction_nm = params->coulomb_friction_nm_active,
-					.torque_constant_nm_per_a =
-						1.5f * (float32_t)MOTOR_POLE_PAIRS *
-						params->flux_linkage_wb_active,
+					.torque_constant_nm_per_a = torque_gain_nm_per_a,
 				};
 				float32_t iq_cmd_mpr_a = 0.0f;
 
@@ -569,19 +569,17 @@ void motor_control_loop_step(struct motor_parameters *params,
 				Iq_ref_A = iq_cmd_pre_dob_a;
 			}
 
-			float32_t kt_nm_per_a = 1.5f * (float32_t)MOTOR_POLE_PAIRS *
-						params->flux_linkage_wb_active;
-			if (isfinite(kt_nm_per_a) && kt_nm_per_a > 0.0f) {
+			if (isfinite(torque_gain_nm_per_a) && torque_gain_nm_per_a > 0.0f) {
 				struct motor_dob_model dob_model = {
 					.inertia_kgm2 = params->inertia_kgm2_active,
 					.viscous_friction_nm_per_rad_s =
 						params->viscous_friction_nm_per_rad_s_active,
 					.coulomb_friction_nm = params->coulomb_friction_nm_active,
-					.torque_constant_nm_per_a = kt_nm_per_a,
+					.torque_constant_nm_per_a = torque_gain_nm_per_a,
 				};
 				struct motor_dob_config dob_cfg = params->velocity_dob_cfg;
 				float32_t iq_limit = params->velocity_cl_iq_limit_A;
-				float32_t auto_torque_limit = kt_nm_per_a * iq_limit;
+				float32_t auto_torque_limit = torque_gain_nm_per_a * iq_limit;
 
 				dob_cfg.dt_s = velocity_loop_dt_s;
 				if (!isfinite(dob_cfg.torque_limit_nm) || dob_cfg.torque_limit_nm <= 0.0f) {

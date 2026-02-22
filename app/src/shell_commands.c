@@ -17,6 +17,7 @@
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
 #include "config.h"
+#include "motor_torque.h"
 #include "angle_wrap.h"
 #include "shell_commands_motion.h"
 #include "shell_commands_commission.h"
@@ -171,8 +172,7 @@ static int motor_compute_velocity_dob_defaults(const struct motor_parameters *pa
 	}
 
 	float iq_limit = params->velocity_cl_iq_limit_A;
-	float psi_f = params->flux_linkage_wb_active;
-	float kt = 1.5f * (float32_t)MOTOR_POLE_PAIRS * psi_f;
+	float kt = motor_torque_gain_resolve_active(params);
 
 	if (!isfinite(iq_limit) || iq_limit <= 0.0f || !isfinite(kt) || kt <= 0.0f) {
 		return -ERANGE;
@@ -206,8 +206,7 @@ static int motor_compute_velocity_bandwidth_gains(const struct motor_parameters 
 
 	float j = params->inertia_kgm2_active;
 	float b = params->viscous_friction_nm_per_rad_s_active;
-	float psi_f = params->flux_linkage_wb_active;
-	float kt = 1.5f * (float)MOTOR_POLE_PAIRS * psi_f;
+	float kt = motor_torque_gain_resolve_active(params);
 	float omega = 2.0f * PI_F32 * bw_hz;
 
 	if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f) {
@@ -237,9 +236,8 @@ static int motor_estimate_velocity_bandwidth_hz(const struct motor_parameters *p
 	}
 
 	float j = params->inertia_kgm2_active;
-	float psi_f = params->flux_linkage_wb_active;
 	float ki = params->velocity_cl_ki_A_per_rad;
-	float kt = 1.5f * (float)MOTOR_POLE_PAIRS * psi_f;
+	float kt = motor_torque_gain_resolve_active(params);
 	if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f ||
 	    !isfinite(ki) || ki <= 0.0f) {
 		return -ERANGE;
@@ -716,6 +714,8 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?
 			    "MPR" :
 			    "PI");
+	shell_print(sh, "  Kt active:  %.6f Nm/A",
+		    (double)motor_torque_gain_resolve_active(g_motor_params));
 	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
 		shell_print(sh, "  MPR q/r:    %.4f / %.4f",
 			    (double)g_motor_params->velocity_mpr_cfg.q_speed,
@@ -869,7 +869,7 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		if (ret != 0) {
 			if (ret == -ERANGE) {
 				shell_error(sh,
-					    "Need valid active commissioning params (J, psi_f) to tune by bandwidth");
+					    "Need valid active commissioning params (J, torque_gain)");
 			} else {
 				shell_error(sh, "Invalid bandwidth/zeta; zeta range is %.1f..%.1f",
 					    (double)OUTER_LOOP_ZETA_MIN, (double)OUTER_LOOP_ZETA_MAX);
@@ -962,7 +962,7 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 							      &iq_ff_limit, &kt);
 		if (ret != 0) {
 			shell_error(sh,
-				    "Cannot compute DOB defaults; need valid active psi_f and velocity current limit");
+				    "Cannot compute DOB defaults; need valid active torque_gain and velocity current limit");
 			return ret;
 		}
 

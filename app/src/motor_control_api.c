@@ -48,6 +48,7 @@ enum motor_param_id {
 	PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S,
 	PARAM_ID_PROFILE_MAX_VELOCITY_HZ,
 	PARAM_ID_PROFILE_MAX_ACCEL_HZ_S,
+	PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE,
 	PARAM_ID_COMMAND_TIMEOUT_MS,
 	PARAM_ID_COUNT,
 };
@@ -82,6 +83,7 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 		"position_mpr_max_delta_velocity_rad_s",
 	[PARAM_ID_PROFILE_MAX_VELOCITY_HZ] = "profile_max_velocity_hz",
 	[PARAM_ID_PROFILE_MAX_ACCEL_HZ_S] = "profile_max_accel_hz_s",
+	[PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE] = "torque_gain_nm_per_a_active",
 	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
 };
 
@@ -102,6 +104,7 @@ static bool motor_param_requires_positive(uint8_t param_id)
 	case PARAM_ID_POSITION_MPR_HORIZON:
 	case PARAM_ID_PROFILE_MAX_VELOCITY_HZ:
 	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
+	case PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE:
 		return true;
 	default:
 		return false;
@@ -208,6 +211,9 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_PROFILE_MAX_ACCEL_HZ_S:
 		*value = params->profile_max_accel_rad_s2 / (2.0f * PI_F32);
+		return 0;
+	case PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE:
+		*value = params->torque_gain_nm_per_a_active;
 		return 0;
 	case PARAM_ID_COMMAND_TIMEOUT_MS:
 		*value = (float)params->command_timeout_ms;
@@ -848,6 +854,19 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_accel_hz_s = %.6f",
 			(double)value);
+		break;
+	case PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE:
+		if (value <= 0.0f) {
+			LOG_ERR("Rejected torque_gain_nm_per_a_active <= 0");
+			break;
+		}
+		params->torque_gain_nm_per_a_active = value;
+		if (!isfinite(params->velocity_dob_cfg.torque_limit_nm) ||
+		    params->velocity_dob_cfg.torque_limit_nm <= 0.0f) {
+			params->velocity_dob_cfg.torque_limit_nm =
+				value * params->velocity_cl_iq_limit_A;
+		}
+		LOG_DBG("Updated torque_gain_nm_per_a_active = %.6f", (double)value);
 		break;
 	case PARAM_ID_COMMAND_TIMEOUT_MS:
 		if (value < 0.0f) {

@@ -178,6 +178,7 @@ struct motor_parameters {
 	float32_t Ls_measured_H;
 	float32_t Rs_measured_ohm;
 	float32_t flux_linkage_wb_active;             /* Active psi_f used by FOC */
+	float32_t torque_gain_nm_per_a_active;        /* Active torque gain Kt for torque-domain models */
 	float32_t inertia_kgm2_active;                /* Active inertia estimate */
 	float32_t viscous_friction_nm_per_rad_s_active; /* Active viscous friction */
 	float32_t coulomb_friction_nm_active;         /* Active Coulomb friction */

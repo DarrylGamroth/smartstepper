@@ -116,6 +116,7 @@ int motor_api_request_commission(void);
  *       position_mpr_r_delta_velocity, position_mpr_horizon,
  *       position_mpr_max_delta_velocity_rad_s,
  *       profile_max_velocity_hz, profile_max_accel_hz_s,
+ *       torque_gain_nm_per_a_active,
  *       command_timeout_ms.
  */
 int motor_api_update_param(const char *name, float value);

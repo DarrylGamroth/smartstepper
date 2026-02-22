@@ -11,6 +11,7 @@ Decide what must change (and what should stay) when running the current FOC/MPR/
 
 - Phase 0: complete (control units/frame/sign contract documented)
   - Reference: `docs/motor_control_units_contract.md`
+- Phase 1: complete (canonical active torque gain parameter wired through runtime/app/tuning paths)
 
 ## Current Baseline
 
