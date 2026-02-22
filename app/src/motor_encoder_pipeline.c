@@ -159,6 +159,15 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 	}
 
 	if (cqe->result != 0) {
+		/* Even failed CQEs may carry a mempool buffer; release it to avoid
+		 * exhausting RTIO buffers under repeated transfer faults.
+		 */
+		uint8_t *buf = NULL;
+		uint32_t buf_len = 0U;
+		if (rtio_cqe_get_mempool_buffer(&motor_encoder_rtio_ctx, cqe, &buf, &buf_len) == 0 &&
+		    buf != NULL) {
+			rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
+		}
 		rtio_cqe_release(&motor_encoder_rtio_ctx, cqe);
 		atomic_set(&motor_encoder_read_in_flight, 0);
 		atomic_inc(&motor_encoder_collect_error_count);

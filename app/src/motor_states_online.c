@@ -203,6 +203,7 @@ void motor_state_online_velocity_open_entry(void *obj)
 	 */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 				     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 
 	/* Initialize angle generator for open-loop mode */
 	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
