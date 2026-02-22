@@ -79,16 +79,18 @@ void adc_callback(const struct device *dev, const q31_t *values,
 
 	bool encoder_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
+	bool encoder_capture_enabled = params->encoder_capture_enabled;
+	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
 	/* Publish policy then always collect once to drain any completed CQE/buffer,
 	 * even if encoder reads were just disabled this cycle.
 	 */
-	motor_encoder_pipeline_set_enabled(encoder_enabled);
+	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
 
 	struct motor_encoder_sample sample = {0};
 	int ret = motor_encoder_pipeline_collect(&sample);
 
 	encoder_sample.enabled = encoder_enabled;
-	if (encoder_enabled) {
+	if (encoder_sampling_enabled) {
 		encoder_sample.angle_deg = sample.angle_deg;
 		encoder_sample.status = sample.status;
 		encoder_sample.warning = sample.warning;
@@ -133,8 +135,10 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	 */
 	bool encoder_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
-	motor_encoder_pipeline_set_enabled(encoder_enabled);
-	if (encoder_enabled) {
+	bool encoder_capture_enabled = params->encoder_capture_enabled;
+	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
+	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
+	if (encoder_sampling_enabled) {
 		int ret = motor_encoder_pipeline_request_sample();
 		if (ret < 0 && ret != -EALREADY) {
 			params->encoder_fault_counter++;
