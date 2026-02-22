@@ -68,6 +68,28 @@ static const char *motor_calibration_mode_to_string(uint8_t mode)
 	}
 }
 
+static inline float motor_encoder_normalized_from_rad(float32_t angle_rad)
+{
+	float32_t wrapped = wrap_rad_2pi(angle_rad);
+
+	return wrapped / (2.0f * PI_F32);
+}
+
+static inline int32_t motor_encoder_q31_from_rad(float32_t angle_rad)
+{
+	float32_t wrapped = wrap_rad_pi(angle_rad);
+	float32_t scaled = wrapped * (2147483648.0f / PI_F32);
+
+	if (scaled >= 2147483647.0f) {
+		return INT32_MAX;
+	}
+	if (scaled <= -2147483648.0f) {
+		return INT32_MIN;
+	}
+
+	return (int32_t)lrintf(scaled);
+}
+
 static inline void motor_zero_control_targets(struct motor_parameters *params)
 {
 	if (!params) {
@@ -891,18 +913,22 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 	}
 
 	shell_print(sh,
-		    "idx loop source deg rad fresh warn err status enabled");
+		    "idx loop source deg rad norm q31 fresh warn err status enabled");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *sample =
 			&g_motor_params->encoder_capture_samples[idx];
+		float32_t norm = motor_encoder_normalized_from_rad(sample->angle_rad);
+		int32_t q31 = motor_encoder_q31_from_rad(sample->angle_rad);
 		shell_print(sh,
-			    "%u %u %s %.3f %.6f %u %u %u 0x%02X %u",
+			    "%u %u %s %.3f %.6f %.6f %d %u %u %u 0x%02X %u",
 			    i,
 			    sample->control_loop_count,
 			    motor_encoder_input_source_to_string(sample->input_source),
 			    (double)sample->angle_deg,
 			    (double)sample->angle_rad,
+			    (double)norm,
+			    q31,
 			    sample->sample_fresh,
 			    sample->sample_warning,
 			    sample->sample_error,
