@@ -7,6 +7,11 @@ Scope: Adapt existing `motor_core` + app control integration for hybrid stepper 
 
 Decide what must change (and what should stay) when running the current FOC/MPR/DOB stack on a hybrid stepper motor, then implement those changes with low risk and measurable validation gates.
 
+## Status
+
+- Phase 0: complete (control units/frame/sign contract documented)
+  - Reference: `docs/motor_control_units_contract.md`
+
 ## Current Baseline
 
 The current control stack is generally valid for hybrid stepper use:
