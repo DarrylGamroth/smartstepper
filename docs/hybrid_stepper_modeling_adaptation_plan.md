@@ -12,6 +12,7 @@ Decide what must change (and what should stay) when running the current FOC/MPR/
 - Phase 0: complete (control units/frame/sign contract documented)
   - Reference: `docs/motor_control_units_contract.md`
 - Phase 1: complete (canonical active torque gain parameter wired through runtime/app/tuning paths)
+- Phase 2: complete (automated mapping validation checks + shell pass/fail/confidence status)
 
 ## Current Baseline
 
@@ -167,4 +168,4 @@ Rationale: stabilize correctness and safety-critical scaling first, then add mod
 
 ## Immediate Next Step
 
-Implement Phase 1 first: introduce canonical torque gain parameter and remove hardcoded torque conversion usage from control/tuning/runtime paths.
+Implement Phase 4 next: harden decoupling/feedforward clamps and add shell diagnostics for clamp/gating activity under uncertain model conditions.

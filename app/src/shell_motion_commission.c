@@ -380,6 +380,32 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)ctx->results.mech_residual_rms_nm,
 		    (double)ctx->results.mech_r2,
 		    ctx->results.mech_sample_count);
+	shell_print(sh, "  Mapping:        valid=%s pass=%s confidence=%.2f",
+		    ctx->results.mapping_valid ? "YES" : "NO",
+		    ctx->results.mapping_pass ? "YES" : "NO",
+		    (double)ctx->results.mapping_confidence);
+	if (ctx->results.mapping_direction_valid) {
+		shell_print(sh, "  Direction chk:  corr=%.4f -> %s",
+			    (double)ctx->results.mapping_direction_corr,
+			    ctx->results.mapping_direction_pass ? "PASS" : "FAIL");
+	} else {
+		shell_print(sh, "  Direction chk:  unavailable (run mechanical commissioning)");
+	}
+	if (ctx->results.mapping_offset_valid) {
+		shell_print(sh, "  Offset chk:     |Id|/|Iq|=%.4f -> %s",
+			    (double)ctx->results.mapping_offset_ratio,
+			    ctx->results.mapping_offset_pass ? "PASS" : "FAIL");
+	} else {
+		shell_print(sh, "  Offset chk:     unavailable (run flux commissioning)");
+	}
+	if (ctx->results.mapping_pole_pairs_valid) {
+		shell_print(sh, "  Pole-pair chk:  est=%.4f cfg=%u -> %s",
+			    (double)ctx->results.mapping_pole_pairs_est,
+			    MOTOR_POLE_PAIRS,
+			    ctx->results.mapping_pole_pairs_pass ? "PASS" : "FAIL");
+	} else {
+		shell_print(sh, "  Pole-pair chk:  unavailable (run flux commissioning)");
+	}
 	shell_print(sh, "  Auto-tune:      staged=%s applied=%s last_err=%d (%s)",
 		    ctx->auto_tune_valid ? "YES" : "NO",
 		    ctx->auto_tune_applied ? "YES" : "NO",
@@ -465,6 +491,12 @@ int cmd_motor_commission_apply(const struct shell *sh, size_t argc, char **argv)
 	if (ret < 0) {
 		shell_error(sh, "Failed to apply commissioning results (err %d)", ret);
 		return ret;
+	}
+
+	if (g_motor_params->commission.results.mapping_valid &&
+	    !g_motor_params->commission.results.mapping_pass) {
+		shell_warn(sh,
+			   "Commissioning apply succeeded but mapping checks FAILED. Review 'motor commission status'.");
 	}
 
 	shell_print(sh, "Commissioning results applied to active runtime parameters");
@@ -717,6 +749,16 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->commission.results.psi_f_r2,
 		    (double)g_motor_params->commission.results.psi_f_residual_rms_v,
 		    g_motor_params->commission.results.psi_f_sample_count);
+	if (g_motor_params->commission.results.mapping_offset_valid ||
+	    g_motor_params->commission.results.mapping_pole_pairs_valid) {
+		shell_print(sh, "  Flux mapping: offset=%s pole_pairs=%s",
+			    g_motor_params->commission.results.mapping_offset_pass ?
+				    "PASS" :
+				    "FAIL",
+			    g_motor_params->commission.results.mapping_pole_pairs_pass ?
+				    "PASS" :
+				    "FAIL");
+	}
 
 	ret = motor_commission_auto_run_mech(sh, &mech_cfg);
 	if (ret != 0) {
@@ -737,6 +779,20 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->commission.results.mech_r2,
 		    (double)g_motor_params->commission.results.mech_residual_rms_nm,
 		    g_motor_params->commission.results.mech_sample_count);
+	if (g_motor_params->commission.results.mapping_direction_valid) {
+		shell_print(sh, "  Mech mapping: direction=%s corr=%.4f",
+			    g_motor_params->commission.results.mapping_direction_pass ?
+				    "PASS" :
+				    "FAIL",
+			    (double)g_motor_params->commission.results.mapping_direction_corr);
+	}
+	if (g_motor_params->commission.results.mapping_valid) {
+		shell_print(sh, "  Mapping summary: PASS=%s confidence=%.2f",
+			    g_motor_params->commission.results.mapping_pass ?
+				    "YES" :
+				    "NO",
+			    (double)g_motor_params->commission.results.mapping_confidence);
+	}
 
 	ret = motor_commission_stage_auto_tune(g_motor_params, &tune_cfg);
 	if (ret != 0) {

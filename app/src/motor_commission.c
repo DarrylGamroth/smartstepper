@@ -23,6 +23,14 @@
 #define MOTOR_COMMISSION_MIN_SPEED_RAD_S (2.0f * PI_F32)
 #define MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S 0.5f
 #define MOTOR_COMMISSION_MIN_KT_NM_PER_A 1.0e-6f
+#define MOTOR_COMMISSION_MAPPING_MIN_SPEED_RAD_S (2.0f * PI_F32)
+#define MOTOR_COMMISSION_MAPPING_MIN_IQ_A 0.03f
+#define MOTOR_COMMISSION_MAPPING_MIN_ACCEL_RAD_S2 0.5f
+#define MOTOR_COMMISSION_MAPPING_MIN_FLUX_SAMPLES 24U
+#define MOTOR_COMMISSION_MAPPING_MIN_MECH_SAMPLES 48U
+#define MOTOR_COMMISSION_MAPPING_DIRECTION_CORR_MIN 0.10f
+#define MOTOR_COMMISSION_MAPPING_OFFSET_RATIO_MAX 0.50f
+#define MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX 0.15f
 
 static inline uint32_t motor_commission_default_decimation(void)
 {
@@ -102,6 +110,52 @@ static void motor_commission_reset_capture_state(struct motor_commission_ctx *ct
 	memset(ctx->samples, 0, sizeof(ctx->samples));
 }
 
+static void motor_commission_update_mapping_summary(struct motor_commission_results *res)
+{
+	if (res == NULL) {
+		return;
+	}
+
+	res->mapping_valid = res->mapping_direction_valid &&
+			     res->mapping_offset_valid &&
+			     res->mapping_pole_pairs_valid;
+	res->mapping_pass = res->mapping_valid &&
+			    res->mapping_direction_pass &&
+			    res->mapping_offset_pass &&
+			    res->mapping_pole_pairs_pass;
+
+	float32_t conf_sum = 0.0f;
+	uint32_t conf_count = 0U;
+
+	if (res->mapping_direction_valid) {
+		float32_t conf_dir = clampf(res->mapping_direction_corr /
+						    MOTOR_COMMISSION_MAPPING_DIRECTION_CORR_MIN,
+					    0.0f, 1.0f);
+		conf_sum += conf_dir;
+		conf_count++;
+	}
+	if (res->mapping_offset_valid) {
+		float32_t conf_off = clampf(1.0f -
+						    (res->mapping_offset_ratio /
+						     MOTOR_COMMISSION_MAPPING_OFFSET_RATIO_MAX),
+					    0.0f, 1.0f);
+		conf_sum += conf_off;
+		conf_count++;
+	}
+	if (res->mapping_pole_pairs_valid) {
+		float32_t rel_err = fabsf(res->mapping_pole_pairs_est -
+					  (float32_t)MOTOR_POLE_PAIRS) /
+				    MAX((float32_t)MOTOR_POLE_PAIRS, 1.0f);
+		float32_t conf_pp = clampf(1.0f -
+						   (rel_err / MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX),
+					   0.0f, 1.0f);
+		conf_sum += conf_pp;
+		conf_count++;
+	}
+
+	res->mapping_confidence = (conf_count > 0U) ? (conf_sum / (float32_t)conf_count) : 0.0f;
+}
+
 static void motor_commission_estimate_flux(struct motor_parameters *params)
 {
 	struct motor_commission_ctx *ctx = &params->commission;
@@ -143,6 +197,75 @@ static void motor_commission_estimate_flux(struct motor_parameters *params)
 	res->psi_f_residual_rms_v = estimate.residual_rms_v;
 	res->psi_f_r2 = estimate.r2;
 	res->psi_f_valid = estimate.valid;
+}
+
+static void motor_commission_validate_mapping_flux(struct motor_parameters *params)
+{
+	struct motor_commission_ctx *ctx = &params->commission;
+	struct motor_commission_results *res = &ctx->results;
+	float32_t id_sq = 0.0f;
+	float32_t iq_sq = 0.0f;
+	float32_t pole_weighted = 0.0f;
+	float32_t pole_weight_sum = 0.0f;
+	uint32_t axis_count = 0U;
+	uint32_t pole_count = 0U;
+
+	res->mapping_offset_valid = false;
+	res->mapping_offset_pass = false;
+	res->mapping_offset_ratio = 0.0f;
+	res->mapping_pole_pairs_valid = false;
+	res->mapping_pole_pairs_pass = false;
+	res->mapping_pole_pairs_est = 0.0f;
+
+	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
+		const struct motor_commission_sample *s = &ctx->samples[i];
+		if (!isfinite(s->mech_speed_rad_s) || !isfinite(s->elec_speed_rad_s) ||
+		    !isfinite(s->id_a) || !isfinite(s->iq_a)) {
+			continue;
+		}
+		if (fabsf(s->mech_speed_rad_s) < MOTOR_COMMISSION_MAPPING_MIN_SPEED_RAD_S) {
+			continue;
+		}
+
+		id_sq += s->id_a * s->id_a;
+		iq_sq += s->iq_a * s->iq_a;
+		axis_count++;
+
+		float32_t pole_est = s->elec_speed_rad_s / s->mech_speed_rad_s;
+		float32_t weight = fabsf(s->mech_speed_rad_s);
+		if (isfinite(pole_est) && isfinite(weight) && weight > 0.0f) {
+			pole_weighted += weight * pole_est;
+			pole_weight_sum += weight;
+			pole_count++;
+		}
+	}
+
+	if (axis_count >= MOTOR_COMMISSION_MAPPING_MIN_FLUX_SAMPLES) {
+		float32_t id_rms = sqrtf(id_sq / (float32_t)axis_count);
+		float32_t iq_rms = sqrtf(iq_sq / (float32_t)axis_count);
+		float32_t ratio = id_rms / MAX(iq_rms, MOTOR_COMMISSION_MAPPING_MIN_IQ_A);
+
+		res->mapping_offset_valid = isfinite(ratio);
+		if (res->mapping_offset_valid) {
+			res->mapping_offset_ratio = ratio;
+			res->mapping_offset_pass = ratio <= MOTOR_COMMISSION_MAPPING_OFFSET_RATIO_MAX;
+		}
+	}
+
+	if (pole_count >= MOTOR_COMMISSION_MAPPING_MIN_FLUX_SAMPLES &&
+	    pole_weight_sum > 0.0f) {
+		float32_t pole_est = pole_weighted / pole_weight_sum;
+		float32_t rel_err = fabsf(pole_est - (float32_t)MOTOR_POLE_PAIRS) /
+				    MAX((float32_t)MOTOR_POLE_PAIRS, 1.0f);
+		res->mapping_pole_pairs_valid = isfinite(pole_est) && isfinite(rel_err);
+		if (res->mapping_pole_pairs_valid) {
+			res->mapping_pole_pairs_est = pole_est;
+			res->mapping_pole_pairs_pass =
+				rel_err <= MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX;
+		}
+	}
+
+	motor_commission_update_mapping_summary(res);
 }
 
 static void motor_commission_estimate_mech(struct motor_parameters *params)
@@ -201,6 +324,49 @@ static void motor_commission_estimate_mech(struct motor_parameters *params)
 	res->mech_valid = estimate.valid;
 }
 
+static void motor_commission_validate_mapping_mech(struct motor_parameters *params)
+{
+	struct motor_commission_ctx *ctx = &params->commission;
+	struct motor_commission_results *res = &ctx->results;
+	float32_t sum_iq2 = 0.0f;
+	float32_t sum_acc2 = 0.0f;
+	float32_t sum_cross = 0.0f;
+	uint32_t count = 0U;
+
+	res->mapping_direction_valid = false;
+	res->mapping_direction_pass = false;
+	res->mapping_direction_corr = 0.0f;
+
+	for (uint32_t i = 0U; i < ctx->sample_count; i++) {
+		const struct motor_commission_sample *s = &ctx->samples[i];
+		if (!isfinite(s->iq_a) || !isfinite(s->mech_accel_rad_s2)) {
+			continue;
+		}
+		if (fabsf(s->iq_a) < MOTOR_COMMISSION_MAPPING_MIN_IQ_A ||
+		    fabsf(s->mech_accel_rad_s2) < MOTOR_COMMISSION_MAPPING_MIN_ACCEL_RAD_S2) {
+			continue;
+		}
+
+		sum_iq2 += s->iq_a * s->iq_a;
+		sum_acc2 += s->mech_accel_rad_s2 * s->mech_accel_rad_s2;
+		sum_cross += s->iq_a * s->mech_accel_rad_s2;
+		count++;
+	}
+
+	if (count >= MOTOR_COMMISSION_MAPPING_MIN_MECH_SAMPLES &&
+	    sum_iq2 > 0.0f && sum_acc2 > 0.0f) {
+		float32_t corr = sum_cross / sqrtf(sum_iq2 * sum_acc2);
+		res->mapping_direction_valid = isfinite(corr);
+		if (res->mapping_direction_valid) {
+			res->mapping_direction_corr = corr;
+			res->mapping_direction_pass =
+				corr >= MOTOR_COMMISSION_MAPPING_DIRECTION_CORR_MIN;
+		}
+	}
+
+	motor_commission_update_mapping_summary(res);
+}
+
 static void motor_commission_finalize(struct motor_parameters *params)
 {
 	struct motor_commission_ctx *ctx = &params->commission;
@@ -208,9 +374,11 @@ static void motor_commission_finalize(struct motor_parameters *params)
 	switch (ctx->mode) {
 	case MOTOR_COMMISSION_MODE_FLUX:
 		motor_commission_estimate_flux(params);
+		motor_commission_validate_mapping_flux(params);
 		break;
 	case MOTOR_COMMISSION_MODE_MECH:
 		motor_commission_estimate_mech(params);
+		motor_commission_validate_mapping_mech(params);
 		break;
 	default:
 		break;
@@ -253,8 +421,20 @@ void motor_commission_reset(struct motor_parameters *params)
 	ctx->results.mech_residual_rms_nm = 0.0f;
 	ctx->results.mech_r2 = 0.0f;
 	ctx->results.mech_sample_count = 0U;
+	ctx->results.mapping_direction_corr = 0.0f;
+	ctx->results.mapping_offset_ratio = 0.0f;
+	ctx->results.mapping_pole_pairs_est = 0.0f;
+	ctx->results.mapping_confidence = 0.0f;
 	ctx->results.psi_f_valid = false;
 	ctx->results.mech_valid = false;
+	ctx->results.mapping_direction_valid = false;
+	ctx->results.mapping_direction_pass = false;
+	ctx->results.mapping_offset_valid = false;
+	ctx->results.mapping_offset_pass = false;
+	ctx->results.mapping_pole_pairs_valid = false;
+	ctx->results.mapping_pole_pairs_pass = false;
+	ctx->results.mapping_valid = false;
+	ctx->results.mapping_pass = false;
 	ctx->auto_tune_staged = (struct motor_commission_tune_output){0};
 	ctx->auto_tune_valid = false;
 	ctx->auto_tune_applied = false;
@@ -354,6 +534,13 @@ int motor_commission_start_flux(struct motor_parameters *params,
 	params->commission.results.psi_f_bias_v = 0.0f;
 	params->commission.results.psi_f_residual_rms_v = 0.0f;
 	params->commission.results.psi_f_r2 = 0.0f;
+	params->commission.results.mapping_offset_valid = false;
+	params->commission.results.mapping_offset_pass = false;
+	params->commission.results.mapping_offset_ratio = 0.0f;
+	params->commission.results.mapping_pole_pairs_valid = false;
+	params->commission.results.mapping_pole_pairs_pass = false;
+	params->commission.results.mapping_pole_pairs_est = 0.0f;
+	motor_commission_update_mapping_summary(&params->commission.results);
 	return 0;
 }
 
@@ -387,6 +574,10 @@ int motor_commission_start_mech(struct motor_parameters *params,
 	params->commission.results.offset_friction_nm = 0.0f;
 	params->commission.results.mech_residual_rms_nm = 0.0f;
 	params->commission.results.mech_r2 = 0.0f;
+	params->commission.results.mapping_direction_valid = false;
+	params->commission.results.mapping_direction_pass = false;
+	params->commission.results.mapping_direction_corr = 0.0f;
+	motor_commission_update_mapping_summary(&params->commission.results);
 	return 0;
 }
 

@@ -83,8 +83,20 @@ struct motor_commission_results {
 	float32_t mech_residual_rms_nm;
 	float32_t mech_r2;
 	uint16_t mech_sample_count;
+	float32_t mapping_direction_corr;
+	float32_t mapping_offset_ratio;
+	float32_t mapping_pole_pairs_est;
+	float32_t mapping_confidence;
 	bool psi_f_valid;
 	bool mech_valid;
+	bool mapping_direction_valid;
+	bool mapping_direction_pass;
+	bool mapping_offset_valid;
+	bool mapping_offset_pass;
+	bool mapping_pole_pairs_valid;
+	bool mapping_pole_pairs_pass;
+	bool mapping_valid;
+	bool mapping_pass;
 };
 
 struct motor_commission_observation {
