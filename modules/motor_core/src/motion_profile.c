@@ -59,9 +59,11 @@ int motion_profile_quintic_plan(struct motion_profile_quintic *profile,
 
 	const float32_t T = duration_s;
 	const float32_t T2 = T * T;
-	const float32_t T3 = T2 * T;
-	const float32_t T4 = T3 * T;
-	const float32_t T5 = T4 * T;
+	const float32_t invT = 1.0f / T;
+	const float32_t invT2 = invT * invT;
+	const float32_t invT3 = invT2 * invT;
+	const float32_t invT4 = invT3 * invT;
+	const float32_t invT5 = invT4 * invT;
 
 	/* Solve in normalized time s=t/T for numerical stability. */
 	const float32_t a0 = pos_start_rad;
@@ -86,11 +88,11 @@ int motion_profile_quintic_plan(struct motion_profile_quintic *profile,
 
 	/* Convert back to coefficients in real time t. */
 	profile->c[0] = a0;
-	profile->c[1] = a1 / T;
-	profile->c[2] = a2 / T2;
-	profile->c[3] = a3 / T3;
-	profile->c[4] = a4 / T4;
-	profile->c[5] = a5 / T5;
+	profile->c[1] = a1 * invT;
+	profile->c[2] = a2 * invT2;
+	profile->c[3] = a3 * invT3;
+	profile->c[4] = a4 * invT4;
+	profile->c[5] = a5 * invT5;
 
 	profile->position_rad = pos_start_rad;
 	profile->velocity_rad_s = vel_start_rad_s;
