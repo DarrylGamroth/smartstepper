@@ -8,7 +8,7 @@ add_library(motor_core STATIC
 	src/motor_motion_modules.c
 	src/motor_position_convert.c
 	src/motor_foc_voltage_pwm.c
-	src/motor_identification.c
+	src/motor_commission_id.c
 	src/motion_profile.c
 	src/motor_autonomy.c
 	src/prbs.c

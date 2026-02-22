@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_identification.h"
+#include "motor_commission_id.h"
 
 #include <errno.h>
 #include <math.h>
@@ -12,10 +12,10 @@
 
 #include <zephyr/sys/util.h>
 
-#define MOTOR_IDENT_VAR_EPS 1.0e-8f
-#define MOTOR_IDENT_PIVOT_EPS 1.0e-9f
+#define MOTOR_COMMISSION_ID_VAR_EPS 1.0e-8f
+#define MOTOR_COMMISSION_ID_PIVOT_EPS 1.0e-9f
 
-static bool motor_identification_solve_4x4(float32_t A[4][4], float32_t b[4], float32_t x[4])
+static bool motor_commission_id_solve_4x4(float32_t A[4][4], float32_t b[4], float32_t x[4])
 {
 	float32_t aug[4][5];
 
@@ -38,7 +38,7 @@ static bool motor_identification_solve_4x4(float32_t A[4][4], float32_t b[4], fl
 			}
 		}
 
-		if (pivot_abs < MOTOR_IDENT_PIVOT_EPS) {
+			if (pivot_abs < MOTOR_COMMISSION_ID_PIVOT_EPS) {
 			return false;
 		}
 
@@ -161,7 +161,7 @@ int motor_flux_id_finalize(const struct motor_flux_id_state *state, struct motor
 
 	const float32_t n = (float32_t)state->sample_count;
 	const float32_t den = n * state->sxx - state->sx * state->sx;
-	if (fabsf(den) < MOTOR_IDENT_VAR_EPS) {
+	if (fabsf(den) < MOTOR_COMMISSION_ID_VAR_EPS) {
 		return -ERANGE;
 	}
 
@@ -178,7 +178,7 @@ int motor_flux_id_finalize(const struct motor_flux_id_state *state, struct motor
 	}
 
 	const float32_t residual_rms_v = sqrtf(sse / n);
-	const float32_t r2 = (sst > MOTOR_IDENT_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
+	const float32_t r2 = (sst > MOTOR_COMMISSION_ID_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
 
 	result->psi_f_wb = psi_f;
 	result->bias_v = bias;
@@ -213,7 +213,7 @@ bool motor_mech_id_accumulate(struct motor_mech_id_state *state, float32_t mech_
 	}
 
 	if (!isfinite(mech_speed_rad_s) || !isfinite(mech_accel_rad_s2) || !isfinite(iq_a) ||
-	    !isfinite(state->cfg.kt_nm_per_a) || fabsf(state->cfg.kt_nm_per_a) < MOTOR_IDENT_PIVOT_EPS) {
+	    !isfinite(state->cfg.kt_nm_per_a) || fabsf(state->cfg.kt_nm_per_a) < MOTOR_COMMISSION_ID_PIVOT_EPS) {
 		return false;
 	}
 
@@ -269,7 +269,7 @@ int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor
 	memcpy(A, state->A, sizeof(A));
 	memcpy(b, state->b, sizeof(b));
 
-	if (!motor_identification_solve_4x4(A, b, theta)) {
+	if (!motor_commission_id_solve_4x4(A, b, theta)) {
 		return -ERANGE;
 	}
 
@@ -284,7 +284,7 @@ int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor
 	const float32_t mean_z = state->sum_z / n;
 	const float32_t sst = state->sum_z2 - n * mean_z * mean_z;
 	const float32_t residual_rms_nm = sqrtf(sse / n);
-	const float32_t r2 = (sst > MOTOR_IDENT_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
+	const float32_t r2 = (sst > MOTOR_COMMISSION_ID_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
 
 	result->inertia_kgm2 = theta[0];
 	result->viscous_friction_nm_per_rad_s = theta[1];
