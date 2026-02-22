@@ -32,6 +32,7 @@
 #define MOTOR_PROFILE_SEQUENCE_MAX_POINTS 64U
 #define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS
 #define CHOPPER_CAL_MAX_EDGES (2U * CHOPPER_CAL_MAX_SLOTS)
+#define MOTOR_ENCODER_CAPTURE_MAX_SAMPLES 512U
 
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
 #define PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL 1U
@@ -49,6 +50,18 @@
 
 #define MOTOR_OUTER_LOOP_MODE_PI 0U
 #define MOTOR_OUTER_LOOP_MODE_MPR 1U
+
+struct motor_encoder_capture_sample {
+	uint32_t control_loop_count;
+	float32_t angle_deg;
+	float32_t angle_rad;
+	uint8_t input_source;
+	uint8_t sample_enabled;
+	uint8_t sample_fresh;
+	uint8_t sample_warning;
+	uint8_t sample_error;
+	uint8_t status;
+};
 
 /**
  * @brief Main motor control parameters structure
@@ -200,6 +213,16 @@ struct motor_parameters {
 	uint32_t max_isr_cycles;
 	uint32_t total_isr_cycles;
 	uint32_t overrun_count;
+
+	/* Encoder debug capture ring buffer (ISR producer, shell reader) */
+	bool encoder_capture_enabled;
+	uint16_t encoder_capture_decimation;
+	uint16_t encoder_capture_phase;
+	uint16_t encoder_capture_write_idx;
+	uint16_t encoder_capture_count;
+	uint32_t encoder_capture_overrun_count;
+	struct motor_encoder_capture_sample
+		encoder_capture_samples[MOTOR_ENCODER_CAPTURE_MAX_SAMPLES];
 
 	/* Error tracking */
 	uint32_t last_error_code;  /* Last error that caused ERROR state entry */

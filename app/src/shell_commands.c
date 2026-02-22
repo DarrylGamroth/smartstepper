@@ -1678,8 +1678,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper,
 );
 
 /* motor encoder subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_capture,
+	SHELL_CMD_ARG(start, NULL, "Start capture [decimation]", cmd_motor_encoder_capture_start, 1, 1),
+	SHELL_CMD(stop, NULL, "Stop capture", cmd_motor_encoder_capture_stop),
+	SHELL_CMD(status, NULL, "Show capture buffer status", cmd_motor_encoder_capture_status),
+	SHELL_CMD_ARG(dump, NULL, "Dump latest samples [count]", cmd_motor_encoder_capture_dump, 1, 1),
+	SHELL_CMD(clear, NULL, "Clear capture buffer", cmd_motor_encoder_capture_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
+	SHELL_CMD(capture, &sub_motor_encoder_capture, "Encoder sample capture buffer", NULL),
 	SHELL_CMD(pipeline, NULL, "Show encoder RTIO pipeline status/counters",
 		  cmd_motor_encoder_pipeline),
 	SHELL_CMD(pipeline_reset, NULL, "Reset encoder RTIO pipeline counters",

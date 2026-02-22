@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "shell_commands_state.h"
 #include "shell_commands_motion.h"
@@ -129,6 +130,21 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 
 	return 0;
 #endif
+}
+
+static void motor_encoder_capture_reset(struct motor_parameters *params, bool clear_samples)
+{
+	if (params == NULL) {
+		return;
+	}
+
+	params->encoder_capture_phase = 0U;
+	params->encoder_capture_write_idx = 0U;
+	params->encoder_capture_count = 0U;
+	params->encoder_capture_overrun_count = 0U;
+	if (clear_samples) {
+		memset(params->encoder_capture_samples, 0, sizeof(params->encoder_capture_samples));
+	}
 }
 
 /* motor state offline */
@@ -727,4 +743,172 @@ int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
 
 	return 0;
 #endif
+}
+
+/* motor encoder capture start [decimation] */
+int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder capture start [decimation]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t decimation = 1U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &decimation) || decimation == 0U ||
+		    decimation > UINT16_MAX) {
+			shell_error(sh, "decimation must be in [1, %u]", UINT16_MAX);
+			return -EINVAL;
+		}
+	}
+
+	g_motor_params->encoder_capture_decimation = (uint16_t)decimation;
+	motor_encoder_capture_reset(g_motor_params, false);
+	g_motor_params->encoder_capture_enabled = true;
+
+	shell_print(sh,
+		    "Encoder capture started: decimation=%u, capacity=%u samples",
+		    g_motor_params->encoder_capture_decimation,
+		    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	return 0;
+}
+
+/* motor encoder capture stop */
+int cmd_motor_encoder_capture_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->encoder_capture_enabled = false;
+	shell_print(sh, "Encoder capture stopped: stored=%u overrun=%u",
+		    g_motor_params->encoder_capture_count,
+		    g_motor_params->encoder_capture_overrun_count);
+	return 0;
+}
+
+/* motor encoder capture clear */
+int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->encoder_capture_enabled = false;
+	motor_encoder_capture_reset(g_motor_params, true);
+	shell_print(sh, "Encoder capture cleared");
+	return 0;
+}
+
+/* motor encoder capture status */
+int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Encoder capture:");
+	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_capture_enabled ? "YES" : "NO");
+	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_capture_decimation);
+	shell_print(sh, "  Stored:     %u / %u",
+		    g_motor_params->encoder_capture_count,
+		    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_capture_overrun_count);
+
+	if (g_motor_params->encoder_capture_count > 0U) {
+		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+						  MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - 1U) %
+						 MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+		const struct motor_encoder_capture_sample *newest =
+			&g_motor_params->encoder_capture_samples[newest_idx];
+		shell_print(sh,
+			    "  Latest:     loop=%u src=%s deg=%.3f fresh=%u warn=%u err=%u status=0x%02X enabled=%u",
+			    newest->control_loop_count,
+			    motor_encoder_input_source_to_string(newest->input_source),
+			    (double)newest->angle_deg,
+			    newest->sample_fresh,
+			    newest->sample_warning,
+			    newest->sample_error,
+			    newest->status,
+			    newest->sample_enabled);
+	}
+
+	return 0;
+}
+
+/* motor encoder capture dump [count] */
+int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder capture dump [count]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t requested = 32U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &requested) || requested == 0U ||
+		    requested > MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
+			shell_error(sh, "count must be in [1, %u]",
+				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+			return -EINVAL;
+		}
+	}
+
+	uint16_t stored = g_motor_params->encoder_capture_count;
+	if (stored == 0U) {
+		shell_print(sh, "No captured encoder samples");
+		return 0;
+	}
+
+	uint16_t count = (uint16_t)MIN(requested, stored);
+	uint16_t start = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+				     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - count) %
+				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+
+	if (g_motor_params->encoder_capture_enabled) {
+		shell_warn(sh,
+			   "Capture is still running; dump may include concurrently updated samples.");
+	}
+
+	shell_print(sh,
+		    "idx loop source deg rad fresh warn err status enabled");
+	for (uint16_t i = 0U; i < count; i++) {
+		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+		const struct motor_encoder_capture_sample *sample =
+			&g_motor_params->encoder_capture_samples[idx];
+		shell_print(sh,
+			    "%u %u %s %.3f %.6f %u %u %u 0x%02X %u",
+			    i,
+			    sample->control_loop_count,
+			    motor_encoder_input_source_to_string(sample->input_source),
+			    (double)sample->angle_deg,
+			    (double)sample->angle_rad,
+			    sample->sample_fresh,
+			    sample->sample_warning,
+			    sample->sample_error,
+			    sample->status,
+			    sample->sample_enabled);
+	}
+
+	return 0;
 }

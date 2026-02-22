@@ -472,6 +472,12 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_stale_events = 0U;
 	params->position_glitch_count = 0U;
 	params->position_jitter_count = 0U;
+	params->encoder_capture_enabled = false;
+	params->encoder_capture_decimation = 1U;
+	params->encoder_capture_phase = 0U;
+	params->encoder_capture_write_idx = 0U;
+	params->encoder_capture_count = 0U;
+	params->encoder_capture_overrun_count = 0U;
 	params->velocity_dob_iq_ff_a = 0.0f;
 	params->velocity_dob_disturbance_nm = 0.0f;
 	params->velocity_dob_residual_rad_s = 0.0f;

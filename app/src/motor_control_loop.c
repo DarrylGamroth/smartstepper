@@ -86,6 +86,48 @@ static inline bool motor_outer_loop_decimation_tick(uint32_t *phase, uint32_t de
 	return false;
 }
 
+static inline void motor_encoder_capture_try_store(struct motor_parameters *params,
+						   float32_t angle_deg,
+						   float32_t angle_rad,
+						   bool sample_enabled,
+						   bool sample_fresh,
+						   bool sample_warning,
+						   bool sample_error,
+						   uint8_t status,
+						   uint8_t input_source)
+{
+	if (params == NULL || !params->encoder_capture_enabled) {
+		return;
+	}
+
+	uint16_t decimation = MAX((uint16_t)1U, params->encoder_capture_decimation);
+	if (params->encoder_capture_phase > 0U) {
+		params->encoder_capture_phase--;
+		return;
+	}
+	params->encoder_capture_phase = decimation - 1U;
+
+	uint16_t idx = params->encoder_capture_write_idx;
+	struct motor_encoder_capture_sample *sample = &params->encoder_capture_samples[idx];
+	sample->control_loop_count = params->control_loop_count;
+	sample->angle_deg = angle_deg;
+	sample->angle_rad = angle_rad;
+	sample->input_source = input_source;
+	sample->sample_enabled = sample_enabled ? 1U : 0U;
+	sample->sample_fresh = sample_fresh ? 1U : 0U;
+	sample->sample_warning = sample_warning ? 1U : 0U;
+	sample->sample_error = sample_error ? 1U : 0U;
+	sample->status = status;
+
+	params->encoder_capture_write_idx =
+		(uint16_t)((idx + 1U) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	if (params->encoder_capture_count < MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
+		params->encoder_capture_count++;
+	} else {
+		params->encoder_capture_overrun_count++;
+	}
+}
+
 void motor_control_loop_step(struct motor_parameters *params,
 			     const q31_t *values,
 			     uint8_t count,
@@ -210,11 +252,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Read encoder if feature is enabled */
 	float32_t angle_raw_rad;
+	bool encoder_sample_enabled = false;
 	bool fresh_encoder_sample = false;
 	uint8_t encoder_frame_status = 0U;
 	bool encoder_frame_warning = false;
 	bool encoder_frame_error = false;
 	if (encoder_sample != NULL && encoder_sample->enabled) {
+		encoder_sample_enabled = true;
 		angle_raw_degrees = encoder_sample->angle_deg;
 		encoder_frame_status = encoder_sample->status;
 		encoder_frame_warning = encoder_sample->warning;
@@ -290,6 +334,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 	angle_observer_update(&params->observer, angle_raw_rad);
 	params->encoder_observer_input_rad = angle_raw_rad;
 	params->encoder_input_source = encoder_input_source;
+
+	float32_t capture_angle_deg = encoder_sample_enabled ?
+					     angle_raw_degrees :
+					     (angle_raw_rad * (180.0f / PI_F32));
+	motor_encoder_capture_try_store(params, capture_angle_deg, angle_raw_rad,
+					encoder_sample_enabled, fresh_encoder_sample,
+					encoder_frame_warning, encoder_frame_error,
+					encoder_frame_status, encoder_input_source);
+
 	struct motor_position_convert_input pos_input = {
 		.sample_valid = false,
 		.sample_fresh = false,
