@@ -186,7 +186,8 @@ static inline q31_t aeat9955_decode_position_q31(const uint8_t *buffer)
 static inline float aeat9955_decode_position_f32(const uint8_t *buffer)
 {
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	uint32_t position = (sys_get_be24(sample->raw) >> 4) & (AEAT9955_MAX_COUNT - 1);
+	int32_t position = (int32_t)((sys_get_be24(sample->raw) >> 4) &
+					 (AEAT9955_MAX_COUNT - 1));
 	/* Convert to degrees centered at 0: [0, 262143] -> [-180.0, +180.0) */
 	return (float)(position - (1 << (AEAT9955_RESOLUTION_BITS - 1))) * AEAT9955_COUNTS_TO_DEGREES;
 }
