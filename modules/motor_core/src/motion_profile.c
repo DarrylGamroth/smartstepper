@@ -14,11 +14,6 @@ static void motion_profile_quintic_eval(const struct motion_profile_quintic *pro
 					float32_t *position_rad, float32_t *velocity_rad_s,
 					float32_t *acceleration_rad_s2)
 {
-	const float32_t t2 = t_s * t_s;
-	const float32_t t3 = t2 * t_s;
-	const float32_t t4 = t3 * t_s;
-	const float32_t t5 = t4 * t_s;
-
 	const float32_t c0 = profile->c[0];
 	const float32_t c1 = profile->c[1];
 	const float32_t c2 = profile->c[2];
@@ -26,9 +21,14 @@ static void motion_profile_quintic_eval(const struct motion_profile_quintic *pro
 	const float32_t c4 = profile->c[4];
 	const float32_t c5 = profile->c[5];
 
-	*position_rad = c0 + c1 * t_s + c2 * t2 + c3 * t3 + c4 * t4 + c5 * t5;
-	*velocity_rad_s = c1 + 2.0f * c2 * t_s + 3.0f * c3 * t2 + 4.0f * c4 * t3 + 5.0f * c5 * t4;
-	*acceleration_rad_s2 = 2.0f * c2 + 6.0f * c3 * t_s + 12.0f * c4 * t2 + 20.0f * c5 * t3;
+	/* Horner form minimizes multiplies and improves numerical robustness. */
+	*position_rad = ((((c5 * t_s + c4) * t_s + c3) * t_s + c2) * t_s + c1) * t_s + c0;
+	*velocity_rad_s = (((5.0f * c5 * t_s + 4.0f * c4) * t_s + 3.0f * c3) * t_s +
+			   2.0f * c2) *
+				  t_s +
+			  c1;
+	*acceleration_rad_s2 = ((20.0f * c5 * t_s + 12.0f * c4) * t_s + 6.0f * c3) * t_s +
+			       2.0f * c2;
 }
 
 void motion_profile_quintic_init(struct motion_profile_quintic *profile, float32_t sample_period_s)
