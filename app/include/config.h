@@ -153,6 +153,10 @@ struct motor_parameters {
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
 	uint8_t outer_loop_mode;                /* MOTOR_OUTER_LOOP_MODE_* */
+	uint32_t velocity_loop_decimation;      /* Velocity outer-loop update period in ISR ticks */
+	uint32_t velocity_loop_phase;           /* Velocity outer-loop decimation phase counter */
+	uint32_t position_loop_decimation;      /* Position outer-loop update period in ISR ticks */
+	uint32_t position_loop_phase;           /* Position outer-loop decimation phase counter */
 	float32_t velocity_cl_kp_A_per_rad_s;   /* Velocity P gain: speed error -> Iq reference */
 	float32_t velocity_cl_ki_A_per_rad;     /* Velocity I gain: speed error integral -> Iq reference */
 	float32_t velocity_cl_iq_limit_A;       /* Closed-loop velocity Iq limit */
@@ -380,6 +384,10 @@ struct motor_parameters {
 #define VELOCITY_MAX_RAD_S (VELOCITY_MAX_HZ * 2.0f * PI_F32)
 #define VELOCITY_MAX_ACCEL_RAD_S2 (VELOCITY_MAX_ACCEL_HZ_S * 2.0f * PI_F32)
 #define VELOCITY_INITIAL_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_initial_hz))
+#define OUTER_LOOP_DECIMATION_MIN 1U
+#define OUTER_LOOP_DECIMATION_MAX 1000U
+#define VELOCITY_LOOP_DECIMATION_DEFAULT 1U
+#define POSITION_LOOP_DECIMATION_DEFAULT 1U
 #define COMMAND_TIMEOUT_DEFAULT_MS 1000U
 #define CURRENT_DECOUPLING_ENABLED IS_ENABLED(CONFIG_MOTOR_CURRENT_DECOUPLING)
 #define VELOCITY_NOTCH_FILTER_ENABLED IS_ENABLED(CONFIG_MOTOR_VELOCITY_NOTCH_FILTER)

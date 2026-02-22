@@ -76,6 +76,8 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->Iq_setpoint_A = 0.0f;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	traj_set_target_value(&params->traj_Id, 0.0f);
@@ -408,6 +410,18 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
 	params->outer_loop_mode = OUTER_LOOP_MPR_DEFAULT_ENABLED ?
 		MOTOR_OUTER_LOOP_MODE_MPR : MOTOR_OUTER_LOOP_MODE_PI;
+	params->velocity_loop_decimation = CLAMP(VELOCITY_LOOP_DECIMATION_DEFAULT,
+						 OUTER_LOOP_DECIMATION_MIN,
+						 OUTER_LOOP_DECIMATION_MAX);
+	params->position_loop_decimation = CLAMP(POSITION_LOOP_DECIMATION_DEFAULT,
+						 OUTER_LOOP_DECIMATION_MIN,
+						 OUTER_LOOP_DECIMATION_MAX);
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
+	float32_t velocity_loop_dt_s =
+		(float32_t)params->velocity_loop_decimation / CONTROL_LOOP_FREQUENCY_HZ;
+	float32_t position_loop_dt_s =
+		(float32_t)params->position_loop_decimation / CONTROL_LOOP_FREQUENCY_HZ;
 	params->velocity_cl_iq_limit_A = MOTOR_MAX_CURRENT_A;
 	params->velocity_cl_kp_A_per_rad_s =
 		MOTOR_MAX_CURRENT_A / MAX(params->profile_max_velocity_rad_s, 1.0f);
@@ -416,7 +430,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_cl_ki_rad_s2_per_rad = 0.5f * params->position_cl_kp_rad_s_per_rad;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
-	params->velocity_mpr_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->velocity_mpr_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_mpr_cfg.horizon = 8U;
 	params->velocity_mpr_cfg.q_speed = 1.5f;
 	params->velocity_mpr_cfg.r_delta_iq = 0.05f;
@@ -425,17 +439,17 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = 0.02f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 
-	params->position_mpr_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->position_mpr_cfg.dt_s = position_loop_dt_s;
 	params->position_mpr_cfg.horizon = 16U;
 	params->position_mpr_cfg.q_position = 2.0f;
 	params->position_mpr_cfg.q_velocity_ff = 0.4f;
 	params->position_mpr_cfg.r_delta_velocity = 0.2f;
 	params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
 	params->position_mpr_cfg.max_delta_velocity_rad_s =
-		params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
+		params->profile_max_accel_rad_s2 * position_loop_dt_s;
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	params->velocity_dob_cfg.enabled = true;
-	params->velocity_dob_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	params->velocity_dob_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_dob_cfg.observer_gain_nm_per_rad_s = 0.02f;
 	params->velocity_dob_cfg.iq_ff_limit_a = params->velocity_cl_iq_limit_A;
 	params->velocity_dob_cfg.torque_limit_nm =

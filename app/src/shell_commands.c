@@ -614,6 +614,49 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
+/* motor velocity decimation <ticks> */
+static int cmd_motor_velocity_decimation(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor velocity decimation <ticks>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before changing velocity decimation.");
+		return -EACCES;
+	}
+
+	uint32_t decimation = 0U;
+	if (!shell_parse_u32(argv[1], &decimation)) {
+		shell_error(sh, "ticks must be an integer");
+		return -EINVAL;
+	}
+	if (decimation < OUTER_LOOP_DECIMATION_MIN || decimation > OUTER_LOOP_DECIMATION_MAX) {
+		shell_error(sh, "ticks must be in [%u, %u]",
+			    OUTER_LOOP_DECIMATION_MIN, OUTER_LOOP_DECIMATION_MAX);
+		return -EINVAL;
+	}
+
+	int ret = motor_api_set_param("velocity_loop_decimation", (float)decimation);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set velocity decimation (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Velocity decimation set to %u tick(s): %.3f ms, %.1f Hz update",
+		    decimation,
+		    (double)(1000.0f * (float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ),
+		    (double)(CONTROL_LOOP_FREQUENCY_HZ / (float32_t)decimation));
+	return 0;
+}
+
 /* motor velocity status */
 static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char **argv)
 {
@@ -642,6 +685,8 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	float meas_hz = meas_rad_s / (2.0f * PI_F32);
 	float error_hz = ref_hz - meas_hz;
 	bool at_target = traj_is_at_target(&g_motor_params->traj_velocity);
+	uint32_t velocity_decimation =
+		MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->velocity_loop_decimation);
 
 	/* Determine motion state */
 	const char *motion_str;
@@ -661,6 +706,10 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	shell_print(sh, "  Ref:        %.2f Hz", (double)ref_hz);
 	shell_print(sh, "  Measured:   %.2f Hz", (double)meas_hz);
 	shell_print(sh, "  Error:      %.2f Hz", (double)error_hz);
+	shell_print(sh, "  Loop dt:    %.3f ms (%u tick, %.1f Hz)",
+		    (double)(1000.0f * (float32_t)velocity_decimation / CONTROL_LOOP_FREQUENCY_HZ),
+		    velocity_decimation,
+		    (double)(CONTROL_LOOP_FREQUENCY_HZ / (float32_t)velocity_decimation));
 	shell_print(sh, "  At Target:  %s", at_target ? "YES" : "NO");
 	shell_print(sh, "  Motion:     %s", motion_str);
 	shell_print(sh, "  Outer loop: %s",
@@ -1049,6 +1098,49 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
+/* motor position decimation <ticks> */
+static int cmd_motor_position_decimation(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor position decimation <ticks>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before changing position decimation.");
+		return -EACCES;
+	}
+
+	uint32_t decimation = 0U;
+	if (!shell_parse_u32(argv[1], &decimation)) {
+		shell_error(sh, "ticks must be an integer");
+		return -EINVAL;
+	}
+	if (decimation < OUTER_LOOP_DECIMATION_MIN || decimation > OUTER_LOOP_DECIMATION_MAX) {
+		shell_error(sh, "ticks must be in [%u, %u]",
+			    OUTER_LOOP_DECIMATION_MIN, OUTER_LOOP_DECIMATION_MAX);
+		return -EINVAL;
+	}
+
+	int ret = motor_api_set_param("position_loop_decimation", (float)decimation);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set position decimation (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Position decimation set to %u tick(s): %.3f ms, %.1f Hz update",
+		    decimation,
+		    (double)(1000.0f * (float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ),
+		    (double)(CONTROL_LOOP_FREQUENCY_HZ / (float32_t)decimation));
+	return 0;
+}
+
 /* motor position status */
 static int cmd_motor_position_status(const struct shell *sh, size_t argc, char **argv)
 {
@@ -1068,11 +1160,17 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 	float target_rad = g_motor_params->position_target_rad;
 	float meas_rad = g_motor_params->position_rad;
 	float err_rad = wrap_rad_pi(target_rad - meas_rad);
+	uint32_t position_decimation =
+		MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->position_loop_decimation);
 
 	shell_print(sh, "Position Controller Status:");
 	shell_print(sh, "  Target:     %.2f deg", (double)(target_rad * 180.0f / PI_F32));
 	shell_print(sh, "  Measured:   %.2f deg", (double)(meas_rad * 180.0f / PI_F32));
 	shell_print(sh, "  Error:      %.2f deg", (double)(err_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Loop dt:    %.3f ms (%u tick, %.1f Hz)",
+		    (double)(1000.0f * (float32_t)position_decimation / CONTROL_LOOP_FREQUENCY_HZ),
+		    position_decimation,
+		    (double)(CONTROL_LOOP_FREQUENCY_HZ / (float32_t)position_decimation));
 	shell_print(sh, "  Profile:    %s",
 		    motion_profile_quintic_is_active(&g_motor_params->position_profile) ?
 			    "ACTIVE" :
@@ -1494,6 +1592,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
 /* motor velocity subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
+	SHELL_CMD_ARG(decimation, NULL, "Set velocity loop decimation <ticks>", cmd_motor_velocity_decimation, 2, 0),
 	SHELL_CMD_ARG(gains, NULL,
 		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_velocity_gains, 3, 2),
@@ -1507,6 +1606,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 /* motor position subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_CMD_ARG(target, NULL, "Set position target <deg>", cmd_motor_position_target, 2, 0),
+	SHELL_CMD_ARG(decimation, NULL, "Set position loop decimation <ticks>", cmd_motor_position_decimation, 2, 0),
 	SHELL_CMD_ARG(gains, NULL,
 		      "Configure position PI gains: set <kp> <ki> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_position_gains, 3, 1),

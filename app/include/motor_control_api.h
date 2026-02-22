@@ -106,6 +106,7 @@ int motor_api_request_commission(void);
  *       Id_setpoint_A, Iq_setpoint_A,
  *       velocity_cl_kp_A_per_rad_s, velocity_cl_ki_A_per_rad, velocity_cl_iq_limit_A,
  *       position_cl_kp_rad_s_per_rad, position_cl_ki_rad_s2_per_rad,
+ *       velocity_loop_decimation, position_loop_decimation,
  *       outer_loop_mode (0=PI,1=MPR),
  *       velocity_mpr_q_speed, velocity_mpr_r_delta_iq, velocity_mpr_horizon,
  *       velocity_mpr_max_delta_iq_a, velocity_mpr_disturbance_ki_nm_per_rad_s,

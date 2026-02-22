@@ -29,6 +29,8 @@ enum motor_param_id {
 	PARAM_ID_VELOCITY_IQ_LIMIT_A,
 	PARAM_ID_POSITION_KP_RAD_S_PER_RAD,
 	PARAM_ID_POSITION_KI_RAD_S2_PER_RAD,
+	PARAM_ID_VELOCITY_LOOP_DECIMATION,
+	PARAM_ID_POSITION_LOOP_DECIMATION,
 	PARAM_ID_OUTER_LOOP_MODE,
 	PARAM_ID_VELOCITY_MPR_Q_SPEED,
 	PARAM_ID_VELOCITY_MPR_R_DELTA_IQ,
@@ -58,6 +60,8 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_VELOCITY_IQ_LIMIT_A] = "velocity_cl_iq_limit_A",
 	[PARAM_ID_POSITION_KP_RAD_S_PER_RAD] = "position_cl_kp_rad_s_per_rad",
 	[PARAM_ID_POSITION_KI_RAD_S2_PER_RAD] = "position_cl_ki_rad_s2_per_rad",
+	[PARAM_ID_VELOCITY_LOOP_DECIMATION] = "velocity_loop_decimation",
+	[PARAM_ID_POSITION_LOOP_DECIMATION] = "position_loop_decimation",
 	[PARAM_ID_OUTER_LOOP_MODE] = "outer_loop_mode",
 	[PARAM_ID_VELOCITY_MPR_Q_SPEED] = "velocity_mpr_q_speed",
 	[PARAM_ID_VELOCITY_MPR_R_DELTA_IQ] = "velocity_mpr_r_delta_iq",
@@ -89,6 +93,8 @@ static bool motor_param_requires_positive(uint8_t param_id)
 	case PARAM_ID_VELOCITY_IQ_LIMIT_A:
 	case PARAM_ID_POSITION_KP_RAD_S_PER_RAD:
 	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
+	case PARAM_ID_VELOCITY_LOOP_DECIMATION:
+	case PARAM_ID_POSITION_LOOP_DECIMATION:
 	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
 	case PARAM_ID_VELOCITY_MPR_R_DELTA_IQ:
 	case PARAM_ID_VELOCITY_MPR_HORIZON:
@@ -145,6 +151,12 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_POSITION_KI_RAD_S2_PER_RAD:
 		*value = params->position_cl_ki_rad_s2_per_rad;
+		return 0;
+	case PARAM_ID_VELOCITY_LOOP_DECIMATION:
+		*value = (float32_t)params->velocity_loop_decimation;
+		return 0;
+	case PARAM_ID_POSITION_LOOP_DECIMATION:
+		*value = (float32_t)params->position_loop_decimation;
 		return 0;
 	case PARAM_ID_OUTER_LOOP_MODE:
 		*value = (float32_t)params->outer_loop_mode;
@@ -653,6 +665,39 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		LOG_DBG("Updated position_cl_ki_rad_s2_per_rad = %.6f",
 			(double)value);
 		break;
+	case PARAM_ID_VELOCITY_LOOP_DECIMATION: {
+		uint32_t decimation = (uint32_t)(value + 0.5f);
+		if (decimation < OUTER_LOOP_DECIMATION_MIN ||
+		    decimation > OUTER_LOOP_DECIMATION_MAX) {
+			LOG_ERR("Rejected velocity_loop_decimation outside [%u,%u]",
+				OUTER_LOOP_DECIMATION_MIN, OUTER_LOOP_DECIMATION_MAX);
+			break;
+		}
+		params->velocity_loop_decimation = decimation;
+		params->velocity_loop_phase = 0U;
+		params->velocity_mpr_cfg.dt_s =
+			(float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ;
+		params->velocity_dob_cfg.dt_s = params->velocity_mpr_cfg.dt_s;
+		LOG_DBG("Updated velocity_loop_decimation = %u", decimation);
+		break;
+	}
+	case PARAM_ID_POSITION_LOOP_DECIMATION: {
+		uint32_t decimation = (uint32_t)(value + 0.5f);
+		if (decimation < OUTER_LOOP_DECIMATION_MIN ||
+		    decimation > OUTER_LOOP_DECIMATION_MAX) {
+			LOG_ERR("Rejected position_loop_decimation outside [%u,%u]",
+				OUTER_LOOP_DECIMATION_MIN, OUTER_LOOP_DECIMATION_MAX);
+			break;
+		}
+		params->position_loop_decimation = decimation;
+		params->position_loop_phase = 0U;
+		params->position_mpr_cfg.dt_s =
+			(float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ;
+		params->position_mpr_cfg.max_delta_velocity_rad_s =
+			params->profile_max_accel_rad_s2 * params->position_mpr_cfg.dt_s;
+		LOG_DBG("Updated position_loop_decimation = %u", decimation);
+		break;
+	}
 	case PARAM_ID_OUTER_LOOP_MODE:
 		if (value < 0.0f || value > 1.0f) {
 			LOG_ERR("Rejected outer_loop_mode outside [0,1]");
@@ -799,7 +844,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->profile_max_accel_rad_s2 = value * 2.0f * PI_F32;
 		params->position_mpr_cfg.max_delta_velocity_rad_s =
-			params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
+			params->profile_max_accel_rad_s2 * params->position_mpr_cfg.dt_s;
 		motor_param_apply_profile_limits(params);
 		LOG_DBG("Updated profile_max_accel_hz_s = %.6f",
 			(double)value);

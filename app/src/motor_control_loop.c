@@ -67,6 +67,24 @@ static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *param
 	return params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR;
 }
 
+static inline bool motor_outer_loop_decimation_tick(uint32_t *phase, uint32_t decimation)
+{
+	if (phase == NULL || decimation <= 1U) {
+		if (phase != NULL) {
+			*phase = 0U;
+		}
+		return true;
+	}
+
+	if (*phase == 0U) {
+		*phase = decimation - 1U;
+		return true;
+	}
+
+	(*phase)--;
+	return false;
+}
+
 void motor_control_loop_step(struct motor_parameters *params,
 			     const q31_t *values,
 			     uint8_t count,
@@ -131,17 +149,26 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t Ua_pu, Ub_pu;
 	float32_t Da_pu, Db_pu;
 	float32_t Da_hb1_pu, Da_hb2_pu, Db_hb1_pu, Db_hb2_pu;
-	float32_t Id_ref_A = 0.0f, Iq_ref_A = 0.0f;
+	float32_t Id_ref_A = params->Id_ref_A;
+	float32_t Iq_ref_A = params->Iq_ref_A;
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 	float32_t inv_park_angle_rad;
 	float32_t dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	uint32_t velocity_loop_decimation =
+		CLAMP(params->velocity_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		      OUTER_LOOP_DECIMATION_MAX);
+	uint32_t position_loop_decimation =
+		CLAMP(params->position_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		      OUTER_LOOP_DECIMATION_MAX);
+	float32_t velocity_loop_dt_s = dt_s * (float32_t)velocity_loop_decimation;
+	float32_t position_loop_dt_s = dt_s * (float32_t)position_loop_decimation;
 	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
 	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
 	float32_t position_mech_rad = params->position_rad;
 	float32_t speed_mech_rad_s = params->velocity_rad_s;
 	float32_t accel_mech_rad_s2 = params->acceleration_rad_s2;
-	float32_t speed_mech_filtered_rad_s = 0.0f;
+	float32_t speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
 	bool autonomous_mode_active =
@@ -410,6 +437,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		float32_t profile_velocity_ff_rad_s = 0.0f;
 		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
 		bool use_mpr = motor_outer_loop_use_mpr(params);
+		bool position_loop_update = motor_outer_loop_decimation_tick(
+			&params->position_loop_phase, position_loop_decimation);
 
 		/* Position move module resolves profile state into target/error/feedforward. */
 		bool move_active = motor_position_move_resolve(&params->position_profile,
@@ -423,40 +452,48 @@ void motor_control_loop_step(struct motor_parameters *params,
 				wrap_rad_pi(params->position_target_rad - position_mech_rad);
 		}
 
-		if (use_mpr) {
-			params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
-			params->position_mpr_cfg.max_delta_velocity_rad_s =
-				params->profile_max_accel_rad_s2 / CONTROL_LOOP_FREQUENCY_HZ;
-			int mpr_ret = motor_mpr_position_step(&params->position_mpr_cfg,
-							      &params->position_mpr_state,
-							      position_error_rad,
-							      profile_velocity_ff_rad_s,
-							      &velocity_target_rad_s);
-			if (mpr_ret != 0) {
-				velocity_target_rad_s = clampf(profile_velocity_ff_rad_s,
-						      -params->profile_max_velocity_rad_s,
-						      params->profile_max_velocity_rad_s);
-				motor_mpr_position_reset(&params->position_mpr_state,
-							 velocity_target_rad_s);
+		if (position_loop_update) {
+			if (use_mpr) {
+				params->position_mpr_cfg.dt_s = position_loop_dt_s;
+				params->position_mpr_cfg.velocity_limit_rad_s =
+					params->profile_max_velocity_rad_s;
+				params->position_mpr_cfg.max_delta_velocity_rad_s =
+					params->profile_max_accel_rad_s2 * position_loop_dt_s;
+				int mpr_ret = motor_mpr_position_step(&params->position_mpr_cfg,
+								      &params->position_mpr_state,
+								      position_error_rad,
+								      profile_velocity_ff_rad_s,
+								      &velocity_target_rad_s);
+				if (mpr_ret != 0) {
+					velocity_target_rad_s = clampf(profile_velocity_ff_rad_s,
+							      -params->profile_max_velocity_rad_s,
+							      params->profile_max_velocity_rad_s);
+					motor_mpr_position_reset(&params->position_mpr_state,
+								 velocity_target_rad_s);
+				}
+				params->position_cl_i_term_rad_s = 0.0f;
+			} else {
+				float32_t position_fb_velocity_rad_s;
+				float32_t pos_i_next =
+					params->position_cl_i_term_rad_s +
+					(params->position_cl_ki_rad_s2_per_rad *
+					 position_error_rad * position_loop_dt_s);
+				pos_i_next = clampf(pos_i_next, -pos_i_limit_rad_s, pos_i_limit_rad_s);
+				params->position_cl_i_term_rad_s = pos_i_next;
+				position_fb_velocity_rad_s =
+					params->position_cl_kp_rad_s_per_rad * position_error_rad +
+					params->position_cl_i_term_rad_s;
+				velocity_target_rad_s =
+					profile_velocity_ff_rad_s + position_fb_velocity_rad_s;
 			}
-			params->position_cl_i_term_rad_s = 0.0f;
-		} else {
-			float32_t position_fb_velocity_rad_s;
-			float32_t pos_i_next =
-				params->position_cl_i_term_rad_s +
-				(params->position_cl_ki_rad_s2_per_rad * position_error_rad * dt_s);
-			pos_i_next = clampf(pos_i_next, -pos_i_limit_rad_s, pos_i_limit_rad_s);
-			params->position_cl_i_term_rad_s = pos_i_next;
-			position_fb_velocity_rad_s =
-				params->position_cl_kp_rad_s_per_rad * position_error_rad +
-				params->position_cl_i_term_rad_s;
-			velocity_target_rad_s = profile_velocity_ff_rad_s + position_fb_velocity_rad_s;
-		}
 
-		velocity_target_rad_s =
-			clampf(velocity_target_rad_s, -params->profile_max_velocity_rad_s,
-			       params->profile_max_velocity_rad_s);
-		traj_set_target_value(&params->traj_velocity, velocity_target_rad_s);
+			velocity_target_rad_s =
+				clampf(velocity_target_rad_s, -params->profile_max_velocity_rad_s,
+				       params->profile_max_velocity_rad_s);
+			traj_set_target_value(&params->traj_velocity, velocity_target_rad_s);
+		}
+	} else {
+		params->position_loop_phase = 0U;
 	}
 
 	/* Update velocity trajectory if enabled */
@@ -476,99 +513,108 @@ void motor_control_loop_step(struct motor_parameters *params,
 	    state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
 		speed_mech_filtered_rad_s = filter_so_run(&params->filter_velocity_notch,
 							 speed_mech_rad_s);
-		bool use_mpr = motor_outer_loop_use_mpr(params);
-		bool mpr_applied = false;
-		float32_t iq_cmd_pre_dob_a = 0.0f;
+		bool velocity_loop_update = motor_outer_loop_decimation_tick(
+			&params->velocity_loop_phase, velocity_loop_decimation);
+		if (velocity_loop_update) {
+			bool use_mpr = motor_outer_loop_use_mpr(params);
+			bool mpr_applied = false;
+			float32_t iq_cmd_pre_dob_a = 0.0f;
 
-		if (use_mpr) {
-			struct motor_mpr_velocity_model mpr_model = {
-				.inertia_kgm2 = params->inertia_kgm2_active,
-				.viscous_friction_nm_per_rad_s =
-					params->viscous_friction_nm_per_rad_s_active,
-				.coulomb_friction_nm = params->coulomb_friction_nm_active,
-				.torque_constant_nm_per_a =
-					1.5f * (float32_t)MOTOR_POLE_PAIRS *
-					params->flux_linkage_wb_active,
-			};
-			float32_t iq_cmd_mpr_a = 0.0f;
+			if (use_mpr) {
+				struct motor_mpr_velocity_model mpr_model = {
+					.inertia_kgm2 = params->inertia_kgm2_active,
+					.viscous_friction_nm_per_rad_s =
+						params->viscous_friction_nm_per_rad_s_active,
+					.coulomb_friction_nm = params->coulomb_friction_nm_active,
+					.torque_constant_nm_per_a =
+						1.5f * (float32_t)MOTOR_POLE_PAIRS *
+						params->flux_linkage_wb_active,
+				};
+				float32_t iq_cmd_mpr_a = 0.0f;
 
-			params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
-			int mpr_ret = motor_mpr_velocity_step(&params->velocity_mpr_cfg, &mpr_model,
-							      &params->velocity_mpr_state,
-							      speed_mech_filtered_rad_s,
-							      velocity_ref_rad_s,
-							      &iq_cmd_mpr_a);
-			if (mpr_ret == 0) {
+				params->velocity_mpr_cfg.dt_s = velocity_loop_dt_s;
+				params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
+				int mpr_ret = motor_mpr_velocity_step(&params->velocity_mpr_cfg, &mpr_model,
+								      &params->velocity_mpr_state,
+								      speed_mech_filtered_rad_s,
+								      velocity_ref_rad_s,
+								      &iq_cmd_mpr_a);
+				if (mpr_ret == 0) {
+					Id_ref_A = params->Id_setpoint_A;
+					iq_cmd_pre_dob_a = clampf(iq_cmd_mpr_a,
+								  -params->velocity_cl_iq_limit_A,
+								  params->velocity_cl_iq_limit_A);
+					Iq_ref_A = iq_cmd_pre_dob_a;
+					params->velocity_cl_i_term_A = 0.0f;
+					mpr_applied = true;
+				}
+			}
+
+			if (!mpr_applied) {
+				float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_filtered_rad_s;
+				float32_t vel_i_next =
+					params->velocity_cl_i_term_A +
+					(params->velocity_cl_ki_A_per_rad * speed_error_rad_s *
+					 velocity_loop_dt_s);
+				vel_i_next = clampf(vel_i_next, -params->velocity_cl_iq_limit_A,
+						   params->velocity_cl_iq_limit_A);
+				params->velocity_cl_i_term_A = vel_i_next;
+
 				Id_ref_A = params->Id_setpoint_A;
-				iq_cmd_pre_dob_a = clampf(iq_cmd_mpr_a,
-							  -params->velocity_cl_iq_limit_A,
-							  params->velocity_cl_iq_limit_A);
+				iq_cmd_pre_dob_a =
+					clampf((params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s) +
+					       params->velocity_cl_i_term_A,
+					       -params->velocity_cl_iq_limit_A,
+					       params->velocity_cl_iq_limit_A);
 				Iq_ref_A = iq_cmd_pre_dob_a;
-				params->velocity_cl_i_term_A = 0.0f;
-				mpr_applied = true;
+			}
+
+			float32_t kt_nm_per_a = 1.5f * (float32_t)MOTOR_POLE_PAIRS *
+						params->flux_linkage_wb_active;
+			if (isfinite(kt_nm_per_a) && kt_nm_per_a > 0.0f) {
+				struct motor_dob_model dob_model = {
+					.inertia_kgm2 = params->inertia_kgm2_active,
+					.viscous_friction_nm_per_rad_s =
+						params->viscous_friction_nm_per_rad_s_active,
+					.coulomb_friction_nm = params->coulomb_friction_nm_active,
+					.torque_constant_nm_per_a = kt_nm_per_a,
+				};
+				struct motor_dob_config dob_cfg = params->velocity_dob_cfg;
+				float32_t iq_limit = params->velocity_cl_iq_limit_A;
+				float32_t auto_torque_limit = kt_nm_per_a * iq_limit;
+
+				dob_cfg.dt_s = velocity_loop_dt_s;
+				if (!isfinite(dob_cfg.torque_limit_nm) || dob_cfg.torque_limit_nm <= 0.0f) {
+					dob_cfg.torque_limit_nm = auto_torque_limit;
+				}
+				if (!isfinite(dob_cfg.iq_ff_limit_a) || dob_cfg.iq_ff_limit_a <= 0.0f) {
+					dob_cfg.iq_ff_limit_a = iq_limit;
+				}
+
+				float32_t iq_dob_ff_a = 0.0f;
+				int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
+							     speed_mech_filtered_rad_s,
+							     iq_cmd_pre_dob_a,
+							     &iq_dob_ff_a);
+				if (dob_ret == 0) {
+					params->velocity_dob_iq_ff_a = iq_dob_ff_a;
+					params->velocity_dob_disturbance_nm =
+						params->velocity_dob_state.disturbance_nm;
+					params->velocity_dob_residual_rad_s =
+						params->velocity_dob_state.residual_rad_s;
+					Iq_ref_A = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
+							 -params->velocity_cl_iq_limit_A,
+							 params->velocity_cl_iq_limit_A);
+				} else {
+					motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
+					params->velocity_dob_iq_ff_a = 0.0f;
+					params->velocity_dob_disturbance_nm = 0.0f;
+					params->velocity_dob_residual_rad_s = 0.0f;
+				}
 			}
 		}
-
-		if (!mpr_applied) {
-			float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_filtered_rad_s;
-			float32_t vel_i_next =
-				params->velocity_cl_i_term_A +
-				(params->velocity_cl_ki_A_per_rad * speed_error_rad_s * dt_s);
-			vel_i_next = clampf(vel_i_next, -params->velocity_cl_iq_limit_A,
-					   params->velocity_cl_iq_limit_A);
-			params->velocity_cl_i_term_A = vel_i_next;
-
-			Id_ref_A = params->Id_setpoint_A;
-			iq_cmd_pre_dob_a =
-				clampf((params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s) +
-				       params->velocity_cl_i_term_A,
-				       -params->velocity_cl_iq_limit_A,
-				       params->velocity_cl_iq_limit_A);
-			Iq_ref_A = iq_cmd_pre_dob_a;
-		}
-
-		float32_t kt_nm_per_a = 1.5f * (float32_t)MOTOR_POLE_PAIRS *
-					params->flux_linkage_wb_active;
-		if (isfinite(kt_nm_per_a) && kt_nm_per_a > 0.0f) {
-			struct motor_dob_model dob_model = {
-				.inertia_kgm2 = params->inertia_kgm2_active,
-				.viscous_friction_nm_per_rad_s =
-					params->viscous_friction_nm_per_rad_s_active,
-				.coulomb_friction_nm = params->coulomb_friction_nm_active,
-				.torque_constant_nm_per_a = kt_nm_per_a,
-			};
-			struct motor_dob_config dob_cfg = params->velocity_dob_cfg;
-			float32_t iq_limit = params->velocity_cl_iq_limit_A;
-			float32_t auto_torque_limit = kt_nm_per_a * iq_limit;
-
-			if (!isfinite(dob_cfg.torque_limit_nm) || dob_cfg.torque_limit_nm <= 0.0f) {
-				dob_cfg.torque_limit_nm = auto_torque_limit;
-			}
-			if (!isfinite(dob_cfg.iq_ff_limit_a) || dob_cfg.iq_ff_limit_a <= 0.0f) {
-				dob_cfg.iq_ff_limit_a = iq_limit;
-			}
-
-			float32_t iq_dob_ff_a = 0.0f;
-			int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
-						     speed_mech_filtered_rad_s,
-						     iq_cmd_pre_dob_a,
-						     &iq_dob_ff_a);
-			if (dob_ret == 0) {
-				params->velocity_dob_iq_ff_a = iq_dob_ff_a;
-				params->velocity_dob_disturbance_nm =
-					params->velocity_dob_state.disturbance_nm;
-				params->velocity_dob_residual_rad_s =
-					params->velocity_dob_state.residual_rad_s;
-				Iq_ref_A = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
-						 -params->velocity_cl_iq_limit_A,
-						 params->velocity_cl_iq_limit_A);
-			} else {
-				motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
-				params->velocity_dob_iq_ff_a = 0.0f;
-				params->velocity_dob_disturbance_nm = 0.0f;
-				params->velocity_dob_residual_rad_s = 0.0f;
-			}
-		}
+	} else {
+		params->velocity_loop_phase = 0U;
 	}
 
 	/* Select current references based on mode */

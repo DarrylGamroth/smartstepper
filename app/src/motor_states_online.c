@@ -145,6 +145,8 @@ void motor_state_online_torque_entry(void *obj)
 	pi_set_ui(&params->pi_Iq, 0.0f);
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
 	params->velocity_target_rad_s = 0.0f;
 	params->velocity_ref_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state,
@@ -206,6 +208,8 @@ void motor_state_online_velocity_open_entry(void *obj)
 				 0.0f);
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
@@ -266,6 +270,8 @@ void motor_state_online_velocity_closed_entry(void *obj)
 	params->velocity_target_rad_s = speed_mech_rad_s;
 	params->velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
@@ -321,6 +327,8 @@ void motor_state_online_position_entry(void *obj)
 	params->velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
