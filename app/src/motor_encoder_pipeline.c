@@ -86,7 +86,7 @@ static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *sta
 SENSOR_DT_READ_IODEV(motor_encoder_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(motor_encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
 static atomic_t motor_encoder_pipeline_enabled;
-static atomic_t motor_encoder_read_in_flight;
+static atomic_t motor_encoder_read_in_flight_count;
 static atomic_t motor_encoder_request_ok_count;
 static atomic_t motor_encoder_request_busy_count;
 static atomic_t motor_encoder_request_disabled_count;
@@ -100,6 +100,15 @@ static atomic_t motor_encoder_collect_frame_error_count;
 static atomic_t motor_encoder_collect_frame_parity_error_count;
 static atomic_t motor_encoder_collect_frame_status_error_count;
 
+#define MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT 2
+
+static inline void motor_encoder_inflight_decrement(void)
+{
+	if (atomic_get(&motor_encoder_read_in_flight_count) > 0) {
+		atomic_dec(&motor_encoder_read_in_flight_count);
+	}
+}
+
 void motor_encoder_pipeline_set_enabled(bool enabled)
 {
 	atomic_set(&motor_encoder_pipeline_enabled, enabled ? 1 : 0);
@@ -112,7 +121,7 @@ bool motor_encoder_pipeline_is_enabled(void)
 
 bool motor_encoder_pipeline_is_busy(void)
 {
-	return atomic_get(&motor_encoder_read_in_flight) != 0;
+	return atomic_get(&motor_encoder_read_in_flight_count) != 0;
 }
 
 void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats)
@@ -162,18 +171,19 @@ int motor_encoder_pipeline_request_sample(void)
 		return -ESHUTDOWN;
 	}
 
-	if (atomic_cas(&motor_encoder_read_in_flight, 0, 1) == 0) {
+	if (atomic_get(&motor_encoder_read_in_flight_count) >=
+	    MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT) {
 		atomic_inc(&motor_encoder_request_busy_count);
 		return -EALREADY;
 	}
 
 	int ret = sensor_read_async_mempool(&motor_encoder_iodev, &motor_encoder_rtio_ctx, NULL);
 	if (ret != 0) {
-		atomic_set(&motor_encoder_read_in_flight, 0);
 		atomic_inc(&motor_encoder_request_error_count);
 		return ret;
 	}
 
+	atomic_inc(&motor_encoder_read_in_flight_count);
 	atomic_inc(&motor_encoder_request_ok_count);
 	return 0;
 }
@@ -190,7 +200,7 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 	struct rtio_cqe *cqe = rtio_cqe_consume(&motor_encoder_rtio_ctx);
 	if (cqe == NULL) {
 		/* Distinguish pending transfer from missing source trigger. */
-		if (atomic_get(&motor_encoder_read_in_flight) != 0) {
+		if (atomic_get(&motor_encoder_read_in_flight_count) != 0) {
 			atomic_inc(&motor_encoder_collect_pending_count);
 			return -EAGAIN;
 		}
@@ -209,7 +219,7 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 			rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
 		}
 		rtio_cqe_release(&motor_encoder_rtio_ctx, cqe);
-		atomic_set(&motor_encoder_read_in_flight, 0);
+		motor_encoder_inflight_decrement();
 		atomic_inc(&motor_encoder_collect_error_count);
 		atomic_inc(&motor_encoder_collect_transport_error_count);
 		return -EIO;
@@ -219,7 +229,7 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 	uint32_t buf_len = 0U;
 	int rc = rtio_cqe_get_mempool_buffer(&motor_encoder_rtio_ctx, cqe, &buf, &buf_len);
 	rtio_cqe_release(&motor_encoder_rtio_ctx, cqe);
-	atomic_set(&motor_encoder_read_in_flight, 0);
+	motor_encoder_inflight_decrement();
 	if (rc != 0) {
 		atomic_inc(&motor_encoder_collect_error_count);
 		atomic_inc(&motor_encoder_collect_transport_error_count);

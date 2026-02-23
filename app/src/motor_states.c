@@ -366,7 +366,10 @@ static void motor_state_hw_init_entry(void *obj)
 	/* Set initial duty cycles */
 	mcpwm_set_duty_cycle(pwm1, 4, 0x01000000);
 	// mcpwm_set_duty_cycle(pwm3, 1, 0x40000000);
-	mcpwm_set_duty_cycle(pwm3, 1, 0x47AE147A); /* 56% duty cycle */
+	/* Fire encoder compare callback in mid-early PWM period to balance SPI
+	 * completion slack against switching-noise susceptibility.
+	 */
+	mcpwm_set_duty_cycle(pwm3, 1, 0x5999999A); /* 35% duty cycle */
 
 	/* Set up encoder callback */
 	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, params);
