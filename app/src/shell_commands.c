@@ -686,7 +686,7 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	bool traj_at_target = traj_is_at_target(&g_motor_params->traj_velocity);
 	uint8_t quality_flags = g_motor_params->position_quality_flags;
 	bool feedback_valid =
-		((quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U) &&
+		((quality_flags & MOTOR_POSITION_CONVERT_QUALITY_VALID) != 0U) &&
 		((quality_flags & (MOTOR_POSITION_CONVERT_QUALITY_ERROR |
 				   MOTOR_POSITION_CONVERT_QUALITY_GLITCH)) == 0U);
 	bool speed_tracking_ok = fabsf(error_hz) <= VELOCITY_STATUS_TRACK_TOL_HZ;

@@ -70,7 +70,10 @@ static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *param
 
 static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 {
-	const uint8_t required = MOTOR_POSITION_CONVERT_QUALITY_FRESH;
+	/* Encoder updates may not be fresh every ISR tick (RTIO completion cadence),
+	 * but feedback is still usable while quality remains VALID.
+	 */
+	const uint8_t required = MOTOR_POSITION_CONVERT_QUALITY_VALID;
 	const uint8_t forbidden = MOTOR_POSITION_CONVERT_QUALITY_ERROR |
 				  MOTOR_POSITION_CONVERT_QUALITY_GLITCH;
 
