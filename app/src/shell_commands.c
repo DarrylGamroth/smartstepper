@@ -72,6 +72,7 @@ enum motor_gains_profile {
 #define OUTER_LOOP_ZETA_MIN 0.2f
 #define OUTER_LOOP_ZETA_MAX 2.0f
 #define POSITION_TO_VELOCITY_BW_RATIO_MAX 0.2f
+#define VELOCITY_STATUS_TRACK_TOL_HZ 0.2f
 
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
 {
@@ -682,13 +683,22 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	float ref_hz = ref_rad_s / (2.0f * PI_F32);
 	float meas_hz = meas_rad_s / (2.0f * PI_F32);
 	float error_hz = ref_hz - meas_hz;
-	bool at_target = traj_is_at_target(&g_motor_params->traj_velocity);
+	bool traj_at_target = traj_is_at_target(&g_motor_params->traj_velocity);
+	uint8_t quality_flags = g_motor_params->position_quality_flags;
+	bool feedback_valid =
+		((quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U) &&
+		((quality_flags & (MOTOR_POSITION_CONVERT_QUALITY_ERROR |
+				   MOTOR_POSITION_CONVERT_QUALITY_GLITCH)) == 0U);
+	bool speed_tracking_ok = fabsf(error_hz) <= VELOCITY_STATUS_TRACK_TOL_HZ;
+	bool at_target = traj_at_target && feedback_valid && speed_tracking_ok;
 	uint32_t velocity_decimation =
 		MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->velocity_loop_decimation);
 
 	/* Determine motion state */
 	const char *motion_str;
-	if (fabsf(meas_rad_s) < 0.1f && fabsf(ref_rad_s) < 0.1f) {
+	if (!feedback_valid) {
+		motion_str = "HOLD_QUALITY";
+	} else if (fabsf(meas_rad_s) < 0.1f && fabsf(ref_rad_s) < 0.1f) {
 		motion_str = "STOPPED";
 	} else if (at_target) {
 		motion_str = "AT_SPEED";
@@ -709,6 +719,9 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 		    velocity_decimation,
 		    (double)(CONTROL_LOOP_FREQUENCY_HZ / (float32_t)velocity_decimation));
 	shell_print(sh, "  At Target:  %s", at_target ? "YES" : "NO");
+	shell_print(sh, "  Feedback:   %s (flags=0x%02X)",
+		    feedback_valid ? "VALID" : "DEGRADED",
+		    quality_flags);
 	shell_print(sh, "  Motion:     %s", motion_str);
 	shell_print(sh, "  Outer loop: %s",
 		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?

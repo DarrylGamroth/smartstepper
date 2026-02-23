@@ -70,6 +70,7 @@ void motor_position_convert_reset(struct motor_position_convert_state *state,
 
 	state->initialized = true;
 	state->stale_latched = false;
+	state->measurement_locked = false;
 	state->prev_meas_wrapped_rad = wrapped;
 	state->position_wrapped_rad = wrapped;
 	state->position_unwrapped_rad = wrapped;
@@ -173,14 +174,29 @@ int motor_position_convert_update(struct motor_position_convert_state *state,
 				input->measurement_wrapped_rad + latency_samples * dt_s * prev_velocity);
 			float32_t measured_step =
 				wrap_rad_pi(compensated_wrapped - state->prev_meas_wrapped_rad);
-
-			if (fabsf(measured_step) > cfg->max_step_rad) {
+			if (!state->measurement_locked) {
+				/* Bootstrap from first fresh sample to avoid startup lock when
+				 * initial state and encoder angle are far apart.
+				 */
+				accepted_sample = true;
+				step_rad = 0.0f;
+				prev_velocity = 0.0f;
+				state->velocity_rad_s = 0.0f;
+				state->accel_rad_s2 = 0.0f;
+				state->position_unwrapped_rad = compensated_wrapped;
+				state->prev_meas_wrapped_rad = compensated_wrapped;
+				state->position_wrapped_rad = compensated_wrapped;
+				state->measurement_locked = true;
+				state->stale_count = 0U;
+				quality |= MOTOR_POSITION_CONVERT_QUALITY_FRESH;
+			} else if (fabsf(measured_step) > cfg->max_step_rad) {
 				glitch_sample = true;
 			} else {
 				accepted_sample = true;
 				step_rad = measured_step;
 				state->prev_meas_wrapped_rad = compensated_wrapped;
 				state->position_wrapped_rad = compensated_wrapped;
+				state->measurement_locked = true;
 				state->stale_count = 0U;
 				quality |= MOTOR_POSITION_CONVERT_QUALITY_FRESH;
 			}

@@ -51,6 +51,7 @@ struct motor_position_convert_input {
 struct motor_position_convert_state {
 	bool initialized;
 	bool stale_latched;
+	bool measurement_locked;
 	float32_t prev_meas_wrapped_rad;
 	float32_t position_wrapped_rad;
 	float32_t position_unwrapped_rad;

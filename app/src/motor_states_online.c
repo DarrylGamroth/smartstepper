@@ -19,6 +19,7 @@
 #include "pi.h"
 #include "traj.h"
 #include "angle_gen.h"
+#include "angle_observer.h"
 #include "angle_wrap.h"
 #include "motor_dob.h"
 #include "motor_motion_modules.h"
@@ -35,6 +36,17 @@ static inline void motor_enable_isr_feature_flags(struct motor_parameters *param
 static inline void motor_disable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
 {
 	params->feature_flags_next &= ~mask;
+}
+
+static inline void motor_online_reset_position_convert(struct motor_parameters *params)
+{
+	float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
+	motor_position_convert_reset(&params->position_convert, wrap_rad_2pi(mech_angle_rad));
+	params->position_quality_flags = 0U;
+	params->position_stale_count = 0U;
+	params->position_stale_events = 0U;
+	params->position_glitch_count = 0U;
+	params->position_jitter_count = 0U;
 }
 
 static int motor_position_plan_sequence_move(struct motor_parameters *params, float32_t target_wrapped_rad)
@@ -148,6 +160,7 @@ void motor_state_online_torque_entry(void *obj)
 
 	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_online_reset_position_convert(params);
 	/* Start torque mode from a neutral current command for bumpless handover. */
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
@@ -269,9 +282,10 @@ void motor_state_online_velocity_closed_entry(void *obj)
 
 	/* Closed-loop velocity uses measured speed and acceleration-limited velocity profile. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-					     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+						      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+	motor_online_reset_position_convert(params);
 
 	motor_velocity_plan_init(&params->traj_velocity,
 				 params->profile_max_velocity_rad_s,
@@ -320,9 +334,10 @@ void motor_state_online_position_entry(void *obj)
 	LOG_INF("Entering ONLINE_POSITION substate");
 
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-					     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-					      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+						      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+	motor_online_reset_position_convert(params);
 
 	/* Use current angle as initial target for bumpless mode entry. */
 	params->position_target_rad = position_mech_rad;

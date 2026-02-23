@@ -404,11 +404,13 @@ static void motor_state_ctrl_init_entry(void *obj)
 			    ANGLE_OBSERVER_BANDWIDTH_HZ,
 			    MOTOR_POLE_PAIRS,
 			    1.0f); /* SPI4-16 pipelined reads have 1-cycle delay */
+	float32_t max_step_rad = clampf((VELOCITY_MAX_RAD_S / CONTROL_LOOP_FREQUENCY_HZ) * 8.0f,
+					0.02f, 0.20f);
 	params->position_convert_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	params->position_convert_cfg.velocity_lpf_hz = 300.0f;
 	params->position_convert_cfg.accel_lpf_hz = 100.0f;
-	params->position_convert_cfg.max_step_rad = 0.95f * PI_F32;
-	params->position_convert_cfg.latency_samples_default = 0.0f;
+	params->position_convert_cfg.max_step_rad = max_step_rad;
+	params->position_convert_cfg.latency_samples_default = 1.0f;
 	params->position_convert_cfg.jitter_threshold_rad = 0.01f;
 	params->position_convert_cfg.stale_threshold_samples = 4U;
 	motor_position_convert_init(&params->position_convert,
