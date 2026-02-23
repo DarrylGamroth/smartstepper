@@ -28,10 +28,10 @@
 	};
 
 	motor_parameters {
-		/* Provisional motor model (replace with commissioning results). */
-		inductance-d-uh = <3000>;
-		inductance-q-uh = <3000>;
-		resistance-mohms = <1600>;
+		/* Updated from on-hardware commissioning (ROVERL + RS_EST). */
+		inductance-d-uh = <2903>;
+		inductance-q-uh = <2903>;
+		resistance-mohms = <2253>;
 		flux_linkage_uvphz = <17675>;
 		max-current-ma = <2000>;
 		/*
@@ -55,4 +55,3 @@
 &aeat9955 {
 	status = "disabled";
 };
-

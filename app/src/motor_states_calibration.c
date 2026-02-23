@@ -373,6 +373,10 @@ enum smf_state_result motor_state_rs_est_run(void *obj)
 
 		/* Update stored Rs value */
 		params->Rs_measured_ohm = Rs_est;
+		params->R_over_L_measured =
+			(params->Ls_measured_H > 0.0f) ?
+				(params->Rs_measured_ohm / params->Ls_measured_H) :
+				0.0f;
 
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
 		return SMF_EVENT_HANDLED;
