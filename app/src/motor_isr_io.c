@@ -100,6 +100,17 @@ void adc_callback(const struct device *dev, const q31_t *values,
 			(ret < 0 && ret != -EAGAIN && ret != -ENODATA);
 	}
 
+	/* Schedule one async read per control ISR (pipeline style). This avoids
+	 * every-other-cycle submission from the separate timer callback and keeps
+	 * encoder latency to the intended single-cycle pipeline depth.
+	 */
+	if (encoder_sampling_enabled) {
+		int req_ret = motor_encoder_pipeline_request_sample();
+		if (req_ret < 0 && req_ret != -EALREADY) {
+			params->encoder_fault_counter++;
+		}
+	}
+
 	struct motor_control_pwm_output pwm_out = {0};
 	motor_control_loop_step(params, values, count, &encoder_sample, &pwm_out);
 
@@ -128,21 +139,6 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 
 	if (params == NULL) {
 		return;
-	}
-
-	/* Trigger continuous encoder reads when feature is enabled
-	 * This keeps SPI bus free during calibration and reduces interrupt load.
-	 */
-	bool encoder_enabled =
-		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
-	bool encoder_capture_enabled = params->encoder_capture_enabled;
-	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
-	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
-	if (encoder_sampling_enabled) {
-		int ret = motor_encoder_pipeline_request_sample();
-		if (ret < 0 && ret != -EALREADY) {
-			params->encoder_fault_counter++;
-		}
 	}
 
 	/* Hardware-timer-driven position-sequence tick source. */
