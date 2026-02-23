@@ -67,12 +67,89 @@ echo "Saved log: $LOG"
 rg -n "=====|### CMD: motor state mode torque|State:|Error:|Armed:|Iq reference|Iq measured|Speed:|OVERCURRENT|Fault:|Latest:" "$LOG" -S
 ```
 
+## Breakaway Sweep Script
+
+Use this to find the static breakaway threshold in torque mode.
+
+```bash
+DEV=/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
+LOG=/tmp/torque_breakaway_sweep.log
+rm -f "$LOG"
+stty -F "$DEV" 115200 raw -echo -echoe -echok -echoctl -echoke
+
+send_read(){
+  local cmd="$1"; local dur="${2:-1.0}"; local t
+  t=$(mktemp)
+  (timeout "$dur" cat "$DEV" | tr -d '\r' > "$t") & local p=$!
+  sleep 0.06
+  printf "\r\n%s\r\n" "$cmd" > "$DEV"
+  wait "$p" || true
+  { echo "\n### CMD: $cmd"; cat "$t"; } >> "$LOG"
+  rm -f "$t"
+}
+
+case_step(){
+  local iq="$1"
+  echo "\n===== CASE iq=${iq}A =====" >> "$LOG"
+  send_read "motor current iq ${iq}" 0.9
+  send_read "motor info live" 1.2
+  send_read "motor info live" 2.0
+  send_read "motor state status" 0.9
+  send_read "motor fault snapshot status" 0.9
+}
+
+send_read "motor state clear_error" 0.8
+send_read "motor disarm" 0.8
+send_read "motor state idle" 0.8
+send_read "motor safety timeout 0" 0.8
+send_read "motor fault snapshot clear" 0.8
+send_read "motor state offline" 3.8
+send_read "motor arm" 0.8
+send_read "motor state mode torque" 1.0
+send_read "motor current id 0" 0.8
+send_read "motor state status" 0.9
+
+case_step 0.04
+case_step 0.06
+case_step 0.08
+case_step 0.10
+case_step 0.12
+case_step 0.15
+send_read "motor current iq 0" 1.0
+case_step -0.04
+case_step -0.06
+case_step -0.08
+case_step -0.10
+case_step -0.12
+case_step -0.15
+
+send_read "motor current iq 0" 0.9
+send_read "motor disarm" 0.8
+send_read "motor state idle" 0.8
+send_read "motor safety timeout 1000" 0.8
+send_read "motor state status" 1.0
+
+echo "Saved log: $LOG"
+rg -n "===== CASE|State:|Error:|Armed:|Angle \(mech\)|Speed:|Iq reference|Iq measured|OVERCURRENT|Fault:" "$LOG" -S
+```
+
+Optional extension above `0.15 A`:
+
+```bash
+case_step 0.18
+case_step 0.22
+case_step 0.26
+case_step 0.30
+```
+
 ## Pass Criteria
 
 - Mode enters and stays in `ONLINE_TORQUE` while armed.
 - `Error: NONE` and no `OVERCURRENT` lines.
 - `Iq measured` tracks `Iq reference` within reasonable tolerance.
 - Fault snapshot can be dumped successfully.
+- For breakaway testing: `Speed` should move away from ~0 and mechanical angle should
+  continue changing under constant nonzero `Iq`.
 
 ## Manual Command Sequence
 
@@ -102,3 +179,5 @@ motor safety timeout 1000
   `motor info live` and `motor fault snapshot dump` first.
 - `Enc flags` warning bit activity can appear without transport failure; correlate
   with `fresh/warn/err/status` in fault snapshot rows.
+- `velocity_open` telemetry reports generated trajectory speed; it is not sufficient
+  alone to prove physical rotor motion unless encoder capture is also active.
