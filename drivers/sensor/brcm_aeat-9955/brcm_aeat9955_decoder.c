@@ -89,18 +89,18 @@ static int aeat9955_decoder_decode(const uint8_t *buffer, struct sensor_chan_spe
 	struct sensor_q31_data *out = data_out;
 
 	uint32_t position;
-	bool warning;
-	bool parity;
+	bool status_error;
+	bool parity_error;
 	int ret;
 
-	ret = aeat9955_decode_position(raw, &position, &warning, &parity);
+	ret = aeat9955_decode_position(raw, &position, &status_error, &parity_error);
 	if (ret < 0) {
-		if (warning) {
-			LOG_WRN("Warning flag set in AEAT9955 data");
+		if (status_error) {
+			LOG_WRN("AEAT9955 status error bit set in position frame");
 		}
 
-		if (parity) {
-			LOG_WRN("Parity error detected in AEAT9955 data");
+		if (parity_error) {
+			LOG_WRN("AEAT9955 parity check failed");
 			return -EIO;
 		}
 		return ret;

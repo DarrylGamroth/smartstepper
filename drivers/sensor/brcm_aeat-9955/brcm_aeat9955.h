@@ -82,8 +82,8 @@ extern "C" {
 
 /* Position register */
 #define AEAT9955_REG_POS             0x3FU /* Position register for fast angle read */
-#define AEAT9955_REG_POS_WARNING_BIT 0x80U /* Position warning bit in MSB */
-#define AEAT9955_REG_POS_ERROR_BIT   0x40U /* Position error bit in MSB */
+#define AEAT9955_POS_STATUS_PARITY_BIT 0x80U /* Status/parity bit in response byte 0 */
+#define AEAT9955_POS_STATUS_ERROR_BIT  0x40U /* Device error bit in response byte 0 */
 
 /* Calibration control commands */
 #define AEAT9955_CAL_CMD_ACCURACY   0x02U /* Trigger accuracy calibration */
@@ -189,21 +189,32 @@ extern "C" {
 /**
  * @brief Decode AEAT-9955 position and status from raw SPI response
  *
- * @param raw_buf Raw SPI response buffer (must be at least 5 bytes)
+ * @param raw_buf Raw SPI response buffer (must be at least 3 bytes)
  * @param position Output: 18-bit position value
- * @param warning Output: warning flag
- * @param parity Output: parity bit
+ * @param status_error Output: device error/status bit
+ * @param parity_error Output: parity check error flag
  * @return 0 on success, -EIO on error
  */
 static inline int aeat9955_decode_position(const uint8_t *raw_buf, uint32_t *position,
-					   bool *warning, bool *parity)
+					   bool *status_error, bool *parity_error)
 {
-	/* Extract 18-bit position (bits 0-17) */
-	*position = (sys_get_be24(&raw_buf[0]) >> 4) & (AEAT9955_MAX_COUNT - 1);
-	*warning = (raw_buf[0] & AEAT9955_REG_POS_WARNING_BIT) ? true : false;
-	*parity = (raw_buf[0] & AEAT9955_REG_POS_ERROR_BIT) ? true : false;
+	uint8_t status0 = raw_buf[0];
+	uint32_t raw24 = sys_get_be24(raw_buf) & 0x00FFFFFFU;
 
-	if (*parity) {
+	/* Extract 18-bit position (bits 0-17) */
+	*position = (raw24 >> 4) & (AEAT9955_MAX_COUNT - 1);
+	bool status_bit_error = (status0 & AEAT9955_POS_STATUS_ERROR_BIT) != 0U;
+	/* SPI4-16 response parity covers the full 24-bit encoder frame. */
+	bool frame_parity_error = (POPCOUNT(raw24) & 1U) != 0U;
+
+	if (status_error != NULL) {
+		*status_error = status_bit_error;
+	}
+	if (parity_error != NULL) {
+		*parity_error = frame_parity_error;
+	}
+
+	if (status_bit_error || frame_parity_error) {
 		return -EIO;
 	}
 

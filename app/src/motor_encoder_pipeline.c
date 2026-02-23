@@ -11,6 +11,8 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/util.h>
 
 #include "math_constants.h"
 
@@ -18,23 +20,29 @@
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
 #define encoder_decode_position_f32 aeat9955_decode_position_f32
-#define ENCODER_FRAME_WARNING_BIT 0x80U
+#define ENCODER_FRAME_PARITY_BIT 0x80U
 #define ENCODER_FRAME_ERROR_BIT 0x40U
 
 static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
 					     bool *warning, bool *error)
 {
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	uint8_t frame_status = sample->raw[0] & (ENCODER_FRAME_WARNING_BIT | ENCODER_FRAME_ERROR_BIT);
+	uint8_t status0 = sample->raw[0];
+	uint32_t raw24 = sys_get_be24(sample->raw) & 0x00FFFFFFU;
+	uint8_t frame_status = status0 & (ENCODER_FRAME_PARITY_BIT | ENCODER_FRAME_ERROR_BIT);
+	bool status_error = (frame_status & ENCODER_FRAME_ERROR_BIT) != 0U;
+	/* SPI4-16 response parity covers the full 24-bit encoder frame. */
+	bool parity_error = (POPCOUNT(raw24) & 1U) != 0U;
 
 	if (status != NULL) {
 		*status = frame_status;
 	}
 	if (warning != NULL) {
-		*warning = (frame_status & ENCODER_FRAME_WARNING_BIT) != 0U;
+		/* No separate warning bit in SPI4-16 fast position frame. */
+		*warning = false;
 	}
 	if (error != NULL) {
-		*error = (frame_status & ENCODER_FRAME_ERROR_BIT) != 0U;
+		*error = status_error || parity_error;
 	}
 }
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)

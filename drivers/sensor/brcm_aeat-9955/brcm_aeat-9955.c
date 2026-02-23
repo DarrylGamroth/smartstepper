@@ -146,9 +146,9 @@ static int aeat9955_read_angle(const struct device *dev, uint32_t *angle)
 		return ret;
 	}
 
-	bool warning;
-	bool parity;
-	ret = aeat9955_decode_position(&rx_buf[0], angle, &warning, &parity);
+	bool status_error;
+	bool parity_error;
+	ret = aeat9955_decode_position(&rx_buf[0], angle, &status_error, &parity_error);
 
 	return ret;
 }
