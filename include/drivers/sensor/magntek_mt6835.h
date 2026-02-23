@@ -190,9 +190,9 @@ static inline int mt6835_decode_position(const uint8_t *raw_buf, uint32_t *posit
  * @param buffer Pointer to `struct mt6835_sample`
  * @param angle_deg Output: decoded angle in degrees, centered [-180, 180)
  * @param status Output: STATUS bits [2:0] from angle frame
- * @param warning Output: warning flag (kept false for now; see status output)
+ * @param warning Output: warning flag (true when STATUS[2:0] is non-zero)
  * @param error Output: true on CRC failure
- * @param status_error_out Output: status-error flag (always false for MT6835)
+ * @param status_error_out Output: status flag (true when STATUS[2:0] is non-zero)
  * @param parity_error_out Output: frame-check error flag (mapped from CRC)
  * @return 0 on success, -EIO on CRC mismatch
  */
@@ -203,6 +203,8 @@ static inline int mt6835_decode_sample_f32(const uint8_t *buffer, float *angle_d
 	const struct mt6835_sample *sample = (const struct mt6835_sample *)buffer;
 	uint32_t position = 0U;
 	bool crc_error = false;
+	uint8_t status_bits = sample->raw[4] & MT6835_STATUS_MASK;
+	bool status_warning = status_bits != 0U;
 	int ret = mt6835_decode_position(sample->raw, &position, &crc_error);
 
 	if (angle_deg != NULL) {
@@ -210,17 +212,17 @@ static inline int mt6835_decode_sample_f32(const uint8_t *buffer, float *angle_d
 			     MT6835_COUNTS_TO_DEGREES;
 	}
 	if (status != NULL) {
-		*status = sample->raw[4] & MT6835_STATUS_MASK;
+		*status = status_bits;
 	}
 	if (warning != NULL) {
-		/* Keep advisory status bits non-faulting in control-loop path for now. */
-		*warning = false;
+		/* Treat MT6835 STATUS bits as advisory warnings by default. */
+		*warning = status_warning;
 	}
 	if (error != NULL) {
 		*error = crc_error;
 	}
 	if (status_error_out != NULL) {
-		*status_error_out = false;
+		*status_error_out = status_warning;
 	}
 	if (parity_error_out != NULL) {
 		/* Preserve pipeline stats/counter naming for existing tooling. */
