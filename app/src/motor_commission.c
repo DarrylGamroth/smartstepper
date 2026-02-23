@@ -31,10 +31,14 @@
 #define MOTOR_COMMISSION_MAPPING_DIRECTION_CORR_MIN 0.10f
 #define MOTOR_COMMISSION_MAPPING_OFFSET_RATIO_MAX 0.50f
 #define MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX 0.15f
+#define MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ 80U
 
 static inline uint32_t motor_commission_default_decimation(void)
 {
-	uint32_t decim = (uint32_t)(CONTROL_LOOP_FREQUENCY_HZ / 1000.0f);
+	/* Keep default auto-commission windows (~5-6 s) within capture capacity. */
+	uint32_t decim = ((uint32_t)CONTROL_LOOP_FREQUENCY_HZ +
+			  (MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ - 1U)) /
+			 MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ;
 
 	return MAX(decim, 1U);
 }

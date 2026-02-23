@@ -437,13 +437,14 @@ static void mt6835_submit_one_shot(const struct device *dev, struct rtio_iodev_s
 {
 	struct mt6835_data *data = dev->data;
 	uint32_t min_buf_len = sizeof(struct mt6835_sample);
+	uint32_t buf_len = 0U;
 	uint64_t cycles;
 	int rc;
 	uint8_t *buf;
 	struct mt6835_sample *sample;
 	struct rtio_sqe *sqes[2];
 
-	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, NULL);
+	rc = rtio_sqe_rx_buf(iodev_sqe, min_buf_len, min_buf_len, &buf, &buf_len);
 	if (rc) {
 		LOG_ERR("Failed to get a read buffer of size %u bytes", min_buf_len);
 		rtio_iodev_sqe_err(iodev_sqe, rc);
