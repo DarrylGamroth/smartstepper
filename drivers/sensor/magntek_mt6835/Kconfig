@@ -10,5 +10,6 @@ config MAGNTEK_MT6835
 	select SPI
 	select SPI_RTIO
 	select SENSOR_ASYNC_API
+	select CRC
 	help
 	  Enable driver for MT6835 magnetic encoder.

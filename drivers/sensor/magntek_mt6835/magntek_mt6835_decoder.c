@@ -82,11 +82,16 @@ static int mt6835_decoder_decode(const uint8_t *buffer, struct sensor_chan_spec 
 	const struct mt6835_sample *sample = (const struct mt6835_sample *)buffer;
 	const uint8_t *raw = sample->raw;
 	struct sensor_q31_data *out = data_out;
+	uint32_t position = 0U;
+	int ret;
 	out->header.reading_count = 1;
 
 	switch (chan_spec.chan_type) {
 	case SENSOR_CHAN_ROTATION:
-		uint32_t position = sys_get_be24(&raw[2]) >> 3;
+		ret = mt6835_decode_position(raw, &position, NULL);
+		if (ret != 0) {
+			return ret;
+		}
 
 		out->header.base_timestamp_ns = sample->header.timestamp_ns;
 		out->shift = 0; /* Q31 format doesn't use shift */

@@ -124,7 +124,11 @@ static int mt6835_read_angle(const struct device *dev, uint32_t *angle)
 
 	int ret = spi_transceive_dt(&dev_cfg->bus, &tx, &rx);
 	if (ret == 0) {
-		*angle = sys_get_be24(&rx_buf[2]) >> 3;
+		ret = mt6835_decode_position(rx_buf, angle, NULL);
+		if (ret != 0) {
+			LOG_WRN("MT6835 CRC mismatch in blocking read");
+			*angle = 0;
+		}
 	} else {
 		*angle = 0;
 	}
