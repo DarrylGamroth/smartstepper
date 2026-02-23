@@ -29,8 +29,20 @@ void motor_state_align_entry(void *obj);
 enum smf_state_result motor_state_align_run(void *obj);
 void motor_state_align_exit(void *obj);
 
-void motor_state_align_sample_entry(void *obj);
-enum smf_state_result motor_state_align_sample_run(void *obj);
-void motor_state_align_sample_exit(void *obj);
+void motor_state_align_pos_inject_entry(void *obj);
+enum smf_state_result motor_state_align_pos_inject_run(void *obj);
+void motor_state_align_pos_inject_exit(void *obj);
+
+void motor_state_align_pos_sample_entry(void *obj);
+enum smf_state_result motor_state_align_pos_sample_run(void *obj);
+void motor_state_align_pos_sample_exit(void *obj);
+
+void motor_state_align_neg_inject_entry(void *obj);
+enum smf_state_result motor_state_align_neg_inject_run(void *obj);
+void motor_state_align_neg_inject_exit(void *obj);
+
+void motor_state_align_neg_sample_entry(void *obj);
+enum smf_state_result motor_state_align_neg_sample_run(void *obj);
+void motor_state_align_neg_sample_exit(void *obj);
 
 #endif /* MOTOR_STATES_CALIBRATION_H */

@@ -19,6 +19,7 @@
 #include "traj.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
+#include "angle_wrap.h"
 #include "motor_state_utils.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
@@ -36,6 +37,8 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 static inline bool motor_calibration_timeout_elapsed(struct motor_parameters *params)
 {
 	if (params->event.type == MOTOR_EVENT_TIMEOUT) {
+		/* Drain timer status so stale expiries do not trigger the next state immediately. */
+		(void)k_timer_status_get(&params->state_timer);
 		return true;
 	}
 
@@ -382,51 +385,90 @@ void motor_state_rs_est_exit(void *obj)
 				      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
-/* State: ALIGN - Align rotor to known position (Phase 1: injection in generated frame) */
+#define ALIGN_SAMPLE_MIN_FRESH_SAMPLES 4U
+#define ALIGN_SAMPLE_MAX_RETRIES 3U
+#define ALIGN_OPPOSED_ELEC_TOL_RAD (20.0f * PI_F32 / 180.0f)
+
+static inline void motor_align_set_injection_target(struct motor_parameters *params,
+						    float32_t id_target_a)
+{
+	float32_t current_id_a = traj_get_int_value(&params->traj_Id);
+	float32_t steps = MAX(1.0f, ALIGN_INJECT_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
+	float32_t max_delta_a = fmaxf(fabsf(id_target_a - current_id_a) / steps, 1e-6f);
+
+	traj_set_target_value(&params->traj_Id, id_target_a);
+	traj_set_max_delta(&params->traj_Id, max_delta_a);
+}
+
+static inline void motor_align_reset_pos_sample_accumulator(struct motor_parameters *params)
+{
+	params->align_pos_sample_count = 0U;
+	params->align_pos_sum_sin = 0.0f;
+	params->align_pos_sum_cos = 0.0f;
+}
+
+static inline void motor_align_reset_neg_sample_accumulator(struct motor_parameters *params)
+{
+	params->align_neg_sample_count = 0U;
+	params->align_neg_sum_sin = 0.0f;
+	params->align_neg_sum_cos = 0.0f;
+}
+
+static inline bool motor_align_compute_circular_mean(float32_t sum_sin,
+						     float32_t sum_cos,
+						     uint16_t sample_count,
+						     float32_t *mean_angle_rad)
+{
+	if (mean_angle_rad == NULL || sample_count == 0U) {
+		return false;
+	}
+
+	if (!isfinite(sum_sin) || !isfinite(sum_cos)) {
+		return false;
+	}
+
+	if ((fabsf(sum_sin) < 1e-6f) && (fabsf(sum_cos) < 1e-6f)) {
+		return false;
+	}
+
+	*mean_angle_rad = wrap_rad_2pi(atan2f(sum_sin, sum_cos));
+	return true;
+}
+
+static inline void motor_align_start_sample_window(struct motor_parameters *params)
+{
+	k_timer_start(&params->state_timer,
+		      K_MSEC((uint32_t)(ALIGN_STABILIZE_DURATION_S * 1000.0f)),
+		      K_NO_WAIT);
+}
+
+static inline enum smf_state_result motor_align_fail(struct motor_parameters *params,
+						     const char *reason)
+{
+	LOG_ERR("ALIGN failed: %s", reason);
+	params->event.type = MOTOR_EVENT_ERROR;
+	params->event.error_code = ERROR_HARDWARE_BREAK;
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+	return SMF_EVENT_HANDLED;
+}
+
+/* State: ALIGN - parent state for dual-polarity rotor alignment */
 void motor_state_align_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ALIGN state");
-
-	/* Phase 1: use generated angle (no encoder -> observer is driven by angle_gen). */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-			     BIT(MOTOR_FEATURE_PI_CONTROL));
-
-	/* Initialize angle generator to stationary frame (0 rad/s) */
-	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
-	angle_gen_set_velocity(&params->angle_gen, 0.0f);
-	angle_gen_set_angle(&params->angle_gen, 0.0f);
-
-	/* Set trajectory target to alignment current (will ramp smoothly)
-	 * Continues from previous state (RS_EST) current value
-	 */
-	traj_set_target_value(&params->traj_Id, ALIGN_CURRENT_A);
-	float32_t align_ramp_rate = ALIGN_CURRENT_A / (ALIGN_INJECT_DURATION_S * CONTROL_LOOP_FREQUENCY_HZ);
-	traj_set_max_delta(&params->traj_Id, align_ramp_rate);
-
-	LOG_INF("Applying alignment current: Id=%.3fA for %.3fs (then sample %.3fs)",
-		(double)ALIGN_CURRENT_A,
-		(double)ALIGN_INJECT_DURATION_S,
-		(double)ALIGN_STABILIZE_DURATION_S);
-
-	/* Start timer for alignment injection duration */
-	k_timer_start(&params->state_timer,
-		      K_MSEC((uint32_t)(ALIGN_INJECT_DURATION_S * 1000.0f)),
-		      K_NO_WAIT);
+	params->align_pos_sample_retries = 0U;
+	params->align_neg_sample_retries = 0U;
+	params->align_pos_mech_angle_rad = 0.0f;
+	params->align_neg_mech_angle_rad = 0.0f;
+	motor_align_reset_pos_sample_accumulator(params);
+	motor_align_reset_neg_sample_accumulator(params);
 }
 
 enum smf_state_result motor_state_align_run(void *obj)
 {
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	if (motor_calibration_timeout_elapsed(params)) {
-		/* Move to Phase 2: switch observer input to encoder and let it converge. */
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_SAMPLE]);
-		return SMF_EVENT_HANDLED;
-	}
-
-	/* Propagate unhandled events */
+	ARG_UNUSED(obj);
 	return SMF_EVENT_PROPAGATE;
 }
 
@@ -435,80 +477,255 @@ void motor_state_align_exit(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Exiting ALIGN state");
-
-	/* Clear this phase's additional requirements. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-			      BIT(MOTOR_FEATURE_PI_CONTROL));
+				      BIT(MOTOR_FEATURE_ENCODER_READ) |
+				      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
-/* State: ALIGN_SAMPLE - Align rotor to known position (Phase 2: sample encoder/observer) */
-void motor_state_align_sample_entry(void *obj)
+/* State: ALIGN_POS_INJECT - inject +Id with generated angle frame */
+void motor_state_align_pos_inject_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Entering ALIGN_SAMPLE state");
+	LOG_INF("Entering ALIGN_POS_INJECT state");
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 
-	/* Phase 2: use encoder-based observer input. Keep PI current control enabled
-	 * so we continue holding alignment current while the observer converges.
-	 */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-			     BIT(MOTOR_FEATURE_PI_CONTROL));
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
 
-	/* Start timer for stabilization window */
+	motor_align_set_injection_target(params, ALIGN_CURRENT_A);
+	LOG_INF("ALIGN +Id inject: Id=%.3fA for %.3fs",
+		(double)ALIGN_CURRENT_A, (double)ALIGN_INJECT_DURATION_S);
+
 	k_timer_start(&params->state_timer,
-		      K_MSEC((uint32_t)(ALIGN_STABILIZE_DURATION_S * 1000.0f)),
+		      K_MSEC((uint32_t)(ALIGN_INJECT_DURATION_S * 1000.0f)),
 		      K_NO_WAIT);
 }
 
-enum smf_state_result motor_state_align_sample_run(void *obj)
+enum smf_state_result motor_state_align_pos_inject_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	if (motor_calibration_timeout_elapsed(params)) {
-		/* Get the current mechanical angle from the observer (now encoder-driven). */
-		float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
-
-		/* Set the offset so that electrical angle = 0 at this position
-		 * (d-axis aligned with alignment current)
-		 * offset = -mech_angle (so elec = (mech + offset) * poles = 0)
-		 */
-			float32_t offset_rad = -mech_angle_rad;
-			params->observer_alignment_offset_rad = offset_rad;
-			/* ALIGN defines base commutation reference; runtime trim is reset here. */
-			params->observer_elec_trim_rad = 0.0f;
-			angle_observer_set_offset(&params->observer,
-						 params->observer_alignment_offset_rad);
-
-		/* Convert to degrees for display */
-		float32_t mech_angle_deg = mech_angle_rad * (180.0f / PI_F32);
-		float32_t offset_deg = offset_rad * (180.0f / PI_F32);
-		LOG_INF("Alignment complete: mech_angle=%.2f deg, offset=%.2f deg",
-			(double)mech_angle_deg, (double)offset_deg);
-
-		/* Boot calibration resumes normal flow to ONLINE. Commissioning ends in IDLE
-		 * so the user can inspect measurements without immediately entering control.
-		 */
-			if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
-				smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-			} else {
-				enum motor_state online_mode =
-					motor_resolve_requested_online_mode(params);
-				smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
-			}
-			return SMF_EVENT_HANDLED;
-		}
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_POS_SAMPLE]);
+		return SMF_EVENT_HANDLED;
+	}
 
 	return SMF_EVENT_PROPAGATE;
 }
 
-void motor_state_align_sample_exit(void *obj)
+void motor_state_align_pos_inject_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting ALIGN_SAMPLE state");
+	LOG_INF("Exiting ALIGN_POS_INJECT state");
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+}
 
-	/* Keep encoder read active across this boundary to avoid tearing down SPI
-	 * while an asynchronous encoder transfer is completing.
+/* State: ALIGN_POS_SAMPLE - hold +Id and capture fresh encoder-driven observer samples */
+void motor_state_align_pos_sample_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ALIGN_POS_SAMPLE state");
+	params->align_pos_sample_retries = 0U;
+	motor_align_reset_pos_sample_accumulator(params);
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+	motor_align_start_sample_window(params);
+}
+
+enum smf_state_result motor_state_align_pos_sample_run(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	if (!motor_calibration_timeout_elapsed(params)) {
+		return SMF_EVENT_PROPAGATE;
+	}
+
+	if (params->align_pos_sample_count < ALIGN_SAMPLE_MIN_FRESH_SAMPLES) {
+		if (params->align_pos_sample_retries < ALIGN_SAMPLE_MAX_RETRIES) {
+			params->align_pos_sample_retries++;
+			LOG_WRN("ALIGN +Id sample: only %u fresh samples, extending window (%u/%u)",
+				params->align_pos_sample_count,
+				params->align_pos_sample_retries,
+				ALIGN_SAMPLE_MAX_RETRIES);
+			motor_align_start_sample_window(params);
+			return SMF_EVENT_HANDLED;
+		}
+
+		return motor_align_fail(params, "+Id sample window insufficient fresh encoder samples");
+	}
+
+	float32_t pos_mean_rad = 0.0f;
+	if (!motor_align_compute_circular_mean(params->align_pos_sum_sin,
+					       params->align_pos_sum_cos,
+					       params->align_pos_sample_count,
+					       &pos_mean_rad)) {
+		return motor_align_fail(params, "+Id sample circular mean invalid");
+	}
+
+	params->align_pos_mech_angle_rad = pos_mean_rad;
+	LOG_INF("ALIGN +Id sample mean: mech=%.2f deg (%u samples)",
+		(double)(pos_mean_rad * (180.0f / PI_F32)),
+		params->align_pos_sample_count);
+
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_NEG_INJECT]);
+	return SMF_EVENT_HANDLED;
+}
+
+void motor_state_align_pos_sample_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ALIGN_POS_SAMPLE state");
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+}
+
+/* State: ALIGN_NEG_INJECT - inject -Id with generated angle frame */
+void motor_state_align_neg_inject_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ALIGN_NEG_INJECT state");
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, 0.0f);
+
+	motor_align_set_injection_target(params, -ALIGN_CURRENT_A);
+	LOG_INF("ALIGN -Id inject: Id=%.3fA for %.3fs",
+		(double)(-ALIGN_CURRENT_A), (double)ALIGN_INJECT_DURATION_S);
+
+	k_timer_start(&params->state_timer,
+		      K_MSEC((uint32_t)(ALIGN_INJECT_DURATION_S * 1000.0f)),
+		      K_NO_WAIT);
+}
+
+enum smf_state_result motor_state_align_neg_inject_run(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	if (motor_calibration_timeout_elapsed(params)) {
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_NEG_SAMPLE]);
+		return SMF_EVENT_HANDLED;
+	}
+
+	return SMF_EVENT_PROPAGATE;
+}
+
+void motor_state_align_neg_inject_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ALIGN_NEG_INJECT state");
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+}
+
+/* State: ALIGN_NEG_SAMPLE - hold -Id, capture observer sample, finalize offset */
+void motor_state_align_neg_sample_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Entering ALIGN_NEG_SAMPLE state");
+	params->align_neg_sample_retries = 0U;
+	motor_align_reset_neg_sample_accumulator(params);
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+				     BIT(MOTOR_FEATURE_PI_CONTROL));
+	motor_align_start_sample_window(params);
+}
+
+enum smf_state_result motor_state_align_neg_sample_run(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	if (!motor_calibration_timeout_elapsed(params)) {
+		return SMF_EVENT_PROPAGATE;
+	}
+
+	if (params->align_neg_sample_count < ALIGN_SAMPLE_MIN_FRESH_SAMPLES) {
+		if (params->align_neg_sample_retries < ALIGN_SAMPLE_MAX_RETRIES) {
+			params->align_neg_sample_retries++;
+			LOG_WRN("ALIGN -Id sample: only %u fresh samples, extending window (%u/%u)",
+				params->align_neg_sample_count,
+				params->align_neg_sample_retries,
+				ALIGN_SAMPLE_MAX_RETRIES);
+			motor_align_start_sample_window(params);
+			return SMF_EVENT_HANDLED;
+		}
+
+		return motor_align_fail(params, "-Id sample window insufficient fresh encoder samples");
+	}
+
+	float32_t neg_mean_rad = 0.0f;
+	if (!motor_align_compute_circular_mean(params->align_neg_sum_sin,
+					       params->align_neg_sum_cos,
+					       params->align_neg_sample_count,
+					       &neg_mean_rad)) {
+		return motor_align_fail(params, "-Id sample circular mean invalid");
+	}
+	params->align_neg_mech_angle_rad = neg_mean_rad;
+
+	float32_t expected_delta_mech_rad = PI_F32 / (float32_t)MOTOR_POLE_PAIRS;
+	float32_t measured_delta_mech_rad = wrap_rad_pi(
+		params->align_neg_mech_angle_rad - params->align_pos_mech_angle_rad);
+	float32_t delta_abs_error_rad =
+		fabsf(fabsf(measured_delta_mech_rad) - expected_delta_mech_rad);
+	float32_t delta_tol_mech_rad = ALIGN_OPPOSED_ELEC_TOL_RAD / (float32_t)MOTOR_POLE_PAIRS;
+
+	if (delta_abs_error_rad > delta_tol_mech_rad) {
+		LOG_ERR("ALIGN consistency failed: |delta|=%.2f deg expected=%.2f deg (tol=%.2f deg)",
+			(double)(fabsf(measured_delta_mech_rad) * (180.0f / PI_F32)),
+			(double)(expected_delta_mech_rad * (180.0f / PI_F32)),
+			(double)(delta_tol_mech_rad * (180.0f / PI_F32)));
+		return motor_align_fail(params, "dual-polarity angle separation out of tolerance");
+	}
+
+	float32_t offset_plus_rad = wrap_rad_pi(-params->align_pos_mech_angle_rad);
+	float32_t offset_minus_rad =
+		wrap_rad_pi((PI_F32 / (float32_t)MOTOR_POLE_PAIRS) - params->align_neg_mech_angle_rad);
+	float32_t offset_sum_sin = sinf(offset_plus_rad) + sinf(offset_minus_rad);
+	float32_t offset_sum_cos = cosf(offset_plus_rad) + cosf(offset_minus_rad);
+
+	if ((fabsf(offset_sum_sin) < 1e-6f) && (fabsf(offset_sum_cos) < 1e-6f)) {
+		return motor_align_fail(params, "dual-polarity offset mean is ill-conditioned");
+	}
+
+	float32_t final_offset_rad = wrap_rad_pi(atan2f(offset_sum_sin, offset_sum_cos));
+	params->observer_alignment_offset_rad = final_offset_rad;
+	/* ALIGN defines base commutation reference; runtime trim is reset here. */
+	params->observer_elec_trim_rad = 0.0f;
+	angle_observer_set_offset(&params->observer, params->observer_alignment_offset_rad);
+
+	LOG_INF("Alignment complete: +Id=%.2f deg, -Id=%.2f deg, offset=%.2f deg",
+		(double)(params->align_pos_mech_angle_rad * (180.0f / PI_F32)),
+		(double)(params->align_neg_mech_angle_rad * (180.0f / PI_F32)),
+		(double)(final_offset_rad * (180.0f / PI_F32)));
+
+	/* Boot calibration resumes normal flow to ONLINE. Commissioning ends in IDLE
+	 * so the user can inspect measurements without immediately entering control.
 	 */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PI_CONTROL));
+	if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+	} else {
+		enum motor_state online_mode =
+			motor_resolve_requested_online_mode(params);
+		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
+	}
+
+	return SMF_EVENT_HANDLED;
+}
+
+void motor_state_align_neg_sample_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+
+	LOG_INF("Exiting ALIGN_NEG_SAMPLE state");
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 }

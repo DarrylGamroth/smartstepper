@@ -191,12 +191,27 @@ const struct smf_state motor_states[] = {
 					motor_state_align_run,
 					motor_state_align_exit,
 					&motor_states[MOTOR_STATE_CALIBRATION],
-					NULL),
-	[MOTOR_STATE_ALIGN_SAMPLE] = SMF_CREATE_STATE(motor_state_align_sample_entry,
-					     motor_state_align_sample_run,
-					     motor_state_align_sample_exit,
-					     &motor_states[MOTOR_STATE_CALIBRATION],
-					     NULL),
+					&motor_states[MOTOR_STATE_ALIGN_POS_INJECT]),
+	[MOTOR_STATE_ALIGN_POS_INJECT] = SMF_CREATE_STATE(motor_state_align_pos_inject_entry,
+						  motor_state_align_pos_inject_run,
+						  motor_state_align_pos_inject_exit,
+						  &motor_states[MOTOR_STATE_ALIGN],
+						  NULL),
+	[MOTOR_STATE_ALIGN_POS_SAMPLE] = SMF_CREATE_STATE(motor_state_align_pos_sample_entry,
+						  motor_state_align_pos_sample_run,
+						  motor_state_align_pos_sample_exit,
+						  &motor_states[MOTOR_STATE_ALIGN],
+						  NULL),
+	[MOTOR_STATE_ALIGN_NEG_INJECT] = SMF_CREATE_STATE(motor_state_align_neg_inject_entry,
+						  motor_state_align_neg_inject_run,
+						  motor_state_align_neg_inject_exit,
+						  &motor_states[MOTOR_STATE_ALIGN],
+						  NULL),
+	[MOTOR_STATE_ALIGN_NEG_SAMPLE] = SMF_CREATE_STATE(motor_state_align_neg_sample_entry,
+						  motor_state_align_neg_sample_run,
+						  motor_state_align_neg_sample_exit,
+						  &motor_states[MOTOR_STATE_ALIGN],
+						  NULL),
 	[MOTOR_STATE_IDLE] = SMF_CREATE_STATE(motor_state_idle_entry,
 					       motor_state_idle_run,
 					       NULL, NULL, NULL),
@@ -261,7 +276,10 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_RS_EST:       return "RS_EST";
 	case MOTOR_STATE_ROVERL_MEAS:  return "ROVERL_MEAS";
 	case MOTOR_STATE_ALIGN:        return "ALIGN";
-	case MOTOR_STATE_ALIGN_SAMPLE: return "ALIGN_SAMPLE";
+	case MOTOR_STATE_ALIGN_POS_INJECT: return "ALIGN_POS_INJECT";
+	case MOTOR_STATE_ALIGN_POS_SAMPLE: return "ALIGN_POS_SAMPLE";
+	case MOTOR_STATE_ALIGN_NEG_INJECT: return "ALIGN_NEG_INJECT";
+	case MOTOR_STATE_ALIGN_NEG_SAMPLE: return "ALIGN_NEG_SAMPLE";
 	case MOTOR_STATE_IDLE:         return "IDLE";
 	case MOTOR_STATE_OFFLINE:      return "OFFLINE";
 	case MOTOR_STATE_ONLINE:       return "ONLINE";
@@ -419,7 +437,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	/* Initialize Id trajectory generator for smooth current ramping */
 	traj_init(&params->traj_Id);
-	traj_set_min_value(&params->traj_Id, 0.0f);
+	traj_set_min_value(&params->traj_Id, -MOTOR_MAX_CURRENT_A);
 	traj_set_max_value(&params->traj_Id, MOTOR_MAX_CURRENT_A);
 
 	/* Initialize velocity/position scaffold defaults */
@@ -520,6 +538,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration_running = false;
 	params->commissioning_complete = false;
 	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+	params->align_pos_sample_retries = 0U;
+	params->align_neg_sample_retries = 0U;
+	params->align_pos_sample_count = 0U;
+	params->align_neg_sample_count = 0U;
+	params->align_pos_sum_sin = 0.0f;
+	params->align_pos_sum_cos = 0.0f;
+	params->align_neg_sum_sin = 0.0f;
+	params->align_neg_sum_cos = 0.0f;
+	params->align_pos_mech_angle_rad = 0.0f;
+	params->align_neg_mech_angle_rad = 0.0f;
 	motor_commission_init(params);
 
 	motor_velocity_plan_init(&params->traj_velocity,

@@ -99,6 +99,18 @@ static inline bool motor_outer_loop_decimation_tick(uint32_t *phase, uint32_t de
 	return false;
 }
 
+static inline bool motor_is_align_injection_state(const struct smf_state *state)
+{
+	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_INJECT) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_INJECT);
+}
+
+static inline bool motor_is_align_sample_state(const struct smf_state *state)
+{
+	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_SAMPLE);
+}
+
 static inline void motor_encoder_capture_try_store(struct motor_parameters *params,
 						   float32_t angle_deg,
 						   float32_t angle_rad,
@@ -437,6 +449,29 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->encoder_observer_input_rad = angle_raw_rad;
 	params->encoder_input_source = encoder_input_source;
 
+	/* ALIGN sample phases only accept fresh, warning-free encoder samples.
+	 * Accumulate circular means in ISR so state thread can validate sample quality.
+	 */
+	if (motor_is_align_sample_state(state) &&
+	    encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
+	    fresh_encoder_sample &&
+	    !encoder_frame_warning &&
+	    !encoder_frame_error) {
+		float32_t align_mech_rad = angle_observer_get_mech_angle(&params->observer);
+		float32_t align_sin = sinf(align_mech_rad);
+		float32_t align_cos = cosf(align_mech_rad);
+
+		if (motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE)) {
+			params->align_pos_sum_sin += align_sin;
+			params->align_pos_sum_cos += align_cos;
+			params->align_pos_sample_count++;
+		} else {
+			params->align_neg_sum_sin += align_sin;
+			params->align_neg_sum_cos += align_cos;
+			params->align_neg_sample_count++;
+		}
+	}
+
 	float32_t capture_angle_rad = encoder_sample_available ?
 					     (angle_control_degrees * (PI_F32 / 180.0f)) :
 					     angle_raw_rad;
@@ -604,9 +639,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		}
 	}
 
-	/* ALIGN: ramp/hold alignment current */
-	if (state == &motor_states[MOTOR_STATE_ALIGN] ||
-	    state == &motor_states[MOTOR_STATE_ALIGN_SAMPLE]) {
+	/* ALIGN child states: ramp/hold calibration d-axis current target. */
+	if (motor_is_align_injection_state(state) || motor_is_align_sample_state(state)) {
 		traj_run(&params->traj_Id);
 
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
