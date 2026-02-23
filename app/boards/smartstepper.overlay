@@ -29,7 +29,7 @@
 		velocity-max-hz = <50>;         /* Maximum velocity (50 Hz = 3000 RPM) */
 		velocity-max-accel-hz-per-s = <10>; /* Acceleration limit */
 		velocity-initial-hz = <0>;      /* Start from stopped */
-		encoder-direction-sign = <1>;   /* Set to <-1> to invert control-loop angle direction */
+		encoder-direction-sign = <(-1)>; /* Verified mapping: invert control-loop angle direction */
 	};
 
 	voltage_sense: voltage_sense {
