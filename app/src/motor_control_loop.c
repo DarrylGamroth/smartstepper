@@ -784,27 +784,28 @@ void motor_control_loop_step(struct motor_parameters *params,
 							 speed_mech_rad_s);
 		bool velocity_feedback_valid =
 			motor_velocity_feedback_is_valid(params->position_quality_flags);
+		bool velocity_feedback_fresh =
+			(params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U;
 		bool velocity_loop_update = motor_outer_loop_decimation_tick(
 			&params->velocity_loop_phase, velocity_loop_decimation);
-		if (velocity_loop_update) {
-			if (!velocity_feedback_valid) {
-				/* Hold measured dq currents and reset outer-loop observers while encoder
-				 * quality is degraded. This avoids current spikes when velocity/angle
-				 * feedback is stale or glitched.
-				 */
-				Id_ref_A = Id_A;
-				Iq_ref_A = Iq_A;
-				params->velocity_target_rad_s = 0.0f;
-				params->velocity_ref_rad_s = 0.0f;
-				traj_set_target_value(&params->traj_velocity, 0.0f);
-				motor_mpr_velocity_reset(&params->velocity_mpr_state,
-							 speed_mech_filtered_rad_s,
-							 Iq_ref_A);
-				motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
-				params->velocity_dob_iq_ff_a = 0.0f;
-				params->velocity_dob_disturbance_nm = 0.0f;
-				params->velocity_dob_residual_rad_s = 0.0f;
-			} else {
+		if (!velocity_feedback_valid) {
+			/* Hold measured dq currents and reset outer-loop observers while encoder
+			 * quality is degraded. This avoids current spikes when velocity/angle
+			 * feedback is stale or glitched.
+			 */
+			Id_ref_A = Id_A;
+			Iq_ref_A = Iq_A;
+			params->velocity_target_rad_s = 0.0f;
+			params->velocity_ref_rad_s = 0.0f;
+			traj_set_target_value(&params->traj_velocity, 0.0f);
+			motor_mpr_velocity_reset(&params->velocity_mpr_state,
+						 speed_mech_filtered_rad_s,
+						 Iq_ref_A);
+			motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
+			params->velocity_dob_iq_ff_a = 0.0f;
+			params->velocity_dob_disturbance_nm = 0.0f;
+			params->velocity_dob_residual_rad_s = 0.0f;
+		} else if (velocity_loop_update && velocity_feedback_fresh) {
 				bool use_mpr = motor_outer_loop_use_mpr(params);
 				bool mpr_applied = false;
 				float32_t iq_cmd_pre_dob_a = 0.0f;
@@ -899,7 +900,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 					}
 				}
 			}
-		}
 	} else {
 		params->velocity_loop_phase = 0U;
 	}
