@@ -442,9 +442,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 		angle_observer_set_delay(&params->observer, 0.0f);
 		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
 	} else if (encoder_sample_enabled && fresh_encoder_sample) {
-		/* Normal operation: use fresh encoder reading (1-cycle pipelined delay) */
+		/* Normal operation: use fresh encoder reading with transport-specific delay. */
 		angle_raw_rad = angle_control_degrees * (PI_F32 / 180.0f);
-		angle_observer_set_delay(&params->observer, 1.0f);
+		angle_observer_set_delay(&params->observer, ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
 		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;
 		params->encoder_raw_deg = angle_sensor_degrees;
 		params->encoder_raw_rad = angle_sensor_degrees * (PI_F32 / 180.0f);
@@ -561,7 +561,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 		pos_input.sample_fresh = fresh_encoder_sample;
 		pos_input.source_generated = false;
 		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
-		pos_input.latency_samples = 1.0f;
+		pos_input.latency_samples = ENCODER_SPI_PIPELINE_DELAY_SAMPLES;
 		break;
 	case MOTOR_ANGLE_INPUT_SRC_PROPAGATED:
 	default:

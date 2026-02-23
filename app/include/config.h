@@ -469,6 +469,13 @@ struct motor_parameters {
 #error "encoder-direction-sign must be 1 or <(-1)>"
 #endif
 #define ENCODER_DIRECTION_SIGN ((ENCODER_DIRECTION_SIGN_RAW == 1) ? 1 : -1)
+#if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 1.0f
+#elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
+#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 0.0f
+#else
+#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 0.0f
+#endif
 #define OUTER_LOOP_DECIMATION_MIN 1U
 #define OUTER_LOOP_DECIMATION_MAX 1000U
 #define VELOCITY_LOOP_DECIMATION_DEFAULT 1U
