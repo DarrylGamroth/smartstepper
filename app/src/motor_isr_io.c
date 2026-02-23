@@ -100,15 +100,34 @@ void adc_callback(const struct device *dev, const q31_t *values,
 			(ret < 0 && ret != -EAGAIN && ret != -ENODATA);
 	}
 
-	/* Schedule one async read per control ISR (pipeline style). This avoids
-	 * every-other-cycle submission from the separate timer callback and keeps
-	 * encoder latency to the intended single-cycle pipeline depth.
+	/* Hardware-timer-driven position-sequence tick source.
+	 * Keep event posting out of encoder1_callback (direct ISR context).
 	 */
-	if (encoder_sampling_enabled) {
-		int req_ret = motor_encoder_pipeline_request_sample();
-		if (req_ret < 0 && req_ret != -EALREADY) {
-			params->encoder_fault_counter++;
+	if (params->profile_sequence_running &&
+	    atomic_get(&params->control_armed) != 0 &&
+	    params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
+	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+		uint32_t period_ticks = params->profile_sequence_period_ticks;
+		if (period_ticks == 0U) {
+			period_ticks = 1U;
 		}
+
+		uint32_t tick_counter = params->profile_sequence_tick_counter + 1U;
+		if (tick_counter >= period_ticks) {
+			struct motor_event evt = {
+				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
+			};
+
+			params->profile_sequence_tick_counter = 0U;
+			int qret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+			if (qret != 0) {
+				params->profile_sequence_event_drop_count++;
+			}
+		} else {
+			params->profile_sequence_tick_counter = tick_counter;
+		}
+	} else {
+		params->profile_sequence_tick_counter = 0U;
 	}
 
 	struct motor_control_pwm_output pwm_out = {0};
@@ -141,31 +160,17 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 		return;
 	}
 
-	/* Hardware-timer-driven position-sequence tick source. */
-	if (params->profile_sequence_running &&
-	    atomic_get(&params->control_armed) != 0 &&
-	    params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
-	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
-		uint32_t period_ticks = params->profile_sequence_period_ticks;
-		if (period_ticks == 0U) {
-			period_ticks = 1U;
-		}
+	/* Trigger continuous encoder reads when feature is enabled. */
+	bool encoder_enabled =
+		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
+	bool encoder_capture_enabled = params->encoder_capture_enabled;
+	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
 
-		uint32_t tick_counter = params->profile_sequence_tick_counter + 1U;
-		if (tick_counter >= period_ticks) {
-			struct motor_event evt = {
-				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
-			};
-
-			params->profile_sequence_tick_counter = 0U;
-			int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
-			if (ret != 0) {
-				params->profile_sequence_event_drop_count++;
-			}
-		} else {
-			params->profile_sequence_tick_counter = tick_counter;
+	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
+	if (encoder_sampling_enabled) {
+		int ret = motor_encoder_pipeline_request_sample();
+		if (ret < 0 && ret != -EALREADY) {
+			params->encoder_fault_counter++;
 		}
-	} else {
-		params->profile_sequence_tick_counter = 0U;
 	}
 }
