@@ -1,0 +1,58 @@
+/*
+ * Motor profile overlay for integrated MT6835 encoder setup.
+ *
+ * Usage:
+ *   west build ... -- \
+ *     -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_mt6835_2a.overlay"
+ *
+ * Notes:
+ * - This overrides only motor/sensor profile parameters.
+ * - Keep board pin/peripheral wiring in the board overlay.
+ */
+
+/ {
+	aliases {
+		/* Use integrated MT6835 sensor for control-loop encoder input. */
+		encoder1 = &mt6835;
+	};
+
+	user_parameters {
+		/* Start conservative; verify direction with velocity_open capture. */
+		encoder-direction-sign = <1>;
+		align-current-ma = <200>;
+		brake-current-ma = <1500>;
+		roverl-est-current-ma = <300>;
+		rs-est-current-ma = <300>;
+		velocity-max-hz = <30>;
+		velocity-max-accel-hz-per-s = <20>;
+	};
+
+	motor_parameters {
+		/* Provisional motor model (replace with commissioning results). */
+		inductance-d-uh = <3000>;
+		inductance-q-uh = <3000>;
+		resistance-mohms = <1600>;
+		flux_linkage_uvphz = <17675>;
+		max-current-ma = <2000>;
+		/*
+		 * These are placeholders. Set from measured motor:
+		 * - pole-pairs
+		 * - inertia-mgcm2
+		 * - max-speed-hz
+		 */
+		pole-pairs = <50>;
+		inertia-mgcm2 = <9000>;
+		max-speed-hz = <30>;
+	};
+
+	fault_detection {
+		/* 120% of 2.0 A current limit. */
+		overcurrent-threshold-ma = <2400>;
+	};
+};
+
+/* Disable AEAT path for this profile to avoid unused sensor init/noise. */
+&aeat9955 {
+	status = "disabled";
+};
+
