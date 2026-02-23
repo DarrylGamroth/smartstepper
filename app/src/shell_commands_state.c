@@ -659,6 +659,10 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->encoder_raw_rad);
 	shell_print(sh, "  Enc dir sign:   %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
+	shell_print(sh, "  Enc trim:       elec=%.3f deg mech=%.4f deg",
+		    (double)(g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32)),
+		    (double)((g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32)) /
+			     (float32_t)MOTOR_POLE_PAIRS));
 	shell_print(sh, "  Enc used:       %.6f rad (%s, fresh=%s)",
 		    (double)g_motor_params->encoder_observer_input_rad,
 		    motor_encoder_input_source_to_string(g_motor_params->encoder_input_source),
@@ -827,6 +831,51 @@ int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv
 	}
 
 	shell_print(sh, "Encoder direction sign update posted (%d)", sign);
+	return 0;
+}
+
+/* motor encoder trim [deg] */
+int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder trim [<-180.0..180.0>]");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	float32_t trim_deg = g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32);
+	float32_t base_mech_offset_deg =
+		g_motor_params->observer_alignment_offset_rad * (180.0f / PI_F32);
+	if (argc == 1U) {
+		shell_print(sh, "Encoder electrical trim: %.3f deg (mechanical equivalent: %.4f deg)",
+			    (double)trim_deg,
+			    (double)(trim_deg / (float32_t)MOTOR_POLE_PAIRS));
+		shell_print(sh, "Observer base offset (ALIGN): %.3f deg mechanical",
+			    (double)base_mech_offset_deg);
+		return 0;
+	}
+
+	if (!shell_parse_finite_float(argv[1], &trim_deg)) {
+		shell_error(sh, "trim must be a finite number of electrical degrees");
+		return -EINVAL;
+	}
+	if (trim_deg < -180.0f || trim_deg > 180.0f) {
+		shell_error(sh, "trim must be within [-180.0, 180.0] electrical degrees");
+		return -EINVAL;
+	}
+
+	int ret = motor_api_update_param("observer_elec_trim_deg", trim_deg);
+	if (ret != 0) {
+		shell_error(sh, "Failed to update observer electrical trim (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Observer electrical trim update posted: %.3f deg", (double)trim_deg);
 	return 0;
 }
 

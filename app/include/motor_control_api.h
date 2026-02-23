@@ -118,7 +118,8 @@ int motor_api_request_commission(void);
  *       profile_max_velocity_hz, profile_max_accel_hz_s,
  *       torque_gain_nm_per_a_active,
  *       command_timeout_ms,
- *       encoder_direction_sign (-1 or 1).
+ *       encoder_direction_sign (-1 or 1),
+ *       observer_elec_trim_deg (electrical commutation trim, -180..180 deg).
  */
 int motor_api_update_param(const char *name, float value);
 

@@ -37,6 +37,7 @@ int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_stop(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char **argv);

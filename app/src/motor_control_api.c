@@ -53,6 +53,7 @@ enum motor_param_id {
 	PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE,
 	PARAM_ID_COMMAND_TIMEOUT_MS,
 	PARAM_ID_ENCODER_DIRECTION_SIGN,
+	PARAM_ID_OBSERVER_ELEC_TRIM_DEG,
 	PARAM_ID_COUNT,
 };
 
@@ -89,6 +90,7 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE] = "torque_gain_nm_per_a_active",
 	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
 	[PARAM_ID_ENCODER_DIRECTION_SIGN] = "encoder_direction_sign",
+	[PARAM_ID_OBSERVER_ELEC_TRIM_DEG] = "observer_elec_trim_deg",
 };
 
 static bool motor_param_requires_positive(uint8_t param_id)
@@ -224,6 +226,9 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_ENCODER_DIRECTION_SIGN:
 		*value = (float32_t)((params->encoder_direction_sign >= 0) ? 1.0f : -1.0f);
+		return 0;
+	case PARAM_ID_OBSERVER_ELEC_TRIM_DEG:
+		*value = params->observer_elec_trim_rad * (180.0f / PI_F32);
 		return 0;
 	default:
 		return -EINVAL;
@@ -915,6 +920,19 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		params->position_glitch_count = 0U;
 		params->position_jitter_count = 0U;
 		LOG_DBG("Updated encoder_direction_sign = %d", sign);
+		break;
+	}
+	case PARAM_ID_OBSERVER_ELEC_TRIM_DEG: {
+		if (value < -180.0f || value > 180.0f) {
+			LOG_ERR("Rejected observer_elec_trim_deg outside [-180,180]");
+			break;
+		}
+		params->observer_elec_trim_rad = value * (PI_F32 / 180.0f);
+		float32_t mech_trim_rad =
+			params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;
+		angle_observer_set_offset(&params->observer,
+					  params->observer_alignment_offset_rad + mech_trim_rad);
+		LOG_DBG("Updated observer_elec_trim_deg = %.3f", (double)value);
 		break;
 	}
 	default:

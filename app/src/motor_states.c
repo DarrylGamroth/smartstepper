@@ -468,6 +468,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_mpr_cfg.max_delta_velocity_rad_s =
 		params->profile_max_accel_rad_s2 * position_loop_dt_s;
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	params->observer_alignment_offset_rad = 0.0f;
+	params->observer_elec_trim_rad = 0.0f;
 	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
 	params->torque_gain_nm_per_a_active =
 		motor_torque_gain_from_flux(params->flux_linkage_wb_active);

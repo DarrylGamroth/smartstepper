@@ -142,6 +142,69 @@ case_step 0.26
 case_step 0.30
 ```
 
+## Electrical Trim Sweep (Commutation Check)
+
+Use this to sweep electrical commutation trim while holding torque current.
+If trim strongly changes behavior (breakaway, direction, roughness), commutation
+offset is likely the main issue.
+
+```bash
+DEV=/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
+LOG=/tmp/torque_trim_sweep.log
+rm -f "$LOG"
+stty -F "$DEV" 115200 raw -echo -echoe -echok -echoctl -echoke
+
+send_read(){
+  local cmd="$1"; local dur="${2:-1.0}"; local t
+  t=$(mktemp)
+  (timeout "$dur" cat "$DEV" | tr -d '\r' > "$t") & local p=$!
+  sleep 0.06
+  printf "\r\n%s\r\n" "$cmd" > "$DEV"
+  wait "$p" || true
+  { echo "\n### CMD: $cmd"; cat "$t"; } >> "$LOG"
+  rm -f "$t"
+}
+
+trim_case(){
+  local trim="$1"
+  echo "\n===== TRIM ${trim} deg =====" >> "$LOG"
+  send_read "motor encoder trim ${trim}" 0.9
+  send_read "motor encoder trim" 0.8
+  send_read "motor current iq 0.15" 0.8
+  send_read "motor info live" 1.2
+  send_read "motor info live" 1.8
+  send_read "motor state status" 0.9
+}
+
+send_read "motor state clear_error" 0.8
+send_read "motor disarm" 0.8
+send_read "motor state idle" 0.8
+send_read "motor safety timeout 0" 0.8
+send_read "motor state offline" 3.8
+send_read "motor arm" 0.8
+send_read "motor state mode torque" 1.0
+send_read "motor current id 0" 0.8
+send_read "motor current iq 0" 0.8
+send_read "motor encoder trim 0" 0.8
+
+trim_case -90
+trim_case -60
+trim_case -30
+trim_case 0
+trim_case 30
+trim_case 60
+trim_case 90
+
+send_read "motor current iq 0" 0.8
+send_read "motor encoder trim 0" 0.8
+send_read "motor disarm" 0.8
+send_read "motor state idle" 0.8
+send_read "motor safety timeout 1000" 0.8
+
+echo "Saved log: $LOG"
+rg -n "===== TRIM|Encoder electrical trim|State:|Error:|Armed:|Angle \(mech\)|Speed:|Iq reference|Iq measured|OVERCURRENT" "$LOG" -S
+```
+
 ## Pass Criteria
 
 - Mode enters and stays in `ONLINE_TORQUE` while armed.

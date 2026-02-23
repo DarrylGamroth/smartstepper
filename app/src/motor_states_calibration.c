@@ -472,8 +472,12 @@ enum smf_state_result motor_state_align_sample_run(void *obj)
 		 * (d-axis aligned with alignment current)
 		 * offset = -mech_angle (so elec = (mech + offset) * poles = 0)
 		 */
-		float32_t offset_rad = -mech_angle_rad;
-		angle_observer_set_offset(&params->observer, offset_rad);
+			float32_t offset_rad = -mech_angle_rad;
+			params->observer_alignment_offset_rad = offset_rad;
+			/* ALIGN defines base commutation reference; runtime trim is reset here. */
+			params->observer_elec_trim_rad = 0.0f;
+			angle_observer_set_offset(&params->observer,
+						 params->observer_alignment_offset_rad);
 
 		/* Convert to degrees for display */
 		float32_t mech_angle_deg = mech_angle_rad * (180.0f / PI_F32);

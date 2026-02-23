@@ -135,6 +135,8 @@ struct motor_parameters {
 
 	/* Observers and estimators */
 	struct angle_observer_state observer;
+	float32_t observer_alignment_offset_rad; /* Base mechanical offset from ALIGN */
+	float32_t observer_elec_trim_rad; /* Runtime electrical trim [rad], converted to mech offset */
 	int8_t encoder_direction_sign; /* Mechanical encoder direction mapping (+1/-1) */
 	struct motor_position_convert_config position_convert_cfg;
 	struct motor_position_convert_state position_convert;
