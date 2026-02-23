@@ -1720,6 +1720,21 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_safety,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor fault snapshot subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault_snapshot,
+	SHELL_CMD(status, NULL, "Show fault snapshot ring status", cmd_motor_fault_snapshot_status),
+	SHELL_CMD_ARG(dump, NULL, "Dump latest fault snapshot rows [count]",
+		      cmd_motor_fault_snapshot_dump, 1, 1),
+	SHELL_CMD(clear, NULL, "Clear fault snapshot ring and latch", cmd_motor_fault_snapshot_clear),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor fault subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault,
+	SHELL_CMD(snapshot, &sub_motor_fault_snapshot, "ISR fault snapshot diagnostics", NULL),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission flux subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_flux,
 	SHELL_CMD_ARG(run, NULL,
@@ -1767,6 +1782,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(arm, NULL, "Arm torque-producing control output", cmd_motor_arm),
 	SHELL_CMD(disarm, NULL, "Disarm control output and request IDLE", cmd_motor_disarm),
 	SHELL_CMD(safety, &sub_motor_safety, "Safety interlock and timeout", NULL),
+	SHELL_CMD(fault, &sub_motor_fault, "Fault diagnostics", NULL),
 	SHELL_CMD(info, &sub_motor_info, "Motor information", NULL),
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),

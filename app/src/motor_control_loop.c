@@ -141,6 +141,74 @@ static inline void motor_encoder_capture_try_store(struct motor_parameters *para
 	}
 }
 
+static inline void motor_fault_snapshot_try_store(struct motor_parameters *params,
+						  float32_t encoder_angle_deg,
+						  float32_t observer_input_rad,
+						  float32_t elec_angle_rad,
+						  float32_t observer_elec_speed_rad_s,
+						  float32_t id_ref_a,
+						  float32_t iq_ref_a,
+						  float32_t id_a,
+						  float32_t iq_a,
+						  float32_t ia_a,
+						  float32_t ib_a,
+						  float32_t vd_v,
+						  float32_t vq_v,
+						  uint8_t input_source,
+						  bool sample_fresh,
+						  bool sample_warning,
+						  bool sample_error,
+						  uint8_t status,
+						  uint8_t position_quality_flags)
+{
+	if (params == NULL) {
+		return;
+	}
+
+	uint16_t idx = params->fault_snapshot_write_idx;
+	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot_samples[idx];
+
+	sample->control_loop_count = params->control_loop_count;
+	sample->encoder_angle_deg = encoder_angle_deg;
+	sample->observer_input_rad = observer_input_rad;
+	sample->elec_angle_rad = elec_angle_rad;
+	sample->observer_elec_speed_rad_s = observer_elec_speed_rad_s;
+	sample->Id_ref_A = id_ref_a;
+	sample->Iq_ref_A = iq_ref_a;
+	sample->Id_A = id_a;
+	sample->Iq_A = iq_a;
+	sample->Ia_A = ia_a;
+	sample->Ib_A = ib_a;
+	sample->Vd_V = vd_v;
+	sample->Vq_V = vq_v;
+	sample->input_source = input_source;
+	sample->sample_fresh = sample_fresh ? 1U : 0U;
+	sample->sample_warning = sample_warning ? 1U : 0U;
+	sample->sample_error = sample_error ? 1U : 0U;
+	sample->status = status;
+	sample->position_quality_flags = position_quality_flags;
+
+	params->fault_snapshot_write_idx =
+		(uint16_t)((idx + 1U) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
+	if (params->fault_snapshot_count < MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES) {
+		params->fault_snapshot_count++;
+	} else {
+		params->fault_snapshot_overrun_count++;
+	}
+}
+
+static inline void motor_post_error_with_snapshot(struct motor_parameters *params,
+						  uint32_t error_code)
+{
+	if (params != NULL) {
+		params->fault_snapshot_latched = 1U;
+		params->fault_snapshot_latch_error_code = error_code;
+		params->fault_snapshot_latch_loop = params->control_loop_count;
+	}
+
+	motor_api_post_error(error_code);
+}
+
 void motor_control_loop_step(struct motor_parameters *params,
 			     const q31_t *values,
 			     uint8_t count,
@@ -319,7 +387,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 		/* Fault detection: too many consecutive encoder failures. */
 		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-			motor_api_post_error(ERROR_ENCODER_FAULT);
+			motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
 			goto isr_done;
 		}
 	} else {
@@ -441,13 +509,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Validate bus voltage before reciprocal to avoid Inf/NaN propagation. */
 	if (Vbus_V < VBUS_MIN_VALID_V) {
-		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		motor_post_error_with_snapshot(params, ERROR_HARDWARE_BREAK);
 		goto isr_done;
 	}
 
 	/* Fault detection: Check for overvoltage */
 	if (Vbus_V > VBUS_MAX_V) {
-		motor_api_post_error(ERROR_OVERVOLTAGE);
+		motor_post_error_with_snapshot(params, ERROR_OVERVOLTAGE);
 		goto isr_done;
 	}
 
@@ -462,9 +530,37 @@ void motor_control_loop_step(struct motor_parameters *params,
 	Ia_A -= params->Ia_offset;
 	Ib_A -= params->Ib_offset;
 
+	/* Compute dq currents before fault checks so snapshot rows include
+	 * same-cycle electrical frame measurements at fault time.
+	 */
+	float32_t park_angle_rad = angle_observer_get_elec_angle(&params->observer);
+	float32_t park_angle_deg = park_angle_rad * (180.0f / PI_F32);
+	arm_sin_cos_f32(park_angle_deg, &sin_theta, &cos_theta);
+	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
+
+	motor_fault_snapshot_try_store(params,
+				      angle_control_degrees,
+				      params->encoder_observer_input_rad,
+				      park_angle_rad,
+				      angle_observer_get_elec_speed(&params->observer),
+				      Id_ref_A,
+				      Iq_ref_A,
+				      Id_A,
+				      Iq_A,
+				      Ia_A,
+				      Ib_A,
+				      params->Vd_V,
+				      params->Vq_V,
+				      encoder_input_source,
+				      fresh_encoder_sample,
+				      encoder_frame_warning,
+				      encoder_frame_error,
+				      encoder_frame_status,
+				      params->position_quality_flags);
+
 	/* Fault detection: Check for overcurrent after offset removal */
 	if (fabsf(Ia_A) > OVERCURRENT_THRESHOLD_A || fabsf(Ib_A) > OVERCURRENT_THRESHOLD_A) {
-		motor_api_post_error(ERROR_OVERCURRENT);
+		motor_post_error_with_snapshot(params, ERROR_OVERCURRENT);
 		goto isr_done;
 	}
 
@@ -472,14 +568,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	if (!feature_pi_control) {
 		goto isr_done;
 	}
-
-	/* Select control frame angle based on state and transform currents */
-	float32_t park_angle_rad = angle_observer_get_elec_angle(&params->observer);
-
-	/* Park transform to dq frame - convert to degrees for arm_sin_cos_f32 */
-	float32_t park_angle_deg = park_angle_rad * (180.0f / PI_F32);
-	arm_sin_cos_f32(park_angle_deg, &sin_theta, &cos_theta);
-	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
 
 	/* R/L measurement: set current reference and accumulate V/I in rotating frame */
 	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
