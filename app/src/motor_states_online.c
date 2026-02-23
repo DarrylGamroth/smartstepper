@@ -291,14 +291,18 @@ void motor_state_online_velocity_closed_entry(void *obj)
 				 params->profile_max_velocity_rad_s,
 				 params->profile_max_accel_rad_s2,
 				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
-				 speed_mech_rad_s);
-	params->velocity_target_rad_s = speed_mech_rad_s;
-	params->velocity_ref_rad_s = speed_mech_rad_s;
+				 0.0f);
+	traj_set_target_value(&params->traj_velocity, 0.0f);
+	traj_set_int_value(&params->traj_velocity, 0.0f);
+	params->velocity_target_rad_s = 0.0f;
+	params->velocity_ref_rad_s = 0.0f;
+	params->Id_ref_A = params->Id_setpoint_A;
+	params->Iq_ref_A = 0.0f;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
 	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
 	params->velocity_dob_iq_ff_a = 0.0f;

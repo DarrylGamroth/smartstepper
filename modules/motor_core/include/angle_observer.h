@@ -109,6 +109,20 @@ void angle_observer_update(struct angle_observer_state *obs,
 			   float32_t encoder_angle_rad);
 
 /**
+ * @brief Reseed observer state for mode handoff
+ *
+ * Resets the internal tracking state to a known mechanical angle/speed while
+ * preserving configured gains and angle offset.
+ *
+ * @param obs Pointer to observer state structure
+ * @param mech_angle_rad Mechanical angle in radians
+ * @param mech_speed_rad_s Mechanical speed in rad/s
+ */
+void angle_observer_reset_tracking(struct angle_observer_state *obs,
+				   float32_t mech_angle_rad,
+				   float32_t mech_speed_rad_s);
+
+/**
  * @brief Get current mechanical angle
  *
  * @param obs Pointer to observer state structure

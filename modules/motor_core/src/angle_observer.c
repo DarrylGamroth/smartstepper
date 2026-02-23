@@ -7,6 +7,8 @@
 #include "angle_observer.h"
 #include "angle_wrap.h"
 #include <zephyr/dsp/types.h>
+#include <math.h>
+#include <stddef.h>
 
 void angle_observer_init(struct angle_observer_state *obs,
 			 float32_t sample_period_s,
@@ -108,5 +110,30 @@ void angle_observer_update(struct angle_observer_state *obs,
 
 	/* Apply offset to predicted mechanical angle for predicted electrical angle */
 	float32_t mech_angle_pred_offset = obs->mech_angle_pred_rad + obs->mech_angle_offset_rad;
+	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
+}
+
+void angle_observer_reset_tracking(struct angle_observer_state *obs,
+				   float32_t mech_angle_rad,
+				   float32_t mech_speed_rad_s)
+{
+	if (obs == NULL) {
+		return;
+	}
+
+	float32_t seeded_angle = isfinite(mech_angle_rad) ? wrap_rad_2pi(mech_angle_rad) : 0.0f;
+	float32_t seeded_speed = isfinite(mech_speed_rad_s) ? mech_speed_rad_s : 0.0f;
+	float32_t mech_angle_offset = seeded_angle + obs->mech_angle_offset_rad;
+	float32_t elec_angle = wrap_rad_2pi(mech_angle_offset * obs->pole_pairs);
+	float32_t Ts = obs->sample_period_s;
+	float32_t mech_angle_pred = wrap_rad_2pi(seeded_angle + Ts * seeded_speed);
+	float32_t mech_angle_pred_offset = mech_angle_pred + obs->mech_angle_offset_rad;
+
+	obs->angle_est_rad = seeded_angle;
+	obs->speed_est_rad_s = seeded_speed;
+	obs->mech_angle_rad = seeded_angle;
+	obs->mech_speed_rad_s = seeded_speed;
+	obs->elec_angle_rad = elec_angle;
+	obs->mech_angle_pred_rad = mech_angle_pred;
 	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
 }

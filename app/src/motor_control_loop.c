@@ -296,7 +296,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t speed_mech_rad_s = params->velocity_rad_s;
 	float32_t accel_mech_rad_s2 = params->acceleration_rad_s2;
 	float32_t speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
-	uint8_t prev_encoder_input_source = params->encoder_input_source;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
 	bool autonomous_mode_active =
@@ -422,9 +421,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	if (encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    prev_encoder_input_source == MOTOR_ANGLE_INPUT_SRC_GENERATED &&
-	    fresh_encoder_sample) {
-		motor_position_convert_reset(&params->position_convert, wrap_rad_2pi(angle_raw_rad));
+	    fresh_encoder_sample &&
+	    !params->position_convert.measurement_locked) {
+		float32_t handoff_angle_rad = wrap_rad_2pi(angle_raw_rad);
+
+		/* Seed observer/position conversion on first fresh encoder sample after
+		 * mode/reset handoff to avoid large residual speed spikes.
+		 */
+		angle_observer_reset_tracking(&params->observer, handoff_angle_rad, 0.0f);
+		motor_position_convert_reset(&params->position_convert, handoff_angle_rad);
 	}
 	
 	/* Update observer with angle (encoder or generated) */
@@ -856,6 +861,19 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	inv_park_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
 
+	float32_t observer_elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
+	float32_t decoupling_speed_limit_rad_s =
+		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
+	bool decoupling_speed_valid = isfinite(observer_elec_speed_rad_s) &&
+				      (fabsf(observer_elec_speed_rad_s) <=
+				       decoupling_speed_limit_rad_s);
+	bool decoupling_feedback_valid = feature_angle_gen ||
+					 motor_velocity_feedback_is_valid(params->position_quality_flags);
+	bool decoupling_enabled = CURRENT_DECOUPLING_ENABLED &&
+				 online_control_state && control_armed &&
+				 decoupling_speed_valid && decoupling_feedback_valid;
+	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
+
 	struct motor_foc_voltage_pwm_inputs foc_inputs = {
 		.id_ref_a = Id_ref_A,
 		.iq_ref_a = Iq_ref_A,
@@ -867,9 +885,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		/* Keep decoupling/feedforward in ONLINE control only; calibration states
 		 * (ALIGN/RS_EST/ROVERL) can have transient observer speed spikes.
 		 */
-		.decoupling_enabled = CURRENT_DECOUPLING_ENABLED &&
-				     online_control_state && control_armed,
-		.electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer),
+		.decoupling_enabled = decoupling_enabled,
+		.electrical_speed_rad_s = decoupling_speed_rad_s,
 		.ld_h = params->Ld_est,
 		.lq_h = params->Lq_est,
 		.flux_linkage_wb = params->flux_linkage_wb_active,
