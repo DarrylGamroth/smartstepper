@@ -816,6 +816,11 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Collect:  ok=%u pending=%u empty=%u error=%u",
 		    stats.collect_ok, stats.collect_pending,
 		    stats.collect_empty, stats.collect_error);
+	shell_print(sh, "  Errors:   transport=%u frame=%u parity=%u status=%u",
+		    stats.collect_transport_error,
+		    stats.collect_frame_error,
+		    stats.collect_frame_parity_error,
+		    stats.collect_frame_status_error);
 
 	return 0;
 }

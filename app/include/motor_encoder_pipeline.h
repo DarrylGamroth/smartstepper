@@ -16,6 +16,8 @@ struct motor_encoder_sample {
 	uint8_t status;
 	bool warning;
 	bool error;
+	bool frame_status_error;
+	bool frame_parity_error;
 	bool fresh;
 };
 
@@ -28,6 +30,10 @@ struct motor_encoder_pipeline_stats {
 	uint32_t collect_pending;
 	uint32_t collect_empty;
 	uint32_t collect_error;
+	uint32_t collect_transport_error;
+	uint32_t collect_frame_error;
+	uint32_t collect_frame_parity_error;
+	uint32_t collect_frame_status_error;
 };
 
 /**

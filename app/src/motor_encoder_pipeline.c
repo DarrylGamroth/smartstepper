@@ -24,7 +24,9 @@
 #define ENCODER_FRAME_ERROR_BIT 0x40U
 
 static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					     bool *warning, bool *error)
+					     bool *warning, bool *error,
+					     bool *status_error_out,
+					     bool *parity_error_out)
 {
 	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
 	uint8_t status0 = sample->raw[0];
@@ -44,13 +46,21 @@ static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *sta
 	if (error != NULL) {
 		*error = status_error || parity_error;
 	}
+	if (status_error_out != NULL) {
+		*status_error_out = status_error;
+	}
+	if (parity_error_out != NULL) {
+		*parity_error_out = parity_error;
+	}
 }
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
 #include <drivers/sensor/magntek_mt6835.h>
 #define encoder_decode_position_f32 mt6835_decode_position_f32
 
 static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					     bool *warning, bool *error)
+					     bool *warning, bool *error,
+					     bool *status_error_out,
+					     bool *parity_error_out)
 {
 	ARG_UNUSED(buffer);
 	if (status != NULL) {
@@ -61,6 +71,12 @@ static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *sta
 	}
 	if (error != NULL) {
 		*error = false;
+	}
+	if (status_error_out != NULL) {
+		*status_error_out = false;
+	}
+	if (parity_error_out != NULL) {
+		*parity_error_out = false;
 	}
 }
 #else
@@ -79,6 +95,10 @@ static atomic_t motor_encoder_collect_ok_count;
 static atomic_t motor_encoder_collect_pending_count;
 static atomic_t motor_encoder_collect_empty_count;
 static atomic_t motor_encoder_collect_error_count;
+static atomic_t motor_encoder_collect_transport_error_count;
+static atomic_t motor_encoder_collect_frame_error_count;
+static atomic_t motor_encoder_collect_frame_parity_error_count;
+static atomic_t motor_encoder_collect_frame_status_error_count;
 
 void motor_encoder_pipeline_set_enabled(bool enabled)
 {
@@ -109,6 +129,14 @@ void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats
 	stats->collect_pending = (uint32_t)atomic_get(&motor_encoder_collect_pending_count);
 	stats->collect_empty = (uint32_t)atomic_get(&motor_encoder_collect_empty_count);
 	stats->collect_error = (uint32_t)atomic_get(&motor_encoder_collect_error_count);
+	stats->collect_transport_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_transport_error_count);
+	stats->collect_frame_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_frame_error_count);
+	stats->collect_frame_parity_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_frame_parity_error_count);
+	stats->collect_frame_status_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_frame_status_error_count);
 }
 
 void motor_encoder_pipeline_reset_stats(void)
@@ -121,6 +149,10 @@ void motor_encoder_pipeline_reset_stats(void)
 	atomic_set(&motor_encoder_collect_pending_count, 0);
 	atomic_set(&motor_encoder_collect_empty_count, 0);
 	atomic_set(&motor_encoder_collect_error_count, 0);
+	atomic_set(&motor_encoder_collect_transport_error_count, 0);
+	atomic_set(&motor_encoder_collect_frame_error_count, 0);
+	atomic_set(&motor_encoder_collect_frame_parity_error_count, 0);
+	atomic_set(&motor_encoder_collect_frame_status_error_count, 0);
 }
 
 int motor_encoder_pipeline_request_sample(void)
@@ -179,6 +211,7 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 		rtio_cqe_release(&motor_encoder_rtio_ctx, cqe);
 		atomic_set(&motor_encoder_read_in_flight, 0);
 		atomic_inc(&motor_encoder_collect_error_count);
+		atomic_inc(&motor_encoder_collect_transport_error_count);
 		return -EIO;
 	}
 
@@ -189,16 +222,25 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 	atomic_set(&motor_encoder_read_in_flight, 0);
 	if (rc != 0) {
 		atomic_inc(&motor_encoder_collect_error_count);
+		atomic_inc(&motor_encoder_collect_transport_error_count);
 		return -EIO;
 	}
 
 	sample->angle_deg = encoder_decode_position_f32(buf);
 	sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
-	encoder_parse_frame_flags(buf, &sample->status, &sample->warning, &sample->error);
+	encoder_parse_frame_flags(buf, &sample->status, &sample->warning, &sample->error,
+				 &sample->frame_status_error, &sample->frame_parity_error);
 	rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
 
 	if (sample->error) {
 		atomic_inc(&motor_encoder_collect_error_count);
+		atomic_inc(&motor_encoder_collect_frame_error_count);
+		if (sample->frame_parity_error) {
+			atomic_inc(&motor_encoder_collect_frame_parity_error_count);
+		}
+		if (sample->frame_status_error) {
+			atomic_inc(&motor_encoder_collect_frame_status_error_count);
+		}
 		return -EIO;
 	}
 
