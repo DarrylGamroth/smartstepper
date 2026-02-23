@@ -1156,7 +1156,9 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 	}
 
 	shell_print(sh,
-		    "idx loop src fresh warn err cmp enc_m_deg gen_m_deg d_m_deg enc_e_deg gen_e_deg d_e_deg");
+		    "idx loop src fresh warn err cmp enc_m_deg gen_m_deg d_m_deg enc_e_deg gen_e_deg d_e_deg rel_phase_deg");
+	bool rel_phase_init = false;
+	float32_t rel_phase_base_rad = 0.0f;
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *sample =
@@ -1167,8 +1169,20 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 		float32_t enc_e_deg = sample->encoder_elec_rad * (180.0f / PI_F32);
 		float32_t gen_e_deg = sample->generated_elec_rad * (180.0f / PI_F32);
 		float32_t d_e_deg = sample->elec_error_rad * (180.0f / PI_F32);
+		float32_t rel_phase_deg = 0.0f;
+		if (sample->compare_valid) {
+			if (!rel_phase_init) {
+				rel_phase_base_rad = sample->elec_error_rad;
+				rel_phase_init = true;
+				rel_phase_deg = 0.0f;
+			} else {
+				rel_phase_deg =
+					wrap_rad_pi(sample->elec_error_rad - rel_phase_base_rad) *
+					(180.0f / PI_F32);
+			}
+		}
 		shell_print(sh,
-			    "%u %u %s %u %u %u %u %.3f %.3f %.3f %.3f %.3f %.3f",
+			    "%u %u %s %u %u %u %u %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
 			    i,
 			    sample->control_loop_count,
 			    motor_encoder_input_source_to_string(sample->input_source),
@@ -1181,7 +1195,8 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 			    (double)d_m_deg,
 			    (double)enc_e_deg,
 			    (double)gen_e_deg,
-			    (double)d_e_deg);
+			    (double)d_e_deg,
+			    (double)rel_phase_deg);
 	}
 
 	return 0;
