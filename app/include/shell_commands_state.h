@@ -42,6 +42,7 @@ int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **
 int cmd_motor_encoder_capture_stop(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **argv);

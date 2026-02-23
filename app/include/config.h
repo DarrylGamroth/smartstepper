@@ -56,12 +56,19 @@ struct motor_encoder_capture_sample {
 	uint32_t control_loop_count;
 	float32_t angle_deg;
 	float32_t angle_rad;
+	float32_t encoder_mech_rad;
+	float32_t encoder_elec_rad;
+	float32_t generated_mech_rad;
+	float32_t generated_elec_rad;
+	float32_t mech_error_rad;
+	float32_t elec_error_rad;
 	uint8_t input_source;
 	uint8_t sample_enabled;
 	uint8_t sample_fresh;
 	uint8_t sample_warning;
 	uint8_t sample_error;
 	uint8_t status;
+	uint8_t compare_valid;
 };
 
 struct motor_fault_snapshot_sample {

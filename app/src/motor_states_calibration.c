@@ -98,16 +98,24 @@ void motor_state_calibration_exit(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	const bool commissioning =
 		(params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING);
+	const bool failed = (params->event.type == MOTOR_EVENT_ERROR);
 
-	LOG_INF("=== %s Complete ===", commissioning ? "Commissioning" : "Calibration");
-	LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
-	LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
-	LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
-
-	params->calibration_complete = true;
 	params->calibration_running = false;
-	if (commissioning) {
-		params->commissioning_complete = true;
+	if (failed) {
+		LOG_WRN("=== %s Aborted (error) ===",
+			commissioning ? "Commissioning" : "Calibration");
+		params->calibration_complete = false;
+		params->commissioning_complete = false;
+	} else {
+		LOG_INF("=== %s Complete ===",
+			commissioning ? "Commissioning" : "Calibration");
+		LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
+		LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
+		LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
+		params->calibration_complete = true;
+		if (commissioning) {
+			params->commissioning_complete = true;
+		}
 	}
 	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
 }
@@ -442,14 +450,52 @@ static inline void motor_align_start_sample_window(struct motor_parameters *para
 		      K_NO_WAIT);
 }
 
-static inline enum smf_state_result motor_align_fail(struct motor_parameters *params,
-						     const char *reason)
+static inline enum smf_state_result motor_align_apply_offset_and_transition(
+	struct motor_parameters *params,
+	float32_t offset_rad)
 {
-	LOG_ERR("ALIGN failed: %s", reason);
-	params->event.type = MOTOR_EVENT_ERROR;
-	params->event.error_code = ERROR_HARDWARE_BREAK;
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+	params->observer_alignment_offset_rad = wrap_rad_pi(offset_rad);
+	/* ALIGN defines base commutation reference; runtime trim is reset here. */
+	params->observer_elec_trim_rad = 0.0f;
+	angle_observer_set_offset(&params->observer, params->observer_alignment_offset_rad);
+
+	if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+	} else {
+		enum motor_state online_mode =
+			motor_resolve_requested_online_mode(params);
+		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
+	}
+
 	return SMF_EVENT_HANDLED;
+}
+
+static inline enum smf_state_result motor_align_fallback_from_mech(
+	struct motor_parameters *params,
+	float32_t mech_angle_rad,
+	const char *reason)
+{
+	float32_t mech_wrapped_rad = wrap_rad_2pi(mech_angle_rad);
+	float32_t fallback_offset_rad = wrap_rad_pi(-mech_wrapped_rad);
+
+	LOG_WRN("ALIGN fallback: %s (mech=%.2f deg, offset=%.2f deg)",
+		reason,
+		(double)(mech_wrapped_rad * (180.0f / PI_F32)),
+		(double)(fallback_offset_rad * (180.0f / PI_F32)));
+
+	return motor_align_apply_offset_and_transition(params, fallback_offset_rad);
+}
+
+static inline enum smf_state_result motor_align_fallback_from_observer(
+	struct motor_parameters *params,
+	const char *reason)
+{
+	float32_t mech_angle_rad = angle_observer_get_mech_angle(&params->observer);
+	if (!isfinite(mech_angle_rad)) {
+		mech_angle_rad = 0.0f;
+	}
+
+	return motor_align_fallback_from_mech(params, mech_angle_rad, reason);
 }
 
 /* State: ALIGN - parent state for dual-polarity rotor alignment */
@@ -557,7 +603,8 @@ enum smf_state_result motor_state_align_pos_sample_run(void *obj)
 			return SMF_EVENT_HANDLED;
 		}
 
-		return motor_align_fail(params, "+Id sample window insufficient fresh encoder samples");
+		return motor_align_fallback_from_observer(params,
+			"+Id sample window insufficient fresh encoder samples");
 	}
 
 	float32_t pos_mean_rad = 0.0f;
@@ -565,7 +612,8 @@ enum smf_state_result motor_state_align_pos_sample_run(void *obj)
 					       params->align_pos_sum_cos,
 					       params->align_pos_sample_count,
 					       &pos_mean_rad)) {
-		return motor_align_fail(params, "+Id sample circular mean invalid");
+		return motor_align_fallback_from_observer(params,
+			"+Id sample circular mean invalid");
 	}
 
 	params->align_pos_mech_angle_rad = pos_mean_rad;
@@ -660,7 +708,9 @@ enum smf_state_result motor_state_align_neg_sample_run(void *obj)
 			return SMF_EVENT_HANDLED;
 		}
 
-		return motor_align_fail(params, "-Id sample window insufficient fresh encoder samples");
+		return motor_align_fallback_from_mech(params,
+			params->align_pos_mech_angle_rad,
+			"-Id sample window insufficient fresh encoder samples");
 	}
 
 	float32_t neg_mean_rad = 0.0f;
@@ -668,7 +718,9 @@ enum smf_state_result motor_state_align_neg_sample_run(void *obj)
 					       params->align_neg_sum_cos,
 					       params->align_neg_sample_count,
 					       &neg_mean_rad)) {
-		return motor_align_fail(params, "-Id sample circular mean invalid");
+		return motor_align_fallback_from_mech(params,
+			params->align_pos_mech_angle_rad,
+			"-Id sample circular mean invalid");
 	}
 	params->align_neg_mech_angle_rad = neg_mean_rad;
 
@@ -680,11 +732,13 @@ enum smf_state_result motor_state_align_neg_sample_run(void *obj)
 	float32_t delta_tol_mech_rad = ALIGN_OPPOSED_ELEC_TOL_RAD / (float32_t)MOTOR_POLE_PAIRS;
 
 	if (delta_abs_error_rad > delta_tol_mech_rad) {
-		LOG_ERR("ALIGN consistency failed: |delta|=%.2f deg expected=%.2f deg (tol=%.2f deg)",
+		LOG_WRN("ALIGN dual-polarity mismatch: |delta|=%.2f deg expected=%.2f deg (tol=%.2f deg)",
 			(double)(fabsf(measured_delta_mech_rad) * (180.0f / PI_F32)),
 			(double)(expected_delta_mech_rad * (180.0f / PI_F32)),
 			(double)(delta_tol_mech_rad * (180.0f / PI_F32)));
-		return motor_align_fail(params, "dual-polarity angle separation out of tolerance");
+		return motor_align_fallback_from_mech(params,
+			params->align_pos_mech_angle_rad,
+			"dual-polarity separation out of tolerance");
 	}
 
 	float32_t offset_plus_rad = wrap_rad_pi(-params->align_pos_mech_angle_rad);
@@ -694,32 +748,17 @@ enum smf_state_result motor_state_align_neg_sample_run(void *obj)
 	float32_t offset_sum_cos = cosf(offset_plus_rad) + cosf(offset_minus_rad);
 
 	if ((fabsf(offset_sum_sin) < 1e-6f) && (fabsf(offset_sum_cos) < 1e-6f)) {
-		return motor_align_fail(params, "dual-polarity offset mean is ill-conditioned");
+		return motor_align_fallback_from_mech(params,
+			params->align_pos_mech_angle_rad,
+			"dual-polarity offset mean is ill-conditioned");
 	}
 
 	float32_t final_offset_rad = wrap_rad_pi(atan2f(offset_sum_sin, offset_sum_cos));
-	params->observer_alignment_offset_rad = final_offset_rad;
-	/* ALIGN defines base commutation reference; runtime trim is reset here. */
-	params->observer_elec_trim_rad = 0.0f;
-	angle_observer_set_offset(&params->observer, params->observer_alignment_offset_rad);
-
 	LOG_INF("Alignment complete: +Id=%.2f deg, -Id=%.2f deg, offset=%.2f deg",
 		(double)(params->align_pos_mech_angle_rad * (180.0f / PI_F32)),
 		(double)(params->align_neg_mech_angle_rad * (180.0f / PI_F32)),
 		(double)(final_offset_rad * (180.0f / PI_F32)));
-
-	/* Boot calibration resumes normal flow to ONLINE. Commissioning ends in IDLE
-	 * so the user can inspect measurements without immediately entering control.
-	 */
-	if (params->calibration_mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
-	} else {
-		enum motor_state online_mode =
-			motor_resolve_requested_online_mode(params);
-		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
-	}
-
-	return SMF_EVENT_HANDLED;
+	return motor_align_apply_offset_and_transition(params, final_offset_rad);
 }
 
 void motor_state_align_neg_sample_exit(void *obj)

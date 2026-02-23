@@ -832,7 +832,7 @@ int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv
 
 	int state = motor_api_get_state();
 	if (state == MOTOR_STATE_ONLINE || motor_state_is_online_submode(state)) {
-		shell_error(sh, "Set encoder direction sign while not in ONLINE state");
+		shell_error(sh, "Set encoder direction sign while in ONLINE state");
 		return -EPERM;
 	}
 
@@ -1037,6 +1037,16 @@ int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char *
 			    newest->sample_error,
 			    newest->status,
 			    newest->sample_enabled);
+		if (newest->compare_valid) {
+			shell_print(sh,
+				    "  Compare:    gen_mech=%.3fdeg enc_mech=%.3fdeg d_mech=%.3fdeg d_elec=%.3fdeg",
+				    (double)(newest->generated_mech_rad * (180.0f / PI_F32)),
+				    (double)(newest->encoder_mech_rad * (180.0f / PI_F32)),
+				    (double)(newest->mech_error_rad * (180.0f / PI_F32)),
+				    (double)(newest->elec_error_rad * (180.0f / PI_F32)));
+		} else {
+			shell_print(sh, "  Compare:    unavailable (needs fresh clean encoder sample)");
+		}
 	}
 
 	return 0;
@@ -1102,6 +1112,76 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 			    sample->sample_error,
 			    sample->status,
 			    sample->sample_enabled);
+	}
+
+	return 0;
+}
+
+/* motor encoder capture compare [count] */
+int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder capture compare [count]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t requested = 32U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &requested) || requested == 0U ||
+		    requested > MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
+			shell_error(sh, "count must be in [1, %u]",
+				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+			return -EINVAL;
+		}
+	}
+
+	uint16_t stored = g_motor_params->encoder_capture_count;
+	if (stored == 0U) {
+		shell_print(sh, "No captured encoder samples");
+		return 0;
+	}
+
+	uint16_t count = (uint16_t)MIN(requested, stored);
+	uint16_t start = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+				     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - count) %
+				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+
+	if (g_motor_params->encoder_capture_enabled) {
+		shell_warn(sh,
+			   "Capture is still running; compare dump may include concurrently updated samples.");
+	}
+
+	shell_print(sh,
+		    "idx loop src fresh warn err cmp enc_m_deg gen_m_deg d_m_deg enc_e_deg gen_e_deg d_e_deg");
+	for (uint16_t i = 0U; i < count; i++) {
+		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+		const struct motor_encoder_capture_sample *sample =
+			&g_motor_params->encoder_capture_samples[idx];
+		float32_t enc_m_deg = sample->encoder_mech_rad * (180.0f / PI_F32);
+		float32_t gen_m_deg = sample->generated_mech_rad * (180.0f / PI_F32);
+		float32_t d_m_deg = sample->mech_error_rad * (180.0f / PI_F32);
+		float32_t enc_e_deg = sample->encoder_elec_rad * (180.0f / PI_F32);
+		float32_t gen_e_deg = sample->generated_elec_rad * (180.0f / PI_F32);
+		float32_t d_e_deg = sample->elec_error_rad * (180.0f / PI_F32);
+		shell_print(sh,
+			    "%u %u %s %u %u %u %u %.3f %.3f %.3f %.3f %.3f %.3f",
+			    i,
+			    sample->control_loop_count,
+			    motor_encoder_input_source_to_string(sample->input_source),
+			    sample->sample_fresh,
+			    sample->sample_warning,
+			    sample->sample_error,
+			    sample->compare_valid,
+			    (double)enc_m_deg,
+			    (double)gen_m_deg,
+			    (double)d_m_deg,
+			    (double)enc_e_deg,
+			    (double)gen_e_deg,
+			    (double)d_e_deg);
 	}
 
 	return 0;

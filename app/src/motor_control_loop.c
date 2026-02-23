@@ -114,6 +114,13 @@ static inline bool motor_is_align_sample_state(const struct smf_state *state)
 static inline void motor_encoder_capture_try_store(struct motor_parameters *params,
 						   float32_t angle_deg,
 						   float32_t angle_rad,
+						   float32_t encoder_mech_rad,
+						   float32_t encoder_elec_rad,
+						   float32_t generated_mech_rad,
+						   float32_t generated_elec_rad,
+						   float32_t mech_error_rad,
+						   float32_t elec_error_rad,
+						   bool compare_valid,
 						   bool sample_enabled,
 						   bool sample_fresh,
 						   bool sample_warning,
@@ -137,6 +144,13 @@ static inline void motor_encoder_capture_try_store(struct motor_parameters *para
 	sample->control_loop_count = params->control_loop_count;
 	sample->angle_deg = angle_deg;
 	sample->angle_rad = angle_rad;
+	sample->encoder_mech_rad = encoder_mech_rad;
+	sample->encoder_elec_rad = encoder_elec_rad;
+	sample->generated_mech_rad = generated_mech_rad;
+	sample->generated_elec_rad = generated_elec_rad;
+	sample->mech_error_rad = mech_error_rad;
+	sample->elec_error_rad = elec_error_rad;
+	sample->compare_valid = compare_valid ? 1U : 0U;
 	sample->input_source = input_source;
 	sample->sample_enabled = sample_enabled ? 1U : 0U;
 	sample->sample_fresh = sample_fresh ? 1U : 0U;
@@ -478,13 +492,40 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t capture_angle_deg = encoder_sample_available ?
 					     angle_control_degrees :
 					     (angle_raw_rad * (180.0f / PI_F32));
+	float32_t capture_encoder_mech_rad = 0.0f;
+	float32_t capture_encoder_elec_rad = 0.0f;
+	float32_t capture_generated_mech_rad = wrap_rad_2pi(angle_gen_get_angle(&params->angle_gen));
+	float32_t mech_trim_rad = params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;
+	float32_t total_mech_offset_rad = params->observer_alignment_offset_rad + mech_trim_rad;
+	float32_t capture_generated_elec_rad =
+		wrap_rad_2pi((capture_generated_mech_rad + total_mech_offset_rad) *
+			     (float32_t)MOTOR_POLE_PAIRS);
+	float32_t capture_mech_error_rad = 0.0f;
+	float32_t capture_elec_error_rad = 0.0f;
+	bool capture_compare_valid = false;
 	uint8_t capture_input_source = encoder_sample_available ?
 					      MOTOR_ANGLE_INPUT_SRC_ENCODER :
 					      encoder_input_source;
+	if (encoder_sample_available && fresh_encoder_sample &&
+	    !encoder_frame_warning && !encoder_frame_error) {
+		capture_encoder_mech_rad = wrap_rad_2pi(angle_control_degrees * (PI_F32 / 180.0f));
+		capture_encoder_elec_rad =
+			wrap_rad_2pi((capture_encoder_mech_rad + total_mech_offset_rad) *
+				     (float32_t)MOTOR_POLE_PAIRS);
+		capture_mech_error_rad =
+			wrap_rad_pi(capture_encoder_mech_rad - capture_generated_mech_rad);
+		capture_elec_error_rad =
+			wrap_rad_pi(capture_encoder_elec_rad - capture_generated_elec_rad);
+		capture_compare_valid = true;
+	}
 	motor_encoder_capture_try_store(params, capture_angle_deg, capture_angle_rad,
-					encoder_sample_available, fresh_encoder_sample,
-					encoder_frame_warning, encoder_frame_error,
-					encoder_frame_status, capture_input_source);
+					capture_encoder_mech_rad, capture_encoder_elec_rad,
+					capture_generated_mech_rad, capture_generated_elec_rad,
+					capture_mech_error_rad, capture_elec_error_rad,
+					capture_compare_valid, encoder_sample_available,
+					fresh_encoder_sample, encoder_frame_warning,
+					encoder_frame_error, encoder_frame_status,
+					capture_input_source);
 
 	struct motor_position_convert_input pos_input = {
 		.sample_valid = false,
