@@ -66,16 +66,23 @@ motor state idle
 `motor encoder capture compare` prints:
 
 ```text
-idx loop src fresh warn err cmp enc_m_deg gen_m_deg d_m_deg enc_e_deg gen_e_deg d_e_deg
+idx loop src fresh warn err cmp ref enc_m_deg ref_m_deg d_m_deg enc_e_deg ref_e_deg d_e_deg rel_phase_deg
 ```
 
 - `cmp=1` means a fresh, warning-free, error-free encoder sample was available.
-- `d_m_deg` is mechanical encoder minus generated mechanical angle.
-- `d_e_deg` is electrical encoder minus generated electrical angle.
+- `ref` selects reference frame: `gen` (angle generator) or `obs` (observer).
+- `d_m_deg` is mechanical encoder minus selected reference mechanical angle.
+- `d_e_deg` is electrical encoder minus selected reference electrical angle.
+- `rel_phase_deg` is `d_e_deg` re-zeroed at the first valid compare sample.
 
 For a healthy open-loop tracking comparison:
 - `d_m_deg` should be nearly constant over time (it can be non-zero).
 - Drift in `d_m_deg` indicates sign or scaling mismatch.
+
+Reference selection:
+- `motor encoder capture compare [count] gen` compares against generated angle.
+- `motor encoder capture compare [count] obs` compares against observer angle.
+- Default is `gen`.
 
 ## Baseline (Current Hardware)
 
@@ -91,6 +98,21 @@ Interpretation:
 - Direction sign should be `-1` for this motor wiring.
 - Non-zero constant `d_m_deg` is expected because generator and absolute encoder
   use different mechanical zero references.
+
+## Closed-Loop Debug Variant
+
+Run the same capture flow in:
+- `motor state mode torque`
+- `motor state mode velocity_closed`
+
+Then use:
+
+```text
+motor encoder capture compare 200 obs
+```
+
+This highlights encoder-vs-observer phase drift directly in closed-loop modes
+using `rel_phase_deg`.
 
 ## Alignment Notes
 

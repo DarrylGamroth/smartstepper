@@ -116,6 +116,8 @@ static inline void motor_encoder_capture_try_store(struct motor_parameters *para
 						   float32_t angle_rad,
 						   float32_t encoder_mech_rad,
 						   float32_t encoder_elec_rad,
+						   float32_t observer_mech_rad,
+						   float32_t observer_elec_rad,
 						   float32_t generated_mech_rad,
 						   float32_t generated_elec_rad,
 						   float32_t mech_error_rad,
@@ -146,6 +148,8 @@ static inline void motor_encoder_capture_try_store(struct motor_parameters *para
 	sample->angle_rad = angle_rad;
 	sample->encoder_mech_rad = encoder_mech_rad;
 	sample->encoder_elec_rad = encoder_elec_rad;
+	sample->observer_mech_rad = observer_mech_rad;
+	sample->observer_elec_rad = observer_elec_rad;
 	sample->generated_mech_rad = generated_mech_rad;
 	sample->generated_elec_rad = generated_elec_rad;
 	sample->mech_error_rad = mech_error_rad;
@@ -494,6 +498,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 					     (angle_raw_rad * (180.0f / PI_F32));
 	float32_t capture_encoder_mech_rad = 0.0f;
 	float32_t capture_encoder_elec_rad = 0.0f;
+	float32_t capture_observer_mech_rad = angle_observer_get_mech_angle(&params->observer);
+	float32_t capture_observer_elec_rad = angle_observer_get_elec_angle(&params->observer);
 	float32_t capture_generated_mech_rad = wrap_rad_2pi(angle_gen_get_angle(&params->angle_gen));
 	float32_t mech_trim_rad = params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;
 	float32_t total_mech_offset_rad = params->observer_alignment_offset_rad + mech_trim_rad;
@@ -520,6 +526,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 	motor_encoder_capture_try_store(params, capture_angle_deg, capture_angle_rad,
 					capture_encoder_mech_rad, capture_encoder_elec_rad,
+					capture_observer_mech_rad, capture_observer_elec_rad,
 					capture_generated_mech_rad, capture_generated_elec_rad,
 					capture_mech_error_rad, capture_elec_error_rad,
 					capture_compare_valid, encoder_sample_available,

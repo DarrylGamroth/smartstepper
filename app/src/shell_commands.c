@@ -1696,8 +1696,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_capture,
 	SHELL_CMD(stop, NULL, "Stop capture", cmd_motor_encoder_capture_stop),
 	SHELL_CMD(status, NULL, "Show capture buffer status", cmd_motor_encoder_capture_status),
 	SHELL_CMD_ARG(dump, NULL, "Dump latest samples [count]", cmd_motor_encoder_capture_dump, 1, 1),
-	SHELL_CMD_ARG(compare, NULL, "Dump generator-vs-encoder comparison [count]",
-		      cmd_motor_encoder_capture_compare, 1, 1),
+	SHELL_CMD_ARG(compare, NULL, "Dump encoder comparison [count] [gen|obs]",
+		      cmd_motor_encoder_capture_compare, 1, 2),
 	SHELL_CMD(clear, NULL, "Clear capture buffer", cmd_motor_encoder_capture_clear),
 	SHELL_SUBCMD_SET_END
 );

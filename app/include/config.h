@@ -58,6 +58,8 @@ struct motor_encoder_capture_sample {
 	float32_t angle_rad;
 	float32_t encoder_mech_rad;
 	float32_t encoder_elec_rad;
+	float32_t observer_mech_rad;
+	float32_t observer_elec_rad;
 	float32_t generated_mech_rad;
 	float32_t generated_elec_rad;
 	float32_t mech_error_rad;
