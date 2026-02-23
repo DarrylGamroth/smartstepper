@@ -8,8 +8,10 @@
 #include "motor_states.h"
 #include "config.h"
 #include "motor_motion_modules.h"
+#include "motor_state_utils.h"
 #include <math.h>
 #include <string.h>
+#include <zephyr/sys/atomic.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(motor_api, CONFIG_APP_LOG_LEVEL);
@@ -50,6 +52,7 @@ enum motor_param_id {
 	PARAM_ID_PROFILE_MAX_ACCEL_HZ_S,
 	PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE,
 	PARAM_ID_COMMAND_TIMEOUT_MS,
+	PARAM_ID_ENCODER_DIRECTION_SIGN,
 	PARAM_ID_COUNT,
 };
 
@@ -85,6 +88,7 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 	[PARAM_ID_PROFILE_MAX_ACCEL_HZ_S] = "profile_max_accel_hz_s",
 	[PARAM_ID_TORQUE_GAIN_NM_PER_A_ACTIVE] = "torque_gain_nm_per_a_active",
 	[PARAM_ID_COMMAND_TIMEOUT_MS] = "command_timeout_ms",
+	[PARAM_ID_ENCODER_DIRECTION_SIGN] = "encoder_direction_sign",
 };
 
 static bool motor_param_requires_positive(uint8_t param_id)
@@ -217,6 +221,9 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_COMMAND_TIMEOUT_MS:
 		*value = (float)params->command_timeout_ms;
+		return 0;
+	case PARAM_ID_ENCODER_DIRECTION_SIGN:
+		*value = (float32_t)((params->encoder_direction_sign >= 0) ? 1.0f : -1.0f);
 		return 0;
 	default:
 		return -EINVAL;
@@ -883,6 +890,33 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		LOG_DBG("Updated command_timeout_ms = %u", params->command_timeout_ms);
 		break;
+	case PARAM_ID_ENCODER_DIRECTION_SIGN: {
+		int8_t sign = 0;
+		if (fabsf(value - 1.0f) < 1.0e-3f) {
+			sign = 1;
+		} else if (fabsf(value + 1.0f) < 1.0e-3f) {
+			sign = -1;
+		} else {
+			LOG_ERR("Rejected encoder_direction_sign (expected -1 or 1)");
+			break;
+		}
+		if (motor_state_ptr_is_online_control_state(params->state_for_isr)) {
+			LOG_ERR("Rejected encoder_direction_sign update in ONLINE state");
+			break;
+		}
+		if (atomic_get(&params->control_armed) != 0) {
+			LOG_ERR("Rejected encoder_direction_sign update while armed");
+			break;
+		}
+		params->encoder_direction_sign = sign;
+		params->position_quality_flags = 0U;
+		params->position_stale_count = 0U;
+		params->position_stale_events = 0U;
+		params->position_glitch_count = 0U;
+		params->position_jitter_count = 0U;
+		LOG_DBG("Updated encoder_direction_sign = %d", sign);
+		break;
+	}
 	default:
 		LOG_ERR("Unknown parameter ID: %u", params->event.param_update.param_id);
 		break;

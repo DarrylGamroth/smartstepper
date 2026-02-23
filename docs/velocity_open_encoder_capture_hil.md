@@ -53,6 +53,8 @@ motor state idle
 - Sign sanity:
   - If commanded velocity is `+0.80 Hz` but measured encoder velocity is negative,
     encoder/mechanical direction mapping is inverted.
+  - Use `motor encoder direction -1` (or `motor encoder direction 1`) to set
+    control-loop direction mapping without modifying encoder EEPROM.
   - Closed-loop modes need consistent sign convention.
 
 ## Notes

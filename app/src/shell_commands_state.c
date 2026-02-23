@@ -392,6 +392,8 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    g_motor_params->commissioning_complete ? "YES" : "NO");
 	shell_print(sh, "  Online mode:  %s",
 		    motor_state_to_string(g_motor_params->requested_online_mode));
+	shell_print(sh, "  Enc dir sign: %d",
+		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	
 	return 0;
 }
@@ -638,6 +640,8 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
 		    (double)g_motor_params->encoder_raw_deg,
 		    (double)g_motor_params->encoder_raw_rad);
+	shell_print(sh, "  Enc dir sign:   %d",
+		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	shell_print(sh, "  Enc used:       %.6f rad (%s, fresh=%s)",
 		    (double)g_motor_params->encoder_observer_input_rad,
 		    motor_encoder_input_source_to_string(g_motor_params->encoder_input_source),
@@ -749,6 +753,63 @@ int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char *
 
 	motor_encoder_pipeline_reset_stats();
 	shell_print(sh, "Encoder RTIO pipeline counters reset");
+	return 0;
+}
+
+/* motor encoder direction [sign] */
+int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder direction [<1|-1>]");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (argc == 1U) {
+		shell_print(sh, "Encoder direction sign: %d (devicetree default: %d)",
+			    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1,
+			    ENCODER_DIRECTION_SIGN);
+		return 0;
+	}
+
+	if (motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Disarm control before changing encoder direction sign");
+		return -EPERM;
+	}
+
+	int state = motor_api_get_state();
+	if (state == MOTOR_STATE_ONLINE || motor_state_is_online_submode(state)) {
+		shell_error(sh, "Set encoder direction sign while not in ONLINE state");
+		return -EPERM;
+	}
+
+	float parsed = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &parsed)) {
+		shell_error(sh, "direction sign must be numeric (-1 or 1)");
+		return -EINVAL;
+	}
+
+	int sign = 0;
+	if (fabsf(parsed - 1.0f) < 1.0e-3f) {
+		sign = 1;
+	} else if (fabsf(parsed + 1.0f) < 1.0e-3f) {
+		sign = -1;
+	} else {
+		shell_error(sh, "direction sign must be -1 or 1");
+		return -EINVAL;
+	}
+
+	int ret = motor_api_update_param("encoder_direction_sign", (float)sign);
+	if (ret != 0) {
+		shell_error(sh, "Failed to update encoder direction sign (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Encoder direction sign update posted (%d)", sign);
 	return 0;
 }
 

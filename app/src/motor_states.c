@@ -424,6 +424,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	/* Initialize velocity/position scaffold defaults */
 	params->position_target_rad = 0.0f;
+	params->encoder_direction_sign = (ENCODER_DIRECTION_SIGN >= 0) ? 1 : -1;
 	params->requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
 	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;

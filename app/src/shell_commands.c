@@ -1702,6 +1702,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_capture,
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
+	SHELL_CMD_ARG(direction, NULL, "Get/set encoder direction sign [<1|-1>]",
+		      cmd_motor_encoder_direction, 1, 1),
 	SHELL_CMD(capture, &sub_motor_encoder_capture, "Encoder sample capture buffer", NULL),
 	SHELL_CMD(pipeline, NULL, "Show encoder RTIO pipeline status/counters",
 		  cmd_motor_encoder_pipeline),

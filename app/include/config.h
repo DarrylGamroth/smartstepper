@@ -112,6 +112,7 @@ struct motor_parameters {
 
 	/* Observers and estimators */
 	struct angle_observer_state observer;
+	int8_t encoder_direction_sign; /* Mechanical encoder direction mapping (+1/-1) */
 	struct motor_position_convert_config position_convert_cfg;
 	struct motor_position_convert_state position_convert;
 	struct rs_online_estimator rs_est;
@@ -409,6 +410,10 @@ struct motor_parameters {
 #define VELOCITY_MAX_RAD_S (VELOCITY_MAX_HZ * 2.0f * PI_F32)
 #define VELOCITY_MAX_ACCEL_RAD_S2 (VELOCITY_MAX_ACCEL_HZ_S * 2.0f * PI_F32)
 #define VELOCITY_INITIAL_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, velocity_initial_hz))
+#define ENCODER_DIRECTION_SIGN DT_PROP_OR(USER_PARAMS_NODE, encoder_direction_sign, 1)
+#if (ENCODER_DIRECTION_SIGN != 1) && (ENCODER_DIRECTION_SIGN != -1)
+#error "encoder-direction-sign must be -1 or 1"
+#endif
 #define OUTER_LOOP_DECIMATION_MIN 1U
 #define OUTER_LOOP_DECIMATION_MAX 1000U
 #define VELOCITY_LOOP_DECIMATION_DEFAULT 1U

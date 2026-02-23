@@ -190,3 +190,14 @@ properties:
     type: int
     default: 0
     description: Initial velocity setpoint in Hz (typically 0)
+
+  encoder-direction-sign:
+    type: int
+    default: 1
+    enum:
+      - -1
+      - 1
+    description: >
+      Mechanical encoder direction mapping sign used by the control loop.
+      Set to 1 for normal direction, or -1 to invert measured mechanical
+      angle/speed without writing encoder EEPROM.

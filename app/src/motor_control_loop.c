@@ -193,7 +193,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->control_loop_count++;
 	commission_obs.control_loop_count = params->control_loop_count;
 
-	float32_t angle_raw_degrees = 0;
+	float32_t angle_sensor_degrees = 0.0f;
+	float32_t angle_control_degrees = 0.0f;
 	float32_t sin_theta, cos_theta;
 	float32_t Ia_A, Ib_A;
 	float32_t Vbus_V;
@@ -208,6 +209,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t max_voltage_magnitude_V;
 	float32_t inv_park_angle_rad;
 	float32_t dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	float32_t encoder_direction_sign =
+		(params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
 	uint32_t velocity_loop_decimation =
 		CLAMP(params->velocity_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
@@ -273,7 +276,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	    (encoder_sample->enabled || params->encoder_capture_enabled)) {
 		encoder_sample_enabled = encoder_sample->enabled;
 		encoder_sample_available = true;
-		angle_raw_degrees = encoder_sample->angle_deg;
+		angle_sensor_degrees = encoder_sample->angle_deg;
+		angle_control_degrees = angle_sensor_degrees * encoder_direction_sign;
 		encoder_frame_status = encoder_sample->status;
 		encoder_frame_warning = encoder_sample->warning;
 		encoder_frame_error = encoder_sample->error;
@@ -334,11 +338,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
 	} else if (encoder_sample_enabled && fresh_encoder_sample) {
 		/* Normal operation: use fresh encoder reading (1-cycle pipelined delay) */
-		angle_raw_rad = angle_raw_degrees * (PI_F32 / 180.0f);
+		angle_raw_rad = angle_control_degrees * (PI_F32 / 180.0f);
 		angle_observer_set_delay(&params->observer, 1.0f);
 		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;
-		params->encoder_raw_deg = angle_raw_degrees;
-		params->encoder_raw_rad = angle_raw_rad;
+		params->encoder_raw_deg = angle_sensor_degrees;
+		params->encoder_raw_rad = angle_sensor_degrees * (PI_F32 / 180.0f);
 	} else {
 		/* No fresh encoder sample: propagate using prior estimate only. */
 		angle_raw_rad = angle_observer_get_mech_angle(&params->observer);
@@ -358,10 +362,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->encoder_input_source = encoder_input_source;
 
 	float32_t capture_angle_rad = encoder_sample_available ?
-					     (angle_raw_degrees * (PI_F32 / 180.0f)) :
+					     (angle_control_degrees * (PI_F32 / 180.0f)) :
 					     angle_raw_rad;
 	float32_t capture_angle_deg = encoder_sample_available ?
-					     angle_raw_degrees :
+					     angle_control_degrees :
 					     (angle_raw_rad * (180.0f / PI_F32));
 	uint8_t capture_input_source = encoder_sample_available ?
 					      MOTOR_ANGLE_INPUT_SRC_ENCODER :

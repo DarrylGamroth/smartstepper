@@ -109,6 +109,7 @@ void config_print_parameters(void)
 	LOG_INF("  R=%.1fmOhm", (double)(MOTOR_RESISTANCE_OHM * 1000.0f));
 	LOG_INF("  Flux linkage=%.3fuV/Hz", (double)(MOTOR_FLUX_LINKAGE_VPH_ELEC * 1000000.0f));
 	LOG_INF("  Pole pairs=%d", MOTOR_POLE_PAIRS);
+	LOG_INF("  Encoder direction sign=%d", ENCODER_DIRECTION_SIGN);
 	LOG_INF("  Max current=%.1fA", (double)MOTOR_MAX_CURRENT_A);
 	LOG_INF("  Max speed=%.0fHz", (double)MOTOR_MAX_SPEED_HZ);
 	LOG_INF("  Inertia=%.3fkgcm²", (double)(MOTOR_INERTIA_KGM2 * 10000.0f));
