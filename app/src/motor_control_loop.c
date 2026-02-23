@@ -62,6 +62,11 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 }
 
 #define VBUS_MIN_VALID_V 0.1f
+#define CURRENT_DECOUPLING_MIN_MECH_SPEED_HZ 0.75f
+#define CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S \
+	(2.0f * PI_F32 * CURRENT_DECOUPLING_MIN_MECH_SPEED_HZ)
+#define CURRENT_DECOUPLING_MIN_FLUX_WB 1.0e-5f
+#define CURRENT_DECOUPLING_MAX_FLUX_WB 1.0f
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {
@@ -783,12 +788,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 			&params->velocity_loop_phase, velocity_loop_decimation);
 		if (velocity_loop_update) {
 			if (!velocity_feedback_valid) {
-				/* Hold prior current command and reset observers while encoder quality
-				 * is degraded to avoid direction flips from propagated/glitched speed.
+				/* Hold measured dq currents and reset outer-loop observers while encoder
+				 * quality is degraded. This avoids current spikes when velocity/angle
+				 * feedback is stale or glitched.
 				 */
-				Iq_ref_A = clampf(Iq_ref_A,
-						 -params->velocity_cl_iq_limit_A,
-						 params->velocity_cl_iq_limit_A);
+				Id_ref_A = Id_A;
+				Iq_ref_A = Iq_A;
+				params->velocity_target_rad_s = 0.0f;
+				params->velocity_ref_rad_s = 0.0f;
+				traj_set_target_value(&params->traj_velocity, 0.0f);
 				motor_mpr_velocity_reset(&params->velocity_mpr_state,
 							 speed_mech_filtered_rad_s,
 							 Iq_ref_A);
@@ -898,9 +906,27 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Select current references based on mode */
 	if (feature_use_commanded_currents) {
-		/* Normal FOC operation: use commanded current references */
-		Id_ref_A = params->Id_setpoint_A;
-		Iq_ref_A = params->Iq_setpoint_A;
+		bool commanded_current_needs_encoder_feedback =
+			online_control_state && !feature_angle_gen;
+		bool commanded_current_feedback_valid =
+			motor_velocity_feedback_is_valid(params->position_quality_flags);
+
+		/* In encoder-based current control, hold a neutral current-loop command
+		 * until position/speed feedback quality is valid. This avoids large
+		 * transients when torque mode is entered before valid encoder feedback.
+		 */
+		if (commanded_current_needs_encoder_feedback &&
+		    !commanded_current_feedback_valid) {
+			/* Keep current loop neutral while encoder feedback is invalid. */
+			Id_ref_A = Id_A;
+			Iq_ref_A = Iq_A;
+			pi_set_ui(&params->pi_Id, 0.0f);
+			pi_set_ui(&params->pi_Iq, 0.0f);
+		} else {
+			/* Normal FOC operation: use commanded current references */
+			Id_ref_A = params->Id_setpoint_A;
+			Iq_ref_A = params->Iq_setpoint_A;
+		}
 	}
 
 	/* Arm/disarm interlock only applies in ONLINE control states. */
@@ -946,6 +972,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t observer_elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
 	float32_t decoupling_speed_limit_rad_s =
 		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
+	float32_t flux_linkage_wb_abs = fabsf(params->flux_linkage_wb_active);
+	bool torque_mode_state = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
+	bool decoupling_min_speed_reached =
+		fabsf(speed_mech_filtered_rad_s) >= CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S;
+	bool decoupling_flux_valid = isfinite(flux_linkage_wb_abs) &&
+				     (flux_linkage_wb_abs >= CURRENT_DECOUPLING_MIN_FLUX_WB) &&
+				     (flux_linkage_wb_abs <= CURRENT_DECOUPLING_MAX_FLUX_WB);
 	bool decoupling_speed_valid = isfinite(observer_elec_speed_rad_s) &&
 				      (fabsf(observer_elec_speed_rad_s) <=
 				       decoupling_speed_limit_rad_s);
@@ -953,7 +986,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 					 motor_velocity_feedback_is_valid(params->position_quality_flags);
 	bool decoupling_enabled = CURRENT_DECOUPLING_ENABLED &&
 				 online_control_state && control_armed &&
-				 decoupling_speed_valid && decoupling_feedback_valid;
+				 !torque_mode_state &&
+				 decoupling_min_speed_reached &&
+				 decoupling_flux_valid &&
+				 decoupling_speed_valid &&
+				 decoupling_feedback_valid;
 	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
 
 	struct motor_foc_voltage_pwm_inputs foc_inputs = {

@@ -35,7 +35,7 @@ config ENCODER_MAGNET_CHECK_ON_ARM
 
 config MOTOR_CURRENT_DECOUPLING
 	bool "Enable d/q decoupling and back-EMF feedforward"
-	default y
+	default n
 	help
 	  Adds model-based feedforward terms to the d-axis and q-axis current loops:
 	  vd_ff = -omega_e * Lq * iq and
