@@ -43,6 +43,15 @@ static inline bool motor_state_allows_arm(int state)
 	       motor_state_is_online_submode(state);
 }
 
+static inline bool motor_state_is_align_phase(int state)
+{
+	return state == MOTOR_STATE_ALIGN ||
+	       state == MOTOR_STATE_ALIGN_POS_INJECT ||
+	       state == MOTOR_STATE_ALIGN_POS_SAMPLE ||
+	       state == MOTOR_STATE_ALIGN_NEG_INJECT ||
+	       state == MOTOR_STATE_ALIGN_NEG_SAMPLE;
+}
+
 static const char *motor_encoder_input_source_to_string(uint8_t source)
 {
 	switch (source) {
@@ -411,6 +420,25 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    motor_state_to_string(g_motor_params->requested_online_mode));
 	shell_print(sh, "  Enc dir sign: %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
+	if (g_motor_params->calibration_running || motor_state_is_align_phase(state)) {
+		shell_print(sh, "  Align phase:  %s", state_str);
+		shell_print(sh,
+			    "  Align +Id:   samples=%u retries=%u mean=%.2f deg",
+			    g_motor_params->align_pos_sample_count,
+			    g_motor_params->align_pos_sample_retries,
+			    (double)(g_motor_params->align_pos_mech_angle_rad *
+				     (180.0f / PI_F32)));
+		shell_print(sh,
+			    "  Align -Id:   samples=%u retries=%u mean=%.2f deg",
+			    g_motor_params->align_neg_sample_count,
+			    g_motor_params->align_neg_sample_retries,
+			    (double)(g_motor_params->align_neg_mech_angle_rad *
+				     (180.0f / PI_F32)));
+		shell_print(sh,
+			    "  Align offset: %.2f deg",
+			    (double)(g_motor_params->observer_alignment_offset_rad *
+				     (180.0f / PI_F32)));
+	}
 	
 	return 0;
 }
