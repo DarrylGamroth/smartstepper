@@ -12,6 +12,7 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_SENSOR_BRCM_AEAT9955_H_
 #define ZEPHYR_INCLUDE_DRIVERS_SENSOR_BRCM_AEAT9955_H_
 
+#include <errno.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/dsp/dsp.h>
@@ -29,6 +30,10 @@ extern "C" {
 #define AEAT9955_RESOLUTION_BITS 18 /**< 18-bit absolute position resolution */
 #define AEAT9955_MAX_COUNT       (1U << AEAT9955_RESOLUTION_BITS) /**< Maximum count value (262144) */
 #define AEAT9955_COUNTS_TO_DEGREES (360.0f / (float)AEAT9955_MAX_COUNT) /**< Conversion factor */
+#define AEAT9955_POS_STATUS_PARITY_BIT 0x80U /**< Status/parity bit in response byte 0 */
+#define AEAT9955_POS_STATUS_ERROR_BIT  0x40U /**< Device error bit in response byte 0 */
+#define AEAT9955_FRAME_STATUS_MASK \
+	(AEAT9955_POS_STATUS_PARITY_BIT | AEAT9955_POS_STATUS_ERROR_BIT)
 
 /**
  * @brief AEAT9955 Q31 sensor reading
@@ -144,6 +149,88 @@ struct aeat9955_sample {
  * @return 0 on success, negative error code on failure
  */
 int aeat9955_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
+
+/**
+ * @brief Decode AEAT-9955 position and frame checks from raw SPI response
+ *
+ * @param raw_buf Raw SPI response buffer (must be at least 3 bytes)
+ * @param position Output: 18-bit position value
+ * @param status_error Output: device error/status bit
+ * @param parity_error Output: parity check error flag
+ * @return 0 on success, -EIO on frame check failure
+ */
+static inline int aeat9955_decode_position(const uint8_t *raw_buf, uint32_t *position,
+					   bool *status_error, bool *parity_error)
+{
+	uint8_t status0 = raw_buf[0];
+	uint32_t raw24 = sys_get_be24(raw_buf) & 0x00FFFFFFU;
+	bool status_bit_error = (status0 & AEAT9955_POS_STATUS_ERROR_BIT) != 0U;
+	/* SPI4-16 response parity covers the full 24-bit encoder frame. */
+	bool frame_parity_error = (POPCOUNT(raw24) & 1U) != 0U;
+
+	if (position != NULL) {
+		/* Extract 18-bit position (bits 0-17). */
+		*position = (raw24 >> 4) & (AEAT9955_MAX_COUNT - 1U);
+	}
+	if (status_error != NULL) {
+		*status_error = status_bit_error;
+	}
+	if (parity_error != NULL) {
+		*parity_error = frame_parity_error;
+	}
+
+	if (status_bit_error || frame_parity_error) {
+		return -EIO;
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Decode full AEAT-9955 RTIO sample into angle and frame status flags
+ *
+ * @param buffer Pointer to `struct aeat9955_sample`
+ * @param angle_deg Output: decoded angle in degrees, centered [-180, 180)
+ * @param status Output: raw frame status bits (parity/error)
+ * @param warning Output: warning flag (always false for AEAT position frame)
+ * @param error Output: true on parity or status frame errors
+ * @param status_error_out Output: device status error bit
+ * @param parity_error_out Output: frame parity error
+ * @return 0 on success, -EIO on frame check failure
+ */
+static inline int aeat9955_decode_sample_f32(const uint8_t *buffer, float *angle_deg, uint8_t *status,
+					     bool *warning, bool *error, bool *status_error_out,
+					     bool *parity_error_out)
+{
+	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
+	uint32_t position = 0U;
+	bool status_error = false;
+	bool parity_error = false;
+	int ret = aeat9955_decode_position(sample->raw, &position, &status_error, &parity_error);
+
+	if (angle_deg != NULL) {
+		*angle_deg = (float)((int32_t)position - (1 << (AEAT9955_RESOLUTION_BITS - 1))) *
+			     AEAT9955_COUNTS_TO_DEGREES;
+	}
+	if (status != NULL) {
+		*status = sample->raw[0] & AEAT9955_FRAME_STATUS_MASK;
+	}
+	if (warning != NULL) {
+		/* No separate warning bit in SPI4-16 fast position frame. */
+		*warning = false;
+	}
+	if (error != NULL) {
+		*error = status_error || parity_error;
+	}
+	if (status_error_out != NULL) {
+		*status_error_out = status_error;
+	}
+	if (parity_error_out != NULL) {
+		*parity_error_out = parity_error;
+	}
+
+	return ret;
+}
 
 /**
  * @brief Fast inline position decode for ISR use (Q31 format)

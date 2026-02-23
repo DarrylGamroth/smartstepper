@@ -186,41 +186,6 @@ extern "C" {
 #define AEAT9955_RESOLUTION_BITS 18
 #define AEAT9955_MAX_COUNT       (1U << AEAT9955_RESOLUTION_BITS)
 
-/**
- * @brief Decode AEAT-9955 position and status from raw SPI response
- *
- * @param raw_buf Raw SPI response buffer (must be at least 3 bytes)
- * @param position Output: 18-bit position value
- * @param status_error Output: device error/status bit
- * @param parity_error Output: parity check error flag
- * @return 0 on success, -EIO on error
- */
-static inline int aeat9955_decode_position(const uint8_t *raw_buf, uint32_t *position,
-					   bool *status_error, bool *parity_error)
-{
-	uint8_t status0 = raw_buf[0];
-	uint32_t raw24 = sys_get_be24(raw_buf) & 0x00FFFFFFU;
-
-	/* Extract 18-bit position (bits 0-17) */
-	*position = (raw24 >> 4) & (AEAT9955_MAX_COUNT - 1);
-	bool status_bit_error = (status0 & AEAT9955_POS_STATUS_ERROR_BIT) != 0U;
-	/* SPI4-16 response parity covers the full 24-bit encoder frame. */
-	bool frame_parity_error = (POPCOUNT(raw24) & 1U) != 0U;
-
-	if (status_error != NULL) {
-		*status_error = status_bit_error;
-	}
-	if (parity_error != NULL) {
-		*parity_error = frame_parity_error;
-	}
-
-	if (status_bit_error || frame_parity_error) {
-		return -EIO;
-	}
-
-	return 0;
-}
-
 #ifdef __cplusplus
 }
 #endif

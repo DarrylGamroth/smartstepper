@@ -12,8 +12,10 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_SENSOR_MAGNTEK_MT6835_H_
 #define ZEPHYR_INCLUDE_DRIVERS_SENSOR_MAGNTEK_MT6835_H_
 
+#include <errno.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/dsp/dsp.h>
 #include <zephyr/sys/util.h>
 
@@ -70,6 +72,7 @@ enum mt6835_sensor_attribute {
  * @brief MT6835 encoder resolution
  */
 #define MT6835_RESOLUTION_BITS 21  /**< 21-bit encoder (2097152 counts per revolution) */
+#define MT6835_MAX_COUNT       (1U << MT6835_RESOLUTION_BITS)
 
 /**
  * @brief MT6835 angle conversion constants
@@ -96,6 +99,7 @@ enum mt6835_sensor_attribute {
 #define MT6835_STATUS_BIT0_ROTATION_OVERSPEED  0x01  /**< Bit 0: Rotation Over Speed Warning */
 #define MT6835_STATUS_BIT1_WEAK_MAGNETIC       0x02  /**< Bit 1: Weak Magnetic Field Warning */
 #define MT6835_STATUS_BIT2_UNDER_VOLTAGE       0x04  /**< Bit 2: Under Voltage Warning */
+#define MT6835_STATUS_MASK                      0x07  /**< STATUS bits [2:0] in fast angle frame */
 
 /**
  * @brief Calibration status values from register 0x113 bits [7:6]
@@ -122,6 +126,9 @@ enum mt6835_sensor_attribute {
 
 /** Raw SPI frame size returned by the encoder. */
 #define MT6835_RAW_FRAME_SIZE 6U
+#define MT6835_FRAME_DATA_OFFSET 2U
+#define MT6835_FRAME_DATA_LEN    3U
+#define MT6835_FRAME_CRC_OFFSET  5U
 
 /**
  * @brief Metadata recorded for each MT6835 RTIO submission.
@@ -145,6 +152,83 @@ struct mt6835_sample {
  * @return 0 on success, negative error code on failure
  */
 int mt6835_get_decoder(const struct device *dev, const struct sensor_decoder_api **decoder);
+
+/**
+ * @brief Decode MT6835 position and verify frame CRC8
+ *
+ * @param raw_buf Raw SPI response buffer (must be at least 6 bytes)
+ * @param position Output: 21-bit position value
+ * @param crc_error Output: CRC mismatch flag
+ * @return 0 on success, -EIO on CRC mismatch
+ */
+static inline int mt6835_decode_position(const uint8_t *raw_buf, uint32_t *position, bool *crc_error)
+{
+	uint8_t expected_crc =
+		crc8_ccitt(0x00U, &raw_buf[MT6835_FRAME_DATA_OFFSET], MT6835_FRAME_DATA_LEN);
+	uint8_t received_crc = raw_buf[MT6835_FRAME_CRC_OFFSET];
+	bool frame_crc_error = (expected_crc != received_crc);
+
+	if (crc_error != NULL) {
+		*crc_error = frame_crc_error;
+	}
+
+	if (frame_crc_error) {
+		return -EIO;
+	}
+
+	if (position != NULL) {
+		*position = (sys_get_be24(&raw_buf[MT6835_FRAME_DATA_OFFSET]) >> 3) &
+			    (MT6835_MAX_COUNT - 1U);
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Decode full MT6835 RTIO sample into angle and frame status flags
+ *
+ * @param buffer Pointer to `struct mt6835_sample`
+ * @param angle_deg Output: decoded angle in degrees, centered [-180, 180)
+ * @param status Output: STATUS bits [2:0] from angle frame
+ * @param warning Output: warning flag (kept false for now; see status output)
+ * @param error Output: true on CRC failure
+ * @param status_error_out Output: status-error flag (always false for MT6835)
+ * @param parity_error_out Output: frame-check error flag (mapped from CRC)
+ * @return 0 on success, -EIO on CRC mismatch
+ */
+static inline int mt6835_decode_sample_f32(const uint8_t *buffer, float *angle_deg, uint8_t *status,
+					   bool *warning, bool *error, bool *status_error_out,
+					   bool *parity_error_out)
+{
+	const struct mt6835_sample *sample = (const struct mt6835_sample *)buffer;
+	uint32_t position = 0U;
+	bool crc_error = false;
+	int ret = mt6835_decode_position(sample->raw, &position, &crc_error);
+
+	if (angle_deg != NULL) {
+		*angle_deg = (float)((int32_t)position - (1 << (MT6835_RESOLUTION_BITS - 1))) *
+			     MT6835_COUNTS_TO_DEGREES;
+	}
+	if (status != NULL) {
+		*status = sample->raw[4] & MT6835_STATUS_MASK;
+	}
+	if (warning != NULL) {
+		/* Keep advisory status bits non-faulting in control-loop path for now. */
+		*warning = false;
+	}
+	if (error != NULL) {
+		*error = crc_error;
+	}
+	if (status_error_out != NULL) {
+		*status_error_out = false;
+	}
+	if (parity_error_out != NULL) {
+		/* Preserve pipeline stats/counter naming for existing tooling. */
+		*parity_error_out = crc_error;
+	}
+
+	return ret;
+}
 
 /**
  * @brief Fast inline position decode for ISR use (Q31 format)

@@ -19,66 +19,10 @@
 /* Include encoder-specific headers based on devicetree */
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
-#define encoder_decode_position_f32 aeat9955_decode_position_f32
-#define ENCODER_FRAME_PARITY_BIT 0x80U
-#define ENCODER_FRAME_ERROR_BIT 0x40U
-
-static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					     bool *warning, bool *error,
-					     bool *status_error_out,
-					     bool *parity_error_out)
-{
-	const struct aeat9955_sample *sample = (const struct aeat9955_sample *)buffer;
-	uint8_t status0 = sample->raw[0];
-	uint32_t raw24 = sys_get_be24(sample->raw) & 0x00FFFFFFU;
-	uint8_t frame_status = status0 & (ENCODER_FRAME_PARITY_BIT | ENCODER_FRAME_ERROR_BIT);
-	bool status_error = (frame_status & ENCODER_FRAME_ERROR_BIT) != 0U;
-	/* SPI4-16 response parity covers the full 24-bit encoder frame. */
-	bool parity_error = (POPCOUNT(raw24) & 1U) != 0U;
-
-	if (status != NULL) {
-		*status = frame_status;
-	}
-	if (warning != NULL) {
-		/* No separate warning bit in SPI4-16 fast position frame. */
-		*warning = false;
-	}
-	if (error != NULL) {
-		*error = status_error || parity_error;
-	}
-	if (status_error_out != NULL) {
-		*status_error_out = status_error;
-	}
-	if (parity_error_out != NULL) {
-		*parity_error_out = parity_error;
-	}
-}
+#define encoder_decode_sample_f32 aeat9955_decode_sample_f32
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
 #include <drivers/sensor/magntek_mt6835.h>
-#define encoder_decode_position_f32 mt6835_decode_position_f32
-
-static inline void encoder_parse_frame_flags(const uint8_t *buffer, uint8_t *status,
-					     bool *warning, bool *error,
-					     bool *status_error_out,
-					     bool *parity_error_out)
-{
-	ARG_UNUSED(buffer);
-	if (status != NULL) {
-		*status = 0U;
-	}
-	if (warning != NULL) {
-		*warning = false;
-	}
-	if (error != NULL) {
-		*error = false;
-	}
-	if (status_error_out != NULL) {
-		*status_error_out = false;
-	}
-	if (parity_error_out != NULL) {
-		*parity_error_out = false;
-	}
-}
+#define encoder_decode_sample_f32 mt6835_decode_sample_f32
 #else
 #error "Unsupported encoder type for encoder1 alias"
 #endif
@@ -236,13 +180,15 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 		return -EIO;
 	}
 
-	sample->angle_deg = encoder_decode_position_f32(buf);
-	sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
-	encoder_parse_frame_flags(buf, &sample->status, &sample->warning, &sample->error,
-				 &sample->frame_status_error, &sample->frame_parity_error);
+	int decode_ret = encoder_decode_sample_f32(buf, &sample->angle_deg, &sample->status,
+					    &sample->warning, &sample->error,
+					    &sample->frame_status_error, &sample->frame_parity_error);
+	if (decode_ret == 0) {
+		sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
+	}
 	rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
 
-	if (sample->error) {
+	if (decode_ret != 0 || sample->error) {
 		atomic_inc(&motor_encoder_collect_error_count);
 		atomic_inc(&motor_encoder_collect_frame_error_count);
 		if (sample->frame_parity_error) {

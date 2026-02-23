@@ -12,8 +12,6 @@
 #ifndef MAGNTEK_MT6835_PRIV_H_
 #define MAGNTEK_MT6835_PRIV_H_
 
-#include <errno.h>
-#include <zephyr/sys/crc.h>
 #include <drivers/sensor/magntek_mt6835.h>
 
 #ifdef __cplusplus
@@ -60,39 +58,6 @@ extern "C" {
 #define MT6835_PULSES_PER_REV 2097152
 #define MT6835_MILLION_UNIT   1000000
 #define MT6835_MAX_COUNT      (1U << MT6835_RESOLUTION_BITS)
-#define MT6835_FRAME_DATA_OFFSET 2U
-#define MT6835_FRAME_DATA_LEN    3U
-#define MT6835_FRAME_CRC_OFFSET  5U
-
-/**
- * @brief Decode MT6835 position and verify frame CRC8
- *
- * @param raw_buf Raw SPI response buffer (must be at least 6 bytes)
- * @param position Output: 21-bit position value
- * @param crc_error Output: CRC mismatch flag
- * @return 0 on success, -EIO on CRC mismatch
- */
-static inline int mt6835_decode_position(const uint8_t *raw_buf, uint32_t *position, bool *crc_error)
-{
-	uint8_t expected_crc =
-		crc8_ccitt(0x00U, &raw_buf[MT6835_FRAME_DATA_OFFSET], MT6835_FRAME_DATA_LEN);
-	uint8_t received_crc = raw_buf[MT6835_FRAME_CRC_OFFSET];
-	bool frame_crc_error = (expected_crc != received_crc);
-
-	if (crc_error != NULL) {
-		*crc_error = frame_crc_error;
-	}
-
-	if (frame_crc_error) {
-		return -EIO;
-	}
-
-	*position = (sys_get_be24(&raw_buf[MT6835_FRAME_DATA_OFFSET]) >> 3) &
-		    (MT6835_MAX_COUNT - 1U);
-
-	return 0;
-}
-
 #ifdef __cplusplus
 }
 #endif
