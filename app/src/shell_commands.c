@@ -1713,6 +1713,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 		  cmd_motor_encoder_pipeline),
 	SHELL_CMD(pipeline_reset, NULL, "Reset encoder RTIO pipeline counters",
 		  cmd_motor_encoder_pipeline_reset),
+	SHELL_CMD_ARG(pipeline_inject, NULL, "Pipeline fault inject mode [none|status|frame]",
+		      cmd_motor_encoder_pipeline_inject, 1, 1),
 	SHELL_SUBCMD_SET_END
 );
 

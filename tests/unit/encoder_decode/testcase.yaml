@@ -1,0 +1,10 @@
+tests:
+  chopper.encoder_decode.unit:
+    tags:
+      - chopper
+      - encoder
+      - unit
+      - decode
+    harness: ztest
+    integration_platforms:
+      - native_sim

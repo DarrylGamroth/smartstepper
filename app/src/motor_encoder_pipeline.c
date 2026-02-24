@@ -18,9 +18,43 @@
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
 #define encoder_decode_sample_f32 aeat9955_decode_sample_f32
+
+static inline void encoder_inject_status_fault(uint8_t *buffer)
+{
+	struct aeat9955_sample *sample = (struct aeat9955_sample *)buffer;
+
+	/* AEAT has no warning-only status path in fast frame; force status error bit. */
+	sample->raw[0] |= AEAT9955_POS_STATUS_ERROR_BIT;
+}
+
+static inline void encoder_inject_frame_fault(uint8_t *buffer)
+{
+	struct aeat9955_sample *sample = (struct aeat9955_sample *)buffer;
+
+	/* Break parity check by toggling parity/status bit. */
+	sample->raw[0] ^= AEAT9955_POS_STATUS_PARITY_BIT;
+}
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
 #include <drivers/sensor/magntek_mt6835.h>
 #define encoder_decode_sample_f32 mt6835_decode_sample_f32
+
+static inline void encoder_inject_status_fault(uint8_t *buffer)
+{
+	struct mt6835_sample *sample = (struct mt6835_sample *)buffer;
+
+	sample->raw[4] = (sample->raw[4] & (uint8_t)~MT6835_STATUS_MASK) |
+			 MT6835_STATUS_BIT1_WEAK_MAGNETIC;
+	/* Keep frame valid while injecting status warning bits. */
+	sample->raw[5] = crc8_ccitt(0x00U, &sample->raw[2], 3U);
+}
+
+static inline void encoder_inject_frame_fault(uint8_t *buffer)
+{
+	struct mt6835_sample *sample = (struct mt6835_sample *)buffer;
+
+	/* Flip CRC byte so decoder reports frame error. */
+	sample->raw[5] ^= 0x01U;
+}
 #else
 #error "Unsupported encoder type for encoder1 alias"
 #endif
@@ -41,6 +75,7 @@ static atomic_t motor_encoder_collect_transport_error_count;
 static atomic_t motor_encoder_collect_frame_error_count;
 static atomic_t motor_encoder_collect_frame_parity_error_count;
 static atomic_t motor_encoder_collect_frame_status_error_count;
+static atomic_t motor_encoder_test_inject_mode;
 
 #define MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT 2
 
@@ -104,6 +139,21 @@ void motor_encoder_pipeline_reset_stats(void)
 	atomic_set(&motor_encoder_collect_frame_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_parity_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_status_error_count, 0);
+}
+
+void motor_encoder_pipeline_set_test_inject_mode(enum motor_encoder_test_inject_mode mode)
+{
+	if ((mode < MOTOR_ENCODER_TEST_INJECT_NONE) ||
+	    (mode > MOTOR_ENCODER_TEST_INJECT_FRAME)) {
+		mode = MOTOR_ENCODER_TEST_INJECT_NONE;
+	}
+
+	atomic_set(&motor_encoder_test_inject_mode, (atomic_val_t)mode);
+}
+
+enum motor_encoder_test_inject_mode motor_encoder_pipeline_get_test_inject_mode(void)
+{
+	return (enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
 }
 
 int motor_encoder_pipeline_request_sample(void)
@@ -178,6 +228,16 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 		return -EIO;
 	}
 
+	enum motor_encoder_test_inject_mode inject_mode =
+		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
+	if (inject_mode != MOTOR_ENCODER_TEST_INJECT_NONE) {
+		if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
+			encoder_inject_status_fault(buf);
+		} else if (inject_mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
+			encoder_inject_frame_fault(buf);
+		}
+	}
+
 	int decode_ret = encoder_decode_sample_f32(buf, &sample->angle_deg, &sample->status,
 					    &sample->warning, &sample->error,
 					    &sample->frame_status_error, &sample->frame_parity_error);
@@ -185,15 +245,16 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 		sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
 	}
 	rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
+	if (sample->frame_status_error) {
+		/* Count all encoder status-flag assertions, including warning-only cases. */
+		atomic_inc(&motor_encoder_collect_frame_status_error_count);
+	}
 
 	if (decode_ret != 0 || sample->error) {
 		atomic_inc(&motor_encoder_collect_error_count);
 		atomic_inc(&motor_encoder_collect_frame_error_count);
 		if (sample->frame_parity_error) {
 			atomic_inc(&motor_encoder_collect_frame_parity_error_count);
-		}
-		if (sample->frame_status_error) {
-			atomic_inc(&motor_encoder_collect_frame_status_error_count);
 		}
 		return -EIO;
 	}

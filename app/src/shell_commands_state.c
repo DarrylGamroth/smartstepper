@@ -805,11 +805,20 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 
 	struct motor_encoder_pipeline_stats stats = {0};
 	motor_encoder_pipeline_get_stats(&stats);
+	enum motor_encoder_test_inject_mode inject_mode =
+		motor_encoder_pipeline_get_test_inject_mode();
+	const char *inject_label = "none";
+	if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
+		inject_label = "status";
+	} else if (inject_mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
+		inject_label = "frame";
+	}
 
 	shell_print(sh, "Encoder RTIO pipeline:");
 	shell_print(sh, "  State:    %s, %s",
 		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
 		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
+	shell_print(sh, "  Inject:   %s", inject_label);
 	shell_print(sh, "  Request:  ok=%u busy=%u disabled=%u error=%u",
 		    stats.request_ok, stats.request_busy,
 		    stats.request_disabled, stats.request_error);
@@ -833,6 +842,44 @@ int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char *
 
 	motor_encoder_pipeline_reset_stats();
 	shell_print(sh, "Encoder RTIO pipeline counters reset");
+	return 0;
+}
+
+/* motor encoder pipeline_inject [none|status|frame] */
+int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc > 2U) {
+		shell_error(sh, "Usage: motor encoder pipeline_inject [none|status|frame]");
+		return -EINVAL;
+	}
+
+	enum motor_encoder_test_inject_mode mode = motor_encoder_pipeline_get_test_inject_mode();
+
+	if (argc == 1U) {
+		const char *label = "none";
+
+		if (mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
+			label = "status";
+		} else if (mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
+			label = "frame";
+		}
+		shell_print(sh, "Encoder pipeline inject mode: %s", label);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "none") == 0) {
+		mode = MOTOR_ENCODER_TEST_INJECT_NONE;
+	} else if (strcmp(argv[1], "status") == 0) {
+		mode = MOTOR_ENCODER_TEST_INJECT_STATUS;
+	} else if (strcmp(argv[1], "frame") == 0) {
+		mode = MOTOR_ENCODER_TEST_INJECT_FRAME;
+	} else {
+		shell_error(sh, "Invalid mode '%s' (expected none|status|frame)", argv[1]);
+		return -EINVAL;
+	}
+
+	motor_encoder_pipeline_set_test_inject_mode(mode);
+	shell_print(sh, "Encoder pipeline inject mode set: %s", argv[1]);
 	return 0;
 }
 

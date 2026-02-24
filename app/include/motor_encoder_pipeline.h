@@ -36,6 +36,12 @@ struct motor_encoder_pipeline_stats {
 	uint32_t collect_frame_status_error;
 };
 
+enum motor_encoder_test_inject_mode {
+	MOTOR_ENCODER_TEST_INJECT_NONE = 0,
+	MOTOR_ENCODER_TEST_INJECT_STATUS = 1,
+	MOTOR_ENCODER_TEST_INJECT_FRAME = 2,
+};
+
 /**
  * @brief Enable or disable async encoder read requests.
  *
@@ -86,5 +92,18 @@ int motor_encoder_pipeline_request_sample(void);
  * frame errors.
  */
 int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample);
+
+/**
+ * @brief Set encoder test injection mode applied to collected frames.
+ *
+ * This is intended for on-target validation of warning/error handling paths.
+ * Injection remains active until set back to `MOTOR_ENCODER_TEST_INJECT_NONE`.
+ */
+void motor_encoder_pipeline_set_test_inject_mode(enum motor_encoder_test_inject_mode mode);
+
+/**
+ * @brief Get currently armed one-shot test injection mode.
+ */
+enum motor_encoder_test_inject_mode motor_encoder_pipeline_get_test_inject_mode(void);
 
 #endif /* MOTOR_ENCODER_PIPELINE_H_ */
