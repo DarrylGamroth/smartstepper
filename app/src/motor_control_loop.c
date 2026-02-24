@@ -36,6 +36,9 @@
 #include "motor_motion_modules.h"
 #include "motor_torque.h"
 #include "motor_encoder_feedback.h"
+#include "motor_control_outer_loops.h"
+#include "motor_current_ref_policy.h"
+#include "motor_control_quality.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -69,42 +72,6 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 	(2.0f * PI_F32 * CURRENT_DECOUPLING_MIN_MECH_SPEED_HZ)
 #define CURRENT_DECOUPLING_MIN_FLUX_WB 1.0e-5f
 #define CURRENT_DECOUPLING_MAX_FLUX_WB 1.0f
-
-static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
-{
-	return params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR;
-}
-
-static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
-{
-	/* Encoder updates may not be fresh every ISR tick (RTIO completion cadence),
-	 * but feedback is still usable while quality remains VALID.
-	 */
-	const uint8_t required = MOTOR_POSITION_CONVERT_QUALITY_VALID;
-	const uint8_t forbidden = MOTOR_POSITION_CONVERT_QUALITY_ERROR |
-				  MOTOR_POSITION_CONVERT_QUALITY_GLITCH;
-
-	return ((quality_flags & required) != 0U) &&
-	       ((quality_flags & forbidden) == 0U);
-}
-
-static inline bool motor_outer_loop_decimation_tick(uint32_t *phase, uint32_t decimation)
-{
-	if (phase == NULL || decimation <= 1U) {
-		if (phase != NULL) {
-			*phase = 0U;
-		}
-		return true;
-	}
-
-	if (*phase == 0U) {
-		*phase = decimation - 1U;
-		return true;
-	}
-
-	(*phase)--;
-	return false;
-}
 
 static inline bool motor_is_align_injection_state(const struct smf_state *state)
 {
@@ -457,16 +424,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 	    !encoder_frame_warning &&
 	    !encoder_frame_error) {
 		float32_t align_mech_rad = ctx.encoder_fb.observer_mech_rad;
-		float32_t align_sin = sinf(align_mech_rad);
-		float32_t align_cos = cosf(align_mech_rad);
+		arm_sin_cos_f32(align_mech_rad, &sin_theta, &cos_theta);
 
 		if (motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE)) {
-			params->align_pos_sum_sin += align_sin;
-			params->align_pos_sum_cos += align_cos;
+			params->align_pos_sum_sin += sin_theta;
+			params->align_pos_sum_cos += cos_theta;
 			params->align_pos_sample_count++;
 		} else {
-			params->align_neg_sum_sin += align_sin;
-			params->align_neg_sum_cos += align_cos;
+			params->align_neg_sum_sin += sin_theta;
+			params->align_neg_sum_cos += cos_theta;
 			params->align_neg_sample_count++;
 		}
 	}
@@ -602,260 +568,50 @@ void motor_control_loop_step(struct motor_parameters *params,
 		Iq_ref_A = 0.0f;
 	}
 
-	/* Position cascade: generate velocity target from position error. */
-	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
-		float32_t position_error_rad;
-		float32_t profile_velocity_ff_rad_s = 0.0f;
-		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
-		bool use_mpr = motor_outer_loop_use_mpr(params);
-		bool position_loop_update = motor_outer_loop_decimation_tick(
-			&params->position_loop_phase, position_loop_decimation);
+	struct motor_outer_loop_inputs outer_inputs = {
+		.state = state,
+		.feature_angle_gen = feature_angle_gen,
+		.feature_velocity_traj = feature_velocity_traj,
+		.velocity_loop_decimation = velocity_loop_decimation,
+		.position_loop_decimation = position_loop_decimation,
+		.velocity_loop_dt_s = velocity_loop_dt_s,
+		.position_loop_dt_s = position_loop_dt_s,
+		.position_mech_rad = position_mech_rad,
+		.speed_mech_rad_s = speed_mech_rad_s,
+		.id_meas_a = Id_A,
+		.iq_meas_a = Iq_A,
+		.velocity_target_rad_s = velocity_target_rad_s,
+		.velocity_ref_rad_s = velocity_ref_rad_s,
+		.id_ref_a = Id_ref_A,
+		.iq_ref_a = Iq_ref_A,
+	};
+	struct motor_outer_loop_outputs outer_outputs = {0};
+	(void)motor_control_outer_loops_step(params, &outer_inputs, &outer_outputs);
+	velocity_target_rad_s = outer_outputs.velocity_target_rad_s;
+	velocity_ref_rad_s = outer_outputs.velocity_ref_rad_s;
+	speed_mech_filtered_rad_s = outer_outputs.speed_mech_filtered_rad_s;
+	Id_ref_A = outer_outputs.id_ref_a;
+	Iq_ref_A = outer_outputs.iq_ref_a;
 
-		/* Position move module resolves profile state into target/error/feedforward. */
-		bool move_active = motor_position_move_resolve(&params->position_profile,
-							       control_armed,
-							       position_mech_rad,
-							       &params->position_target_rad,
-							       &position_error_rad,
-							       &profile_velocity_ff_rad_s);
-		if (!move_active) {
-			position_error_rad =
-				wrap_rad_pi(params->position_target_rad - position_mech_rad);
-		}
-
-		if (position_loop_update) {
-			if (use_mpr) {
-				params->position_mpr_cfg.dt_s = position_loop_dt_s;
-				params->position_mpr_cfg.velocity_limit_rad_s =
-					params->profile_max_velocity_rad_s;
-				params->position_mpr_cfg.max_delta_velocity_rad_s =
-					params->profile_max_accel_rad_s2 * position_loop_dt_s;
-				int mpr_ret = motor_mpr_position_step(&params->position_mpr_cfg,
-								      &params->position_mpr_state,
-								      position_error_rad,
-								      profile_velocity_ff_rad_s,
-								      &velocity_target_rad_s);
-				if (mpr_ret != 0) {
-					velocity_target_rad_s = clampf(profile_velocity_ff_rad_s,
-							      -params->profile_max_velocity_rad_s,
-							      params->profile_max_velocity_rad_s);
-					motor_mpr_position_reset(&params->position_mpr_state,
-								 velocity_target_rad_s);
-				}
-				params->position_cl_i_term_rad_s = 0.0f;
-			} else {
-				float32_t position_fb_velocity_rad_s;
-				float32_t pos_i_next =
-					params->position_cl_i_term_rad_s +
-					(params->position_cl_ki_rad_s2_per_rad *
-					 position_error_rad * position_loop_dt_s);
-				pos_i_next = clampf(pos_i_next, -pos_i_limit_rad_s, pos_i_limit_rad_s);
-				params->position_cl_i_term_rad_s = pos_i_next;
-				position_fb_velocity_rad_s =
-					params->position_cl_kp_rad_s_per_rad * position_error_rad +
-					params->position_cl_i_term_rad_s;
-				velocity_target_rad_s =
-					profile_velocity_ff_rad_s + position_fb_velocity_rad_s;
-			}
-
-			velocity_target_rad_s =
-				clampf(velocity_target_rad_s, -params->profile_max_velocity_rad_s,
-				       params->profile_max_velocity_rad_s);
-			traj_set_target_value(&params->traj_velocity, velocity_target_rad_s);
-		}
-	} else {
-		params->position_loop_phase = 0U;
-	}
-
-	/* Update velocity trajectory if enabled */
-	if (feature_velocity_traj) {
-		motor_velocity_plan_step(&params->traj_velocity,
-					&velocity_target_rad_s,
-					&velocity_ref_rad_s);
-
-		/* Open-loop commutation uses the trajectory directly. */
-		if (feature_angle_gen) {
-			angle_gen_set_velocity(&params->angle_gen, velocity_ref_rad_s);
-		}
-	}
-
-	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
-	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
-	    state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
-		speed_mech_filtered_rad_s = filter_so_run(&params->filter_velocity_notch,
-							 speed_mech_rad_s);
-		bool velocity_feedback_valid =
-			motor_velocity_feedback_is_valid(params->position_quality_flags);
-		bool velocity_feedback_fresh =
-			(params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U;
-		bool velocity_loop_update = motor_outer_loop_decimation_tick(
-			&params->velocity_loop_phase, velocity_loop_decimation);
-		if (!velocity_feedback_valid) {
-			/* Hold measured dq currents and reset outer-loop observers while encoder
-			 * quality is degraded. This avoids current spikes when velocity/angle
-			 * feedback is stale or glitched.
-			 */
-			Id_ref_A = Id_A;
-			Iq_ref_A = Iq_A;
-			params->velocity_target_rad_s = 0.0f;
-			params->velocity_ref_rad_s = 0.0f;
-			traj_set_target_value(&params->traj_velocity, 0.0f);
-			motor_mpr_velocity_reset(&params->velocity_mpr_state,
-						 speed_mech_filtered_rad_s,
-						 Iq_ref_A);
-			motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
-			params->velocity_dob_iq_ff_a = 0.0f;
-			params->velocity_dob_disturbance_nm = 0.0f;
-			params->velocity_dob_residual_rad_s = 0.0f;
-		} else if (velocity_loop_update && velocity_feedback_fresh) {
-				bool use_mpr = motor_outer_loop_use_mpr(params);
-				bool mpr_applied = false;
-				float32_t iq_cmd_pre_dob_a = 0.0f;
-				float32_t torque_gain_nm_per_a = motor_torque_gain_resolve_active(params);
-
-				if (use_mpr) {
-					struct motor_mpr_velocity_model mpr_model = {
-						.inertia_kgm2 = params->inertia_kgm2_active,
-						.viscous_friction_nm_per_rad_s =
-							params->viscous_friction_nm_per_rad_s_active,
-						.coulomb_friction_nm = params->coulomb_friction_nm_active,
-						.torque_constant_nm_per_a = torque_gain_nm_per_a,
-					};
-					float32_t iq_cmd_mpr_a = 0.0f;
-
-					params->velocity_mpr_cfg.dt_s = velocity_loop_dt_s;
-					params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
-					int mpr_ret = motor_mpr_velocity_step(&params->velocity_mpr_cfg, &mpr_model,
-									      &params->velocity_mpr_state,
-									      speed_mech_filtered_rad_s,
-									      velocity_ref_rad_s,
-									      &iq_cmd_mpr_a);
-					if (mpr_ret == 0) {
-						Id_ref_A = params->Id_setpoint_A;
-						iq_cmd_pre_dob_a = clampf(iq_cmd_mpr_a,
-									  -params->velocity_cl_iq_limit_A,
-									  params->velocity_cl_iq_limit_A);
-						Iq_ref_A = iq_cmd_pre_dob_a;
-						params->velocity_cl_i_term_A = 0.0f;
-						mpr_applied = true;
-					}
-				}
-
-				if (!mpr_applied) {
-					float32_t speed_error_rad_s = velocity_ref_rad_s - speed_mech_filtered_rad_s;
-					float32_t vel_i_next =
-						params->velocity_cl_i_term_A +
-						(params->velocity_cl_ki_A_per_rad * speed_error_rad_s *
-						 velocity_loop_dt_s);
-					vel_i_next = clampf(vel_i_next, -params->velocity_cl_iq_limit_A,
-							   params->velocity_cl_iq_limit_A);
-					params->velocity_cl_i_term_A = vel_i_next;
-
-					Id_ref_A = params->Id_setpoint_A;
-					iq_cmd_pre_dob_a =
-						clampf((params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s) +
-						       params->velocity_cl_i_term_A,
-						       -params->velocity_cl_iq_limit_A,
-						       params->velocity_cl_iq_limit_A);
-					Iq_ref_A = iq_cmd_pre_dob_a;
-				}
-
-				if (isfinite(torque_gain_nm_per_a) && torque_gain_nm_per_a > 0.0f) {
-					struct motor_dob_model dob_model = {
-						.inertia_kgm2 = params->inertia_kgm2_active,
-						.viscous_friction_nm_per_rad_s =
-							params->viscous_friction_nm_per_rad_s_active,
-						.coulomb_friction_nm = params->coulomb_friction_nm_active,
-						.torque_constant_nm_per_a = torque_gain_nm_per_a,
-					};
-					struct motor_dob_config dob_cfg = params->velocity_dob_cfg;
-					float32_t iq_limit = params->velocity_cl_iq_limit_A;
-					float32_t auto_torque_limit = torque_gain_nm_per_a * iq_limit;
-
-					dob_cfg.dt_s = velocity_loop_dt_s;
-					if (!isfinite(dob_cfg.torque_limit_nm) || dob_cfg.torque_limit_nm <= 0.0f) {
-						dob_cfg.torque_limit_nm = auto_torque_limit;
-					}
-					if (!isfinite(dob_cfg.iq_ff_limit_a) || dob_cfg.iq_ff_limit_a <= 0.0f) {
-						dob_cfg.iq_ff_limit_a = iq_limit;
-					}
-
-					float32_t iq_dob_ff_a = 0.0f;
-					int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
-								     speed_mech_filtered_rad_s,
-								     iq_cmd_pre_dob_a,
-								     &iq_dob_ff_a);
-					if (dob_ret == 0) {
-						params->velocity_dob_iq_ff_a = iq_dob_ff_a;
-						params->velocity_dob_disturbance_nm =
-							params->velocity_dob_state.disturbance_nm;
-						params->velocity_dob_residual_rad_s =
-							params->velocity_dob_state.residual_rad_s;
-						Iq_ref_A = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
-								 -params->velocity_cl_iq_limit_A,
-								 params->velocity_cl_iq_limit_A);
-					} else {
-						motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
-						params->velocity_dob_iq_ff_a = 0.0f;
-						params->velocity_dob_disturbance_nm = 0.0f;
-						params->velocity_dob_residual_rad_s = 0.0f;
-					}
-				}
-			}
-	} else {
-		params->velocity_loop_phase = 0U;
-	}
-
-	/* Select current references based on mode */
-	if (feature_use_commanded_currents) {
-		bool commanded_current_needs_encoder_feedback =
-			online_control_state && !feature_angle_gen;
-		bool commanded_current_feedback_valid =
-			motor_velocity_feedback_is_valid(params->position_quality_flags);
-
-		/* In encoder-based current control, hold a neutral current-loop command
-		 * until position/speed feedback quality is valid. This avoids large
-		 * transients when torque mode is entered before valid encoder feedback.
-		 */
-		if (commanded_current_needs_encoder_feedback &&
-		    !commanded_current_feedback_valid) {
-			/* Keep current loop neutral while encoder feedback is invalid. */
-			Id_ref_A = Id_A;
-			Iq_ref_A = Iq_A;
-			pi_set_ui(&params->pi_Id, 0.0f);
-			pi_set_ui(&params->pi_Iq, 0.0f);
-		} else {
-			/* Normal FOC operation: use commanded current references */
-			Id_ref_A = params->Id_setpoint_A;
-			Iq_ref_A = params->Iq_setpoint_A;
-		}
-	}
-
-	/* Arm/disarm interlock only applies in ONLINE control states. */
-	if (online_control_state && !control_armed) {
-		Id_ref_A = Id_A;
-		Iq_ref_A = Iq_A;
-		params->Id_setpoint_A = 0.0f;
-		params->Iq_setpoint_A = 0.0f;
-		velocity_target_rad_s = 0.0f;
-		velocity_ref_rad_s = 0.0f;
-		params->velocity_target_rad_s = 0.0f;
-		params->velocity_ref_rad_s = 0.0f;
-		params->velocity_cl_i_term_A = 0.0f;
-		params->position_cl_i_term_rad_s = 0.0f;
-		traj_set_target_value(&params->traj_velocity, 0.0f);
-		traj_set_int_value(&params->traj_velocity, 0.0f);
-		angle_gen_set_velocity(&params->angle_gen, 0.0f);
-		pi_set_ui(&params->pi_Id, 0.0f);
-		pi_set_ui(&params->pi_Iq, 0.0f);
-		motor_mpr_velocity_reset(&params->velocity_mpr_state,
-					 speed_mech_filtered_rad_s, 0.0f);
-		motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-		motor_dob_reset(&params->velocity_dob_state, speed_mech_filtered_rad_s);
-		params->velocity_dob_iq_ff_a = 0.0f;
-		params->velocity_dob_disturbance_nm = 0.0f;
-		params->velocity_dob_residual_rad_s = 0.0f;
-	}
+	struct motor_current_ref_policy_inputs ref_policy_inputs = {
+		.online_control_state = online_control_state,
+		.feature_angle_gen = feature_angle_gen,
+		.feature_use_commanded_currents = feature_use_commanded_currents,
+		.control_armed = control_armed,
+		.speed_mech_filtered_rad_s = speed_mech_filtered_rad_s,
+		.id_meas_a = Id_A,
+		.iq_meas_a = Iq_A,
+		.velocity_target_rad_s = velocity_target_rad_s,
+		.velocity_ref_rad_s = velocity_ref_rad_s,
+		.id_ref_a = Id_ref_A,
+		.iq_ref_a = Iq_ref_A,
+	};
+	struct motor_current_ref_policy_outputs ref_policy_outputs = {0};
+	(void)motor_current_ref_apply_policy(params, &ref_policy_inputs, &ref_policy_outputs);
+	velocity_target_rad_s = ref_policy_outputs.velocity_target_rad_s;
+	velocity_ref_rad_s = ref_policy_outputs.velocity_ref_rad_s;
+	Id_ref_A = ref_policy_outputs.id_ref_a;
+	Iq_ref_A = ref_policy_outputs.iq_ref_a;
 
 	struct motor_rls_runtime_state rls_runtime = {0};
 	Id_ref_A = motor_rls_prepare_id_reference(params, online_control_state, control_armed,
