@@ -19,6 +19,38 @@ Adopt a strict module decomposition similar to C2000Ware/MotorWare: each algorit
 
 This moves us from “large control function with rich cross-module context” to “small composable modules with narrow contracts.”
 
+## Proposed Library Organization (TI-Style)
+
+Organize `motor_core` by function families (like TI libraries), not by call-site wrappers:
+
+1. `modules/motor_core/include/motor/math/*`
+2. `modules/motor_core/include/motor/filters/*`
+3. `modules/motor_core/include/motor/observers/*`
+4. `modules/motor_core/include/motor/motion/*`
+5. `modules/motor_core/include/motor/control/*`
+6. `modules/motor_core/include/motor/protection/*`
+7. `modules/motor_core/include/motor/runtime/*`
+8. `modules/motor_core/include/motor/telemetry/*`
+
+Source layout mirrors include layout:
+
+1. `modules/motor_core/src/math/*`
+2. `modules/motor_core/src/filters/*`
+3. `modules/motor_core/src/observers/*`
+4. `modules/motor_core/src/motion/*`
+5. `modules/motor_core/src/control/*`
+6. `modules/motor_core/src/protection/*`
+7. `modules/motor_core/src/runtime/*`
+8. `modules/motor_core/src/telemetry/*`
+
+API convention for all modules:
+
+1. `*_config` struct
+2. `*_state` struct
+3. `*_input` struct
+4. `*_output` struct
+5. `*_init()`, `*_reset()`, `*_step()` functions
+
 ## Constraints
 
 1. No dynamic allocation in ISR path.
@@ -106,6 +138,18 @@ This moves us from “large control function with rich cross-module context” t
 3. `motor_rt_diag_state` (slow/diagnostic/capture state)
 4. `motor_step_pipeline` (ordered invocation of modules A-F)
 
+## Existing Building Blocks (Keep and Rehome)
+
+The following blocks are already strong and should be retained while relocating under the new taxonomy:
+
+1. `angle_gen` -> `motor/motion/angle_gen`
+2. `angle_observer` -> `motor/observers/angle_observer`
+3. `motor_position_convert` -> `motor/observers/position_convert`
+4. `motor_mpr` -> `motor/control/mpr`
+5. `motor_dob` -> `motor/control/dob`
+6. `motion_profile` + `motor_motion_modules` -> `motor/motion/profile`
+7. `motor_foc_voltage_pwm` -> split across `motor/control/current_ctrl`, `motor/control/foc_transform`, `motor/control/pwm_synth`
+
 ## Target Architecture
 
 ### Runtime partition
@@ -116,16 +160,21 @@ This moves us from “large control function with rich cross-module context” t
 
 ### ISR pipeline contract
 
-`adc_callback` should become a thin orchestrator:
+`adc_callback` should become a thin orchestrator with exactly four stages:
 
-1. `motor_isr_begin()`
-2. `motor_encoder_io_collect()`
-3. `motor_trigger_source_step()`
-4. `motor_core_step_fast()`
-5. `motor_pwm_commit()`
-6. `motor_isr_end()`
+1. `Collect`
+2. `Process`
+3. `Apply`
+4. `Telemetry`
 
-Each stage has a compact I/O struct and strict ownership.
+### Stage contract details
+
+1. `Collect`: read ADC, drain encoder pipeline, normalize input status, fetch coherent runtime snapshot, and advance trigger bookkeeping.
+2. `Process`: run observer chain, reference chain, and current-loop chain, then produce compact actuator command and status outputs.
+3. `Apply`: commit PWM output from command object and latch fast protection actions.
+4. `Telemetry`: update compact live telemetry plus decimated diagnostic rings and per-stage timing counters.
+
+Each stage owns its own input/output contract and must not depend on ad-hoc globals.
 
 ### Module layering
 
@@ -149,25 +198,38 @@ Acceptance:
 1. No functional change.
 2. Baseline captured for both hardware profiles.
 
-## Phase 1: `adc_callback` Structural Split
+## Phase 1: ISR Stage Shell (Collect/Process/Apply/Telemetry)
 
 1. Split `adc_callback` into static helpers in `app/src/motor_isr_io.c`:
-   - `adc_collect_encoder_sample()`
-   - `adc_step_profile_trigger()`
-   - `adc_run_control_step()`
-   - `adc_apply_pwm()`
-   - `adc_update_timing_stats()`
+   - `isr_collect()`
+   - `isr_process()`
+   - `isr_apply()`
+   - `isr_telemetry()`
 2. Keep exact behavior, just isolate concerns and ownership.
 
 Deliverables:
 1. Refactored `app/src/motor_isr_io.c` with no logic change.
-2. Updated function-level comments and call graph doc.
+2. Updated stage contracts in docs and comments.
 
 Acceptance:
 1. Bit-equivalent behavior in existing HIL scripts.
 2. No ISR cycle regression beyond measurement noise.
 
-## Phase 2: Runtime State Decomposition
+## Phase 2: Module Rehome Skeleton (TI-style folders + wrappers)
+
+1. Create new folder taxonomy under `modules/motor_core/include/motor/*` and `src/*`.
+2. Move headers/sources without behavior changes; keep compatibility wrappers at old include paths.
+3. Add per-family CMake grouping (`math`, `filters`, `observers`, `motion`, `control`, `protection`, `runtime`, `telemetry`).
+
+Deliverables:
+1. New directory structure with stable build.
+2. Wrapper headers preserving existing includes.
+
+Acceptance:
+1. Zero behavior changes.
+2. All builds/tests green.
+
+## Phase 3: Runtime State Decomposition
 
 1. Introduce `struct motor_rt_fast_state` in `motor_core` for ISR-only mutable data.
 2. Move large diagnostics/commissioning buffers out of hot struct into `motor_runtime_diag` owned by app layer.
@@ -181,7 +243,7 @@ Acceptance:
 1. `motor_parameters` field count materially reduced in hot region.
 2. No stack growth in ISR.
 
-## Phase 3: Sensor/Observer Module Split (C + D subset)
+## Phase 4: Sensor/Observer Module Split (C + D subset)
 
 1. Split `motor_encoder_feedback` into independent modules:
    - `motor_encoder_source`
@@ -200,7 +262,7 @@ Acceptance:
 1. Reduced stack usage in `motor_control_loop_step`.
 2. All phase-4 unit tests still pass.
 
-## Phase 4: Reference-Path Module Split (D)
+## Phase 5: Reference-Path Module Split (D)
 
 1. Split reference generation into explicit modules:
    - `motor_ref_align`
@@ -218,7 +280,7 @@ Acceptance:
 1. Reference-path logic is independent of ADC/PWM I/O.
 2. Per-module unit tests cover edge cases and transitions.
 
-## Phase 5: Current-Loop / FOC Module Split (E)
+## Phase 6: Current-Loop / FOC Module Split (E)
 
 1. Isolate current control path into:
    - `motor_current_ctrl`
@@ -236,7 +298,7 @@ Acceptance:
 1. Closed-loop torque/velocity behavior unchanged.
 2. No ISR-time regression; reduced local stack in control step.
 
-## Phase 6: Compose `motor_core_step_fast(...)` Pipeline (G)
+## Phase 7: Compose `motor_core_step_fast(...)` Pipeline (G)
 
 1. Add one orchestrator API in `motor_core` that sequences modules A-F.
 2. Keep app-owned side effects (error posting, state transitions, event queueing) outside core.
@@ -250,7 +312,7 @@ Acceptance:
 1. `app/src/motor_control_loop.c` becomes thin orchestration.
 2. Full unit suite + HIL smoke pass.
 
-## Phase 7: Coherent Snapshot and Concurrency Hardening
+## Phase 8: Coherent Snapshot and Concurrency Hardening
 
 1. Replace separate `state_for_isr` + `feature_flags` reads with coherent snapshot publish/consume.
 2. Use a lock-free snapshot protocol (versioned double-buffer or seqlock style) between state thread and ISR.
@@ -264,7 +326,7 @@ Acceptance:
 1. No mixed state/feature epoch observed in stress tests.
 2. Existing command/state transitions remain deterministic.
 
-## Phase 8: Packaging and Link-Time Partitioning
+## Phase 9: Packaging and Link-Time Partitioning
 
 1. Split `motor_core` build into sub-libraries:
    - `motor_core_rt` (hard real-time)
@@ -282,7 +344,7 @@ Acceptance:
 1. Reduced text/data footprint for realtime target.
 2. No regression in control-loop jitter.
 
-## Phase 9: Optional RAM Placement and Micro-Optimizations
+## Phase 10: Optional RAM Placement and Micro-Optimizations
 
 1. Add opt-in section-placement macros for hottest modules/functions.
 2. Add per-stage cycle counters (`stage_min/max/avg`) similar to TI `cpu_time`.
@@ -300,19 +362,23 @@ Acceptance:
 
 ```c
 void adc_callback(...) {
-    motor_isr_begin(...);
-
-    enc = adc_collect_encoder_sample(...);
-    trig = adc_step_profile_trigger(...);
-
-    motor_core_step_fast(&rt_cfg, &rt_fast, &enc, values, &step_out);
-
-    adc_apply_pwm(&step_out.pwm);
-    adc_publish_telemetry(&rt_fast, &step_out);
-
-    motor_isr_end(...);
+    collect = isr_collect(...);
+    process = isr_process(&collect, ...);
+    isr_apply(&process.actuator_cmd, ...);
+    isr_telemetry(&collect, &process, ...);
 }
 ```
+
+## `motor_core_step_fast(...)` End-State (Conceptual)
+
+```c
+int motor_core_step_fast(const struct motor_rt_cfg_snapshot *cfg,
+                         struct motor_rt_fast_state *fast,
+                         const struct motor_collect_frame *in,
+                         struct motor_process_frame *out);
+```
+
+`motor_core_step_fast(...)` only implements the `Process` stage.
 
 ## Verification Plan Per Phase
 
@@ -330,4 +396,4 @@ void adc_callback(...) {
 
 ## Immediate Next Step
 
-Start with Phase 1, because it is low risk and creates a clean seam for Phases 2-4.
+Start with Phase 1 (ISR stage shell), then Phase 2 (module rehome skeleton) before any algorithmic movement.
