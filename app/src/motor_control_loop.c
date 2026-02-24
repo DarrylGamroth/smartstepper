@@ -499,17 +499,16 @@ void motor_control_loop_step(struct motor_parameters *params,
 					     (angle_control_degrees * (PI_F32 / 180.0f)) :
 					     angle_raw_rad;
 	float32_t capture_angle_deg = encoder_sample_available ?
-					     angle_control_degrees :
-					     (angle_raw_rad * (180.0f / PI_F32));
+						     angle_control_degrees :
+						     (angle_raw_rad * (180.0f / PI_F32));
 	float32_t capture_encoder_mech_rad = 0.0f;
 	float32_t capture_encoder_elec_rad = 0.0f;
 	float32_t capture_observer_mech_rad = angle_observer_get_mech_angle(&params->observer);
 	float32_t capture_observer_elec_rad = angle_observer_get_elec_angle(&params->observer);
 	float32_t capture_generated_mech_rad = wrap_rad_2pi(angle_gen_get_angle(&params->angle_gen));
-	float32_t mech_trim_rad = params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;
-	float32_t total_mech_offset_rad = params->observer_alignment_offset_rad + mech_trim_rad;
+	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
 	float32_t capture_generated_elec_rad =
-		wrap_rad_2pi((capture_generated_mech_rad + total_mech_offset_rad) *
+		wrap_rad_2pi((capture_generated_mech_rad + observer_mech_offset_rad) *
 			     (float32_t)MOTOR_POLE_PAIRS);
 	float32_t capture_mech_error_rad = 0.0f;
 	float32_t capture_elec_error_rad = 0.0f;
@@ -519,10 +518,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 					      encoder_input_source;
 	if (encoder_sample_available && fresh_encoder_sample &&
 	    !encoder_frame_warning && !encoder_frame_error) {
-		capture_encoder_mech_rad = wrap_rad_2pi(angle_control_degrees * (PI_F32 / 180.0f));
-		capture_encoder_elec_rad =
-			wrap_rad_2pi((capture_encoder_mech_rad + total_mech_offset_rad) *
-				     (float32_t)MOTOR_POLE_PAIRS);
+		capture_encoder_mech_rad = capture_observer_mech_rad;
+		capture_encoder_elec_rad = capture_observer_elec_rad;
 		capture_mech_error_rad =
 			wrap_rad_pi(capture_encoder_mech_rad - capture_generated_mech_rad);
 		capture_elec_error_rad =
