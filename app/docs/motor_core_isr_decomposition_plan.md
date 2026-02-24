@@ -167,6 +167,8 @@ The following blocks are already strong and should be retained while relocating 
 3. `Apply`
 4. `Telemetry`
 
+Stage names above are conceptual. Helper/function naming is implementation-defined.
+
 ### Stage contract details
 
 1. `Collect`: read ADC, drain encoder pipeline, normalize input status, fetch coherent runtime snapshot, and advance trigger bookkeeping.
@@ -201,10 +203,11 @@ Acceptance:
 ## Phase 1: ISR Stage Shell (Collect/Process/Apply/Telemetry)
 
 1. Split `adc_callback` into static helpers in `app/src/motor_isr_io.c`:
-   - `isr_collect()`
-   - `isr_process()`
-   - `isr_apply()`
-   - `isr_telemetry()`
+   - one helper (or inlined block) per stage boundary:
+   - Collect
+   - Process
+   - Apply
+   - Telemetry
 2. Keep exact behavior, just isolate concerns and ownership.
 
 Deliverables:
@@ -362,10 +365,10 @@ Acceptance:
 
 ```c
 void adc_callback(...) {
-    collect = isr_collect(...);
-    process = isr_process(&collect, ...);
-    isr_apply(&process.actuator_cmd, ...);
-    isr_telemetry(&collect, &process, ...);
+    collect = collect_stage(...);
+    process = process_stage(&collect, ...);
+    apply_stage(&process.actuator_cmd, ...);
+    telemetry_stage(&collect, &process, ...);
 }
 ```
 
