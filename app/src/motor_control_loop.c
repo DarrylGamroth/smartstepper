@@ -990,7 +990,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 				 decoupling_feedback_valid;
 	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
 
-	struct motor_foc_voltage_pwm_inputs foc_inputs = {
+		struct motor_foc_voltage_pwm_inputs foc_inputs = {
 		.id_ref_a = Id_ref_A,
 		.iq_ref_a = Iq_ref_A,
 		.id_a = Id_A,
@@ -1006,13 +1006,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.ld_h = params->Ld_est,
 		.lq_h = params->Lq_est,
 		.flux_linkage_wb = params->flux_linkage_wb_active,
-		.braking_enabled =
-			feature_braking,
-		.braking_iq_ref_a = params->Iq_ref_A,
-		.braking_speed_rad_s = speed_mech_rad_s,
-		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
-		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
-	};
+			.braking_enabled =
+				feature_braking,
+			.braking_iq_ref_a = Iq_ref_A,
+			.braking_speed_rad_s = speed_mech_rad_s,
+			.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
+			.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
+		};
 	struct motor_foc_voltage_pwm_outputs foc_outputs = {0};
 	int foc_ret = motor_foc_voltage_pwm_step(&params->pi_Id, &params->pi_Iq,
 						 &foc_inputs, &foc_outputs);
