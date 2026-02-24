@@ -61,7 +61,7 @@ API conventions:
 2. No blocking or kernel APIs in direct ISR context.
 3. Preserve current control-loop behavior and safety interlocks.
 4. Keep encoder async pipeline (`RTIO`) semantics intact.
-5. Maintain shell/state-machine compatibility during migration.
+5. No requirement to preserve legacy file/include layout during migration.
 6. Keep `Process` stage deterministic: fixed work per tick except compile-time gated diagnostics.
 
 ## Telemetry Gating Model
@@ -252,22 +252,22 @@ Acceptance:
 1. Bit-equivalent behavior in existing HIL scripts.
 2. No ISR cycle regression beyond measurement noise.
 
-## Phase 2: Module Rehome Skeleton (TI-style folders + wrappers)
+## Phase 2: Module Rehome Cutover (TI-style folders)
 
 1. Create new folder taxonomy under `modules/motor_core/include/motor/*` and `src/*`.
-2. Move headers/sources without behavior changes; keep compatibility wrappers at old include paths.
+2. Move headers/sources without behavior changes; update all call sites to new include paths directly.
 3. Add per-family CMake grouping (`math`, `filters`, `observers`, `motion`, `control`, `protection`, `runtime`, `telemetry`).
-4. Add wrapper migration table (`old include` -> `new include`) in docs.
+4. Add include migration table (`old include` -> `new include`) in docs.
 
 Deliverables:
 1. New directory structure with stable build.
-2. Wrapper headers preserving existing includes.
-3. Migration table with owner and removal target phase.
+2. Migration table with owner and completion status.
+3. All app/tests includes switched to new paths.
 
 Acceptance:
 1. Zero behavior changes.
 2. All builds/tests green.
-3. No new includes are added to legacy wrapper paths.
+3. Zero references to legacy include paths in repo.
 
 ## Phase 3: Runtime State Decomposition
 
@@ -311,12 +311,12 @@ Acceptance:
    - `motor_ref_velocity_regulator`
    - `motor_ref_command_arbitration`
    - `motor_ref_interlocks`
-2. Replace multi-purpose reference wrappers with narrow module APIs.
+2. Replace multi-purpose reference adapters with narrow module APIs.
 3. Add tests for each reference module independently.
 
 Deliverables:
 1. New reference modules in `modules/motor_core`.
-2. Adapter layer preserving existing shell/state behavior.
+2. State/shell integration paths updated to new module APIs.
 
 Acceptance:
 1. Reference-path logic is independent of ADC/PWM I/O.
@@ -402,20 +402,6 @@ Deliverables:
 Acceptance:
 1. Verified deterministic jitter budget on hardware.
 2. No functional regression.
-
-## Phase 11: Wrapper Retirement
-
-1. Remove compatibility wrapper headers introduced in Phase 2.
-2. Enforce new include paths only in app/tests.
-3. Add CI/static check to reject legacy include paths.
-
-Deliverables:
-1. Wrapper-free include tree.
-2. Migration report with all call sites updated.
-
-Acceptance:
-1. Zero references to legacy wrapper includes in repo.
-2. Build/test/HIL unchanged.
 
 ## Proposed `adc_callback` End-State (Conceptual)
 
