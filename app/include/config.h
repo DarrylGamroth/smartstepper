@@ -21,6 +21,8 @@
 #include "motor_commission.h"
 #include "motor_events.h"
 #include "motor_states.h"
+#include "motor/runtime/motor_runtime_state.h"
+#include "motor/runtime/motor_runtime_diag.h"
 #include "motor_dob.h"
 #include "motor_mpr.h"
 #include "motor_position_convert.h"
@@ -107,6 +109,13 @@ struct motor_parameters {
 	const struct smf_state *state_for_isr;
 	struct motor_event event;  /* Current event being processed */
 	struct k_timer state_timer;  /* Timer for state timeouts */
+	/* P03 split scaffolding:
+	 * - rt_fast: ISR-rate mirrors for hot data migration.
+	 * - rt_diag: slow/diagnostic mirrors for non-hot data migration.
+	 * Legacy fields below remain active until phased cutover tasks migrate users.
+	 */
+	struct motor_rt_fast_state rt_fast;
+	struct motor_rt_diag_state rt_diag;
 
 	/* PI controllers (stateful - NOT double buffered) */
 	struct pi_f32 pi_Id;
