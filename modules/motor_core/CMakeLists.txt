@@ -5,6 +5,8 @@ add_library(motor_core STATIC
 	src/observers/angle_tracking.c
 	src/observers/encoder_source.c
 	src/runtime/motor_commission_tune.c
+	src/runtime/command_arbitration.c
+	src/protection/interlocks.c
 	src/control/motor_dob.c
 	src/control/motor_mpr.c
 	src/motion/motor_motion_modules.c
@@ -34,6 +36,7 @@ target_include_directories(motor_core
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/control
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/runtime
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/estimation
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/protection
 )
 
 target_link_libraries(motor_core PUBLIC zephyr_interface)

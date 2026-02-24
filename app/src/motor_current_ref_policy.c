@@ -15,7 +15,8 @@
 #include "motor/motion/angle_gen.h"
 #include "motor/control/motor_mpr.h"
 #include "motor/control/motor_dob.h"
-#include "motor/control/motor_current_ref_policy_core.h"
+#include "motor/protection/interlocks.h"
+#include "motor/runtime/command_arbitration.h"
 
 int motor_current_ref_apply_policy(struct motor_parameters *params,
 				   const struct motor_current_ref_policy_inputs *in,
@@ -31,9 +32,8 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 	out->iq_ref_a = in->iq_ref_a;
 
 	bool feedback_valid = motor_velocity_feedback_is_valid(params->position_quality_flags);
-	struct motor_current_ref_policy_core_input core_in = {
+	struct motor_command_arbitration_input arb_in = {
 		.online_control_state = in->online_control_state,
-		.control_armed = in->control_armed,
 		.feature_angle_gen = in->feature_angle_gen,
 		.feature_use_commanded_currents = in->feature_use_commanded_currents,
 		.feedback_valid = feedback_valid,
@@ -44,17 +44,30 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 		.id_ref_in_a = in->id_ref_a,
 		.iq_ref_in_a = in->iq_ref_a,
 	};
-	struct motor_current_ref_policy_core_output core_out = {0};
-	motor_current_ref_policy_core_apply(&core_in, &core_out);
-	out->id_ref_a = core_out.id_ref_a;
-	out->iq_ref_a = core_out.iq_ref_a;
+	struct motor_command_arbitration_output arb_out = {0};
+	motor_command_arbitration_apply(&arb_in, &arb_out);
+	out->id_ref_a = arb_out.id_ref_a;
+	out->iq_ref_a = arb_out.iq_ref_a;
 
-	if (core_out.reset_current_pi) {
+	struct motor_current_interlock_input interlock_in = {
+		.online_control_state = in->online_control_state,
+		.control_armed = in->control_armed,
+		.id_meas_a = in->id_meas_a,
+		.iq_meas_a = in->iq_meas_a,
+		.id_ref_in_a = out->id_ref_a,
+		.iq_ref_in_a = out->iq_ref_a,
+	};
+	struct motor_current_interlock_output interlock_out = {0};
+	motor_interlocks_apply_current(&interlock_in, &interlock_out);
+	out->id_ref_a = interlock_out.id_ref_a;
+	out->iq_ref_a = interlock_out.iq_ref_a;
+
+	if (arb_out.reset_current_pi || interlock_out.reset_current_pi) {
 		pi_set_ui(&params->pi_Id, 0.0f);
 		pi_set_ui(&params->pi_Iq, 0.0f);
 	}
 
-	if (core_out.disarmed_interlock_active) {
+	if (interlock_out.disarmed_interlock_active) {
 		params->Id_setpoint_A = 0.0f;
 		params->Iq_setpoint_A = 0.0f;
 		out->velocity_target_rad_s = 0.0f;

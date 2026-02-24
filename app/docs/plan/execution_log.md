@@ -20,6 +20,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0402 | done | n/a | Added explicit `motor_control_feedback` and `motor_capture_feedback` payloads; control logic now consumes compact feedback while capture ring writes consume extended capture payload; `smartstepper_v2` build passed. |
 | 2026-02-24 | T0403 | done | n/a | Added observer split regression coverage for source gating, delay/handoff reset behavior, and invalid-frame burst/recovery transitions; full unit suite passed (21/21) and observer/encoder parity check evidence recorded for split path behavior. |
 | 2026-02-24 | T0501 | done | n/a | Extracted PI-style position/velocity regulators into `motor/control/{position_regulator,velocity_regulator}` and rewired `motor_control_outer_loops.c` to use module APIs; added `chopper.pi_controller.unit`; firmware build and full unit suite passed (22/22). |
+| 2026-02-24 | T0502 | done | n/a | Extracted reference arbitration into `motor/runtime/command_arbitration` and timeout/disarm gating into `motor/protection/interlocks`; rewired `motor_current_ref_policy.c` and `motor_control_loop.c` to use module interfaces with unchanged priority order; `smartstepper_v2` build and full unit suite passed (22/22). |
 
 ## Blocker Template
 

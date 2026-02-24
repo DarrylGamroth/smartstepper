@@ -41,6 +41,7 @@
 #include "motor_control_outer_loops.h"
 #include "motor_current_ref_policy.h"
 #include "motor_control_quality.h"
+#include "motor/protection/interlocks.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -448,13 +449,20 @@ void motor_control_loop_step(struct motor_parameters *params,
 		params->command_timeout_latched = false;
 	}
 
-	/* Timeout disarms output commands when command updates stop. */
-	if (online_control_state && control_armed && !autonomous_keepalive &&
-	    params->command_timeout_ms > 0U) {
+	/* Timeout interlock disarms output commands when command updates stop. */
+	if (params->command_timeout_ms > 0U) {
 		now_ms = k_uptime_get_32();
-		uint32_t elapsed_ms = now_ms - params->last_command_update_ms;
-
-		if (elapsed_ms > params->command_timeout_ms) {
+		struct motor_timeout_interlock_input timeout_in = {
+			.online_control_state = online_control_state,
+			.control_armed = control_armed,
+			.autonomous_keepalive = autonomous_keepalive,
+			.command_timeout_ms = params->command_timeout_ms,
+			.now_ms = now_ms,
+			.last_command_update_ms = params->last_command_update_ms,
+		};
+		struct motor_timeout_interlock_output timeout_out = {0};
+		motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
+		if (timeout_out.disarm_control) {
 			control_armed = false;
 			atomic_set(&params->control_armed, 0);
 			if (!params->command_timeout_latched) {
