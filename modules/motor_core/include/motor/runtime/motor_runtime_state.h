@@ -21,7 +21,6 @@
  */
 struct motor_rt_fast_state {
 	uint32_t control_loop_count;
-	uint32_t overrun_count;
 	uint32_t rls_d_prev_cycle;
 	uint32_t rls_q_prev_cycle;
 	uint8_t rls_d_prev_valid;

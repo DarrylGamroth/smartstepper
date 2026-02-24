@@ -22,6 +22,7 @@ struct motor_rt_diag_state {
 	uint32_t encoder_error_count;
 	uint32_t max_isr_cycles;
 	uint32_t total_isr_cycles;
+	uint32_t overrun_count;
 	uint32_t encoder_capture_overrun_count;
 	uint32_t fault_snapshot_overrun_count;
 	uint32_t fault_snapshot_latch_loop;

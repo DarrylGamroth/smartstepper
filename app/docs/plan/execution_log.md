@@ -14,6 +14,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0203 | done | n/a | Rehomed control/protection/runtime/telemetry modules and includes to `motor/...` family paths; both firmware builds and full unit tests passed. |
 | 2026-02-24 | T0204 | done | n/a | Filled P02 migration table. Legacy include scan in code files (`*.c/*.h`) returned zero matches; unfiltered scan only matched task text in `app/docs/plan/tasks/T0204.yaml`. |
 | 2026-02-24 | T0301 | done | n/a | Added `motor_rt_fast_state` and `motor_rt_diag_state` runtime headers with update cadence comments; wired scaffold fields into `motor_parameters`; both firmware builds passed. |
+| 2026-02-24 | T0302 | done | n/a | Moved non-hot runtime mirrors to `rt_diag`, kept ISR-per-sample mirrors in `rt_fast`, added telemetry scaffold file, and synced mirror paths in `motor_control_loop.c`; build + unit tests passed. |
 
 ## Blocker Template
 

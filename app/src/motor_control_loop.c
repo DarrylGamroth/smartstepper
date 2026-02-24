@@ -117,7 +117,7 @@ static inline void motor_encoder_capture_try_store(struct motor_parameters *para
 
 	uint16_t idx = params->encoder_capture_write_idx;
 	struct motor_encoder_capture_sample *sample = &params->encoder_capture_samples[idx];
-	sample->control_loop_count = params->control_loop_count;
+	sample->control_loop_count = params->rt_fast.control_loop_count;
 	sample->angle_deg = angle_deg;
 	sample->angle_rad = angle_rad;
 	sample->encoder_mech_rad = encoder_mech_rad;
@@ -172,7 +172,7 @@ static inline void motor_fault_snapshot_try_store(struct motor_parameters *param
 	uint16_t idx = params->fault_snapshot_write_idx;
 	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot_samples[idx];
 
-	sample->control_loop_count = params->control_loop_count;
+	sample->control_loop_count = params->rt_fast.control_loop_count;
 	sample->encoder_angle_deg = encoder_angle_deg;
 	sample->observer_input_rad = observer_input_rad;
 	sample->elec_angle_rad = elec_angle_rad;
@@ -207,10 +207,42 @@ static inline void motor_post_error_with_snapshot(struct motor_parameters *param
 	if (params != NULL) {
 		params->fault_snapshot_latched = 1U;
 		params->fault_snapshot_latch_error_code = error_code;
-		params->fault_snapshot_latch_loop = params->control_loop_count;
+		params->fault_snapshot_latch_loop = params->rt_fast.control_loop_count;
 	}
 
 	motor_api_post_error(error_code);
+}
+
+static inline void motor_runtime_fast_sync(struct motor_parameters *params, bool control_armed)
+{
+	params->rt_fast.control_loop_count = params->control_loop_count;
+	params->rt_fast.rls_d_prev_cycle = params->rls_d_prev_cycle;
+	params->rt_fast.rls_q_prev_cycle = params->rls_q_prev_cycle;
+	params->rt_fast.rls_d_prev_valid = params->rls_d_prev_valid;
+	params->rt_fast.rls_q_prev_valid = params->rls_q_prev_valid;
+	params->rt_fast.Id_setpoint_A = params->Id_setpoint_A;
+	params->rt_fast.Iq_setpoint_A = params->Iq_setpoint_A;
+	params->rt_fast.Vd_V = params->Vd_V;
+	params->rt_fast.Vq_V = params->Vq_V;
+	params->rt_fast.feature_flags_shadow = atomic_get(&params->feature_flags);
+	params->rt_fast.control_armed_shadow = control_armed;
+}
+
+static inline void motor_runtime_diag_sync(struct motor_parameters *params)
+{
+	params->rt_diag.state_counter = params->state_counter;
+	params->rt_diag.encoder_fault_counter = params->encoder_fault_counter;
+	params->rt_diag.encoder_warning_count = params->encoder_warning_count;
+	params->rt_diag.encoder_error_count = params->encoder_error_count;
+	params->rt_diag.max_isr_cycles = params->max_isr_cycles;
+	params->rt_diag.total_isr_cycles = params->total_isr_cycles;
+	params->rt_diag.overrun_count = params->overrun_count;
+	params->rt_diag.encoder_capture_overrun_count = params->encoder_capture_overrun_count;
+	params->rt_diag.fault_snapshot_overrun_count = params->fault_snapshot_overrun_count;
+	params->rt_diag.fault_snapshot_latch_loop = params->fault_snapshot_latch_loop;
+	params->rt_diag.fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
+	params->rt_diag.command_timeout_count = params->command_timeout_count;
+	params->rt_diag.profile_sequence_event_drop_count = params->profile_sequence_event_drop_count;
 }
 
 struct motor_control_step_ctx {
@@ -324,6 +356,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
+	motor_runtime_fast_sync(params, control_armed);
 	commission_obs.control_loop_count = params->control_loop_count;
 
 	float32_t angle_control_degrees = 0.0f;
@@ -744,6 +777,8 @@ isr_done:
 	commission_obs.control_armed = control_armed;
 	commission_obs.state = state;
 	commission_obs.fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
+	motor_runtime_fast_sync(params, control_armed);
+	motor_runtime_diag_sync(params);
 	motor_commission_update(params, &commission_obs);
 	return;
 }
