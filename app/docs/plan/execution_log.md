@@ -23,6 +23,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0502 | done | n/a | Extracted reference arbitration into `motor/runtime/command_arbitration` and timeout/disarm gating into `motor/protection/interlocks`; rewired `motor_current_ref_policy.c` and `motor_control_loop.c` to use module interfaces with unchanged priority order; `smartstepper_v2` build and full unit suite passed (22/22). |
 | 2026-02-24 | T0503 | done | n/a | Added `chopper.control_ref_path.unit` covering arbitration priority, disarm interlock precedence, timeout boundary behavior, and keepalive bypass; full unit suite passed (23/23). Closed-loop parity smoke result: `smartstepper_v2_mt6835` build passed after reference-path split. |
 | 2026-02-24 | T0601 | done | n/a | Split decoupling and current PI into dedicated `motor/control/{decoupling,current_loop}` modules; rewired `motor_foc_voltage_pwm.c` to compose them and updated `motor_control_loop.c` to use `motor_decoupling_is_enabled(...)` for deterministic decoupling gating; `smartstepper_v2` build and full unit suite passed (23/23). |
+| 2026-02-24 | T0602 | done | n/a | Isolated transform and PWM synthesis contracts into `motor/control/{transforms,pwm_synthesis}`; `motor_control_loop.c` now uses `motor_transforms_park(...)`, `motor_foc_voltage_pwm.c` composes current-loop/decoupling/transform/pwm modules, and ISR apply stage remains finalized modulation only; `smartstepper_v2` build passed. |
 
 ## Blocker Template
 

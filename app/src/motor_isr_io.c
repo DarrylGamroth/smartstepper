@@ -119,6 +119,7 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 
 static void motor_adc_stage_apply(const struct motor_adc_process_stage *process)
 {
+	/* Apply only finalized modulation commands produced by Process stage. */
 	if (process->pwm_out.update_pwm) {
 		mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1,
 						      process->pwm_out.da_hb1_pu,

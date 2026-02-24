@@ -43,6 +43,7 @@
 #include "motor_control_quality.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/decoupling.h"
+#include "motor/control/transforms.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -569,9 +570,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 	 * same-cycle electrical frame measurements at fault time.
 	 */
 	float32_t park_angle_rad = angle_observer_get_elec_angle(&params->observer);
-	float32_t park_angle_deg = park_angle_rad * (180.0f / PI_F32);
-	arm_sin_cos_f32(park_angle_deg, &sin_theta, &cos_theta);
-	arm_park_f32(Ia_A, Ib_A, &Id_A, &Iq_A, sin_theta, cos_theta);
+	int park_ret = motor_transforms_park(Ia_A, Ib_A, park_angle_rad, &Id_A, &Iq_A);
+	if (park_ret != 0) {
+		goto isr_done;
+	}
 
 	motor_fault_snapshot_try_store(params,
 				      angle_control_degrees,

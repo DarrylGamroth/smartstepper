@@ -30,3 +30,14 @@ void arm_inv_park_f32(float32_t id, float32_t iq, float32_t *pAlpha, float32_t *
 		*pBeta = (id * sinVal) + (iq * cosVal);
 	}
 }
+
+void arm_park_f32(float32_t i_alpha, float32_t i_beta, float32_t *pId, float32_t *pIq,
+		  float32_t sinVal, float32_t cosVal)
+{
+	if (pId != NULL) {
+		*pId = (i_alpha * cosVal) + (i_beta * sinVal);
+	}
+	if (pIq != NULL) {
+		*pIq = (-i_alpha * sinVal) + (i_beta * cosVal);
+	}
+}

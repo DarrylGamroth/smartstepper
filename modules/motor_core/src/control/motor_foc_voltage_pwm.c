@@ -9,24 +9,10 @@
 #include <errno.h>
 #include <math.h>
 
-#if defined(CONFIG_ARCH_POSIX)
-/* Native_sim unit tests provide local stubs for these CMSIS DSP helpers. */
-void arm_sin_cos_f32(float32_t theta, float32_t *pSinVal, float32_t *pCosVal);
-void arm_inv_park_f32(float32_t id, float32_t iq, float32_t *pAlpha, float32_t *pBeta,
-		      float32_t sinVal, float32_t cosVal);
-#else
-#include <dsp/controller_functions.h>
-#endif
-
-#include "motor/control/pwmgen.h"
 #include "motor/control/current_loop.h"
 #include "motor/control/decoupling.h"
-#include "motor/math/math_constants.h"
-
-static inline float32_t clamp_unit_interval(float32_t value)
-{
-	return clampf(value, 0.0f, 1.0f);
-}
+#include "motor/control/pwm_synthesis.h"
+#include "motor/control/transforms.h"
 
 int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 			       const struct motor_foc_voltage_pwm_inputs *in,
@@ -53,9 +39,6 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		return -EINVAL;
 	}
 
-	float32_t sin_theta;
-	float32_t cos_theta;
-	float32_t ctrl_angle_deg;
 	float32_t max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
 	if (!isfinite(max_voltage_magnitude_v) || max_voltage_magnitude_v <= 0.0f) {
 		return -ERANGE;
@@ -100,51 +83,35 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	out->vq_v = current_loop_out.vq_v;
 	out->vq_limit_v = current_loop_out.vq_limit_v;
 
-	/* CMSIS arm_sin_cos_f32 expects angle in degrees. */
-	ctrl_angle_deg = in->inv_park_angle_rad * (180.0f / PI_F32);
-	arm_sin_cos_f32(ctrl_angle_deg, &sin_theta, &cos_theta);
-	arm_inv_park_f32(out->vd_v, out->vq_v, &out->va_v, &out->vb_v, sin_theta, cos_theta);
-	if (!isfinite(out->va_v) || !isfinite(out->vb_v)) {
-		return -ERANGE;
+	int xform_ret = motor_transforms_inv_park(out->vd_v, out->vq_v, in->inv_park_angle_rad,
+						  &out->va_v, &out->vb_v);
+	if (xform_ret != 0) {
+		return xform_ret;
 	}
 
-	float32_t vbus_inv = 1.0f / in->vbus_v;
-	out->ua_pu = out->va_v * vbus_inv;
-	out->ub_pu = out->vb_v * vbus_inv;
-	if (!isfinite(out->ua_pu) || !isfinite(out->ub_pu)) {
-		return -ERANGE;
+	struct motor_pwm_synthesis_input pwm_in = {
+		.va_v = out->va_v,
+		.vb_v = out->vb_v,
+		.vbus_v = in->vbus_v,
+		.braking_enabled = in->braking_enabled,
+		.braking_iq_ref_a = in->braking_iq_ref_a,
+		.braking_speed_rad_s = in->braking_speed_rad_s,
+		.braking_vbus_limit_v = in->braking_vbus_limit_v,
+		.braking_vbus_margin_inv = in->braking_vbus_margin_inv,
+	};
+	struct motor_pwm_synthesis_output pwm_out = {0};
+	int pwm_ret = motor_pwm_synthesis_step(&pwm_in, &pwm_out);
+	if (pwm_ret != 0) {
+		return pwm_ret;
 	}
-
-	pwmgen_spwm_2phase_f32(out->ua_pu, out->ub_pu, &out->da_pu, &out->db_pu);
-	out->da_pu = clamp_unit_interval(out->da_pu);
-	out->db_pu = clamp_unit_interval(out->db_pu);
-
-	out->da_hb1_pu = out->da_pu;
-	out->da_hb2_pu = 1.0f - out->da_pu;
-	out->db_hb1_pu = out->db_pu;
-	out->db_hb2_pu = 1.0f - out->db_pu;
-
-	if (in->braking_enabled) {
-		bool is_braking = (in->braking_iq_ref_a * in->braking_speed_rad_s) < 0.0f;
-
-		/* Ignore very low speed near zero crossing (0.628 rad/s = 0.1 Hz). */
-		if (is_braking && fabsf(in->braking_speed_rad_s) > 0.628f &&
-		    in->vbus_v > in->braking_vbus_limit_v) {
-			float32_t overvoltage = in->vbus_v - in->braking_vbus_limit_v;
-			float32_t short_duty =
-				fminf(1.0f, overvoltage * in->braking_vbus_margin_inv);
-			float32_t scale = 1.0f - short_duty;
-
-			out->da_hb1_pu *= scale;
-			out->da_hb2_pu = out->da_hb2_pu * scale + short_duty;
-			out->db_hb1_pu *= scale;
-			out->db_hb2_pu = out->db_hb2_pu * scale + short_duty;
-		}
-	}
-	out->da_hb1_pu = clamp_unit_interval(out->da_hb1_pu);
-	out->da_hb2_pu = clamp_unit_interval(out->da_hb2_pu);
-	out->db_hb1_pu = clamp_unit_interval(out->db_hb1_pu);
-	out->db_hb2_pu = clamp_unit_interval(out->db_hb2_pu);
+	out->ua_pu = pwm_out.ua_pu;
+	out->ub_pu = pwm_out.ub_pu;
+	out->da_pu = pwm_out.da_pu;
+	out->db_pu = pwm_out.db_pu;
+	out->da_hb1_pu = pwm_out.da_hb1_pu;
+	out->da_hb2_pu = pwm_out.da_hb2_pu;
+	out->db_hb1_pu = pwm_out.db_hb1_pu;
+	out->db_hb2_pu = pwm_out.db_hb2_pu;
 
 	return 0;
 }

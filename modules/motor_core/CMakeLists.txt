@@ -11,6 +11,8 @@ add_library(motor_core STATIC
 	src/control/motor_mpr.c
 	src/control/current_loop.c
 	src/control/decoupling.c
+	src/control/transforms.c
+	src/control/pwm_synthesis.c
 	src/motion/motor_motion_modules.c
 	src/observers/motor_position_convert.c
 	src/control/motor_foc_voltage_pwm.c
