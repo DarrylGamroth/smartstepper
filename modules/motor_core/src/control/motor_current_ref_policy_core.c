@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_current_ref_policy_core.h"
+#include "motor/control/motor_current_ref_policy_core.h"
 
 #include <stddef.h>
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_foc_voltage_pwm.h"
+#include "motor/control/motor_foc_voltage_pwm.h"
 
 #include <errno.h>
 #include <math.h>
@@ -18,7 +18,7 @@ void arm_inv_park_f32(float32_t id, float32_t iq, float32_t *pAlpha, float32_t *
 #include <dsp/controller_functions.h>
 #endif
 
-#include "pwmgen.h"
+#include "motor/control/pwmgen.h"
 #include "motor/math/math_constants.h"
 
 #define DECOUPLING_FLUX_BACKEMF_HEADROOM_RATIO 0.60f

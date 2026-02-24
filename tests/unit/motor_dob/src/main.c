@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor_dob.h"
+#include "motor/control/motor_dob.h"
 
 static float32_t clampf32(float32_t value, float32_t min_value, float32_t max_value)
 {

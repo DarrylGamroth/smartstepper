@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/rls_motor_est.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/telemetry/rls_motor_est.c
 	src/main.c
 )

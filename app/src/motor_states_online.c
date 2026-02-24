@@ -21,7 +21,7 @@
 #include "motor/motion/angle_gen.h"
 #include "motor/observers/angle_observer.h"
 #include "motor/math/angle_wrap.h"
-#include "motor_dob.h"
+#include "motor/control/motor_dob.h"
 #include "motor/motion/motor_motion_modules.h"
 #include "motor_state_utils.h"
 #include "motor_hardware.h"

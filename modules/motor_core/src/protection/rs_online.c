@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "rs_online.h"
+#include "motor/protection/rs_online.h"
 #include "motor/math/math_constants.h"
 
 #include <zephyr/dsp/types.h>

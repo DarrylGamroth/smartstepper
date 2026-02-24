@@ -13,9 +13,9 @@
 #include "motor/filters/pi.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/angle_gen.h"
-#include "motor_mpr.h"
-#include "motor_dob.h"
-#include "motor_current_ref_policy_core.h"
+#include "motor/control/motor_mpr.h"
+#include "motor/control/motor_dob.h"
+#include "motor/control/motor_current_ref_policy_core.h"
 
 int motor_current_ref_apply_policy(struct motor_parameters *params,
 				   const struct motor_current_ref_policy_inputs *in,

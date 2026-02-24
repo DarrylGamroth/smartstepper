@@ -6,7 +6,7 @@
 #include <math.h>
 #include <zephyr/ztest.h>
 
-#include "motor_foc_voltage_pwm.h"
+#include "motor/control/motor_foc_voltage_pwm.h"
 #include "motor/filters/pi.h"
 
 static void init_zero_pi(struct pi_f32 *pi)
