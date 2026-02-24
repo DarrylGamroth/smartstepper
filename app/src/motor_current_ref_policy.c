@@ -10,9 +10,9 @@
 
 #include "config.h"
 #include "motor_control_quality.h"
-#include "pi.h"
-#include "traj.h"
-#include "angle_gen.h"
+#include "motor/filters/pi.h"
+#include "motor/motion/traj.h"
+#include "motor/motion/angle_gen.h"
 #include "motor_mpr.h"
 #include "motor_dob.h"
 #include "motor_current_ref_policy_core.h"

@@ -9,8 +9,8 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor_motion_modules.h"
-#include "angle_wrap.h"
+#include "motor/motion/motor_motion_modules.h"
+#include "motor/math/angle_wrap.h"
 
 ZTEST(motor_motion_modules, test_velocity_plan_limits_delta)
 {

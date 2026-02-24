@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <zephyr/dsp/types.h>
 
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 void arm_sin_cos_f32(float32_t theta, float32_t *pSinVal, float32_t *pCosVal)
 {

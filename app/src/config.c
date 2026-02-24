@@ -7,7 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include "config.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 LOG_MODULE_REGISTER(config, CONFIG_APP_LOG_LEVEL);
 

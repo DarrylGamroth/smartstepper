@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_autonomy.h"
+#include "motor/motion/motor_autonomy.h"
 
 bool motor_autonomy_should_keepalive(bool control_armed, bool autonomous_mode_active,
 				     bool profile_sequence_running, bool chopper_cal_active,

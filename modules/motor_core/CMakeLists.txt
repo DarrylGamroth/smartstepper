@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 add_library(motor_core STATIC
-	src/angle_observer.c
+	src/observers/angle_observer.c
 	src/motor_commission_tune.c
 	src/motor_dob.c
 	src/motor_mpr.c
-	src/motor_motion_modules.c
-	src/motor_position_convert.c
+	src/motion/motor_motion_modules.c
+	src/observers/motor_position_convert.c
 	src/motor_foc_voltage_pwm.c
 	src/motor_commission_id.c
-	src/motion_profile.c
-	src/motor_autonomy.c
-	src/motor_encoder_feedback_core.c
-	src/motor_outer_loop_sched.c
+	src/motion/motion_profile.c
+	src/motion/motor_autonomy.c
+	src/observers/motor_encoder_feedback_core.c
+	src/motion/motor_outer_loop_sched.c
 	src/motor_current_ref_policy_core.c
 	src/math/prbs.c
 	src/rls_motor_est.c
@@ -25,6 +25,8 @@ target_include_directories(motor_core
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/math
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/filters
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/observers
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/motion
 )
 
 target_link_libraries(motor_core PUBLIC zephyr_interface)

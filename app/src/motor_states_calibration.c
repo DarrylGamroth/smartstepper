@@ -14,12 +14,12 @@
 #include "motor_states_calibration.h"
 #include "motor_control_api.h"
 #include "config.h"
-#include "pi.h"
-#include "filter_fo.h"
-#include "traj.h"
-#include "angle_observer.h"
-#include "angle_gen.h"
-#include "angle_wrap.h"
+#include "motor/filters/pi.h"
+#include "motor/filters/filter_fo.h"
+#include "motor/motion/traj.h"
+#include "motor/observers/angle_observer.h"
+#include "motor/motion/angle_gen.h"
+#include "motor/math/angle_wrap.h"
 #include "motor_state_utils.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);

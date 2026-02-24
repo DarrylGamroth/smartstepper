@@ -7,7 +7,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
-#include "motor_motion_modules.h"
+#include "motor/motion/motor_motion_modules.h"
 #include "motor_state_utils.h"
 #include <math.h>
 #include <string.h>

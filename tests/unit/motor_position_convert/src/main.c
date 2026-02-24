@@ -9,8 +9,8 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor_position_convert.h"
-#include "math_constants.h"
+#include "motor/observers/motor_position_convert.h"
+#include "motor/math/math_constants.h"
 
 static struct motor_position_convert_config test_cfg(void)
 {

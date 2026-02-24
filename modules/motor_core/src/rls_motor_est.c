@@ -13,7 +13,7 @@
  */
 
 #include "rls_motor_est.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 #include <errno.h>
 #include <zephyr/sys/util.h>
 #include <math.h>

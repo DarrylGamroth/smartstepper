@@ -12,8 +12,8 @@
 
 #include <zephyr/dsp/types.h>
 
-#include "traj.h"
-#include "motion_profile.h"
+#include "motor/motion/traj.h"
+#include "motor/motion/motion_profile.h"
 
 #ifdef __cplusplus
 extern "C" {

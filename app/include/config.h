@@ -10,9 +10,9 @@
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
 #include <zephyr/sys/util.h>
-#include "pi.h"
-#include "filter_fo.h"
-#include "filter_so.h"
+#include "motor/filters/pi.h"
+#include "motor/filters/filter_fo.h"
+#include "motor/filters/filter_so.h"
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "rs_online.h"
@@ -24,10 +24,10 @@
 #include "motor_dob.h"
 #include "motor_mpr.h"
 #include "motor_position_convert.h"
-#include "prbs.h"
+#include "motor/math/prbs.h"
 #include "rls_motor_est.h"
 #include "thermal_model.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #define MOTOR_PROFILE_SEQUENCE_MAX_POINTS 64U
 #define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS

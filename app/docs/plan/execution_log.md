@@ -10,6 +10,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0101 | done | n/a | Split `adc_callback` into Collect/Process/Apply/Telemetry stages; both firmware targets build cleanly. |
 | 2026-02-24 | T0102 | done | n/a | Parity validation complete: unit tests 21/21 passing (`./tests/run_unit_tests.sh`) and `smartstepper_v2` build passed. |
 | 2026-02-24 | T0201 | done | n/a | Rehomed math/filter families under `include/motor/{math,filters}` and moved `prbs.c` to `src/math`; `smartstepper_v2` build passed. |
+| 2026-02-24 | T0202 | done | n/a | Rehomed observer/motion modules, migrated app+unit include paths to `motor/{observers,motion,math,filters}`, `smartstepper_v2` build and full unit tests passed. |
 
 ## Blocker Template
 

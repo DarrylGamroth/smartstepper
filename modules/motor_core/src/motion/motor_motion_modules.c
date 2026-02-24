@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_motion_modules.h"
+#include "motor/motion/motor_motion_modules.h"
 
 #include <errno.h>
 
-#include "angle_wrap.h"
+#include "motor/math/angle_wrap.h"
 
 void motor_velocity_plan_init(struct traj_f32 *traj,
 	     float32_t max_velocity_rad_s,

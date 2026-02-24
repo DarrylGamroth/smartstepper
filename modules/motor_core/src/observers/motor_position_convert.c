@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_position_convert.h"
+#include "motor/observers/motor_position_convert.h"
 
 #include <errno.h>
 #include <math.h>
 #include <stddef.h>
 
-#include "angle_wrap.h"
-#include "math_constants.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/math/math_constants.h"
 
 #define MOTOR_POSITION_CONVERT_EPSILON 1e-9f
 

@@ -17,8 +17,8 @@
 #include "motor_states.h"
 #include "shell_parse.h"
 #include "config.h"
-#include "traj.h"
-#include "math_constants.h"
+#include "motor/motion/traj.h"
+#include "motor/math/math_constants.h"
 #include "motor_torque.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U

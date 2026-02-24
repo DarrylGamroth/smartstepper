@@ -6,9 +6,9 @@
 #include <zephyr/ztest.h>
 #include <math.h>
 
-#include "filter_fo.h"
-#include "filter_so.h"
-#include "pi.h"
+#include "motor/filters/filter_fo.h"
+#include "motor/filters/filter_so.h"
+#include "motor/filters/pi.h"
 
 ZTEST(pi_filter, test_filter_form0_response)
 {

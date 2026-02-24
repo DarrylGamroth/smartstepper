@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motion_profile.h"
+#include "motor/motion/motion_profile.h"
 
 #include <errno.h>
 #include <math.h>

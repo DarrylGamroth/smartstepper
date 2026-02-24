@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <zephyr/dsp/types.h>
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 /**
  * @brief Angle observer state structure

@@ -10,7 +10,7 @@
 #include <math.h>
 #include <stddef.h>
 
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #define MOTOR_MPR_EPSILON 1e-9f
 #define MOTOR_MPR_FRICTION_DEADBAND_RAD_S 1e-3f

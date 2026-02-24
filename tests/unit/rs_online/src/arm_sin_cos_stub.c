@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <zephyr/dsp/types.h>
 
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 /*
  * Test-only replacement for CMSIS arm_sin_cos_f32.

@@ -5,7 +5,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor_autonomy.h"
+#include "motor/motion/motor_autonomy.h"
 
 ZTEST(motor_autonomy, test_keepalive_false_when_disarmed)
 {

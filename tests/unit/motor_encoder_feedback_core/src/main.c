@@ -6,7 +6,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor_encoder_feedback_core.h"
+#include "motor/observers/motor_encoder_feedback_core.h"
 
 static struct motor_encoder_feedback_core_input base_input(void)
 {

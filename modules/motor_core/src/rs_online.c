@@ -5,7 +5,7 @@
  */
 
 #include "rs_online.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #include <zephyr/dsp/types.h>
 #include <zephyr/dsp/dsp.h>

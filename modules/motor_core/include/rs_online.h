@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <zephyr/dsp/types.h>
-#include "filter_fo.h"
+#include "motor/filters/filter_fo.h"
 
 #ifdef __cplusplus
 extern "C" {

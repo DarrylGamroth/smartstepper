@@ -5,7 +5,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "prbs.h"
+#include "motor/math/prbs.h"
 
 ZTEST(prbs, test_init_defaults)
 {

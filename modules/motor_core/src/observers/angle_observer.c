@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "angle_observer.h"
-#include "angle_wrap.h"
+#include "motor/observers/angle_observer.h"
+#include "motor/math/angle_wrap.h"
 #include <zephyr/dsp/types.h>
 #include <math.h>
 #include <stddef.h>

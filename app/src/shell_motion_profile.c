@@ -12,8 +12,8 @@
 #include "motor_control_api.h"
 #include "motor_state_utils.h"
 #include "config.h"
-#include "angle_wrap.h"
-#include "motor_motion_modules.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/motion/motor_motion_modules.h"
 #include "shell_parse.h"
 
 #include <zephyr/logging/log.h>

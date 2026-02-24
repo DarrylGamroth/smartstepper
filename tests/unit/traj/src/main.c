@@ -5,7 +5,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "traj.h"
+#include "motor/motion/traj.h"
 
 ZTEST(traj, test_init_zeros_state)
 {

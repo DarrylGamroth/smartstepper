@@ -12,7 +12,7 @@
  */
 
 #include <zephyr/toolchain.h>
-#include "prbs.h"
+#include "motor/math/prbs.h"
 
 void prbs_init(struct prbs_gen *prbs)
 {

@@ -8,12 +8,12 @@
 
 #include <zephyr/ztest.h>
 
-#include "angle_wrap.h"
-#include "math_constants.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/math/math_constants.h"
 #include "motor_dob.h"
-#include "motor_motion_modules.h"
+#include "motor/motion/motor_motion_modules.h"
 #include "motor_mpr.h"
-#include "motor_position_convert.h"
+#include "motor/observers/motor_position_convert.h"
 
 static void position_convert_update_sample(struct motor_position_convert_state *state,
 					   const struct motor_position_convert_config *cfg,

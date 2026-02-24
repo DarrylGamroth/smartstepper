@@ -12,10 +12,10 @@
 
 #include "motor_control_loop.h"
 #include "config.h"
-#include "angle_observer.h"
-#include "angle_gen.h"
-#include "angle_wrap.h"
-#include "motor_encoder_feedback_core.h"
+#include "motor/observers/angle_observer.h"
+#include "motor/motion/angle_gen.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/observers/motor_encoder_feedback_core.h"
 
 int motor_encoder_feedback_update(struct motor_parameters *params,
 				  const struct motor_control_encoder_sample *encoder_sample,

@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/prbs.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/math/prbs.c
 	src/main.c
 )

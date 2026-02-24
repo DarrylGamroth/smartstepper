@@ -19,7 +19,7 @@ void arm_inv_park_f32(float32_t id, float32_t iq, float32_t *pAlpha, float32_t *
 #endif
 
 #include "pwmgen.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #define DECOUPLING_FLUX_BACKEMF_HEADROOM_RATIO 0.60f
 #define DECOUPLING_TOTAL_FEEDFORWARD_LIMIT_RATIO 0.70f

@@ -5,9 +5,9 @@
 
 #include <zephyr/ztest.h>
 
-#include "angle_observer.h"
-#include "angle_wrap.h"
-#include "math_constants.h"
+#include "motor/observers/angle_observer.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/math/math_constants.h"
 
 static void assert_wrapped_0_2pi(float32_t angle_rad)
 {

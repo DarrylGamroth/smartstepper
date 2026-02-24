@@ -7,7 +7,7 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/motion_profile.c
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/motor_motion_modules.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/motion/motion_profile.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/motion/motor_motion_modules.c
 	src/main.c
 )

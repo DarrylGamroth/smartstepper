@@ -5,7 +5,7 @@
  */
 
 #include "thermal_model.h"
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 #include <math.h>
 
 void thermal_model_init(struct thermal_model *model, float32_t R_th, float32_t C_th,

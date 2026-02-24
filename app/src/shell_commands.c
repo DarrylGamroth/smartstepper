@@ -18,7 +18,7 @@
 #include "motor_hardware.h"
 #include "config.h"
 #include "motor_torque.h"
-#include "angle_wrap.h"
+#include "motor/math/angle_wrap.h"
 #include "shell_commands_motion.h"
 #include "shell_commands_commission.h"
 #include "shell_commands_state.h"

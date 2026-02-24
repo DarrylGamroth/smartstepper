@@ -7,8 +7,8 @@
 #include <math.h>
 #include <zephyr/ztest.h>
 
-#include "math_constants.h"
-#include "motion_profile.h"
+#include "motor/math/math_constants.h"
+#include "motor/motion/motion_profile.h"
 
 static void motion_profile_run_to_completion(struct motion_profile_quintic *profile,
 					     uint32_t max_steps)

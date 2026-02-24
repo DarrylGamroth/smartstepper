@@ -12,16 +12,16 @@
 #include "config.h"
 #include "motor_states.h"
 #include "motor_state_utils.h"
-#include "angle_wrap.h"
-#include "filter_so.h"
-#include "traj.h"
-#include "angle_gen.h"
-#include "motor_motion_modules.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/filters/filter_so.h"
+#include "motor/motion/traj.h"
+#include "motor/motion/angle_gen.h"
+#include "motor/motion/motor_motion_modules.h"
 #include "motor_mpr.h"
 #include "motor_dob.h"
 #include "motor_torque.h"
 #include "motor_control_quality.h"
-#include "motor_outer_loop_sched.h"
+#include "motor/motion/motor_outer_loop_sched.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {

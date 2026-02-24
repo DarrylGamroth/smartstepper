@@ -18,11 +18,11 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "motor_state_utils.h"
-#include "motor_autonomy.h"
+#include "motor/motion/motor_autonomy.h"
 #include "motor_hardware.h"
 #include "motor_encoder_pipeline.h"
 #include "config.h"
-#include "angle_wrap.h"
+#include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
 
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)

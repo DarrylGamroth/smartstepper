@@ -12,7 +12,7 @@
 #include <string.h>
 #include <zephyr/dsp/types.h>
 
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #ifdef __cplusplus
 extern "C" {

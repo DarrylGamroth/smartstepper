@@ -17,8 +17,8 @@
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
 #include "config.h"
-#include "angle_wrap.h"
-#include "traj.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/motion/traj.h"
 #include "shell_parse.h"
 
 #include <zephyr/logging/log.h>

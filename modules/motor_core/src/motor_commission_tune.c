@@ -10,7 +10,7 @@
 #include <math.h>
 #include <stddef.h>
 
-#include "math_constants.h"
+#include "motor/math/math_constants.h"
 
 #define MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A 0.05f
 #define MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN 0.02f

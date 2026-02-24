@@ -19,7 +19,7 @@
 #include "motor_states.h"
 #include "motor_state_utils.h"
 #include "config.h"
-#include "angle_wrap.h"
+#include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
 
 #include <zephyr/logging/log.h>
