@@ -518,6 +518,12 @@ struct motor_parameters {
 #define VELOCITY_NOTCH_Q VELOCITY_NOTCH_Q_CFG
 #endif
 
+/* Runtime footprint guards for ISR-hot split scaffolding (P03). */
+BUILD_ASSERT(sizeof(struct motor_rt_fast_state) <= 64U,
+	     "motor_rt_fast_state grew beyond ISR-hot budget");
+BUILD_ASSERT(sizeof(struct motor_rt_diag_state) <= 96U,
+	     "motor_rt_diag_state grew beyond diagnostic budget");
+
 /**
  * @brief Initialize filters with devicetree parameters
  *
