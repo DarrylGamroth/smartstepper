@@ -19,6 +19,8 @@
 #include "motor/motion/motor_motion_modules.h"
 #include "motor/control/motor_mpr.h"
 #include "motor/control/motor_dob.h"
+#include "motor/control/position_regulator.h"
+#include "motor/control/velocity_regulator.h"
 #include "motor_torque.h"
 #include "motor_control_quality.h"
 #include "motor/motion/motor_outer_loop_sched.h"
@@ -101,18 +103,27 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 				}
 				params->position_cl_i_term_rad_s = 0.0f;
 			} else {
-				float32_t position_fb_velocity_rad_s;
-				float32_t pos_i_next =
-					params->position_cl_i_term_rad_s +
-					(params->position_cl_ki_rad_s2_per_rad *
-					 position_error_rad * in->position_loop_dt_s);
-				pos_i_next = clampf(pos_i_next, -pos_i_limit_rad_s, pos_i_limit_rad_s);
-				params->position_cl_i_term_rad_s = pos_i_next;
-				position_fb_velocity_rad_s =
-					params->position_cl_kp_rad_s_per_rad * position_error_rad +
-					params->position_cl_i_term_rad_s;
-				out->velocity_target_rad_s =
-					profile_velocity_ff_rad_s + position_fb_velocity_rad_s;
+				struct motor_position_regulator_config pos_cfg = {
+					.kp_rad_s_per_rad = params->position_cl_kp_rad_s_per_rad,
+					.ki_rad_s2_per_rad = params->position_cl_ki_rad_s2_per_rad,
+					.integrator_limit_rad_s = pos_i_limit_rad_s,
+					.output_limit_rad_s = params->profile_max_velocity_rad_s,
+				};
+				struct motor_position_regulator_state pos_state = {
+					.integrator_rad_s = params->position_cl_i_term_rad_s,
+				};
+				float32_t velocity_target = clampf(profile_velocity_ff_rad_s,
+								   -params->profile_max_velocity_rad_s,
+								   params->profile_max_velocity_rad_s);
+				int pos_ret = motor_position_regulator_step(
+					&pos_cfg, &pos_state, position_error_rad,
+					profile_velocity_ff_rad_s, in->position_loop_dt_s,
+					&velocity_target);
+				if (pos_ret != 0) {
+					motor_position_regulator_reset(&pos_state, 0.0f);
+				}
+				params->position_cl_i_term_rad_s = pos_state.integrator_rad_s;
+				out->velocity_target_rad_s = velocity_target;
 			}
 
 			out->velocity_target_rad_s =
@@ -199,20 +210,28 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 			if (!mpr_applied) {
 				float32_t speed_error_rad_s =
 					out->velocity_ref_rad_s - out->speed_mech_filtered_rad_s;
-				float32_t vel_i_next =
-					params->velocity_cl_i_term_A +
-					(params->velocity_cl_ki_A_per_rad * speed_error_rad_s *
-					 in->velocity_loop_dt_s);
-				vel_i_next = clampf(vel_i_next, -params->velocity_cl_iq_limit_A,
-						   params->velocity_cl_iq_limit_A);
-				params->velocity_cl_i_term_A = vel_i_next;
+				struct motor_velocity_regulator_config vel_cfg = {
+					.kp_a_per_rad_s = params->velocity_cl_kp_A_per_rad_s,
+					.ki_a_per_rad = params->velocity_cl_ki_A_per_rad,
+					.integrator_limit_a = params->velocity_cl_iq_limit_A,
+					.output_limit_a = params->velocity_cl_iq_limit_A,
+				};
+				struct motor_velocity_regulator_state vel_state = {
+					.integrator_a = params->velocity_cl_i_term_A,
+				};
+				float32_t iq_cmd = 0.0f;
+				int vel_ret = motor_velocity_regulator_step(&vel_cfg, &vel_state,
+									 speed_error_rad_s,
+									 in->velocity_loop_dt_s,
+									 &iq_cmd);
+				if (vel_ret != 0) {
+					motor_velocity_regulator_reset(&vel_state, 0.0f);
+					iq_cmd = 0.0f;
+				}
+				params->velocity_cl_i_term_A = vel_state.integrator_a;
 
 				out->id_ref_a = params->Id_setpoint_A;
-				iq_cmd_pre_dob_a =
-					clampf((params->velocity_cl_kp_A_per_rad_s * speed_error_rad_s) +
-					       params->velocity_cl_i_term_A,
-					       -params->velocity_cl_iq_limit_A,
-					       params->velocity_cl_iq_limit_A);
+				iq_cmd_pre_dob_a = iq_cmd;
 				out->iq_ref_a = iq_cmd_pre_dob_a;
 			}
 

@@ -10,6 +10,8 @@ add_library(motor_core STATIC
 	src/motion/motor_motion_modules.c
 	src/observers/motor_position_convert.c
 	src/control/motor_foc_voltage_pwm.c
+	src/control/position_regulator.c
+	src/control/velocity_regulator.c
 	src/estimation/motor_commission_id.c
 	src/motion/motion_profile.c
 	src/runtime/motor_keepalive_policy.c
