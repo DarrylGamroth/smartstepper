@@ -42,6 +42,7 @@
 #include "motor_current_ref_policy.h"
 #include "motor_control_quality.h"
 #include "motor/protection/interlocks.h"
+#include "motor/control/decoupling.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -715,13 +716,17 @@ void motor_control_loop_step(struct motor_parameters *params,
 				       decoupling_speed_limit_rad_s);
 	bool decoupling_feedback_valid = feature_angle_gen ||
 					 motor_velocity_feedback_is_valid(params->position_quality_flags);
-	bool decoupling_enabled = CURRENT_DECOUPLING_ENABLED &&
-				 online_control_state && control_armed &&
-				 !torque_mode_state &&
-				 decoupling_min_speed_reached &&
-				 decoupling_flux_valid &&
-				 decoupling_speed_valid &&
-				 decoupling_feedback_valid;
+	struct motor_decoupling_enable_input decoupling_enable_in = {
+		.feature_enabled = CURRENT_DECOUPLING_ENABLED,
+		.online_control_state = online_control_state,
+		.control_armed = control_armed,
+		.torque_mode_state = torque_mode_state,
+		.min_speed_reached = decoupling_min_speed_reached,
+		.flux_valid = decoupling_flux_valid,
+		.speed_valid = decoupling_speed_valid,
+		.feedback_valid = decoupling_feedback_valid,
+	};
+	bool decoupling_enabled = motor_decoupling_is_enabled(&decoupling_enable_in);
 	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
 
 		struct motor_foc_voltage_pwm_inputs foc_inputs = {
