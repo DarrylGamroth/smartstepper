@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/runtime/motor_commission_id.h"
+#include "motor/estimation/motor_commission_id.h"
 
 static float32_t flux_model_vq(const struct motor_flux_id_config *cfg,
 			       float32_t elec_speed_rad_s,

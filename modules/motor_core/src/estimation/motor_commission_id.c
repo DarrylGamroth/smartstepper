@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/runtime/motor_commission_id.h"
+#include "motor/estimation/motor_commission_id.h"
 
 #include <errno.h>
 #include <math.h>

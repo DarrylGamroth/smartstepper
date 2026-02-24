@@ -5,7 +5,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/protection/rs_online.h"
+#include "motor/estimation/rs_online.h"
 
 ZTEST(rs_online, test_init_sets_fields_and_filter_state)
 {

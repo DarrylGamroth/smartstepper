@@ -27,7 +27,7 @@
 #include "motor/observers/angle_observer.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
-#include "motor/motion/motor_autonomy.h"
+#include "motor/runtime/motor_keepalive_policy.h"
 #include "motor_rls_runtime.h"
 #include "motor/control/motor_foc_voltage_pwm.h"
 #include "motor_state_utils.h"
@@ -395,7 +395,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->velocity_dob_residual_rad_s = 0.0f;
 
 	autonomous_keepalive =
-		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 params->profile_sequence_running,
 						 params->chopper_cal_active,
 						 motion_profile_quintic_is_active(&params->position_profile));

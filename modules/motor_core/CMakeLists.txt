@@ -8,16 +8,16 @@ add_library(motor_core STATIC
 	src/motion/motor_motion_modules.c
 	src/observers/motor_position_convert.c
 	src/control/motor_foc_voltage_pwm.c
-	src/runtime/motor_commission_id.c
+	src/estimation/motor_commission_id.c
 	src/motion/motion_profile.c
-	src/motion/motor_autonomy.c
+	src/runtime/motor_keepalive_policy.c
 	src/observers/motor_encoder_feedback_core.c
 	src/motion/motor_outer_loop_sched.c
 	src/control/motor_current_ref_policy_core.c
 	src/math/prbs.c
-	src/telemetry/rls_motor_est.c
-	src/protection/rs_online.c
-	src/telemetry/thermal_model.c
+	src/estimation/rls_motor_est.c
+	src/estimation/rs_online.c
+	src/estimation/thermal_model.c
 )
 
 target_include_directories(motor_core
@@ -31,6 +31,7 @@ target_include_directories(motor_core
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/protection
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/runtime
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/telemetry
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/estimation
 )
 
 target_link_libraries(motor_core PUBLIC zephyr_interface)

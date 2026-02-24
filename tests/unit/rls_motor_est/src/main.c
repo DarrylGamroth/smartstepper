@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <zephyr/ztest.h>
 
-#include "motor/telemetry/rls_motor_est.h"
+#include "motor/estimation/rls_motor_est.h"
 
 static void clear_covariance(struct rls_motor_est *rls)
 {

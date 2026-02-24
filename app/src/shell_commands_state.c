@@ -18,7 +18,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "motor_state_utils.h"
-#include "motor/motion/motor_autonomy.h"
+#include "motor/runtime/motor_keepalive_policy.h"
 #include "motor_hardware.h"
 #include "motor_encoder_pipeline.h"
 #include "config.h"
@@ -421,7 +421,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
-		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_sequence_running,
 						 g_motor_params->chopper_cal_active,
 						 motion_profile_quintic_is_active(
@@ -604,7 +604,7 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
-		motor_autonomy_should_keepalive(control_armed, autonomous_mode_active,
+		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_sequence_running,
 						 g_motor_params->chopper_cal_active,
 						 motion_profile_quintic_is_active(

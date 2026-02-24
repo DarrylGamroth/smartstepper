@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/telemetry/thermal_model.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/estimation/thermal_model.c
 	src/main.c
 )

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/telemetry/thermal_model.h"
+#include "motor/estimation/thermal_model.h"
 #include "motor/math/math_constants.h"
 #include <math.h>
 

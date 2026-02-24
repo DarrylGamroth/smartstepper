@@ -12,7 +12,7 @@
  * identification using explicit matrix operations for efficiency.
  */
 
-#include "motor/telemetry/rls_motor_est.h"
+#include "motor/estimation/rls_motor_est.h"
 #include "motor/math/math_constants.h"
 #include <errno.h>
 #include <zephyr/sys/util.h>

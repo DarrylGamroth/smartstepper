@@ -6,7 +6,7 @@
 #include <zephyr/ztest.h>
 #include <math.h>
 
-#include "motor/telemetry/thermal_model.h"
+#include "motor/estimation/thermal_model.h"
 
 ZTEST(thermal_model, test_init_sets_expected_state)
 {
