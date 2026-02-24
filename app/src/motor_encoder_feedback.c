@@ -15,6 +15,8 @@
 #include "motor/observers/angle_observer.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
+#include "motor/observers/encoder_source.h"
+#include "motor/observers/angle_tracking.h"
 #include "motor/observers/motor_encoder_feedback_core.h"
 
 int motor_encoder_feedback_update(struct motor_parameters *params,
@@ -43,21 +45,38 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	float32_t encoder_direction_sign =
 		(params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
 
-	if (encoder_sample != NULL &&
-	    (encoder_sample->enabled || params->encoder_capture_enabled)) {
-		feedback->sample_enabled = encoder_sample->enabled;
-		feedback->sample_available = true;
-		feedback->fresh = encoder_sample->fresh;
-		feedback->warning = encoder_sample->warning;
-		feedback->error = encoder_sample->error;
-		feedback->io_fault = encoder_sample->io_fault;
-		feedback->status = encoder_sample->status;
-		feedback->angle_sensor_deg = encoder_sample->angle_deg;
-		feedback->angle_control_deg = feedback->angle_sensor_deg * encoder_direction_sign;
+	struct motor_encoder_source_sample source_sample = {0};
+	bool raw_sample_present = (encoder_sample != NULL);
+	bool raw_sample_enabled = raw_sample_present ? encoder_sample->enabled : false;
+	bool raw_fresh = raw_sample_present ? encoder_sample->fresh : false;
+	bool raw_warning = raw_sample_present ? encoder_sample->warning : false;
+	bool raw_error = raw_sample_present ? encoder_sample->error : false;
+	bool raw_io_fault = raw_sample_present ? encoder_sample->io_fault : false;
+	uint8_t raw_status = raw_sample_present ? encoder_sample->status : 0U;
+	float32_t raw_angle_deg = raw_sample_present ? encoder_sample->angle_deg : 0.0f;
+	motor_encoder_source_from_raw(raw_sample_present,
+				      raw_sample_enabled,
+				      raw_fresh,
+				      raw_warning,
+				      raw_error,
+				      raw_io_fault,
+				      raw_status,
+				      raw_angle_deg,
+				      params->encoder_capture_enabled,
+				      encoder_direction_sign,
+				      &source_sample);
+	feedback->sample_enabled = source_sample.sample_enabled;
+	feedback->sample_available = source_sample.sample_available;
+	feedback->fresh = source_sample.fresh;
+	feedback->warning = source_sample.warning;
+	feedback->error = source_sample.error;
+	feedback->io_fault = source_sample.io_fault;
+	feedback->status = source_sample.status;
+	feedback->angle_sensor_deg = source_sample.angle_sensor_deg;
+	feedback->angle_control_deg = source_sample.angle_control_deg;
 
-		if (feedback->fresh || feedback->warning || feedback->error) {
-			params->encoder_last_status = feedback->status;
-		}
+	if (feedback->sample_available && (feedback->fresh || feedback->warning || feedback->error)) {
+		params->encoder_last_status = feedback->status;
 	}
 
 	struct motor_encoder_feedback_core_input core_in = {
@@ -85,43 +104,42 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	}
 
 	float32_t angle_raw_rad = 0.0f;
-	uint8_t source = motor_encoder_feedback_select_source(feature_angle_gen,
-						      feedback->sample_enabled,
-						      feedback->fresh);
-	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) {
-		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
-		angle_observer_set_delay(&params->observer, 0.0f);
-		feedback->input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
-	} else if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER) {
-		angle_raw_rad = feedback->angle_control_deg * (PI_F32 / 180.0f);
-		angle_observer_set_delay(&params->observer, ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
-		feedback->input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;
+	float32_t generated_angle_rad = angle_gen_get_angle(&params->angle_gen);
+	uint8_t source = motor_encoder_source_select(feature_angle_gen,
+						     feedback->sample_enabled,
+						     feedback->fresh);
+	angle_raw_rad = motor_encoder_source_resolve_angle_rad(source,
+							       &source_sample,
+							       angle_observer_get_mech_angle(&params->observer),
+							       generated_angle_rad);
+	struct motor_angle_tracking_result tracking = {0};
+	motor_angle_tracking_update(&params->observer,
+				    angle_raw_rad,
+				    source,
+				    feedback->fresh,
+				    feedback->warning,
+				    feedback->error,
+				    params->position_convert.measurement_locked,
+				    ENCODER_SPI_PIPELINE_DELAY_SAMPLES,
+				    &tracking);
+	feedback->input_source = tracking.input_source;
+	params->encoder_observer_input_rad = tracking.observer_input_rad;
+	params->encoder_input_source = feedback->input_source;
+	feedback->observer_input_rad = tracking.observer_input_rad;
+	feedback->observer_mech_rad = tracking.observer_mech_rad;
+	feedback->observer_elec_rad = tracking.observer_elec_rad;
+
+	if (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) {
 		params->encoder_raw_deg = feedback->angle_sensor_deg;
 		params->encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
-	} else {
-		angle_raw_rad = angle_observer_get_mech_angle(&params->observer);
-		angle_observer_set_delay(&params->observer, 0.0f);
-		feedback->input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
+		if (feedback->fresh && !params->position_convert.measurement_locked) {
+			/* Preserve legacy behavior: reset position conversion on first fresh
+			 * encoder handoff sample used to seed the observer.
+			 */
+			motor_position_convert_reset(&params->position_convert,
+						     wrap_rad_2pi(angle_raw_rad));
+		}
 	}
-
-	if (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    feedback->fresh &&
-	    !params->position_convert.measurement_locked) {
-		float32_t handoff_angle_rad = wrap_rad_2pi(angle_raw_rad);
-
-		/* Seed observer/position conversion on first fresh encoder sample after
-		 * mode/reset handoff to avoid large residual speed spikes.
-		 */
-		angle_observer_reset_tracking(&params->observer, handoff_angle_rad, 0.0f);
-		motor_position_convert_reset(&params->position_convert, handoff_angle_rad);
-	}
-
-	angle_observer_update(&params->observer, angle_raw_rad);
-	params->encoder_observer_input_rad = angle_raw_rad;
-	params->encoder_input_source = feedback->input_source;
-	feedback->observer_input_rad = angle_raw_rad;
-	feedback->observer_mech_rad = angle_observer_get_mech_angle(&params->observer);
-	feedback->observer_elec_rad = angle_observer_get_elec_angle(&params->observer);
 
 	feedback->capture_angle_rad = feedback->sample_available ?
 					      (feedback->angle_control_deg * (PI_F32 / 180.0f)) :
@@ -131,7 +149,7 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 					      (angle_raw_rad * (180.0f / PI_F32));
 	feedback->capture_observer_mech_rad = feedback->observer_mech_rad;
 	feedback->capture_observer_elec_rad = feedback->observer_elec_rad;
-	feedback->capture_generated_mech_rad = wrap_rad_2pi(angle_gen_get_angle(&params->angle_gen));
+	feedback->capture_generated_mech_rad = wrap_rad_2pi(generated_angle_rad);
 	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
 	feedback->capture_generated_elec_rad =
 		wrap_rad_2pi((feedback->capture_generated_mech_rad + observer_mech_offset_rad) *
