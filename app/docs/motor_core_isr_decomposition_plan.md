@@ -43,13 +43,17 @@ Source layout mirrors include layout:
 7. `modules/motor_core/src/runtime/*`
 8. `modules/motor_core/src/telemetry/*`
 
-API convention for all modules:
+API conventions:
 
-1. `*_config` struct
-2. `*_state` struct
-3. `*_input` struct
-4. `*_output` struct
-5. `*_init()`, `*_reset()`, `*_step()` functions
+1. Algorithm modules (`filters`, `observers`, `motion`, `control`, `protection`, `runtime`, `telemetry` where stateful):
+   - `*_config` struct
+   - `*_state` struct
+   - `*_input` struct
+   - `*_output` struct
+   - `*_init()`, `*_reset()`, `*_step()` functions
+2. Utility modules (`math`, unit conversion, small stateless helpers):
+   - header-only `static inline` or pure functions
+   - no mandatory state/config wrappers
 
 ## Constraints
 
@@ -58,6 +62,20 @@ API convention for all modules:
 3. Preserve current control-loop behavior and safety interlocks.
 4. Keep encoder async pipeline (`RTIO`) semantics intact.
 5. Maintain shell/state-machine compatibility during migration.
+6. Keep `Process` stage deterministic: fixed work per tick except compile-time gated diagnostics.
+
+## Telemetry Gating Model
+
+1. Compile-time gates:
+   - `CONFIG_MOTOR_TELEM_LIVE`: compact live telemetry mirror in ISR.
+   - `CONFIG_MOTOR_TELEM_ISR_DIAG`: optional ISR diagnostic captures/rings.
+   - `CONFIG_MOTOR_TELEM_DEFERRED`: deferred telemetry pipeline using SPSC queue.
+2. Runtime gates:
+   - enable/disable capture families and decimation values from shell/config.
+3. Default production profile:
+   - live telemetry ON
+   - ISR diagnostics OFF
+   - deferred telemetry ON (for low-rate diagnostics)
 
 ## External Reference Review
 
@@ -128,7 +146,7 @@ To avoid ambiguity:
 3. `motor_ref_position_regulator` (position error -> velocity command)
 4. `motor_ref_velocity_regulator` (velocity error -> torque/current command)
 5. `motor_ref_command_arbitration` (command source selection and precedence)
-6. `motor_ref_interlocks` (armed/disarmed and safety interlock gating)
+6. `motor_ref_interlocks` (armed/disarmed and torque-enable gating in `Process`)
 
 ### E. Current Loop / FOC Modules
 
@@ -141,7 +159,7 @@ To avoid ambiguity:
 
 1. `motor_fault_limits` (overcurrent/overvoltage/vbus validity checks)
 2. `motor_fault_snapshot` (fault ring update)
-3. `motor_error_post` (deferred error posting path for ISR)
+3. `motor_error_post` (deferred error posting path outside direct ISR, fed by fault flags)
 
 ### G. Runtime Orchestration Modules
 
@@ -184,9 +202,12 @@ Stage names above are conceptual. Helper/function naming is implementation-defin
 ### Stage contract details
 
 1. `Collect`: read ADC, drain encoder pipeline, normalize input status, fetch coherent runtime snapshot, and advance trigger bookkeeping.
-2. `Process`: run observer chain, reference chain, and current-loop chain, then produce compact actuator command and status outputs.
-3. `Apply`: commit PWM output from command object and latch fast protection actions.
-4. `Telemetry`: update compact live telemetry plus decimated diagnostic rings and per-stage timing counters.
+2. `Process`: run observer chain, reference chain, interlock gating, protection checks (flag-only), and current-loop chain, then produce compact actuator command and status outputs.
+3. `Apply`: commit PWM output from command object and execute protection actions (fault latch/disable path) from `Process` fault flags.
+4. `Telemetry`:
+   - ISR-minimal: always-on compact live telemetry mirror and core timing counters.
+   - Optional ISR diagnostics: compile-time + runtime gated captures only.
+   - Deferred diagnostics: enqueue records to a consumer thread via SPSC queue.
 
 Each stage owns its own input/output contract and must not depend on ad-hoc globals.
 
@@ -194,7 +215,8 @@ Each stage owns its own input/output contract and must not depend on ad-hoc glob
 
 1. `modules/motor_core/rt/*`: pure control math and state update.
 2. `app/src/motor_isr_io.c`: hardware I/O glue only.
-3. `app/src/motor_states*.c` and shell: mode management, safety/interlock management, and config management only.
+3. `app/src/motor_states*.c` and shell: mode management, command/config publication, and diagnostics control.
+4. Safety/interlock evaluation for torque-producing commands executes in `Process` for deterministic same-cycle gating.
 
 ## Multi-Phase Plan
 
@@ -235,14 +257,17 @@ Acceptance:
 1. Create new folder taxonomy under `modules/motor_core/include/motor/*` and `src/*`.
 2. Move headers/sources without behavior changes; keep compatibility wrappers at old include paths.
 3. Add per-family CMake grouping (`math`, `filters`, `observers`, `motion`, `control`, `protection`, `runtime`, `telemetry`).
+4. Add wrapper migration table (`old include` -> `new include`) in docs.
 
 Deliverables:
 1. New directory structure with stable build.
 2. Wrapper headers preserving existing includes.
+3. Migration table with owner and removal target phase.
 
 Acceptance:
 1. Zero behavior changes.
 2. All builds/tests green.
+3. No new includes are added to legacy wrapper paths.
 
 ## Phase 3: Runtime State Decomposition
 
@@ -258,7 +283,7 @@ Acceptance:
 1. `motor_parameters` field count materially reduced in hot region.
 2. No stack growth in ISR.
 
-## Phase 4: Sensor/Observer Module Split (C + D subset)
+## Phase 4: Sensor/Observer Module Split (C)
 
 1. Split `motor_encoder_feedback` into independent modules:
    - `motor_encoder_source`
@@ -318,12 +343,15 @@ Acceptance:
 ## Phase 7: Compose `motor_core_step_fast(...)` Pipeline (G)
 
 1. Add one orchestrator API in `motor_core` that sequences modules A-F.
-2. Keep app-owned side effects (error posting, state transitions, event queueing) outside core.
+2. Keep app-owned side effects (state transitions and non-realtime event handling) outside core.
 3. Use compact stage-local structs instead of one large cross-stage context.
 
 Deliverables:
 1. `motor_core_step_fast(...)` and associated contracts.
-2. App control loop reduced to orchestration and mode/safety boundary handling.
+2. App control loop reduced to orchestration and mode/config boundary handling.
+3. `motor_core_step_fast(...)` contract explicitly marks side-effect boundaries:
+   - allowed: algorithm state updates
+   - disallowed: queue ops, logging, kernel calls, blocking I/O
 
 Acceptance:
 1. `app/src/motor_control_loop.c` becomes thin orchestration.
@@ -374,6 +402,20 @@ Deliverables:
 Acceptance:
 1. Verified deterministic jitter budget on hardware.
 2. No functional regression.
+
+## Phase 11: Wrapper Retirement
+
+1. Remove compatibility wrapper headers introduced in Phase 2.
+2. Enforce new include paths only in app/tests.
+3. Add CI/static check to reject legacy include paths.
+
+Deliverables:
+1. Wrapper-free include tree.
+2. Migration report with all call sites updated.
+
+Acceptance:
+1. Zero references to legacy wrapper includes in repo.
+2. Build/test/HIL unchanged.
 
 ## Proposed `adc_callback` End-State (Conceptual)
 
