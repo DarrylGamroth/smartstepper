@@ -87,10 +87,20 @@ API convention for all modules:
 1. `motor_parameters` is monolithic and mixes hot ISR state, commissioning buffers, capture rings, and shell-facing telemetry (`app/include/config.h:104`).
 2. `motor_control_loop_step` still has large local state and cross-cutting concerns (`app/src/motor_control_loop.c:273`).
 3. `motor_control_step_ctx` includes heavy nested feedback (`struct motor_encoder_feedback`) that also carries capture/debug fields not always needed for control (`app/src/motor_control_loop.c:216`, `app/include/motor_encoder_feedback.h:21`).
-4. ISR dataflow in `adc_callback` still mixes encoder drain policy, profile tick generation, control invocation, PWM commit, and timing stats in one function (`app/src/motor_isr_io.c:57`).
+4. ISR dataflow in `adc_callback` still mixes encoder drain gating, profile tick generation, control invocation, PWM commit, and timing stats in one function (`app/src/motor_isr_io.c:57`).
 5. App wrappers pass multiple medium-size input/output structs per call in the hot path (`app/src/motor_control_loop.c:571`, `app/src/motor_control_loop.c:596`).
 
 ## Target Module Taxonomy
+
+### Terminology Clarification
+
+To avoid ambiguity:
+
+1. Use `position regulator` instead of `outer-loop position`.
+2. Use `velocity regulator` instead of `outer-loop velocity`.
+3. Use `command arbitration` instead of generic `policy`.
+4. Use `interlocks` for armed/disarmed and safety gating logic.
+5. Reserve `policy` only for high-level state-machine behavior outside ISR math modules.
 
 ### A. Math/Foundation Modules
 
@@ -115,13 +125,15 @@ API convention for all modules:
 
 1. `motor_ref_align` (ALIGN/ROVERL/RS current references)
 2. `motor_ref_motion` (traj + quintic + sequence progression)
-3. `motor_ref_outer_loop` (position/velocity PI|MPR, DOB feedforward)
-4. `motor_ref_policy` (armed/disarmed and commanded-current arbitration)
+3. `motor_ref_position_regulator` (position error -> velocity command)
+4. `motor_ref_velocity_regulator` (velocity error -> torque/current command)
+5. `motor_ref_command_arbitration` (command source selection and precedence)
+6. `motor_ref_interlocks` (armed/disarmed and safety interlock gating)
 
 ### E. Current Loop / FOC Modules
 
 1. `motor_foc_transform` (Park/iPark/SVPWM prep and electrical frame handling)
-2. `motor_current_ctrl` (Id/Iq PI and anti-windup policy)
+2. `motor_current_ctrl` (Id/Iq PI and anti-windup/limit handling)
 3. `motor_decoupling` (cross-coupling/feedforward enable + validation)
 4. `motor_pwm_synth` (duty computation / output packing)
 
@@ -129,7 +141,7 @@ API convention for all modules:
 
 1. `motor_fault_limits` (overcurrent/overvoltage/vbus validity checks)
 2. `motor_fault_snapshot` (fault ring update)
-3. `motor_error_post` (deferred error posting policy for ISR path)
+3. `motor_error_post` (deferred error posting path for ISR)
 
 ### G. Runtime Orchestration Modules
 
@@ -182,7 +194,7 @@ Each stage owns its own input/output contract and must not depend on ad-hoc glob
 
 1. `modules/motor_core/rt/*`: pure control math and state update.
 2. `app/src/motor_isr_io.c`: hardware I/O glue only.
-3. `app/src/motor_states*.c` and shell: mode/policy/config management only.
+3. `app/src/motor_states*.c` and shell: mode management, safety/interlock management, and config management only.
 
 ## Multi-Phase Plan
 
@@ -270,9 +282,11 @@ Acceptance:
 1. Split reference generation into explicit modules:
    - `motor_ref_align`
    - `motor_ref_motion`
-   - `motor_ref_outer_loop`
-   - `motor_ref_policy`
-2. Replace multi-purpose outer-loop wrappers with narrow module APIs.
+   - `motor_ref_position_regulator`
+   - `motor_ref_velocity_regulator`
+   - `motor_ref_command_arbitration`
+   - `motor_ref_interlocks`
+2. Replace multi-purpose reference wrappers with narrow module APIs.
 3. Add tests for each reference module independently.
 
 Deliverables:
@@ -309,7 +323,7 @@ Acceptance:
 
 Deliverables:
 1. `motor_core_step_fast(...)` and associated contracts.
-2. App control loop reduced to orchestration and policy boundary handling.
+2. App control loop reduced to orchestration and mode/safety boundary handling.
 
 Acceptance:
 1. `app/src/motor_control_loop.c` becomes thin orchestration.
@@ -319,7 +333,7 @@ Acceptance:
 
 1. Replace separate `state_for_isr` + `feature_flags` reads with coherent snapshot publish/consume.
 2. Use a lock-free snapshot protocol (versioned double-buffer or seqlock style) between state thread and ISR.
-3. Move profile trigger policy read into same snapshot.
+3. Move profile trigger source/settings read into same snapshot.
 
 Deliverables:
 1. `motor_rt_cfg_snapshot` publish/consume API.
