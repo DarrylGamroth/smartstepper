@@ -97,3 +97,26 @@ podman exec priceless_wiles bash -lc 'west flash -d /workspace/build/chopper/sma
   - test root: `tests/unit`
   - platform: `native_sim`
 - The wrapper passes extra args through to `west twister`, so use twister flags after the optional container argument.
+
+## Plan Pack Usage (LLM)
+
+Use the plan pack at `app/docs/plan/` as the execution contract for the motor-core refactor.
+
+Start each new LLM session by reading:
+
+1. `app/docs/plan/README.md`
+2. `app/docs/plan/00_scope.md`
+3. `app/docs/plan/01_architecture_target.md`
+4. `app/docs/plan/tasks/index.md`
+5. `app/docs/plan/validation.md`
+
+Execution rules:
+
+1. Execute tasks in the order listed in `app/docs/plan/tasks/index.md`.
+2. For each task card `app/docs/plan/tasks/Txxxx.yaml`, obey `touch_files`, `do_not_touch`, and `constraints`.
+3. Run the task `validation` commands before marking done.
+4. Append progress/evidence to `app/docs/plan/execution_log.md`.
+5. Include task ID(s) in commit messages.
+6. Avoid extra scope beyond the current task unless required to satisfy validation.
+
+Reference seed commit for this plan pack: `f22b4b4`.

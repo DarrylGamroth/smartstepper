@@ -27,3 +27,25 @@ This directory is the execution pack for LLM-driven implementation of the
 3. `done`
 4. `blocked`
 
+## LLM Invocation
+
+For future LLM runs, treat this directory as the source of truth.
+
+Read first:
+
+1. `app/docs/plan/README.md`
+2. `app/docs/plan/00_scope.md`
+3. `app/docs/plan/01_architecture_target.md`
+4. `app/docs/plan/tasks/index.md`
+5. `app/docs/plan/validation.md`
+
+Then execute tasks in `app/docs/plan/tasks/index.md` order.
+For each `Txxxx.yaml` task card:
+
+1. Follow `touch_files`, `do_not_touch`, and `constraints`.
+2. Run listed `validation` commands.
+3. Update `app/docs/plan/execution_log.md`.
+4. Commit with task ID(s) in message.
+5. Do not expand scope beyond current task unless needed to pass validation.
+
+Seed commit for this plan pack: `f22b4b4`.
