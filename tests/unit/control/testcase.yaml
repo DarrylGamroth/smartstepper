@@ -1,0 +1,12 @@
+tests:
+  chopper.control_ref_path.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - control
+      - arbitration
+      - interlock
+    harness: ztest
+    integration_platforms:
+      - native_sim
