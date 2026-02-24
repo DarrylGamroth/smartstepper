@@ -29,15 +29,11 @@ extern const struct gpio_dt_spec trig;
  * @brief ADC injected conversion complete callback - main control loop ISR
  * 
  * This is the primary motor control interrupt handler that runs at the control
- * loop frequency (typically 10-20 kHz). It performs:
- * - Double buffer swap if pending
- * - Encoder reading and observer update
- * - ADC value conversion (currents, bus voltage)
- * - Fault detection (overcurrent, overvoltage, encoder)
- * - State-specific processing (offset measurement, RoverL, Rs estimation)
- * - FOC current control (Park/Clarke transforms, PI controllers)
- * - SVPWM generation and output
- * - ISR performance measurement
+ * loop frequency (typically 10-20 kHz). The callback follows explicit stages:
+ * - Collect: input sampling and encoder pipeline drain
+ * - Process: control-loop/state processing
+ * - Apply: PWM output update
+ * - Telemetry: ISR timing/performance accounting
  *
  * @param dev ADC device
  * @param values Array of q31 ADC values [Ib, Ia, Vbus]
