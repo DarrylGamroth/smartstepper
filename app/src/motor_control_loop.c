@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <errno.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/dsp/utils.h>
@@ -34,6 +35,7 @@
 #include "motor_dob.h"
 #include "motor_motion_modules.h"
 #include "motor_torque.h"
+#include "motor_encoder_feedback.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -244,6 +246,63 @@ static inline void motor_post_error_with_snapshot(struct motor_parameters *param
 	motor_api_post_error(error_code);
 }
 
+struct motor_control_step_ctx {
+	const struct smf_state *state;
+	atomic_val_t feature_flags;
+	bool feature_angle_gen;
+	bool feature_pwm_output;
+	bool feature_pi_control;
+	bool feature_velocity_traj;
+	bool feature_use_commanded_currents;
+	bool feature_braking;
+	bool online_control_state;
+	bool control_armed;
+	float32_t dt_s;
+	uint32_t velocity_loop_decimation;
+	uint32_t position_loop_decimation;
+	float32_t velocity_loop_dt_s;
+	float32_t position_loop_dt_s;
+	float32_t velocity_target_rad_s;
+	float32_t velocity_ref_rad_s;
+	float32_t position_mech_rad;
+	float32_t speed_mech_rad_s;
+	float32_t accel_mech_rad_s2;
+	float32_t speed_mech_filtered_rad_s;
+	struct motor_encoder_feedback encoder_fb;
+};
+
+static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ctx,
+					       const struct motor_parameters *params)
+{
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->state = params->state_for_isr;
+	ctx->feature_flags = atomic_get(&params->feature_flags);
+	ctx->feature_angle_gen = (ctx->feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
+	ctx->feature_pwm_output = (ctx->feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
+	ctx->feature_pi_control = (ctx->feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
+	ctx->feature_velocity_traj = (ctx->feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0;
+	ctx->feature_use_commanded_currents =
+		(ctx->feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
+	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
+	ctx->online_control_state = motor_state_ptr_is_online_control_state(ctx->state);
+	ctx->control_armed = atomic_get(&params->control_armed) != 0;
+	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
+	ctx->velocity_loop_decimation =
+		CLAMP(params->velocity_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		      OUTER_LOOP_DECIMATION_MAX);
+	ctx->position_loop_decimation =
+		CLAMP(params->position_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		      OUTER_LOOP_DECIMATION_MAX);
+	ctx->velocity_loop_dt_s = ctx->dt_s * (float32_t)ctx->velocity_loop_decimation;
+	ctx->position_loop_dt_s = ctx->dt_s * (float32_t)ctx->position_loop_decimation;
+	ctx->velocity_target_rad_s = params->velocity_target_rad_s;
+	ctx->velocity_ref_rad_s = params->velocity_ref_rad_s;
+	ctx->position_mech_rad = params->position_rad;
+	ctx->speed_mech_rad_s = params->velocity_rad_s;
+	ctx->accel_mech_rad_s2 = params->acceleration_rad_s2;
+	ctx->speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
+}
+
 void motor_control_loop_step(struct motor_parameters *params,
 			     const q31_t *values,
 			     uint8_t count,
@@ -255,17 +314,18 @@ void motor_control_loop_step(struct motor_parameters *params,
 		return;
 	}
 
-	const struct smf_state *state = params->state_for_isr;
-	atomic_val_t feature_flags = atomic_get(&params->feature_flags);
-	bool feature_angle_gen = (feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
-	bool feature_pwm_output = (feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
-	bool feature_pi_control = (feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
-	bool feature_velocity_traj = (feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0;
-	bool feature_use_commanded_currents =
-		(feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
-	bool feature_braking = (feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
-	bool online_control_state = motor_state_ptr_is_online_control_state(state);
-	bool control_armed = atomic_get(&params->control_armed) != 0;
+	struct motor_control_step_ctx ctx;
+	motor_control_step_ctx_init(&ctx, params);
+
+	const struct smf_state *state = ctx.state;
+	bool feature_angle_gen = ctx.feature_angle_gen;
+	bool feature_pwm_output = ctx.feature_pwm_output;
+	bool feature_pi_control = ctx.feature_pi_control;
+	bool feature_velocity_traj = ctx.feature_velocity_traj;
+	bool feature_use_commanded_currents = ctx.feature_use_commanded_currents;
+	bool feature_braking = ctx.feature_braking;
+	bool online_control_state = ctx.online_control_state;
+	bool control_armed = ctx.control_armed;
 	bool autonomous_keepalive = false;
 	struct motor_commission_observation commission_obs = {
 		.control_loop_count = 0U,
@@ -299,7 +359,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	params->control_loop_count++;
 	commission_obs.control_loop_count = params->control_loop_count;
 
-	float32_t angle_sensor_degrees = 0.0f;
 	float32_t angle_control_degrees = 0.0f;
 	float32_t sin_theta, cos_theta;
 	float32_t Ia_A, Ib_A;
@@ -314,23 +373,16 @@ void motor_control_loop_step(struct motor_parameters *params,
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 	float32_t inv_park_angle_rad;
-	float32_t dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
-	float32_t encoder_direction_sign =
-		(params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
-	uint32_t velocity_loop_decimation =
-		CLAMP(params->velocity_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
-		      OUTER_LOOP_DECIMATION_MAX);
-	uint32_t position_loop_decimation =
-		CLAMP(params->position_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
-		      OUTER_LOOP_DECIMATION_MAX);
-	float32_t velocity_loop_dt_s = dt_s * (float32_t)velocity_loop_decimation;
-	float32_t position_loop_dt_s = dt_s * (float32_t)position_loop_decimation;
-	float32_t velocity_target_rad_s = params->velocity_target_rad_s;
-	float32_t velocity_ref_rad_s = params->velocity_ref_rad_s;
-	float32_t position_mech_rad = params->position_rad;
-	float32_t speed_mech_rad_s = params->velocity_rad_s;
-	float32_t accel_mech_rad_s2 = params->acceleration_rad_s2;
-	float32_t speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
+	uint32_t velocity_loop_decimation = ctx.velocity_loop_decimation;
+	uint32_t position_loop_decimation = ctx.position_loop_decimation;
+	float32_t velocity_loop_dt_s = ctx.velocity_loop_dt_s;
+	float32_t position_loop_dt_s = ctx.position_loop_dt_s;
+	float32_t velocity_target_rad_s = ctx.velocity_target_rad_s;
+	float32_t velocity_ref_rad_s = ctx.velocity_ref_rad_s;
+	float32_t position_mech_rad = ctx.position_mech_rad;
+	float32_t speed_mech_rad_s = ctx.speed_mech_rad_s;
+	float32_t accel_mech_rad_s2 = ctx.accel_mech_rad_s2;
+	float32_t speed_mech_filtered_rad_s = ctx.speed_mech_filtered_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	uint32_t now_ms = 0U;
 	bool autonomous_mode_active =
@@ -370,107 +422,31 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	/* Read encoder if feature is enabled */
-	float32_t angle_raw_rad;
-	bool encoder_sample_enabled = false;
-	bool encoder_sample_available = false;
-	bool fresh_encoder_sample = false;
-	uint8_t encoder_frame_status = 0U;
-	bool encoder_frame_warning = false;
-	bool encoder_frame_error = false;
-	if (encoder_sample != NULL &&
-	    (encoder_sample->enabled || params->encoder_capture_enabled)) {
-		encoder_sample_enabled = encoder_sample->enabled;
-		encoder_sample_available = true;
-		angle_sensor_degrees = encoder_sample->angle_deg;
-		angle_control_degrees = angle_sensor_degrees * encoder_direction_sign;
-		encoder_frame_status = encoder_sample->status;
-		encoder_frame_warning = encoder_sample->warning;
-		encoder_frame_error = encoder_sample->error;
-		fresh_encoder_sample = encoder_sample->fresh;
-		if (fresh_encoder_sample || encoder_frame_warning || encoder_frame_error) {
-			params->encoder_last_status = encoder_frame_status;
-		}
-	}
+	int enc_ret = motor_encoder_feedback_update(params, encoder_sample, feature_angle_gen,
+						      &ctx.encoder_fb);
+	encoder_input_source = ctx.encoder_fb.input_source;
+	angle_control_degrees = ctx.encoder_fb.angle_control_deg;
+	bool fresh_encoder_sample = ctx.encoder_fb.fresh;
+	uint8_t encoder_frame_status = ctx.encoder_fb.status;
+	bool encoder_frame_warning = ctx.encoder_fb.warning;
+	bool encoder_frame_error = ctx.encoder_fb.error;
+	bool encoder_sample_available = ctx.encoder_fb.sample_available;
 
-	if (encoder_sample != NULL && encoder_sample->enabled) {
-		if (!fresh_encoder_sample) {
-			if (encoder_sample->io_fault) {
-				params->encoder_fault_counter++;
-			}
-			if (encoder_frame_warning) {
-				params->encoder_warning_count++;
-			}
-			if (encoder_frame_error) {
-				params->encoder_error_count++;
-			}
-		} else {
-			/* Reset fault counter on successful read. */
-			params->encoder_fault_counter = 0;
-			if (encoder_frame_warning) {
-				params->encoder_warning_count++;
-			}
-		}
-
-		params->encoder_sample_fresh = fresh_encoder_sample ? 1U : 0U;
-		params->encoder_sample_warning = encoder_frame_warning ? 1U : 0U;
-		params->encoder_sample_error = encoder_frame_error ? 1U : 0U;
+	if (ctx.encoder_fb.sample_enabled) {
 		commission_obs.encoder_fresh = fresh_encoder_sample;
 		commission_obs.encoder_warning = encoder_frame_warning;
 		commission_obs.encoder_error = encoder_frame_error;
 		commission_obs.encoder_status = encoder_frame_status;
-
-		/* Fault detection: too many consecutive encoder failures. */
-		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-			motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
-			goto isr_done;
-		}
 	} else {
-		/* Encoder not active - reset fault counter */
-		params->encoder_fault_counter = 0;
-		params->encoder_sample_fresh = 0U;
-		params->encoder_sample_warning = 0U;
-		params->encoder_sample_error = 0U;
 		commission_obs.encoder_fresh = false;
 		commission_obs.encoder_warning = false;
 		commission_obs.encoder_error = false;
 	}
-	
-	/* Select angle source based on feature flag */
-	if (feature_angle_gen) {
-		/* Calibration/open-loop: use generated angle (no delay) */
-		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
-		angle_observer_set_delay(&params->observer, 0.0f);
-		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
-	} else if (encoder_sample_enabled && fresh_encoder_sample) {
-		/* Normal operation: use fresh encoder reading with transport-specific delay. */
-		angle_raw_rad = angle_control_degrees * (PI_F32 / 180.0f);
-		angle_observer_set_delay(&params->observer, ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
-		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;
-		params->encoder_raw_deg = angle_sensor_degrees;
-		params->encoder_raw_rad = angle_sensor_degrees * (PI_F32 / 180.0f);
-	} else {
-		/* No fresh encoder sample: propagate using prior estimate only. */
-		angle_raw_rad = angle_observer_get_mech_angle(&params->observer);
-		angle_observer_set_delay(&params->observer, 0.0f);
-		encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
-	}
 
-	if (encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    fresh_encoder_sample &&
-	    !params->position_convert.measurement_locked) {
-		float32_t handoff_angle_rad = wrap_rad_2pi(angle_raw_rad);
-
-		/* Seed observer/position conversion on first fresh encoder sample after
-		 * mode/reset handoff to avoid large residual speed spikes.
-		 */
-		angle_observer_reset_tracking(&params->observer, handoff_angle_rad, 0.0f);
-		motor_position_convert_reset(&params->position_convert, handoff_angle_rad);
+	if (enc_ret == -EIO) {
+		motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
+		goto isr_done;
 	}
-	
-	/* Update observer with angle (encoder or generated) */
-	angle_observer_update(&params->observer, angle_raw_rad);
-	params->encoder_observer_input_rad = angle_raw_rad;
-	params->encoder_input_source = encoder_input_source;
 
 	/* ALIGN sample phases only accept fresh, warning-free encoder samples.
 	 * Accumulate circular means in ISR so state thread can validate sample quality.
@@ -480,7 +456,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	    fresh_encoder_sample &&
 	    !encoder_frame_warning &&
 	    !encoder_frame_error) {
-		float32_t align_mech_rad = angle_observer_get_mech_angle(&params->observer);
+		float32_t align_mech_rad = ctx.encoder_fb.observer_mech_rad;
 		float32_t align_sin = sinf(align_mech_rad);
 		float32_t align_cos = cosf(align_mech_rad);
 
@@ -495,97 +471,26 @@ void motor_control_loop_step(struct motor_parameters *params,
 		}
 	}
 
-	float32_t capture_angle_rad = encoder_sample_available ?
-					     (angle_control_degrees * (PI_F32 / 180.0f)) :
-					     angle_raw_rad;
-	float32_t capture_angle_deg = encoder_sample_available ?
-						     angle_control_degrees :
-						     (angle_raw_rad * (180.0f / PI_F32));
-	float32_t capture_encoder_mech_rad = 0.0f;
-	float32_t capture_encoder_elec_rad = 0.0f;
-	float32_t capture_observer_mech_rad = angle_observer_get_mech_angle(&params->observer);
-	float32_t capture_observer_elec_rad = angle_observer_get_elec_angle(&params->observer);
-	float32_t capture_generated_mech_rad = wrap_rad_2pi(angle_gen_get_angle(&params->angle_gen));
-	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
-	float32_t capture_generated_elec_rad =
-		wrap_rad_2pi((capture_generated_mech_rad + observer_mech_offset_rad) *
-			     (float32_t)MOTOR_POLE_PAIRS);
-	float32_t capture_mech_error_rad = 0.0f;
-	float32_t capture_elec_error_rad = 0.0f;
-	bool capture_compare_valid = false;
-	uint8_t capture_input_source = encoder_sample_available ?
-					      MOTOR_ANGLE_INPUT_SRC_ENCODER :
-					      encoder_input_source;
-	if (encoder_sample_available && fresh_encoder_sample &&
-	    !encoder_frame_warning && !encoder_frame_error) {
-		capture_encoder_mech_rad = capture_observer_mech_rad;
-		capture_encoder_elec_rad = capture_observer_elec_rad;
-		capture_mech_error_rad =
-			wrap_rad_pi(capture_encoder_mech_rad - capture_generated_mech_rad);
-		capture_elec_error_rad =
-			wrap_rad_pi(capture_encoder_elec_rad - capture_generated_elec_rad);
-		capture_compare_valid = true;
-	}
-	motor_encoder_capture_try_store(params, capture_angle_deg, capture_angle_rad,
-					capture_encoder_mech_rad, capture_encoder_elec_rad,
-					capture_observer_mech_rad, capture_observer_elec_rad,
-					capture_generated_mech_rad, capture_generated_elec_rad,
-					capture_mech_error_rad, capture_elec_error_rad,
-					capture_compare_valid, encoder_sample_available,
+	motor_encoder_capture_try_store(params, ctx.encoder_fb.capture_angle_deg,
+					ctx.encoder_fb.capture_angle_rad,
+					ctx.encoder_fb.capture_encoder_mech_rad,
+					ctx.encoder_fb.capture_encoder_elec_rad,
+					ctx.encoder_fb.capture_observer_mech_rad,
+					ctx.encoder_fb.capture_observer_elec_rad,
+					ctx.encoder_fb.capture_generated_mech_rad,
+					ctx.encoder_fb.capture_generated_elec_rad,
+					ctx.encoder_fb.capture_mech_error_rad,
+					ctx.encoder_fb.capture_elec_error_rad,
+					ctx.encoder_fb.capture_compare_valid,
+					encoder_sample_available,
 					fresh_encoder_sample, encoder_frame_warning,
 					encoder_frame_error, encoder_frame_status,
-					capture_input_source);
+					ctx.encoder_fb.capture_input_source);
 
-	struct motor_position_convert_input pos_input = {
-		.sample_valid = false,
-		.sample_fresh = false,
-		.source_generated = false,
-		.warning = encoder_frame_warning,
-		.error = encoder_frame_error,
-		.measurement_wrapped_rad = 0.0f,
-		.latency_samples = 0.0f,
-	};
-	switch (encoder_input_source) {
-	case MOTOR_ANGLE_INPUT_SRC_GENERATED:
-		pos_input.sample_valid = true;
-		pos_input.sample_fresh = true;
-		pos_input.source_generated = true;
-		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
-		pos_input.latency_samples = 0.0f;
-		break;
-	case MOTOR_ANGLE_INPUT_SRC_ENCODER:
-		pos_input.sample_valid = true;
-		pos_input.sample_fresh = fresh_encoder_sample;
-		pos_input.source_generated = false;
-		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
-		pos_input.latency_samples = ENCODER_SPI_PIPELINE_DELAY_SAMPLES;
-		break;
-	case MOTOR_ANGLE_INPUT_SRC_PROPAGATED:
-	default:
-		pos_input.sample_valid = false;
-		pos_input.sample_fresh = false;
-		pos_input.source_generated = false;
-		pos_input.measurement_wrapped_rad = 0.0f;
-		pos_input.latency_samples = 0.0f;
-		break;
-	}
-
-	int pos_ret = motor_position_convert_update(&params->position_convert,
-						    &params->position_convert_cfg,
-						    &pos_input);
-	if (pos_ret != 0) {
-		motor_position_convert_reset(&params->position_convert, wrap_rad_2pi(angle_raw_rad));
-	}
-	params->position_quality_flags = params->position_convert.quality_flags;
-	params->position_stale_count = params->position_convert.stale_count;
-	params->position_stale_events = params->position_convert.stale_event_count;
-	params->position_glitch_count = params->position_convert.glitch_count;
-	params->position_jitter_count = params->position_convert.jitter_count;
-
-	position_mech_rad = params->position_convert.position_wrapped_rad;
-	speed_mech_rad_s = params->position_convert.velocity_rad_s;
-	accel_mech_rad_s2 = params->position_convert.accel_rad_s2;
-	speed_mech_filtered_rad_s = speed_mech_rad_s;
+	position_mech_rad = ctx.encoder_fb.position_mech_rad;
+	speed_mech_rad_s = ctx.encoder_fb.speed_mech_rad_s;
+	accel_mech_rad_s2 = ctx.encoder_fb.accel_mech_rad_s2;
+	speed_mech_filtered_rad_s = ctx.encoder_fb.speed_mech_filtered_rad_s;
 
 	/* Skip control if PWM output not enabled */
 	if (!feature_pwm_output) {
