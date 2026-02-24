@@ -123,6 +123,46 @@ static inline enum motor_state motor_resolve_requested_online_mode(const struct 
 static struct motor_parameters motor_params;
 K_MSGQ_DEFINE(motor_event_queue, sizeof(struct motor_event), 16, 4);
 
+#define MOTOR_ISR_EVENT_RING_SIZE 16U
+static struct motor_event motor_isr_event_ring[MOTOR_ISR_EVENT_RING_SIZE];
+static atomic_t motor_isr_event_head;
+static atomic_t motor_isr_event_tail;
+
+static int motor_isr_event_ring_pop(struct motor_event *evt)
+{
+	if (evt == NULL) {
+		return -EINVAL;
+	}
+
+	uint32_t tail = (uint32_t)atomic_get(&motor_isr_event_tail);
+	uint32_t head = (uint32_t)atomic_get(&motor_isr_event_head);
+	if (tail == head) {
+		return -ENOENT;
+	}
+
+	*evt = motor_isr_event_ring[tail];
+	atomic_set(&motor_isr_event_tail, (atomic_val_t)((tail + 1U) % MOTOR_ISR_EVENT_RING_SIZE));
+	return 0;
+}
+
+int motor_api_enqueue_event_from_isr(const struct motor_event *evt)
+{
+	if (evt == NULL) {
+		return -EINVAL;
+	}
+
+	uint32_t head = (uint32_t)atomic_get(&motor_isr_event_head);
+	uint32_t tail = (uint32_t)atomic_get(&motor_isr_event_tail);
+	uint32_t next = (head + 1U) % MOTOR_ISR_EVENT_RING_SIZE;
+	if (next == tail) {
+		return -ENOSPC;
+	}
+
+	motor_isr_event_ring[head] = *evt;
+	atomic_set(&motor_isr_event_head, (atomic_val_t)next);
+	return 0;
+}
+
 /* Timer callback for state timeouts - posts timeout event */
 static void state_timer_expiry(struct k_timer *timer)
 {
@@ -910,21 +950,24 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 
 	/* Initialize state machine */
 	smf_set_initial(SMF_CTX(&motor_params), &motor_states[MOTOR_STATE_HW_INIT]);
+	atomic_set(&motor_isr_event_head, 0);
+	atomic_set(&motor_isr_event_tail, 0);
 
 	/* Update ISR-safe state after initialization complete */
 	motor_params.state_for_isr = motor_params.smf.current;
 
 	/* Event-driven state machine loop */
 	while (1) {
-		rc = k_msgq_get(&motor_event_queue, &motor_params.event, K_MSEC(10));
-
-		if (rc == -EAGAIN) {
-			/* No event received within timeout - run state machine with no event */
-			struct motor_event evt = {
-				.type = MOTOR_EVENT_NONE,
-			};
-			motor_params.event = evt;
-
+		rc = motor_isr_event_ring_pop(&motor_params.event);
+		if (rc == -ENOENT) {
+			rc = k_msgq_get(&motor_event_queue, &motor_params.event, K_MSEC(10));
+			if (rc == -EAGAIN) {
+				/* No event received within timeout - run state machine with no event */
+				struct motor_event evt = {
+					.type = MOTOR_EVENT_NONE,
+				};
+				motor_params.event = evt;
+			}
 		}
 
 		/* Start each SMF cycle from the currently published stable flags so that

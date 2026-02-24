@@ -119,8 +119,8 @@ void adc_callback(const struct device *dev, const q31_t *values,
 			};
 
 			params->profile_sequence_tick_counter = 0U;
-			int qret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
-			if (qret != 0) {
+			int ret = motor_api_enqueue_event_from_isr(&evt);
+			if (ret != 0) {
 				params->profile_sequence_event_drop_count++;
 			}
 		} else {

@@ -28,6 +28,16 @@ struct motor_parameters;
 extern struct k_msgq motor_event_queue;
 
 /**
+ * @brief Queue a motor event from ISR context without kernel queue calls.
+ *
+ * Uses an ISR-safe SPSC ring consumed by the motor state-machine thread.
+ *
+ * @param evt Event to enqueue
+ * @return 0 on success, -ENOSPC if ring full, -EINVAL if evt is NULL
+ */
+int motor_api_enqueue_event_from_isr(const struct motor_event *evt);
+
+/**
  * @brief Initialize motor control API
  * 
  * Creates message queue for thread-safe parameter updates and state requests.
