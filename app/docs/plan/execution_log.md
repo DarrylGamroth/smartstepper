@@ -6,6 +6,7 @@ Append one entry per task execution.
 | --- | --- | --- | --- | --- |
 | YYYY-MM-DD | T0000 | pending/in_progress/done/blocked | <hash or n/a> | short note |
 | 2026-02-24 | T0001 | done | n/a | Added baseline ISR cycle + stack watermark procedure and baseline entry template. |
+| 2026-02-24 | T0002 | done | n/a | Added P00 guardrail checklist for sizeof checks, regressions, and baseline evidence. |
 
 ## Blocker Template
 
