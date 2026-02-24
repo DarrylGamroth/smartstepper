@@ -12,6 +12,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0201 | done | n/a | Rehomed math/filter families under `include/motor/{math,filters}` and moved `prbs.c` to `src/math`; `smartstepper_v2` build passed. |
 | 2026-02-24 | T0202 | done | n/a | Rehomed observer/motion modules, migrated app+unit include paths to `motor/{observers,motion,math,filters}`, `smartstepper_v2` build and full unit tests passed. |
 | 2026-02-24 | T0203 | done | n/a | Rehomed control/protection/runtime/telemetry modules and includes to `motor/...` family paths; both firmware builds and full unit tests passed. |
+| 2026-02-24 | T0204 | done | n/a | Filled P02 migration table. Legacy include scan in code files (`*.c/*.h`) returned zero matches; unfiltered scan only matched task text in `app/docs/plan/tasks/T0204.yaml`. |
 
 ## Blocker Template
 
