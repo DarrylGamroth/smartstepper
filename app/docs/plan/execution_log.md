@@ -24,6 +24,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0503 | done | n/a | Added `chopper.control_ref_path.unit` covering arbitration priority, disarm interlock precedence, timeout boundary behavior, and keepalive bypass; full unit suite passed (23/23). Closed-loop parity smoke result: `smartstepper_v2_mt6835` build passed after reference-path split. |
 | 2026-02-24 | T0601 | done | n/a | Split decoupling and current PI into dedicated `motor/control/{decoupling,current_loop}` modules; rewired `motor_foc_voltage_pwm.c` to compose them and updated `motor_control_loop.c` to use `motor_decoupling_is_enabled(...)` for deterministic decoupling gating; `smartstepper_v2` build and full unit suite passed (23/23). |
 | 2026-02-24 | T0602 | done | n/a | Isolated transform and PWM synthesis contracts into `motor/control/{transforms,pwm_synthesis}`; `motor_control_loop.c` now uses `motor_transforms_park(...)`, `motor_foc_voltage_pwm.c` composes current-loop/decoupling/transform/pwm modules, and ISR apply stage remains finalized modulation only; `smartstepper_v2` build passed. |
+| 2026-02-24 | T0603 | done | n/a | Expanded `tests/unit/control` with FOC regression for current-loop saturation headroom, decoupling enable/disable determinism, transform finite round-trip, and PWM clamp behavior; full Twister run passed (`23/23`, `183/183`) via `west twister ... --outdir /tmp/twister-full`. ISR-time parity note: no ISR cycle-budget regression introduced in P06 split (apply stage still consumes finalized modulation only). |
 
 ## Blocker Template
 

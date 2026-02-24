@@ -8,6 +8,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stddef.h>
 
 #if defined(CONFIG_ARCH_POSIX)
 void arm_sin_cos_f32(float32_t theta, float32_t *pSinVal, float32_t *pCosVal);

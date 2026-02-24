@@ -4,8 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <math.h>
+
 #include <zephyr/ztest.h>
 
+#include "motor/control/current_loop.h"
+#include "motor/control/decoupling.h"
+#include "motor/control/pwm_synthesis.h"
+#include "motor/control/transforms.h"
 #include "motor/protection/interlocks.h"
 #include "motor/runtime/command_arbitration.h"
 
@@ -164,6 +170,107 @@ ZTEST(control_ref_path, test_reference_path_priority_disarm_overrides_setpoint_p
 	zassert_within(int_out.id_ref_a, 0.4f, 1e-6f, NULL);
 	zassert_within(int_out.iq_ref_a, 0.5f, 1e-6f, NULL);
 	zassert_true(int_out.disarmed_interlock_active, NULL);
+}
+
+ZTEST(control_ref_path, test_foc_current_loop_saturates_vq_after_vd_headroom)
+{
+	struct pi_f32 pi_id = {0};
+	struct pi_f32 pi_iq = {0};
+	struct motor_current_loop_input in = {
+		.id_ref_a = 20.0f,
+		.iq_ref_a = 20.0f,
+		.id_a = 0.0f,
+		.iq_a = 0.0f,
+		.max_voltage_magnitude_v = 1.0f,
+		.vd_ff_v = 0.0f,
+		.vq_ff_v = 0.0f,
+	};
+	struct motor_current_loop_output out = {0};
+
+	pi_init(&pi_id);
+	pi_init(&pi_iq);
+	pi_set_gains(&pi_id, 2.0f, 0.0f);
+	pi_set_gains(&pi_iq, 2.0f, 0.0f);
+	zassert_ok(motor_current_loop_step(&pi_id, &pi_iq, &in, &out), NULL);
+
+	zassert_within(out.vd_v, 1.0f, 1e-6f, NULL);
+	zassert_within(out.vq_limit_v, 0.0f, 1e-6f, NULL);
+	zassert_within(out.vq_v, 0.0f, 1e-6f, NULL);
+}
+
+ZTEST(control_ref_path, test_decoupling_disable_path_is_deterministic_zero_ff)
+{
+	struct motor_decoupling_feedforward_input in = {
+		.enabled = false,
+		.electrical_speed_rad_s = NAN,
+		.ld_h = NAN,
+		.lq_h = NAN,
+		.flux_linkage_wb = NAN,
+		.id_a = NAN,
+		.iq_a = NAN,
+		.max_voltage_magnitude_v = NAN,
+	};
+	struct motor_decoupling_feedforward_output out = {
+		.vd_ff_v = 123.0f,
+		.vq_ff_v = 456.0f,
+	};
+
+	zassert_ok(motor_decoupling_feedforward_step(&in, &out), NULL);
+	zassert_within(out.vd_ff_v, 0.0f, 1e-6f, NULL);
+	zassert_within(out.vq_ff_v, 0.0f, 1e-6f, NULL);
+}
+
+ZTEST(control_ref_path, test_decoupling_enable_gate_requires_all_conditions)
+{
+	struct motor_decoupling_enable_input in = {
+		.feature_enabled = true,
+		.online_control_state = true,
+		.control_armed = true,
+		.torque_mode_state = false,
+		.min_speed_reached = true,
+		.flux_valid = true,
+		.speed_valid = true,
+		.feedback_valid = true,
+	};
+
+	zassert_true(motor_decoupling_is_enabled(&in), NULL);
+	in.speed_valid = false;
+	zassert_false(motor_decoupling_is_enabled(&in), NULL);
+}
+
+ZTEST(control_ref_path, test_foc_transforms_roundtrip_is_finite)
+{
+	float32_t id_a = 0.0f;
+	float32_t iq_a = 0.0f;
+	float32_t va_v = 0.0f;
+	float32_t vb_v = 0.0f;
+	float32_t angle = 1.0f;
+
+	zassert_ok(motor_transforms_park(0.4f, -0.1f, angle, &id_a, &iq_a), NULL);
+	zassert_ok(motor_transforms_inv_park(id_a, iq_a, angle, &va_v, &vb_v), NULL);
+	zassert_true(isfinite(va_v), NULL);
+	zassert_true(isfinite(vb_v), NULL);
+}
+
+ZTEST(control_ref_path, test_pwm_synthesis_braking_clamps_to_unit_interval)
+{
+	struct motor_pwm_synthesis_input in = {
+		.va_v = 5.0f,
+		.vb_v = -5.0f,
+		.vbus_v = 10.0f,
+		.braking_enabled = true,
+		.braking_iq_ref_a = -1.0f,
+		.braking_speed_rad_s = 10.0f,
+		.braking_vbus_limit_v = 5.0f,
+		.braking_vbus_margin_inv = 0.5f,
+	};
+	struct motor_pwm_synthesis_output out = {0};
+
+	zassert_ok(motor_pwm_synthesis_step(&in, &out), NULL);
+	zassert_true(out.da_hb1_pu >= 0.0f && out.da_hb1_pu <= 1.0f, NULL);
+	zassert_true(out.da_hb2_pu >= 0.0f && out.da_hb2_pu <= 1.0f, NULL);
+	zassert_true(out.db_hb1_pu >= 0.0f && out.db_hb1_pu <= 1.0f, NULL);
+	zassert_true(out.db_hb2_pu >= 0.0f && out.db_hb2_pu <= 1.0f, NULL);
 }
 
 ZTEST_SUITE(control_ref_path, NULL, NULL, NULL, NULL, NULL);
