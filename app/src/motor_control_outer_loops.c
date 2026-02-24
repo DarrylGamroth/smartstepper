@@ -21,28 +21,11 @@
 #include "motor_dob.h"
 #include "motor_torque.h"
 #include "motor_control_quality.h"
+#include "motor_outer_loop_sched.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {
 	return params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR;
-}
-
-static inline bool motor_outer_loop_decimation_tick(uint32_t *phase, uint32_t decimation)
-{
-	if (phase == NULL || decimation <= 1U) {
-		if (phase != NULL) {
-			*phase = 0U;
-		}
-		return true;
-	}
-
-	if (*phase == 0U) {
-		*phase = decimation - 1U;
-		return true;
-	}
-
-	(*phase)--;
-	return false;
 }
 
 int motor_control_outer_loops_step(struct motor_parameters *params,
@@ -59,14 +42,31 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
 
+	bool position_active = (in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]);
+	bool velocity_active = (in->state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
+				in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]);
+	struct motor_outer_loop_sched_input sched_in = {
+		.position_active = position_active,
+		.velocity_active = velocity_active,
+		.position_decimation = in->position_loop_decimation,
+		.velocity_decimation = in->velocity_loop_decimation,
+	};
+	struct motor_outer_loop_sched_state sched_state = {
+		.position_phase = params->position_loop_phase,
+		.velocity_phase = params->velocity_loop_phase,
+	};
+	struct motor_outer_loop_sched_output sched_out = {0};
+	motor_outer_loop_sched_step(&sched_in, &sched_state, &sched_out);
+	params->position_loop_phase = sched_state.position_phase;
+	params->velocity_loop_phase = sched_state.velocity_phase;
+
 	/* Position cascade: generate velocity target from position error. */
-	if (in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
+	if (position_active) {
 		float32_t position_error_rad;
 		float32_t profile_velocity_ff_rad_s = 0.0f;
 		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
 		bool use_mpr = motor_outer_loop_use_mpr(params);
-		bool position_loop_update = motor_outer_loop_decimation_tick(
-			&params->position_loop_phase, in->position_loop_decimation);
+		bool position_loop_update = sched_out.position_update;
 
 		/* Position move module resolves profile state into target/error/feedforward. */
 		bool move_active = motor_position_move_resolve(&params->position_profile,
@@ -120,8 +120,6 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 				       params->profile_max_velocity_rad_s);
 			traj_set_target_value(&params->traj_velocity, out->velocity_target_rad_s);
 		}
-	} else {
-		params->position_loop_phase = 0U;
 	}
 
 	/* Update velocity trajectory if enabled */
@@ -137,16 +135,14 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	}
 
 	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
-	if (in->state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
-	    in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
+	if (velocity_active) {
 		out->speed_mech_filtered_rad_s =
 			filter_so_run(&params->filter_velocity_notch, in->speed_mech_rad_s);
 		bool velocity_feedback_valid =
 			motor_velocity_feedback_is_valid(params->position_quality_flags);
 		bool velocity_feedback_fresh =
 			(params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U;
-		bool velocity_loop_update = motor_outer_loop_decimation_tick(
-			&params->velocity_loop_phase, in->velocity_loop_decimation);
+		bool velocity_loop_update = sched_out.velocity_update;
 		if (!velocity_feedback_valid) {
 			/* Hold measured dq currents and reset outer-loop observers while encoder
 			 * quality is degraded. This avoids current spikes when velocity/angle
@@ -263,8 +259,6 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 				}
 			}
 		}
-	} else {
-		params->velocity_loop_phase = 0U;
 	}
 
 	return 0;

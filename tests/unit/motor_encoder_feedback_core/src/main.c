@@ -1,0 +1,160 @@
+/*
+ * Copyright (c) 2026 Rubus Technologies Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/ztest.h>
+
+#include "motor_encoder_feedback_core.h"
+
+static struct motor_encoder_feedback_core_input base_input(void)
+{
+	struct motor_encoder_feedback_core_input in = {
+		.feature_angle_gen = false,
+		.sample_enabled = true,
+		.sample_available = true,
+		.fresh = true,
+		.warning = false,
+		.error = false,
+		.io_fault = false,
+		.status = 0x00U,
+		.fault_threshold = 3U,
+	};
+
+	return in;
+}
+
+ZTEST(motor_encoder_feedback_core, test_select_source_generated_has_priority)
+{
+	uint8_t src = motor_encoder_feedback_select_source(true, true, true);
+
+	zassert_equal(src, MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_select_source_encoder_when_fresh)
+{
+	uint8_t src = motor_encoder_feedback_select_source(false, true, true);
+
+	zassert_equal(src, MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_select_source_propagated_when_not_fresh)
+{
+	uint8_t src_not_fresh = motor_encoder_feedback_select_source(false, true, false);
+	uint8_t src_disabled = motor_encoder_feedback_select_source(false, false, true);
+
+	zassert_equal(src_not_fresh, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
+	zassert_equal(src_disabled, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_update_state_resets_when_sample_disabled)
+{
+	struct motor_encoder_feedback_core_input in = base_input();
+	struct motor_encoder_feedback_core_state state = {
+		.fault_counter = 5U,
+		.warning_count = 4U,
+		.error_count = 3U,
+		.sample_fresh = 1U,
+		.sample_warning = 1U,
+		.sample_error = 1U,
+		.last_status = 0x12U,
+	};
+
+	in.sample_enabled = false;
+	in.fresh = false;
+	in.warning = true;
+	in.error = true;
+	in.io_fault = true;
+
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.fault_counter, 0U, NULL);
+	zassert_equal(state.sample_fresh, 0U, NULL);
+	zassert_equal(state.sample_warning, 0U, NULL);
+	zassert_equal(state.sample_error, 0U, NULL);
+	zassert_equal(state.warning_count, 4U, NULL);
+	zassert_equal(state.error_count, 3U, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_update_state_fresh_sample_clears_fault_counter)
+{
+	struct motor_encoder_feedback_core_input in = base_input();
+	struct motor_encoder_feedback_core_state state = {
+		.fault_counter = 7U,
+		.warning_count = 0U,
+		.error_count = 0U,
+		.sample_fresh = 0U,
+		.sample_warning = 0U,
+		.sample_error = 0U,
+		.last_status = 0x33U,
+	};
+
+	in.status = 0xA5U;
+	in.warning = true;
+
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.fault_counter, 0U, NULL);
+	zassert_equal(state.warning_count, 1U, NULL);
+	zassert_equal(state.error_count, 0U, NULL);
+	zassert_equal(state.sample_fresh, 1U, NULL);
+	zassert_equal(state.sample_warning, 1U, NULL);
+	zassert_equal(state.sample_error, 0U, NULL);
+	zassert_equal(state.last_status, 0xA5U, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_update_state_nonfresh_accumulates_fault_warning_error)
+{
+	struct motor_encoder_feedback_core_input in = base_input();
+	struct motor_encoder_feedback_core_state state = {0};
+
+	in.fresh = false;
+	in.warning = true;
+	in.error = true;
+	in.io_fault = true;
+
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.fault_counter, 1U, NULL);
+	zassert_equal(state.warning_count, 1U, NULL);
+	zassert_equal(state.error_count, 1U, NULL);
+	zassert_equal(state.sample_fresh, 0U, NULL);
+	zassert_equal(state.sample_warning, 1U, NULL);
+	zassert_equal(state.sample_error, 1U, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_fault_threshold_is_strictly_greater_than)
+{
+	struct motor_encoder_feedback_core_input in = base_input();
+	struct motor_encoder_feedback_core_state state = {0};
+
+	in.fresh = false;
+	in.io_fault = true;
+	in.warning = false;
+	in.error = false;
+	in.fault_threshold = 1U;
+
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.fault_counter, 1U, NULL);
+	zassert_true(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.fault_counter, 2U, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_last_status_updates_only_with_valid_sample_event)
+{
+	struct motor_encoder_feedback_core_input in = base_input();
+	struct motor_encoder_feedback_core_state state = {
+		.last_status = 0x44U,
+	};
+
+	in.sample_available = false;
+	in.status = 0x99U;
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.last_status, 0x44U, NULL);
+
+	in.sample_available = true;
+	in.fresh = false;
+	in.warning = true;
+	zassert_false(motor_encoder_feedback_update_state(&in, &state), NULL);
+	zassert_equal(state.last_status, 0x99U, NULL);
+}
+
+ZTEST_SUITE(motor_encoder_feedback_core, NULL, NULL, NULL, NULL, NULL);

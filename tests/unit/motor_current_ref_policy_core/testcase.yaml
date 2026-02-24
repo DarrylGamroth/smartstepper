@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_current_ref_policy_core.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - current
+      - policy
+    harness: ztest
+    integration_platforms:
+      - native_sim

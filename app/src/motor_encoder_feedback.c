@@ -15,6 +15,7 @@
 #include "angle_observer.h"
 #include "angle_gen.h"
 #include "angle_wrap.h"
+#include "motor_encoder_feedback_core.h"
 
 int motor_encoder_feedback_update(struct motor_parameters *params,
 				  const struct motor_control_encoder_sample *encoder_sample,
@@ -28,6 +29,16 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	memset(feedback, 0, sizeof(*feedback));
 	feedback->input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	feedback->capture_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
+
+	struct motor_encoder_feedback_core_state core_state = {
+		.fault_counter = params->encoder_fault_counter,
+		.warning_count = params->encoder_warning_count,
+		.error_count = params->encoder_error_count,
+		.sample_fresh = params->encoder_sample_fresh,
+		.sample_warning = params->encoder_sample_warning,
+		.sample_error = params->encoder_sample_error,
+		.last_status = params->encoder_last_status,
+	};
 
 	float32_t encoder_direction_sign =
 		(params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
@@ -49,44 +60,39 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		}
 	}
 
-	if (encoder_sample != NULL && encoder_sample->enabled) {
-		if (!feedback->fresh) {
-			if (feedback->io_fault) {
-				params->encoder_fault_counter++;
-			}
-			if (feedback->warning) {
-				params->encoder_warning_count++;
-			}
-			if (feedback->error) {
-				params->encoder_error_count++;
-			}
-		} else {
-			params->encoder_fault_counter = 0;
-			if (feedback->warning) {
-				params->encoder_warning_count++;
-			}
-		}
+	struct motor_encoder_feedback_core_input core_in = {
+		.feature_angle_gen = feature_angle_gen,
+		.sample_enabled = (encoder_sample != NULL) ? encoder_sample->enabled : false,
+		.sample_available = feedback->sample_available,
+		.fresh = feedback->fresh,
+		.warning = feedback->warning,
+		.error = feedback->error,
+		.io_fault = feedback->io_fault,
+		.status = feedback->status,
+		.fault_threshold = ENCODER_FAULT_THRESHOLD,
+	};
+	bool threshold_exceeded = motor_encoder_feedback_update_state(&core_in, &core_state);
+	params->encoder_fault_counter = core_state.fault_counter;
+	params->encoder_warning_count = core_state.warning_count;
+	params->encoder_error_count = core_state.error_count;
+	params->encoder_sample_fresh = core_state.sample_fresh;
+	params->encoder_sample_warning = core_state.sample_warning;
+	params->encoder_sample_error = core_state.sample_error;
+	params->encoder_last_status = core_state.last_status;
 
-		params->encoder_sample_fresh = feedback->fresh ? 1U : 0U;
-		params->encoder_sample_warning = feedback->warning ? 1U : 0U;
-		params->encoder_sample_error = feedback->error ? 1U : 0U;
-
-		if (params->encoder_fault_counter > ENCODER_FAULT_THRESHOLD) {
-			return -EIO;
-		}
-	} else {
-		params->encoder_fault_counter = 0;
-		params->encoder_sample_fresh = 0U;
-		params->encoder_sample_warning = 0U;
-		params->encoder_sample_error = 0U;
+	if (threshold_exceeded) {
+		return -EIO;
 	}
 
 	float32_t angle_raw_rad = 0.0f;
-	if (feature_angle_gen) {
+	uint8_t source = motor_encoder_feedback_select_source(feature_angle_gen,
+						      feedback->sample_enabled,
+						      feedback->fresh);
+	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) {
 		angle_raw_rad = angle_gen_get_angle(&params->angle_gen);
 		angle_observer_set_delay(&params->observer, 0.0f);
 		feedback->input_source = MOTOR_ANGLE_INPUT_SRC_GENERATED;
-	} else if (feedback->sample_enabled && feedback->fresh) {
+	} else if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER) {
 		angle_raw_rad = feedback->angle_control_deg * (PI_F32 / 180.0f);
 		angle_observer_set_delay(&params->observer, ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
 		feedback->input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER;

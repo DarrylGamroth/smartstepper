@@ -11,6 +11,9 @@ add_library(motor_core STATIC
 	src/motor_commission_id.c
 	src/motion_profile.c
 	src/motor_autonomy.c
+	src/motor_encoder_feedback_core.c
+	src/motor_outer_loop_sched.c
+	src/motor_current_ref_policy_core.c
 	src/prbs.c
 	src/rls_motor_est.c
 	src/rs_online.c

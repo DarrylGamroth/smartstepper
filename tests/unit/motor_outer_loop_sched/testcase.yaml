@@ -1,0 +1,10 @@
+tests:
+  chopper.motor_outer_loop_sched.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - scheduler
+    harness: ztest
+    integration_platforms:
+      - native_sim

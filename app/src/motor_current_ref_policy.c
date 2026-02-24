@@ -15,6 +15,7 @@
 #include "angle_gen.h"
 #include "motor_mpr.h"
 #include "motor_dob.h"
+#include "motor_current_ref_policy_core.h"
 
 int motor_current_ref_apply_policy(struct motor_parameters *params,
 				   const struct motor_current_ref_policy_inputs *in,
@@ -29,35 +30,31 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
 
-	/* Select current references based on mode */
-	if (in->feature_use_commanded_currents) {
-		bool commanded_current_needs_encoder_feedback =
-			in->online_control_state && !in->feature_angle_gen;
-		bool commanded_current_feedback_valid =
-			motor_velocity_feedback_is_valid(params->position_quality_flags);
+	bool feedback_valid = motor_velocity_feedback_is_valid(params->position_quality_flags);
+	struct motor_current_ref_policy_core_input core_in = {
+		.online_control_state = in->online_control_state,
+		.control_armed = in->control_armed,
+		.feature_angle_gen = in->feature_angle_gen,
+		.feature_use_commanded_currents = in->feature_use_commanded_currents,
+		.feedback_valid = feedback_valid,
+		.id_meas_a = in->id_meas_a,
+		.iq_meas_a = in->iq_meas_a,
+		.id_setpoint_a = params->Id_setpoint_A,
+		.iq_setpoint_a = params->Iq_setpoint_A,
+		.id_ref_in_a = in->id_ref_a,
+		.iq_ref_in_a = in->iq_ref_a,
+	};
+	struct motor_current_ref_policy_core_output core_out = {0};
+	motor_current_ref_policy_core_apply(&core_in, &core_out);
+	out->id_ref_a = core_out.id_ref_a;
+	out->iq_ref_a = core_out.iq_ref_a;
 
-		/* In encoder-based current control, hold a neutral current-loop command
-		 * until position/speed feedback quality is valid. This avoids large
-		 * transients when torque mode is entered before valid encoder feedback.
-		 */
-		if (commanded_current_needs_encoder_feedback &&
-		    !commanded_current_feedback_valid) {
-			/* Keep current loop neutral while encoder feedback is invalid. */
-			out->id_ref_a = in->id_meas_a;
-			out->iq_ref_a = in->iq_meas_a;
-			pi_set_ui(&params->pi_Id, 0.0f);
-			pi_set_ui(&params->pi_Iq, 0.0f);
-		} else {
-			/* Normal FOC operation: use commanded current references */
-			out->id_ref_a = params->Id_setpoint_A;
-			out->iq_ref_a = params->Iq_setpoint_A;
-		}
+	if (core_out.reset_current_pi) {
+		pi_set_ui(&params->pi_Id, 0.0f);
+		pi_set_ui(&params->pi_Iq, 0.0f);
 	}
 
-	/* Arm/disarm interlock only applies in ONLINE control states. */
-	if (in->online_control_state && !in->control_armed) {
-		out->id_ref_a = in->id_meas_a;
-		out->iq_ref_a = in->iq_meas_a;
+	if (core_out.disarmed_interlock_active) {
 		params->Id_setpoint_A = 0.0f;
 		params->Iq_setpoint_A = 0.0f;
 		out->velocity_target_rad_s = 0.0f;
@@ -69,8 +66,6 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 		traj_set_target_value(&params->traj_velocity, 0.0f);
 		traj_set_int_value(&params->traj_velocity, 0.0f);
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);
-		pi_set_ui(&params->pi_Id, 0.0f);
-		pi_set_ui(&params->pi_Iq, 0.0f);
 		motor_mpr_velocity_reset(&params->velocity_mpr_state,
 					 in->speed_mech_filtered_rad_s, 0.0f);
 		motor_mpr_position_reset(&params->position_mpr_state, 0.0f);

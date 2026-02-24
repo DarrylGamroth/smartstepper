@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_encoder_feedback_core.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - encoder
+      - feedback
+    harness: ztest
+    integration_platforms:
+      - native_sim
