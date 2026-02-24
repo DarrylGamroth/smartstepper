@@ -41,11 +41,11 @@ Move module files to TI-style directory taxonomy with direct include-path cutove
 | `observers` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/observers/*.h` | `modules/motor_core/src/observers/` | complete |
 | `motion` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/motion/*.h` | `modules/motor_core/src/motion/` | complete |
 | `control` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/control/*.h` | `modules/motor_core/src/control/` | complete |
-| `protection` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/protection/*.h` | `modules/motor_core/src/protection/` | complete |
+| `estimation` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/estimation/*.h` | `modules/motor_core/src/estimation/` | complete |
 | `runtime` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/runtime/*.h` | `modules/motor_core/src/runtime/` | complete |
-| `telemetry` | `modules/motor_core/include/*.h` | `modules/motor_core/include/motor/telemetry/*.h` | `modules/motor_core/src/telemetry/` | complete |
 
 Notes:
 
 1. `app/src` and `tests/unit` call sites were directly cut over to `#include "motor/.../*.h"` paths.
 2. No compatibility wrapper headers were added.
+3. Estimator modules (`rs_online`, `rls_motor_est`, `thermal_model`, `motor_commission_id`) were reclassified from protection/telemetry/runtime into `estimation`.

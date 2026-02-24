@@ -1,5 +1,5 @@
 tests:
-  chopper.motor_autonomy.unit:
+  chopper.motor_keepalive_policy.unit:
     tags:
       - chopper
       - motor

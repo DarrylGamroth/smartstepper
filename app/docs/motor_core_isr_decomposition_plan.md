@@ -28,9 +28,8 @@ Organize `motor_core` by function families (like TI libraries), not by call-site
 3. `modules/motor_core/include/motor/observers/*`
 4. `modules/motor_core/include/motor/motion/*`
 5. `modules/motor_core/include/motor/control/*`
-6. `modules/motor_core/include/motor/protection/*`
+6. `modules/motor_core/include/motor/estimation/*`
 7. `modules/motor_core/include/motor/runtime/*`
-8. `modules/motor_core/include/motor/telemetry/*`
 
 Source layout mirrors include layout:
 
@@ -39,13 +38,12 @@ Source layout mirrors include layout:
 3. `modules/motor_core/src/observers/*`
 4. `modules/motor_core/src/motion/*`
 5. `modules/motor_core/src/control/*`
-6. `modules/motor_core/src/protection/*`
+6. `modules/motor_core/src/estimation/*`
 7. `modules/motor_core/src/runtime/*`
-8. `modules/motor_core/src/telemetry/*`
 
 API conventions:
 
-1. Algorithm modules (`filters`, `observers`, `motion`, `control`, `protection`, `runtime`, `telemetry` where stateful):
+1. Algorithm modules (`filters`, `observers`, `motion`, `control`, `estimation`, `runtime` where stateful):
    - `*_config` struct
    - `*_state` struct
    - `*_input` struct
@@ -178,6 +176,7 @@ The following blocks are already strong and should be retained while relocating 
 4. `motor_mpr` -> `motor/control/mpr`
 5. `motor_dob` -> `motor/control/dob`
 6. `motion_profile` + `motor_motion_modules` -> `motor/motion/profile`
+7. `rs_online` + `rls_motor_est` + `thermal_model` + `motor_commission_id` -> `motor/estimation/*`
 7. `motor_foc_voltage_pwm` -> split across `motor/control/current_ctrl`, `motor/control/foc_transform`, `motor/control/pwm_synth`
 
 ## Target Architecture

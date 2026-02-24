@@ -7,18 +7,16 @@
 3. `modules/motor_core/include/motor/observers/*`
 4. `modules/motor_core/include/motor/motion/*`
 5. `modules/motor_core/include/motor/control/*`
-6. `modules/motor_core/include/motor/protection/*`
+6. `modules/motor_core/include/motor/estimation/*`
 7. `modules/motor_core/include/motor/runtime/*`
-8. `modules/motor_core/include/motor/telemetry/*`
 
 1. `modules/motor_core/src/math/*`
 2. `modules/motor_core/src/filters/*`
 3. `modules/motor_core/src/observers/*`
 4. `modules/motor_core/src/motion/*`
 5. `modules/motor_core/src/control/*`
-6. `modules/motor_core/src/protection/*`
+6. `modules/motor_core/src/estimation/*`
 7. `modules/motor_core/src/runtime/*`
-8. `modules/motor_core/src/telemetry/*`
 
 ## Ownership Map
 
@@ -27,9 +25,8 @@
 3. `observers`: encoder source, angle tracking, position conversion.
 4. `motion`: angle generation, trajectories, motion profile planning.
 5. `control`: position/velocity regulation, command arbitration, interlocks, current loop, decoupling, pwm synthesis.
-6. `protection`: limits/fault checks, snapshot capture, deferred post records.
-7. `runtime`: coherent config snapshots, fast-state containers, process pipeline entry.
-8. `telemetry`: live mirror, optional ISR diagnostics, deferred diagnostic packet format.
+6. `estimation`: online/system estimators and identification helpers.
+7. `runtime`: coherent config snapshots, fast-state containers, process pipeline entry, keepalive policy.
 
 ## ISR Stage Contract
 
@@ -62,4 +59,3 @@ Rules:
 
 1. Allowed side effects: updates to `fast` state and explicit output structs.
 2. Disallowed side effects: queue operations, kernel calls, blocking I/O, logs.
-

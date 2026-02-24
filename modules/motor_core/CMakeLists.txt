@@ -28,9 +28,7 @@ target_include_directories(motor_core
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/observers
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/motion
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/control
-	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/protection
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/runtime
-	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/telemetry
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/estimation
 )
 
