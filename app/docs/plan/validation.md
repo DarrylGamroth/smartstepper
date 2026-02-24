@@ -44,10 +44,37 @@ motor velocity target 5
 motor state status
 ```
 
+## Baseline ISR Metrics (P00)
+
+Capture baseline ISR cycle and stack metrics before refactor work.
+
+1. Start from a clean online run and collect ISR cycle counters:
+```text
+motor state clear_error
+motor disarm
+motor state idle
+motor safety timeout 0
+motor state offline
+motor arm
+motor state mode velocity_open
+motor current id 0
+motor current iq 0.15
+motor velocity target 5
+motor info stats
+```
+
+2. Capture thread stack watermark (if kernel shell module is enabled):
+```text
+kernel thread stacks
+```
+
+3. If `kernel thread stacks` is unavailable, record this fallback:
+  - note `command unavailable` in `app/docs/plan/execution_log.md`
+  - continue with ISR-cycle baseline and proceed to the next task
+
 ## Per-Task Validation Policy
 
 1. Doc-only tasks: `markdown lint/readability self-check` and no build required.
 2. Header/include move tasks: both firmware builds.
 3. Runtime/control code tasks: both firmware builds + relevant unit suites.
 4. ISR-path behavior tasks: both builds + unit suites + HIL smoke.
-
