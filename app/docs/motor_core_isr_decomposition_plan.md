@@ -7,6 +7,18 @@ Scope: `modules/motor_core`, `app/src/motor_control_loop.c`, `app/src/motor_isr_
 
 Decompose control logic into composable, ISR-safe modules with explicit hot-path contracts, while reducing stack and context bloat introduced by large step/context structs.
 
+## Design Direction (TI-Style Modularization)
+
+Adopt a strict module decomposition similar to C2000Ware/MotorWare: each algorithmic feature is an independent module with:
+
+1. `config` (immutable or rarely changed),
+2. `state` (runtime mutable),
+3. `input`/`output` structs,
+4. `init/reset/step` APIs,
+5. no hidden global state and no dynamic allocation.
+
+This moves us from “large control function with rich cross-module context” to “small composable modules with narrow contracts.”
+
 ## Constraints
 
 1. No dynamic allocation in ISR path.
@@ -45,6 +57,54 @@ Decompose control logic into composable, ISR-safe modules with explicit hot-path
 3. `motor_control_step_ctx` includes heavy nested feedback (`struct motor_encoder_feedback`) that also carries capture/debug fields not always needed for control (`app/src/motor_control_loop.c:216`, `app/include/motor_encoder_feedback.h:21`).
 4. ISR dataflow in `adc_callback` still mixes encoder drain policy, profile tick generation, control invocation, PWM commit, and timing stats in one function (`app/src/motor_isr_io.c:57`).
 5. App wrappers pass multiple medium-size input/output structs per call in the hot path (`app/src/motor_control_loop.c:571`, `app/src/motor_control_loop.c:596`).
+
+## Target Module Taxonomy
+
+### A. Math/Foundation Modules
+
+1. `motor_math_clamp` (shared clamp/saturation helpers)
+2. `motor_math_wrap` (angle wrapping/unwrapping helpers)
+3. `motor_math_units` (deg/rad, mech/elec conversions, sign application)
+
+### B. Signal Conditioning Modules
+
+1. `motor_adc_scale` (Q31 -> physical units)
+2. `motor_current_offset` (offset removal/filtering)
+3. `motor_bus_monitor` (vbus validity/limits)
+
+### C. Sensor/Observer Modules
+
+1. `motor_encoder_source` (source arbitration + frame/transport classification)
+2. `motor_angle_track` (observer update + delay/handoff logic)
+3. `motor_position_convert` (unwrap, velocity, accel, quality flags)
+4. `motor_speed_filter` (optional notch/LPF)
+
+### D. Reference Generation Modules
+
+1. `motor_ref_align` (ALIGN/ROVERL/RS current references)
+2. `motor_ref_motion` (traj + quintic + sequence progression)
+3. `motor_ref_outer_loop` (position/velocity PI|MPR, DOB feedforward)
+4. `motor_ref_policy` (armed/disarmed and commanded-current arbitration)
+
+### E. Current Loop / FOC Modules
+
+1. `motor_foc_transform` (Park/iPark/SVPWM prep and electrical frame handling)
+2. `motor_current_ctrl` (Id/Iq PI and anti-windup policy)
+3. `motor_decoupling` (cross-coupling/feedforward enable + validation)
+4. `motor_pwm_synth` (duty computation / output packing)
+
+### F. Protection/Fault Modules
+
+1. `motor_fault_limits` (overcurrent/overvoltage/vbus validity checks)
+2. `motor_fault_snapshot` (fault ring update)
+3. `motor_error_post` (deferred error posting policy for ISR path)
+
+### G. Runtime Orchestration Modules
+
+1. `motor_rt_cfg_snapshot` (coherent state+feature snapshot)
+2. `motor_rt_fast_state` (hot runtime state only)
+3. `motor_rt_diag_state` (slow/diagnostic/capture state)
+4. `motor_step_pipeline` (ordered invocation of modules A-F)
 
 ## Target Architecture
 
@@ -107,7 +167,7 @@ Acceptance:
 1. Bit-equivalent behavior in existing HIL scripts.
 2. No ISR cycle regression beyond measurement noise.
 
-## Phase 2: Hot/Cold State Separation
+## Phase 2: Runtime State Decomposition
 
 1. Introduce `struct motor_rt_fast_state` in `motor_core` for ISR-only mutable data.
 2. Move large diagnostics/commissioning buffers out of hot struct into `motor_runtime_diag` owned by app layer.
@@ -121,15 +181,16 @@ Acceptance:
 1. `motor_parameters` field count materially reduced in hot region.
 2. No stack growth in ISR.
 
-## Phase 3: Context Shrink and Contract Cleanup
+## Phase 3: Sensor/Observer Module Split (C + D subset)
 
-1. Split `motor_encoder_feedback` into:
-   - `motor_encoder_feedback_control` (hot)
-   - `motor_encoder_feedback_capture` (optional debug)
-2. Refactor `motor_control_step_ctx` into:
+1. Split `motor_encoder_feedback` into independent modules:
+   - `motor_encoder_source`
+   - `motor_angle_track`
+   - `motor_position_convert` (already present, narrow interface)
+2. Move capture/debug fields out of control feedback object.
+3. Refactor `motor_control_step_ctx` into:
    - immutable tick snapshot
-   - compact step scratch
-3. Remove duplicate local variables in `motor_control_loop_step`; use stage structs with clear ownership.
+   - compact step scratch.
 
 Deliverables:
 1. New control-only feedback API in `motor_core`.
@@ -139,25 +200,57 @@ Acceptance:
 1. Reduced stack usage in `motor_control_loop_step`.
 2. All phase-4 unit tests still pass.
 
-## Phase 4: Compose Fast Control Pipeline in `motor_core`
+## Phase 4: Reference-Path Module Split (D)
 
-1. Add `motor_core_step_fast(...)` API that consumes compact inputs and emits compact outputs.
-2. Internally sequence:
-   - sensor normalization
-   - observer/position convert
-   - outer-loop scheduling/arbitration
-   - FOC voltage/PWM synthesis
-3. Keep app-owned side effects (error posting, state transitions, event queueing) outside core.
+1. Split reference generation into explicit modules:
+   - `motor_ref_align`
+   - `motor_ref_motion`
+   - `motor_ref_outer_loop`
+   - `motor_ref_policy`
+2. Replace multi-purpose outer-loop wrappers with narrow module APIs.
+3. Add tests for each reference module independently.
 
 Deliverables:
-1. New pipeline API in `modules/motor_core`.
-2. Adapter layer in app preserving existing shell/state behavior.
+1. New reference modules in `modules/motor_core`.
+2. Adapter layer preserving existing shell/state behavior.
 
 Acceptance:
-1. `app/src/motor_control_loop.c` becomes orchestration + policy only.
+1. Reference-path logic is independent of ADC/PWM I/O.
+2. Per-module unit tests cover edge cases and transitions.
+
+## Phase 5: Current-Loop / FOC Module Split (E)
+
+1. Isolate current control path into:
+   - `motor_current_ctrl`
+   - `motor_decoupling`
+   - `motor_foc_transform`
+   - `motor_pwm_synth`
+2. Keep module contracts fixed-size and scalar-heavy to reduce stack pressure.
+3. Ensure each module can be invoked independently in ISR.
+
+Deliverables:
+1. New current-loop module APIs under `motor_core`.
+2. Reference integration path uses module outputs only.
+
+Acceptance:
+1. Closed-loop torque/velocity behavior unchanged.
+2. No ISR-time regression; reduced local stack in control step.
+
+## Phase 6: Compose `motor_core_step_fast(...)` Pipeline (G)
+
+1. Add one orchestrator API in `motor_core` that sequences modules A-F.
+2. Keep app-owned side effects (error posting, state transitions, event queueing) outside core.
+3. Use compact stage-local structs instead of one large cross-stage context.
+
+Deliverables:
+1. `motor_core_step_fast(...)` and associated contracts.
+2. App control loop reduced to orchestration and policy boundary handling.
+
+Acceptance:
+1. `app/src/motor_control_loop.c` becomes thin orchestration.
 2. Full unit suite + HIL smoke pass.
 
-## Phase 5: Coherent Snapshot and Concurrency Hardening
+## Phase 7: Coherent Snapshot and Concurrency Hardening
 
 1. Replace separate `state_for_isr` + `feature_flags` reads with coherent snapshot publish/consume.
 2. Use a lock-free snapshot protocol (versioned double-buffer or seqlock style) between state thread and ISR.
@@ -171,7 +264,7 @@ Acceptance:
 1. No mixed state/feature epoch observed in stress tests.
 2. Existing command/state transitions remain deterministic.
 
-## Phase 6: Performance and Packaging
+## Phase 8: Packaging and Link-Time Partitioning
 
 1. Split `motor_core` build into sub-libraries:
    - `motor_core_rt` (hard real-time)
@@ -188,6 +281,20 @@ Deliverables:
 Acceptance:
 1. Reduced text/data footprint for realtime target.
 2. No regression in control-loop jitter.
+
+## Phase 9: Optional RAM Placement and Micro-Optimizations
+
+1. Add opt-in section-placement macros for hottest modules/functions.
+2. Add per-stage cycle counters (`stage_min/max/avg`) similar to TI `cpu_time`.
+3. Tune inlining and struct layout for deterministic stack/latency.
+
+Deliverables:
+1. Kconfig-controlled hot-section placement.
+2. Stage-level timing visibility in shell telemetry.
+
+Acceptance:
+1. Verified deterministic jitter budget on hardware.
+2. No functional regression.
 
 ## Proposed `adc_callback` End-State (Conceptual)
 
