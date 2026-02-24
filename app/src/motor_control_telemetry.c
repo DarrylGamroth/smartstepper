@@ -5,6 +5,7 @@
  */
 
 #include "config.h"
+#include "motor/telemetry/motor_capture.h"
 
 /* Phase P03 scaffold helper. Kept out of the ISR callback wiring for now. */
 void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
@@ -27,4 +28,10 @@ void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
 	diag->fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
 	diag->command_timeout_count = params->command_timeout_count;
 	diag->profile_sequence_event_drop_count = params->profile_sequence_event_drop_count;
+}
+
+/* Optional capture-path hook for extended observer/debug payloads. */
+void motor_control_telemetry_consume_capture(const struct motor_capture_feedback *capture)
+{
+	ARG_UNUSED(capture);
 }

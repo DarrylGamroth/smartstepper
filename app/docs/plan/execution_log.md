@@ -17,6 +17,7 @@ Append one entry per task execution.
 | 2026-02-24 | T0302 | done | n/a | Moved non-hot runtime mirrors to `rt_diag`, kept ISR-per-sample mirrors in `rt_fast`, added telemetry scaffold file, and synced mirror paths in `motor_control_loop.c`; build + unit tests passed. |
 | 2026-02-24 | T0303 | done | n/a | Added compile-time runtime footprint guards in `config.h` (`rt_fast <= 64B`, `rt_diag <= 96B`) and verified `smartstepper_v2` build; before: no explicit guardrails, after: bounded hot/diag budgets. |
 | 2026-02-24 | T0401 | done | n/a | Split observer pipeline into `encoder_source` and `angle_tracking` modules and rewired `motor_encoder_feedback.c` to use them while preserving delay/handoff behavior; observer unit test and firmware build passed. |
+| 2026-02-24 | T0402 | done | n/a | Added explicit `motor_control_feedback` and `motor_capture_feedback` payloads; control logic now consumes compact feedback while capture ring writes consume extended capture payload; `smartstepper_v2` build passed. |
 
 ## Blocker Template
 
