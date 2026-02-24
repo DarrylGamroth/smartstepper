@@ -14,7 +14,7 @@ add_library(motor_core STATIC
 	src/motor_encoder_feedback_core.c
 	src/motor_outer_loop_sched.c
 	src/motor_current_ref_policy_core.c
-	src/prbs.c
+	src/math/prbs.c
 	src/rls_motor_est.c
 	src/rs_online.c
 	src/thermal_model.c
@@ -23,6 +23,8 @@ add_library(motor_core STATIC
 target_include_directories(motor_core
 	PUBLIC
 	${CMAKE_CURRENT_SOURCE_DIR}/include
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/math
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/filters
 )
 
 target_link_libraries(motor_core PUBLIC zephyr_interface)
