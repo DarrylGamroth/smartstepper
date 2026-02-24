@@ -1,0 +1,18 @@
+id: T0204
+phase: P02
+status: pending
+title: Complete include migration table and enforce zero legacy includes
+objective: Document include mapping and verify no legacy include references remain
+touch_files:
+  - app/docs/plan/phases/P02_module_rehome_cutover.md
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - runtime algorithm sources
+constraints:
+  - direct cutover documentation only
+validation:
+  - "rg -n 'include/.+angle_observer.h|include/.+motor_mpr.h|include/.+motor_dob.h' app modules tests || true"
+done_when:
+  - migration table filled with completion state
+  - execution log records zero legacy include scan result
+commit_message: "docs(plan): finalize include cutover table and legacy scan"

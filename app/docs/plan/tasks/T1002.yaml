@@ -1,0 +1,23 @@
+id: T1002
+phase: P10
+status: pending
+title: Add per-stage timing counters and micro-optimization gate
+objective: Add low-overhead per-stage timing stats and require measured evidence before micro-optimizations
+
+touch_files:
+  - app/src/motor_isr_io.c
+  - app/include/motor_isr.h
+  - app/docs/plan/execution_log.md
+  - app/docs/plan/phases/P10_optional_ram_microopt.md
+do_not_touch:
+  - control algorithm correctness logic
+constraints:
+  - timing instrumentation must be compile-time selectable
+  - overhead must remain bounded for release config
+validation:
+  - "rg -n 'stage timing|min|max|avg|CONFIG_' app/src/motor_isr_io.c app/include/motor_isr.h app/docs/plan/phases/P10_optional_ram_microopt.md"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+done_when:
+  - stage-level timing counters can be enabled for debug runs
+  - execution log records optimization decisions with measured data
+commit_message: "feat(isr): add optional per-stage timing counters"

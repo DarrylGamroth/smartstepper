@@ -1,0 +1,22 @@
+id: T0402
+phase: P04
+status: pending
+title: Split control feedback payload from capture/debug payload
+objective: Define separate lightweight control feedback struct and optional capture/debug payload struct
+
+touch_files:
+  - modules/motor_core/include/motor/observers/motor_feedback.h
+  - modules/motor_core/include/motor/telemetry/motor_capture.h
+  - app/src/motor_control_loop.c
+  - app/src/motor_control_telemetry.c
+do_not_touch:
+  - SPI transport protocol code
+constraints:
+  - control payload must stay ISR-friendly and minimal
+validation:
+  - "rg -n 'motor_feedback|capture' modules/motor_core/include/motor app/src/motor_control_loop.c app/src/motor_control_telemetry.c"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - control loop consumes only control feedback payload
+  - debug capture path consumes optional extended payload
+commit_message: "refactor(observer): split control feedback from capture payload"

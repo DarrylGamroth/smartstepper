@@ -1,0 +1,23 @@
+id: T0501
+phase: P05
+status: pending
+title: Extract position and velocity regulator modules
+objective: Move outer-loop position and velocity regulators into dedicated composable control modules
+
+touch_files:
+  - modules/motor_core/include/motor/control/position_regulator.h
+  - modules/motor_core/include/motor/control/velocity_regulator.h
+  - modules/motor_core/src/control/position_regulator.c
+  - modules/motor_core/src/control/velocity_regulator.c
+  - app/src/motor_control_outer_loops.c
+do_not_touch:
+  - current-loop FOC implementation files
+constraints:
+  - preserve existing gains, clamps, and sign conventions
+validation:
+  - "rg -n 'position_regulator|velocity_regulator' modules/motor_core/include/motor/control modules/motor_core/src/control app/src/motor_control_outer_loops.c"
+  - "./tests/run_unit_tests.sh priceless_wiles -s chopper.pi_controller.unit"
+done_when:
+  - position and velocity regulation execute via module APIs
+  - app orchestration no longer embeds regulator math inline
+commit_message: "refactor(control): extract position and velocity regulators"

@@ -1,0 +1,22 @@
+id: T0301
+phase: P03
+status: pending
+title: Introduce fast and diagnostic runtime state structs
+objective: Define `motor_rt_fast_state` and `motor_rt_diag_state` with clear ownership and update core config types
+touch_files:
+  - modules/motor_core/include/motor/runtime/motor_runtime_state.h
+  - modules/motor_core/include/motor/runtime/motor_runtime_diag.h
+  - app/include/config.h
+do_not_touch:
+  - encoder SPI driver files
+constraints:
+  - no behavior change
+  - keep ISR-hot fields in fast state only
+validation:
+  - "rg -n 'motor_rt_fast_state|motor_rt_diag_state' modules/motor_core/include/motor/runtime app/include/config.h"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+done_when:
+  - fast and diagnostic structs are defined with comments on update cadence
+  - config references compile with new struct split
+commit_message: "refactor(runtime): add fast/diag runtime state split"

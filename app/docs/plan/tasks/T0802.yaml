@@ -1,0 +1,20 @@
+id: T0802
+phase: P08
+status: pending
+title: Add mixed-epoch and transition concurrency tests
+objective: Validate snapshot scheme prevents mixed-epoch settings and unstable mode transitions
+
+touch_files:
+  - tests/unit/runtime/*
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - motion profile math modules
+constraints:
+  - include adversarial publish/consume timing scenarios
+validation:
+  - "./tests/run_unit_tests.sh"
+  - "rg -n 'P08|mixed epoch|snapshot' app/docs/plan/execution_log.md"
+done_when:
+  - tests catch mixed-epoch regressions
+  - execution log includes transition determinism evidence
+commit_message: "test(runtime): add snapshot concurrency regression coverage"

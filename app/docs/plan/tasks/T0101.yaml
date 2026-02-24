@@ -1,0 +1,20 @@
+id: T0101
+phase: P01
+status: pending
+title: Split adc callback into stage boundaries
+objective: Introduce explicit Collect Process Apply Telemetry stage boundaries in adc callback without changing behavior
+touch_files:
+  - app/src/motor_isr_io.c
+  - app/include/motor_isr.h
+do_not_touch:
+  - modules/motor_core/src
+constraints:
+  - no algorithm changes
+  - preserve encoder request/collect flow
+validation:
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+done_when:
+  - adc callback code has explicit stage boundaries
+  - binaries build for both targets
+commit_message: "refactor(isr): stage adc callback into collect process apply telemetry"

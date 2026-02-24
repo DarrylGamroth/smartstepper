@@ -1,0 +1,24 @@
+id: T0202
+phase: P02
+status: pending
+title: Rehome observers and motion families
+objective: Move observer and motion modules to new family paths and update includes
+touch_files:
+  - modules/motor_core/include/motor/observers
+  - modules/motor_core/include/motor/motion
+  - modules/motor_core/src/observers
+  - modules/motor_core/src/motion
+  - app/src
+  - tests/unit
+do_not_touch:
+  - driver source under zephyr tree
+constraints:
+  - no behavior changes
+  - no temporary include shims
+validation:
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+  - "./tests/run_unit_tests.sh"
+done_when:
+  - all observer and motion includes use new paths
+  - build and tests pass
+commit_message: "refactor(core): rehome observers and motion modules"

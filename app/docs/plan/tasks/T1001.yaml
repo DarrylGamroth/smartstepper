@@ -1,0 +1,22 @@
+id: T1001
+phase: P10
+status: pending
+title: Add optional section-placement controls for hot functions
+objective: Introduce compile-time options for RAM/section placement of selected hot-path code
+
+touch_files:
+  - app/include/config.h
+  - modules/motor_core/include/motor/runtime/placement.h
+  - modules/motor_core/src/runtime/motor_core_step.c
+  - app/prj.conf
+do_not_touch:
+  - state-machine flow logic
+constraints:
+  - feature must be optional and off by default
+validation:
+  - "rg -n 'section|placement|CONFIG_' app/include/config.h modules/motor_core/include/motor/runtime/placement.h app/prj.conf"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - placement controls are compile-time gated and documented
+  - default build behavior remains unchanged
+commit_message: "feat(runtime): add optional hot-path section placement controls"

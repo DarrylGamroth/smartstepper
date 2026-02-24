@@ -1,0 +1,22 @@
+id: T0201
+phase: P02
+status: pending
+title: Rehome math and filter module headers and sources
+objective: Move math and filter families to new motor namespace paths
+touch_files:
+  - modules/motor_core/include/motor/math
+  - modules/motor_core/include/motor/filters
+  - modules/motor_core/src/math
+  - modules/motor_core/src/filters
+  - modules/motor_core/CMakeLists.txt
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - app/src/motor_control_loop.c
+constraints:
+  - direct cutover no compatibility wrappers
+validation:
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - files moved under new family paths
+  - build passes
+commit_message: "refactor(core): rehome math and filters into family namespace"

@@ -1,0 +1,18 @@
+id: T0102
+phase: P01
+status: pending
+title: Validate ISR stage-shell parity
+objective: Confirm no behavior change after stage-shell refactor
+touch_files:
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - modules/motor_core/src
+constraints:
+  - use existing smoke command sequence
+validation:
+  - "./tests/run_unit_tests.sh"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - unit tests pass
+  - parity evidence added to execution log
+commit_message: "docs(plan): record P01 parity validation evidence"

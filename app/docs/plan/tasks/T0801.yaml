@@ -1,0 +1,22 @@
+id: T0801
+phase: P08
+status: pending
+title: Implement coherent config snapshot publication and consumption
+objective: Replace split runtime reads with atomic/coherent snapshot handoff between thread and ISR
+
+touch_files:
+  - modules/motor_core/include/motor/runtime/config_snapshot.h
+  - modules/motor_core/src/runtime/config_snapshot.c
+  - app/src/motor_states.c
+  - app/src/motor_control_loop.c
+do_not_touch:
+  - inner-loop algorithm implementations
+constraints:
+  - snapshot read must be constant-time in ISR
+validation:
+  - "rg -n 'snapshot|epoch|config' modules/motor_core/include/motor/runtime modules/motor_core/src/runtime app/src/motor_states.c app/src/motor_control_loop.c"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - ISR consumes one coherent config snapshot per cycle
+  - state thread publishes complete snapshots with version/epoch tagging
+commit_message: "refactor(runtime): add coherent config snapshot handoff"

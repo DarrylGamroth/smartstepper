@@ -1,0 +1,20 @@
+id: T0303
+phase: P03
+status: pending
+title: Add runtime size guards and log baseline deltas
+objective: Track and guard hot struct footprint and record size/stack deltas in execution log
+
+touch_files:
+  - app/include/config.h
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - algorithm math modules
+constraints:
+  - lightweight compile-time checks only
+validation:
+  - "rg -n 'sizeof\(|STATIC_ASSERT|BUILD_ASSERT' app/include/config.h"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - compile-time guards exist for hot runtime structures
+  - execution log includes recorded before/after footprint entries
+commit_message: "chore(runtime): add hot-struct size guards and logging"

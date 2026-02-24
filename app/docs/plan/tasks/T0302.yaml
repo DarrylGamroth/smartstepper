@@ -1,0 +1,24 @@
+id: T0302
+phase: P03
+status: pending
+title: Move non-hot runtime fields out of ISR fast state
+objective: Relocate commissioning, telemetry, and debug-only fields from fast state to diagnostic state
+
+touch_files:
+  - app/src/motor_control_loop.c
+  - modules/motor_core/include/motor/runtime/motor_runtime_state.h
+  - modules/motor_core/include/motor/runtime/motor_runtime_diag.h
+  - app/src/motor_control_telemetry.c
+do_not_touch:
+  - low-level ADC/PWM ISR callback wiring
+constraints:
+  - preserve control behavior and limits
+  - no kernel calls added in ISR path
+validation:
+  - "rg -n 'motor_rt_diag_state|diag' app/src/motor_control_loop.c app/src/motor_control_telemetry.c"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+  - "./tests/run_unit_tests.sh"
+done_when:
+  - fast state only contains per-sample control data
+  - relocated fields are accessed via diagnostic state paths
+commit_message: "refactor(runtime): relocate non-hot fields to diagnostic state"

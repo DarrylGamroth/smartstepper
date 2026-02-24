@@ -1,0 +1,20 @@
+id: T0403
+phase: P04
+status: pending
+title: Add observer split regression coverage and HIL parity check
+objective: Extend unit coverage around wrap/delay/quality edges and record HIL parity results
+
+touch_files:
+  - tests/unit/observers/*
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - control policy modules
+constraints:
+  - tests should target boundary conditions and dropouts
+validation:
+  - "./tests/run_unit_tests.sh"
+  - "rg -n 'P04|observer|encoder parity' app/docs/plan/execution_log.md"
+done_when:
+  - observer regression tests cover wrap boundaries and invalid-frame transitions
+  - execution log contains HIL parity note for observer split
+commit_message: "test(observer): add split regression and HIL parity evidence"

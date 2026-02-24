@@ -1,0 +1,23 @@
+id: T0601
+phase: P06
+status: pending
+title: Separate decoupling from current PI control
+objective: Split decoupling enable/validation and feed-forward math from core Id/Iq PI current control modules
+
+touch_files:
+  - modules/motor_core/include/motor/control/current_loop.h
+  - modules/motor_core/include/motor/control/decoupling.h
+  - modules/motor_core/src/control/current_loop.c
+  - modules/motor_core/src/control/decoupling.c
+  - app/src/motor_control_loop.c
+do_not_touch:
+  - state-machine transition modules
+constraints:
+  - preserve overcurrent and saturation protections
+validation:
+  - "rg -n 'decoupling|current_loop' modules/motor_core/include/motor/control modules/motor_core/src/control app/src/motor_control_loop.c"
+  - "./tests/run_unit_tests.sh priceless_wiles -s chopper.pi_controller.unit"
+done_when:
+  - current PI path operates independently from decoupling feature toggle
+  - decoupling disable path is deterministic and test-covered
+commit_message: "refactor(foc): split decoupling from current PI loop"

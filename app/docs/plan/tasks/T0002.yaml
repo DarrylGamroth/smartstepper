@@ -1,0 +1,18 @@
+id: T0002
+phase: P00
+status: pending
+title: Add guardrail checklist
+objective: Add explicit guard checklist for sizeof checks and regression tests
+touch_files:
+  - app/docs/plan/phases/P00_baseline_and_guardrails.md
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - modules/motor_core/src
+constraints:
+  - no runtime behavior change
+validation:
+  - "test -f app/docs/plan/phases/P00_baseline_and_guardrails.md"
+done_when:
+  - phase doc lists compile-time size checks
+  - phase doc lists regression suites to run
+commit_message: "docs(plan): add P00 guardrail checklist"

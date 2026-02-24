@@ -1,0 +1,19 @@
+id: T0001
+phase: P00
+status: pending
+title: Record baseline ISR metrics procedure
+objective: Define and log the baseline procedure for ISR cycle and stack metrics before refactor
+touch_files:
+  - app/docs/plan/validation.md
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - app/src/motor_control_loop.c
+  - app/src/motor_isr_io.c
+constraints:
+  - documentation-only change
+validation:
+  - "test -f app/docs/plan/validation.md"
+done_when:
+  - validation doc includes baseline metric commands
+  - execution log has baseline entry template
+commit_message: "docs(plan): add baseline ISR metric procedure"

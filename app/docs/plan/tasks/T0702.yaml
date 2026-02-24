@@ -1,0 +1,21 @@
+id: T0702
+phase: P07
+status: pending
+title: Enforce side-effect boundaries and integration tests for fast step
+objective: Add checks/tests to ensure fast-step code remains deterministic and side-effect free
+
+touch_files:
+  - tests/unit/runtime/*
+  - app/docs/plan/01_architecture_target.md
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - sensor driver implementations
+constraints:
+  - no blocking primitives in fast-step call graph
+validation:
+  - "rg -n 'side-effect|no queue|no kernel' app/docs/plan/01_architecture_target.md"
+  - "./tests/run_unit_tests.sh"
+done_when:
+  - tests assert side-effect boundary assumptions for fast step
+  - execution log records integration parity results for composed pipeline
+commit_message: "test(runtime): enforce fast-step side-effect boundary"

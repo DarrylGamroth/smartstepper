@@ -1,0 +1,23 @@
+id: T0401
+phase: P04
+status: pending
+title: Split encoder source classification from angle tracking
+objective: Separate frame/source quality classification from angle unwrap/observer state tracking
+
+touch_files:
+  - modules/motor_core/include/motor/observers/encoder_source.h
+  - modules/motor_core/include/motor/observers/angle_tracking.h
+  - modules/motor_core/src/observers/encoder_source.c
+  - modules/motor_core/src/observers/angle_tracking.c
+  - app/src/motor_encoder_feedback.c
+do_not_touch:
+  - motion profile and regulator modules
+constraints:
+  - preserve existing delay and handoff semantics
+validation:
+  - "rg -n 'encoder_source|angle_tracking' modules/motor_core/include/motor/observers modules/motor_core/src/observers app/src/motor_encoder_feedback.c"
+  - "./tests/run_unit_tests.sh priceless_wiles -s chopper.angle_observer.unit"
+done_when:
+  - source classification API is independent from angle tracking API
+  - existing observer behavior remains functionally equivalent
+commit_message: "refactor(observer): split source classification from angle tracking"

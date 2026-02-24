@@ -1,0 +1,24 @@
+id: T0502
+phase: P05
+status: pending
+title: Extract command arbitration and interlock modules
+objective: Centralize reference arbitration and interlock evaluation into explicit runtime modules
+
+touch_files:
+  - modules/motor_core/include/motor/runtime/command_arbitration.h
+  - modules/motor_core/include/motor/protection/interlocks.h
+  - modules/motor_core/src/runtime/command_arbitration.c
+  - modules/motor_core/src/protection/interlocks.c
+  - app/src/motor_current_ref_policy.c
+  - app/src/motor_control_loop.c
+do_not_touch:
+  - PWM driver and ISR hardware setup
+constraints:
+  - deterministic priority order must remain explicit
+validation:
+  - "rg -n 'arbitration|interlock' modules/motor_core/include/motor modules/motor_core/src app/src/motor_current_ref_policy.c app/src/motor_control_loop.c"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - arbitration and interlocks run through dedicated module interfaces
+  - policy priority and fault gating are unchanged by test evidence
+commit_message: "refactor(runtime): extract reference arbitration and interlocks"

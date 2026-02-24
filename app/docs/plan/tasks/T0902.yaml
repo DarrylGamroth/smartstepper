@@ -1,0 +1,19 @@
+id: T0902
+phase: P09
+status: pending
+title: Capture link map and jitter/size evidence after partition
+objective: Record binary size, map changes, and timing impact of library partitioning
+
+touch_files:
+  - app/docs/plan/execution_log.md
+  - app/docs/plan/phases/P09_packaging_link_partition.md
+do_not_touch:
+  - runtime control source files
+constraints:
+  - evidence-only task
+validation:
+  - "rg -n 'size|link map|jitter|P09' app/docs/plan/execution_log.md app/docs/plan/phases/P09_packaging_link_partition.md"
+done_when:
+  - execution log captures before/after size and jitter notes
+  - P09 phase doc includes measured partition outcome summary
+commit_message: "docs(plan): record link partition evidence"

@@ -1,0 +1,25 @@
+id: T0602
+phase: P06
+status: pending
+title: Isolate transforms and PWM synthesis contracts
+objective: Define explicit interfaces for Clarke/Park/inverse transforms and PWM synthesis handoff
+
+touch_files:
+  - modules/motor_core/include/motor/control/transforms.h
+  - modules/motor_core/include/motor/control/pwm_synthesis.h
+  - modules/motor_core/src/control/transforms.c
+  - modules/motor_core/src/control/pwm_synthesis.c
+  - app/src/motor_control_loop.c
+  - app/src/motor_isr_io.c
+do_not_touch:
+  - encoder protocol parsing
+constraints:
+  - no dynamic allocation
+  - no kernel calls in ISR path
+validation:
+  - "rg -n 'clarke|park|pwm_synthesis|svpwm' modules/motor_core/src/control app/src/motor_control_loop.c app/src/motor_isr_io.c"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+done_when:
+  - transform and PWM steps are independently testable module calls
+  - ISR apply stage receives a finalized modulation command only
+commit_message: "refactor(foc): isolate transforms and PWM synthesis"

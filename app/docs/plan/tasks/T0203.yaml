@@ -1,0 +1,30 @@
+id: T0203
+phase: P02
+status: pending
+title: Rehome control protection runtime telemetry families
+objective: Move remaining module families and update all includes to new layout
+touch_files:
+  - modules/motor_core/include/motor/control
+  - modules/motor_core/include/motor/protection
+  - modules/motor_core/include/motor/runtime
+  - modules/motor_core/include/motor/telemetry
+  - modules/motor_core/src/control
+  - modules/motor_core/src/protection
+  - modules/motor_core/src/runtime
+  - modules/motor_core/src/telemetry
+  - app/src
+  - tests/unit
+  - modules/motor_core/CMakeLists.txt
+do_not_touch:
+  - app/drivers
+constraints:
+  - preserve behavior
+  - direct include cutover
+validation:
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+  - "./tests/run_unit_tests.sh"
+done_when:
+  - all module families moved
+  - all call sites compile with new paths
+commit_message: "refactor(core): rehome control protection runtime telemetry modules"

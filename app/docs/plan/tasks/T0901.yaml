@@ -1,0 +1,22 @@
+id: T0901
+phase: P09
+status: pending
+title: Partition motor_core into runtime and non-runtime sub-libraries
+objective: Split link targets by criticality to keep ISR path lean and explicit
+
+touch_files:
+  - modules/motor_core/CMakeLists.txt
+  - modules/motor_core/src/CMakeLists.txt
+  - modules/motor_core/include/motor/runtime/*
+do_not_touch:
+  - algorithm source behavior
+constraints:
+  - no functional changes
+  - preserve include API compatibility
+validation:
+  - "rg -n 'motor_core_rt|motor_core_motion|motor_core_estimation|motor_core_commission' modules/motor_core/CMakeLists.txt modules/motor_core/src/CMakeLists.txt"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+done_when:
+  - runtime-critical and non-runtime objects are separated at link level
+  - firmware links successfully with new library partition
+commit_message: "build(motor_core): split link targets by runtime criticality"

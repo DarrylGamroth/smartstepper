@@ -1,0 +1,20 @@
+id: T0503
+phase: P05
+status: pending
+title: Add reference-path regression tests and HIL parity run
+objective: Verify reference path split preserves behavior across mode transitions and limits
+
+touch_files:
+  - tests/unit/control/*
+  - app/docs/plan/execution_log.md
+do_not_touch:
+  - encoder driver sources
+constraints:
+  - include edge cases for clamp, timeout, and mode transitions
+validation:
+  - "./tests/run_unit_tests.sh"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+done_when:
+  - reference path regression tests cover transition and interlock boundaries
+  - execution log includes closed-loop parity smoke result
+commit_message: "test(control): expand reference-path regression coverage"
