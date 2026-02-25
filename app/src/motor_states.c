@@ -118,7 +118,6 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state,
 			params->velocity_rad_s);
-	motor_position_convert_reset(&params->position_convert, params->position_rad);
 	params->position_quality_flags = 0U;
 	params->position_stale_count = 0U;
 	params->position_stale_events = 0U;
@@ -489,18 +488,6 @@ static void motor_state_ctrl_init_entry(void *obj)
 			    ANGLE_OBSERVER_BANDWIDTH_HZ,
 			    MOTOR_POLE_PAIRS,
 			    ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
-	float32_t max_step_rad = clampf((VELOCITY_MAX_RAD_S / CONTROL_LOOP_FREQUENCY_HZ) * 8.0f,
-					0.02f, 0.20f);
-	params->position_convert_cfg.dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
-	params->position_convert_cfg.velocity_lpf_hz = 300.0f;
-	params->position_convert_cfg.accel_lpf_hz = 100.0f;
-	params->position_convert_cfg.max_step_rad = max_step_rad;
-	params->position_convert_cfg.latency_samples_default = ENCODER_SPI_PIPELINE_DELAY_SAMPLES;
-	params->position_convert_cfg.jitter_threshold_rad = 0.01f;
-	params->position_convert_cfg.stale_threshold_samples = 4U;
-	motor_position_convert_init(&params->position_convert,
-				    &params->position_convert_cfg,
-				    0.0f);
 
 	/* Initialize Id trajectory generator for smooth current ramping */
 	traj_init(&params->traj_Id);

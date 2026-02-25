@@ -802,10 +802,10 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 	motor_rls_update_estimators(params, &rls_runtime, Id_A, Iq_A);
 
-	/* Update telemetry snapshot (position_convert provides mechanical domain signals). */
+	/* Update telemetry snapshot (mechanical-domain feedback from observer path). */
 	params->position_rad = position_mech_rad;
-	params->position_unwrapped_rad = params->position_convert.position_unwrapped_rad;
-	params->position_innovation_rad = params->position_convert.innovation_rad;
+	params->position_unwrapped_rad = position_mech_rad;
+	params->position_innovation_rad = 0.0f;
 	params->velocity_rad_s = speed_mech_rad_s;
 	params->acceleration_rad_s2 = accel_mech_rad_s2;
 	params->velocity_filtered_rad_s = speed_mech_filtered_rad_s;

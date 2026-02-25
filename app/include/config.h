@@ -25,7 +25,7 @@
 #include "motor/runtime/runtime_diag.h"
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
-#include "motor/observers/position_convert.h"
+#include "motor/observers/feedback_quality.h"
 #include "motor/math/prbs.h"
 #include "motor/estimation/rls_motor_est.h"
 #include "motor/estimation/thermal_model.h"
@@ -156,8 +156,6 @@ struct motor_parameters {
 	float32_t observer_alignment_offset_rad; /* Base mechanical offset from ALIGN */
 	float32_t observer_elec_trim_rad; /* Runtime electrical trim [rad], converted to mech offset */
 	int8_t encoder_direction_sign; /* Mechanical encoder direction mapping (+1/-1) */
-	struct motor_position_convert_config position_convert_cfg;
-	struct motor_position_convert_state position_convert;
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */

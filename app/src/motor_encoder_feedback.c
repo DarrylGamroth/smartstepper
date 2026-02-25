@@ -18,6 +18,9 @@
 #include "motor/observers/encoder_source.h"
 #include "motor/observers/angle_tracking.h"
 #include "motor/observers/encoder_feedback_core.h"
+#include "motor/observers/feedback_quality.h"
+
+#define MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES 4U
 
 int motor_encoder_feedback_update(struct motor_parameters *params,
 				  const struct motor_control_encoder_sample *encoder_sample,
@@ -119,7 +122,7 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 				    feedback->fresh,
 				    feedback->warning,
 				    feedback->error,
-				    params->position_convert.measurement_locked,
+				    (params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U,
 				    ENCODER_SPI_PIPELINE_DELAY_SAMPLES,
 				    &tracking);
 	feedback->input_source = tracking.input_source;
@@ -132,13 +135,6 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	if (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) {
 		params->encoder_raw_deg = feedback->angle_sensor_deg;
 		params->encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
-		if (feedback->fresh && !params->position_convert.measurement_locked) {
-			/* Preserve legacy behavior: reset position conversion on first fresh
-			 * encoder handoff sample used to seed the observer.
-			 */
-			motor_position_convert_reset(&params->position_convert,
-						     wrap_rad_2pi(angle_raw_rad));
-		}
 	}
 
 	feedback->capture_angle_rad = feedback->sample_available ?
@@ -170,56 +166,38 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		feedback->capture_compare_valid = true;
 	}
 
-	struct motor_position_convert_input pos_input = {
-		.sample_valid = false,
-		.sample_fresh = false,
-		.source_generated = false,
-		.warning = feedback->warning,
-		.error = feedback->error,
-		.measurement_wrapped_rad = 0.0f,
-		.latency_samples = 0.0f,
-	};
+	uint8_t quality_flags = 0U;
+	bool source_generated = (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_GENERATED);
+	bool source_encoder = (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER);
+	bool has_error = feedback->error || feedback->io_fault;
+	bool sample_fresh = source_generated || (source_encoder && feedback->fresh);
 
-	switch (feedback->input_source) {
-	case MOTOR_ANGLE_INPUT_SRC_GENERATED:
-		pos_input.sample_valid = true;
-		pos_input.sample_fresh = true;
-		pos_input.source_generated = true;
-		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
-		pos_input.latency_samples = 0.0f;
-		break;
-	case MOTOR_ANGLE_INPUT_SRC_ENCODER:
-		pos_input.sample_valid = true;
-		pos_input.sample_fresh = feedback->fresh;
-		pos_input.source_generated = false;
-		pos_input.measurement_wrapped_rad = wrap_rad_2pi(angle_raw_rad);
-		pos_input.latency_samples = ENCODER_SPI_PIPELINE_DELAY_SAMPLES;
-		break;
-	case MOTOR_ANGLE_INPUT_SRC_PROPAGATED:
-	default:
-		pos_input.sample_valid = false;
-		pos_input.sample_fresh = false;
-		pos_input.source_generated = false;
-		pos_input.measurement_wrapped_rad = 0.0f;
-		pos_input.latency_samples = 0.0f;
-		break;
+	if (sample_fresh) {
+		params->position_stale_count = 0U;
+	} else if (params->position_stale_count < UINT16_MAX) {
+		params->position_stale_count++;
+		if (params->position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
+			params->position_stale_events++;
+		}
 	}
 
-	int pos_ret = motor_position_convert_update(&params->position_convert,
-						    &params->position_convert_cfg,
-						    &pos_input);
-	if (pos_ret != 0) {
-		motor_position_convert_reset(&params->position_convert, wrap_rad_2pi(angle_raw_rad));
+	if (sample_fresh) {
+		quality_flags |= MOTOR_FEEDBACK_QUALITY_FRESH;
 	}
-	params->position_quality_flags = params->position_convert.quality_flags;
-	params->position_stale_count = params->position_convert.stale_count;
-	params->position_stale_events = params->position_convert.stale_event_count;
-	params->position_glitch_count = params->position_convert.glitch_count;
-	params->position_jitter_count = params->position_convert.jitter_count;
+	if (has_error) {
+		quality_flags |= MOTOR_FEEDBACK_QUALITY_ERROR;
+	}
+	if (sample_fresh && !has_error) {
+		quality_flags |= MOTOR_FEEDBACK_QUALITY_VALID;
+	}
 
-	feedback->position_mech_rad = params->position_convert.position_wrapped_rad;
-	feedback->speed_mech_rad_s = params->position_convert.velocity_rad_s;
-	feedback->accel_mech_rad_s2 = params->position_convert.accel_rad_s2;
+	params->position_quality_flags = quality_flags;
+	params->position_glitch_count = 0U;
+	params->position_jitter_count = 0U;
+
+	feedback->position_mech_rad = tracking.observer_mech_rad;
+	feedback->speed_mech_rad_s = angle_observer_get_mech_speed(&params->observer);
+	feedback->accel_mech_rad_s2 = 0.0f;
 	feedback->speed_mech_filtered_rad_s = feedback->speed_mech_rad_s;
 
 	return 0;

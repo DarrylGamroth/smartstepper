@@ -134,7 +134,7 @@ To avoid ambiguity:
 
 1. `motor_encoder_source` (source arbitration + frame/transport classification)
 2. `motor_angle_track` (observer update + delay/handoff logic)
-3. `motor_position_convert` (unwrap, velocity, accel, quality flags)
+3. `motor_angle_observer` (offset/wrap/speed estimation + delay compensation)
 4. `motor_speed_filter` (optional notch/LPF)
 
 ### D. Reference Generation Modules
@@ -172,7 +172,7 @@ The following blocks are already strong and should be retained while relocating 
 
 1. `angle_gen` -> `motor/motion/angle_gen`
 2. `angle_observer` -> `motor/observers/angle_observer`
-3. `motor_position_convert` -> `motor/observers/position_convert`
+3. `angle_observer` -> `motor/observers/angle_observer`
 4. `motor_mpr` -> `motor/control/mpr`
 5. `motor_dob` -> `motor/control/dob`
 6. `motion_profile` + `motor_motion_modules` -> `motor/motion/profile`
@@ -287,7 +287,7 @@ Acceptance:
 1. Split `motor_encoder_feedback` into independent modules:
    - `motor_encoder_source`
    - `motor_angle_track`
-   - `motor_position_convert` (already present, narrow interface)
+   - `motor_angle_observer` + `feedback_quality` (narrow interface)
 2. Move capture/debug fields out of control feedback object.
 3. Refactor `motor_control_step_ctx` into:
    - immutable tick snapshot

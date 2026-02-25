@@ -152,7 +152,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 		bool velocity_feedback_valid =
 			motor_velocity_feedback_is_valid(params->position_quality_flags);
 		bool velocity_feedback_fresh =
-			(params->position_quality_flags & MOTOR_POSITION_CONVERT_QUALITY_FRESH) != 0U;
+			(params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
 		bool velocity_loop_update = sched_out.velocity_update;
 		if (!velocity_feedback_valid) {
 			/* Hold measured dq currents and reset outer-loop observers while encoder

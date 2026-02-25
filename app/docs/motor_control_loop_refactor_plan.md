@@ -47,17 +47,17 @@ struct motor_encoder_feedback {
 	uint8_t source;          /* GENERATED | ENCODER | PROPAGATED */
 	float32_t sensor_mech_rad;   /* raw sensor mapped to control sign */
 	float32_t observer_input_rad;
-	float32_t mech_rad;          /* observer/position-convert output */
+	float32_t mech_rad;          /* observer output */
 	float32_t elec_rad;          /* observer output */
 	float32_t mech_speed_rad_s;
-	uint8_t quality_flags;       /* position_convert quality */
+	uint8_t quality_flags;       /* feedback quality (valid/fresh/error) */
 };
 ```
 
 Rules:
 
 1. Convert units once at boundary (prefer radians in control path).
-2. One source-of-truth for offset/wrap is the observer + position-convert path.
+2. One source-of-truth for offset/wrap is the observer path.
 3. Separate control quality from capture diagnostics:
    - Control uses normalized feedback fields only.
    - Capture uses a copy of normalized feedback plus optional generated-reference fields.

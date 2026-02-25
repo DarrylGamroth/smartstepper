@@ -52,7 +52,6 @@ add_library(motor_core_rt STATIC
 	observers/angle_tracking.c
 	observers/encoder_source.c
 	observers/encoder_feedback_core.c
-	observers/position_convert.c
 	control/dob.c
 	control/mpr.c
 	control/current_loop.c

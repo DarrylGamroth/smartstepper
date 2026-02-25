@@ -10,16 +10,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "motor/observers/position_convert.h"
+#include "motor/observers/feedback_quality.h"
 
 static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 {
 	/* Encoder updates may not be fresh every ISR tick (RTIO completion cadence),
 	 * but feedback is still usable while quality remains VALID.
 	 */
-	const uint8_t required = MOTOR_POSITION_CONVERT_QUALITY_VALID;
-	const uint8_t forbidden = MOTOR_POSITION_CONVERT_QUALITY_ERROR |
-				  MOTOR_POSITION_CONVERT_QUALITY_GLITCH;
+	const uint8_t required = MOTOR_FEEDBACK_QUALITY_VALID;
+	const uint8_t forbidden = MOTOR_FEEDBACK_QUALITY_ERROR;
 
 	return ((quality_flags & required) != 0U) &&
 	       ((quality_flags & forbidden) == 0U);
