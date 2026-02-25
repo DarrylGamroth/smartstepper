@@ -32,7 +32,6 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 
 	memset(feedback, 0, sizeof(*feedback));
 	feedback->input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
-	feedback->capture_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 
 	struct motor_encoder_feedback_core_state core_state = {
 		.fault_counter = params->encoder_fault_counter,
@@ -126,35 +125,6 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		params->encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
 	}
 
-	feedback->capture_angle_rad = feedback->sample_available ?
-					      (feedback->angle_control_deg * (PI_F32 / 180.0f)) :
-					      path_out.observer_input_rad;
-	feedback->capture_angle_deg = feedback->sample_available ?
-					      feedback->angle_control_deg :
-					      (path_out.observer_input_rad * (180.0f / PI_F32));
-	feedback->capture_observer_mech_rad = feedback->observer_mech_rad;
-	feedback->capture_observer_elec_rad = feedback->observer_elec_rad;
-	feedback->capture_generated_mech_rad = wrap_rad_2pi(generated_angle_rad);
-	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
-	feedback->capture_generated_elec_rad =
-		wrap_rad_2pi((feedback->capture_generated_mech_rad + observer_mech_offset_rad) *
-			     (float32_t)MOTOR_POLE_PAIRS);
-	feedback->capture_input_source = feedback->sample_available ?
-					 MOTOR_ANGLE_INPUT_SRC_ENCODER :
-					 feedback->input_source;
-	if (feedback->sample_available && feedback->fresh &&
-	    !feedback->warning && !feedback->error) {
-		feedback->capture_encoder_mech_rad = feedback->capture_observer_mech_rad;
-		feedback->capture_encoder_elec_rad = feedback->capture_observer_elec_rad;
-		feedback->capture_mech_error_rad =
-			wrap_rad_pi(feedback->capture_encoder_mech_rad -
-				    feedback->capture_generated_mech_rad);
-		feedback->capture_elec_error_rad =
-			wrap_rad_pi(feedback->capture_encoder_elec_rad -
-				    feedback->capture_generated_elec_rad);
-		feedback->capture_compare_valid = true;
-	}
-
 	uint8_t quality_flags = feedback->control.quality_flags;
 	bool sample_fresh = (quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
 
@@ -175,6 +145,55 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	feedback->speed_mech_rad_s = feedback->control.speed_mech_rad_s;
 	feedback->accel_mech_rad_s2 = feedback->control.accel_mech_rad_s2;
 	feedback->speed_mech_filtered_rad_s = feedback->control.speed_mech_filtered_rad_s;
+
+	return 0;
+}
+
+int motor_encoder_feedback_prepare_capture(const struct motor_parameters *params,
+					   const struct motor_encoder_feedback *feedback,
+					   struct motor_capture_feedback *capture)
+{
+	if (params == NULL || feedback == NULL || capture == NULL) {
+		return -EINVAL;
+	}
+
+	memset(capture, 0, sizeof(*capture));
+
+	float32_t generated_mech_rad = angle_gen_get_angle(&params->angle_gen);
+	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
+
+	capture->angle_rad = feedback->sample_available ?
+				     (feedback->angle_control_deg * (PI_F32 / 180.0f)) :
+				     feedback->observer_input_rad;
+	capture->angle_deg = feedback->sample_available ?
+				     feedback->angle_control_deg :
+				     (feedback->observer_input_rad * (180.0f / PI_F32));
+	capture->observer_mech_rad = feedback->observer_mech_rad;
+	capture->observer_elec_rad = feedback->observer_elec_rad;
+	capture->generated_mech_rad = wrap_rad_2pi(generated_mech_rad);
+	capture->generated_elec_rad =
+		wrap_rad_2pi((capture->generated_mech_rad + observer_mech_offset_rad) *
+			     (float32_t)MOTOR_POLE_PAIRS);
+	capture->input_source = feedback->sample_available ?
+				MOTOR_ANGLE_INPUT_SRC_ENCODER :
+				feedback->input_source;
+
+	if (feedback->sample_available && feedback->fresh &&
+	    !feedback->warning && !feedback->error) {
+		capture->encoder_mech_rad = capture->observer_mech_rad;
+		capture->encoder_elec_rad = capture->observer_elec_rad;
+		capture->mech_error_rad =
+			wrap_rad_pi(capture->encoder_mech_rad - capture->generated_mech_rad);
+		capture->elec_error_rad =
+			wrap_rad_pi(capture->encoder_elec_rad - capture->generated_elec_rad);
+		capture->compare_valid = true;
+	}
+
+	capture->sample_enabled = feedback->sample_available;
+	capture->sample_fresh = feedback->fresh;
+	capture->sample_warning = feedback->warning;
+	capture->sample_error = feedback->error;
+	capture->status = feedback->status;
 
 	return 0;
 }

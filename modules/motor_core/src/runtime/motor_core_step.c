@@ -46,6 +46,7 @@
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/transforms.h"
+#include "motor_control_telemetry.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -92,51 +93,6 @@ static inline bool motor_is_align_sample_state(const struct smf_state *state)
 {
 	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE) ||
 	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_SAMPLE);
-}
-
-static inline void motor_encoder_capture_try_store(
-	struct motor_parameters *params,
-	const struct motor_capture_feedback *capture)
-{
-	if (params == NULL || capture == NULL || !params->encoder_capture_enabled) {
-		return;
-	}
-
-	uint16_t decimation = MAX((uint16_t)1U, params->encoder_capture_decimation);
-	if (params->encoder_capture_phase > 0U) {
-		params->encoder_capture_phase--;
-		return;
-	}
-	params->encoder_capture_phase = decimation - 1U;
-
-	uint16_t idx = params->encoder_capture_write_idx;
-	struct motor_encoder_capture_sample *sample = &params->encoder_capture_samples[idx];
-	sample->control_loop_count = params->rt_fast.control_loop_count;
-	sample->angle_deg = capture->angle_deg;
-	sample->angle_rad = capture->angle_rad;
-	sample->encoder_mech_rad = capture->encoder_mech_rad;
-	sample->encoder_elec_rad = capture->encoder_elec_rad;
-	sample->observer_mech_rad = capture->observer_mech_rad;
-	sample->observer_elec_rad = capture->observer_elec_rad;
-	sample->generated_mech_rad = capture->generated_mech_rad;
-	sample->generated_elec_rad = capture->generated_elec_rad;
-	sample->mech_error_rad = capture->mech_error_rad;
-	sample->elec_error_rad = capture->elec_error_rad;
-	sample->compare_valid = capture->compare_valid ? 1U : 0U;
-	sample->input_source = capture->input_source;
-	sample->sample_enabled = capture->sample_enabled ? 1U : 0U;
-	sample->sample_fresh = capture->sample_fresh ? 1U : 0U;
-	sample->sample_warning = capture->sample_warning ? 1U : 0U;
-	sample->sample_error = capture->sample_error ? 1U : 0U;
-	sample->status = capture->status;
-
-	params->encoder_capture_write_idx =
-		(uint16_t)((idx + 1U) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
-	if (params->encoder_capture_count < MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
-		params->encoder_capture_count++;
-	} else {
-		params->encoder_capture_overrun_count++;
-	}
 }
 
 static inline void motor_fault_snapshot_try_store(struct motor_parameters *params,
@@ -266,34 +222,6 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->accel_mech_rad_s2 = encoder_fb->control.accel_mech_rad_s2;
 	control_fb->speed_mech_filtered_rad_s = encoder_fb->control.speed_mech_filtered_rad_s;
 	control_fb->input_source = encoder_fb->control.input_source;
-}
-
-static inline void motor_capture_feedback_from_encoder(
-	const struct motor_encoder_feedback *encoder_fb,
-	struct motor_capture_feedback *capture_fb)
-{
-	memset(capture_fb, 0, sizeof(*capture_fb));
-	if (encoder_fb == NULL) {
-		return;
-	}
-
-	capture_fb->angle_deg = encoder_fb->capture_angle_deg;
-	capture_fb->angle_rad = encoder_fb->capture_angle_rad;
-	capture_fb->encoder_mech_rad = encoder_fb->capture_encoder_mech_rad;
-	capture_fb->encoder_elec_rad = encoder_fb->capture_encoder_elec_rad;
-	capture_fb->observer_mech_rad = encoder_fb->capture_observer_mech_rad;
-	capture_fb->observer_elec_rad = encoder_fb->capture_observer_elec_rad;
-	capture_fb->generated_mech_rad = encoder_fb->capture_generated_mech_rad;
-	capture_fb->generated_elec_rad = encoder_fb->capture_generated_elec_rad;
-	capture_fb->mech_error_rad = encoder_fb->capture_mech_error_rad;
-	capture_fb->elec_error_rad = encoder_fb->capture_elec_error_rad;
-	capture_fb->compare_valid = encoder_fb->capture_compare_valid;
-	capture_fb->sample_enabled = encoder_fb->sample_available;
-	capture_fb->sample_fresh = encoder_fb->fresh;
-	capture_fb->sample_warning = encoder_fb->warning;
-	capture_fb->sample_error = encoder_fb->error;
-	capture_fb->status = encoder_fb->status;
-	capture_fb->input_source = encoder_fb->capture_input_source;
 }
 
 struct motor_control_step_ctx {
@@ -495,7 +423,6 @@ void motor_core_step_fast(struct motor_parameters *params,
 	struct motor_control_feedback control_fb = {0};
 	struct motor_capture_feedback capture_fb = {0};
 	motor_control_feedback_from_encoder(&ctx.encoder_fb, &control_fb);
-	motor_capture_feedback_from_encoder(&ctx.encoder_fb, &capture_fb);
 	encoder_input_source = control_fb.input_source;
 	angle_control_degrees = control_fb.angle_control_deg;
 	bool fresh_encoder_sample = control_fb.fresh;
@@ -541,7 +468,12 @@ void motor_core_step_fast(struct motor_parameters *params,
 		}
 	}
 
-	motor_encoder_capture_try_store(params, &capture_fb);
+	if (params->encoder_capture_enabled) {
+		(void)motor_encoder_feedback_prepare_capture(params, &ctx.encoder_fb, &capture_fb);
+		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
+	}
+	motor_control_telemetry_store_encoder_raw_trace(params, encoder_sample, &control_fb,
+							params->position_quality_flags);
 
 	position_mech_rad = control_fb.position_mech_rad;
 	speed_mech_rad_s = control_fb.speed_mech_rad_s;

@@ -1701,6 +1701,15 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_capture,
 	SHELL_SUBCMD_SET_END
 );
 
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_trace,
+	SHELL_CMD_ARG(start, NULL, "Start raw trace [decimation]", cmd_motor_encoder_trace_start, 1, 1),
+	SHELL_CMD(stop, NULL, "Stop raw trace", cmd_motor_encoder_trace_stop),
+	SHELL_CMD(status, NULL, "Show raw trace buffer status", cmd_motor_encoder_trace_status),
+	SHELL_CMD_ARG(dump, NULL, "Dump latest raw trace samples [count]", cmd_motor_encoder_trace_dump, 1, 1),
+	SHELL_CMD(clear, NULL, "Clear raw trace buffer", cmd_motor_encoder_trace_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
 	SHELL_CMD_ARG(direction, NULL, "Get/set encoder direction sign [<1|-1>]",
@@ -1708,6 +1717,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD_ARG(trim, NULL, "Get/set electrical commutation trim [<-180..180> deg]",
 		      cmd_motor_encoder_trim, 1, 1),
 	SHELL_CMD(capture, &sub_motor_encoder_capture, "Encoder sample capture buffer", NULL),
+	SHELL_CMD(trace, &sub_motor_encoder_trace, "Raw encoder telemetry trace buffer", NULL),
 	SHELL_CMD(pipeline, NULL, "Show encoder RTIO pipeline status/counters",
 		  cmd_motor_encoder_pipeline),
 	SHELL_CMD(pipeline_reset, NULL, "Reset encoder RTIO pipeline counters",

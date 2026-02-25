@@ -35,6 +35,7 @@
 #define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS
 #define CHOPPER_CAL_MAX_EDGES (2U * CHOPPER_CAL_MAX_SLOTS)
 #define MOTOR_ENCODER_CAPTURE_MAX_SAMPLES 512U
+#define MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES 512U
 #define MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES 256U
 
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
@@ -73,6 +74,23 @@ struct motor_encoder_capture_sample {
 	uint8_t sample_error;
 	uint8_t status;
 	uint8_t compare_valid;
+};
+
+struct motor_encoder_raw_trace_sample {
+	uint32_t control_loop_count;
+	float32_t raw_angle_deg;
+	float32_t raw_angle_rad;
+	float32_t control_angle_deg;
+	float32_t control_angle_rad;
+	float32_t observer_input_rad;
+	uint8_t input_source;
+	uint8_t quality_flags;
+	uint8_t sample_enabled;
+	uint8_t sample_fresh;
+	uint8_t sample_warning;
+	uint8_t sample_error;
+	uint8_t sample_io_fault;
+	uint8_t status;
 };
 
 struct motor_fault_snapshot_sample {
@@ -265,6 +283,14 @@ struct motor_parameters {
 	uint32_t encoder_capture_overrun_count;
 	struct motor_encoder_capture_sample
 		encoder_capture_samples[MOTOR_ENCODER_CAPTURE_MAX_SAMPLES];
+	bool encoder_raw_trace_enabled;
+	uint16_t encoder_raw_trace_decimation;
+	uint16_t encoder_raw_trace_phase;
+	uint16_t encoder_raw_trace_write_idx;
+	uint16_t encoder_raw_trace_count;
+	uint32_t encoder_raw_trace_overrun_count;
+	struct motor_encoder_raw_trace_sample
+		encoder_raw_trace_samples[MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES];
 
 	/* Continuous ISR fault snapshot ring (latest samples for post-fault debug). */
 	uint16_t fault_snapshot_write_idx;

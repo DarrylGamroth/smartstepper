@@ -13,6 +13,7 @@
 #include <zephyr/dsp/types.h>
 
 #include "motor/observers/angle_path.h"
+#include "motor/telemetry/capture.h"
 
 struct motor_parameters;
 struct motor_control_encoder_sample;
@@ -42,20 +43,6 @@ struct motor_encoder_feedback {
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
-
-	/* Capture/debug fields */
-	float32_t capture_angle_deg;
-	float32_t capture_angle_rad;
-	float32_t capture_encoder_mech_rad;
-	float32_t capture_encoder_elec_rad;
-	float32_t capture_observer_mech_rad;
-	float32_t capture_observer_elec_rad;
-	float32_t capture_generated_mech_rad;
-	float32_t capture_generated_elec_rad;
-	float32_t capture_mech_error_rad;
-	float32_t capture_elec_error_rad;
-	bool capture_compare_valid;
-	uint8_t capture_input_source;
 };
 
 /**
@@ -69,5 +56,9 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 				  const struct motor_control_encoder_sample *encoder_sample,
 				  bool feature_angle_gen,
 				  struct motor_encoder_feedback *feedback);
+
+int motor_encoder_feedback_prepare_capture(const struct motor_parameters *params,
+					   const struct motor_encoder_feedback *feedback,
+					   struct motor_capture_feedback *capture);
 
 #endif /* MOTOR_ENCODER_FEEDBACK_H_ */

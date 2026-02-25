@@ -4,8 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "motor_control_telemetry.h"
+
+#include <string.h>
+
+#include <zephyr/sys/util.h>
+
 #include "config.h"
-#include "motor/telemetry/capture.h"
+#include "motor/math/math_constants.h"
 
 /* Phase P03 scaffold helper. Kept out of the ISR callback wiring for now. */
 void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
@@ -34,4 +40,95 @@ void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
 void motor_control_telemetry_consume_capture(const struct motor_capture_feedback *capture)
 {
 	ARG_UNUSED(capture);
+}
+
+void motor_control_telemetry_store_encoder_capture(struct motor_parameters *params,
+						   const struct motor_capture_feedback *capture)
+{
+	if (params == NULL || capture == NULL || !params->encoder_capture_enabled) {
+		return;
+	}
+
+	uint16_t decimation = MAX((uint16_t)1U, params->encoder_capture_decimation);
+	if (params->encoder_capture_phase > 0U) {
+		params->encoder_capture_phase--;
+		return;
+	}
+	params->encoder_capture_phase = decimation - 1U;
+
+	uint16_t idx = params->encoder_capture_write_idx;
+	struct motor_encoder_capture_sample *sample = &params->encoder_capture_samples[idx];
+	sample->control_loop_count = params->rt_fast.control_loop_count;
+	sample->angle_deg = capture->angle_deg;
+	sample->angle_rad = capture->angle_rad;
+	sample->encoder_mech_rad = capture->encoder_mech_rad;
+	sample->encoder_elec_rad = capture->encoder_elec_rad;
+	sample->observer_mech_rad = capture->observer_mech_rad;
+	sample->observer_elec_rad = capture->observer_elec_rad;
+	sample->generated_mech_rad = capture->generated_mech_rad;
+	sample->generated_elec_rad = capture->generated_elec_rad;
+	sample->mech_error_rad = capture->mech_error_rad;
+	sample->elec_error_rad = capture->elec_error_rad;
+	sample->compare_valid = capture->compare_valid ? 1U : 0U;
+	sample->input_source = capture->input_source;
+	sample->sample_enabled = capture->sample_enabled ? 1U : 0U;
+	sample->sample_fresh = capture->sample_fresh ? 1U : 0U;
+	sample->sample_warning = capture->sample_warning ? 1U : 0U;
+	sample->sample_error = capture->sample_error ? 1U : 0U;
+	sample->status = capture->status;
+
+	params->encoder_capture_write_idx =
+		(uint16_t)((idx + 1U) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	if (params->encoder_capture_count < MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
+		params->encoder_capture_count++;
+	} else {
+		params->encoder_capture_overrun_count++;
+	}
+}
+
+void motor_control_telemetry_store_encoder_raw_trace(
+	struct motor_parameters *params,
+	const struct motor_control_encoder_sample *raw_sample,
+	const struct motor_control_feedback *control_fb,
+	uint8_t position_quality_flags)
+{
+	if (params == NULL || raw_sample == NULL || control_fb == NULL ||
+	    !params->encoder_raw_trace_enabled) {
+		return;
+	}
+
+	uint16_t decimation = MAX((uint16_t)1U, params->encoder_raw_trace_decimation);
+	if (params->encoder_raw_trace_phase > 0U) {
+		params->encoder_raw_trace_phase--;
+		return;
+	}
+	params->encoder_raw_trace_phase = decimation - 1U;
+
+	uint16_t idx = params->encoder_raw_trace_write_idx;
+	struct motor_encoder_raw_trace_sample *sample =
+		&params->encoder_raw_trace_samples[idx];
+	memset(sample, 0, sizeof(*sample));
+
+	sample->control_loop_count = params->rt_fast.control_loop_count;
+	sample->raw_angle_deg = raw_sample->angle_deg;
+	sample->raw_angle_rad = raw_sample->angle_deg * (PI_F32 / 180.0f);
+	sample->control_angle_deg = control_fb->angle_control_deg;
+	sample->control_angle_rad = control_fb->angle_control_deg * (PI_F32 / 180.0f);
+	sample->observer_input_rad = control_fb->observer_input_rad;
+	sample->input_source = control_fb->input_source;
+	sample->quality_flags = position_quality_flags;
+	sample->sample_enabled = raw_sample->enabled ? 1U : 0U;
+	sample->sample_fresh = raw_sample->fresh ? 1U : 0U;
+	sample->sample_warning = raw_sample->warning ? 1U : 0U;
+	sample->sample_error = raw_sample->error ? 1U : 0U;
+	sample->sample_io_fault = raw_sample->io_fault ? 1U : 0U;
+	sample->status = raw_sample->status;
+
+	params->encoder_raw_trace_write_idx =
+		(uint16_t)((idx + 1U) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	if (params->encoder_raw_trace_count < MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES) {
+		params->encoder_raw_trace_count++;
+	} else {
+		params->encoder_raw_trace_overrun_count++;
+	}
 }

@@ -204,6 +204,21 @@ static void motor_encoder_capture_reset(struct motor_parameters *params, bool cl
 	}
 }
 
+static void motor_encoder_raw_trace_reset(struct motor_parameters *params, bool clear_samples)
+{
+	if (params == NULL) {
+		return;
+	}
+
+	params->encoder_raw_trace_phase = 0U;
+	params->encoder_raw_trace_write_idx = 0U;
+	params->encoder_raw_trace_count = 0U;
+	params->encoder_raw_trace_overrun_count = 0U;
+	if (clear_samples) {
+		memset(params->encoder_raw_trace_samples, 0, sizeof(params->encoder_raw_trace_samples));
+	}
+}
+
 static void motor_fault_snapshot_reset(struct motor_parameters *params, bool clear_samples)
 {
 	if (params == NULL) {
@@ -1070,6 +1085,180 @@ int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **
 	g_motor_params->encoder_capture_enabled = false;
 	motor_encoder_capture_reset(g_motor_params, true);
 	shell_print(sh, "Encoder capture cleared");
+	return 0;
+}
+
+/* motor encoder trace start [decimation] */
+int cmd_motor_encoder_trace_start(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder trace start [decimation]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t decimation = 1U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &decimation) || decimation == 0U ||
+		    decimation > UINT16_MAX) {
+			shell_error(sh, "decimation must be in [1, %u]", UINT16_MAX);
+			return -EINVAL;
+		}
+	}
+
+	g_motor_params->encoder_raw_trace_decimation = (uint16_t)decimation;
+	motor_encoder_raw_trace_reset(g_motor_params, false);
+	g_motor_params->encoder_raw_trace_enabled = true;
+
+	shell_print(sh, "Encoder raw trace started: decimation=%u, capacity=%u samples",
+		    g_motor_params->encoder_raw_trace_decimation,
+		    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	return 0;
+}
+
+/* motor encoder trace stop */
+int cmd_motor_encoder_trace_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->encoder_raw_trace_enabled = false;
+	shell_print(sh, "Encoder raw trace stopped: stored=%u overrun=%u",
+		    g_motor_params->encoder_raw_trace_count,
+		    g_motor_params->encoder_raw_trace_overrun_count);
+	return 0;
+}
+
+/* motor encoder trace clear */
+int cmd_motor_encoder_trace_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->encoder_raw_trace_enabled = false;
+	motor_encoder_raw_trace_reset(g_motor_params, true);
+	shell_print(sh, "Encoder raw trace cleared");
+	return 0;
+}
+
+/* motor encoder trace status */
+int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Encoder raw trace:");
+	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_raw_trace_enabled ? "YES" : "NO");
+	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_raw_trace_decimation);
+	shell_print(sh, "  Stored:     %u / %u",
+		    g_motor_params->encoder_raw_trace_count,
+		    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_raw_trace_overrun_count);
+
+	if (g_motor_params->encoder_raw_trace_count > 0U) {
+		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_raw_trace_write_idx +
+						  MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - 1U) %
+						 MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+		const struct motor_encoder_raw_trace_sample *newest =
+			&g_motor_params->encoder_raw_trace_samples[newest_idx];
+		shell_print(sh,
+			    "  Latest:     loop=%u src=%s raw_deg=%.3f ctrl_deg=%.3f q=0x%02X fresh=%u warn=%u err=%u io=%u status=0x%02X",
+			    newest->control_loop_count,
+			    motor_encoder_input_source_to_string(newest->input_source),
+			    (double)newest->raw_angle_deg,
+			    (double)newest->control_angle_deg,
+			    newest->quality_flags,
+			    newest->sample_fresh,
+			    newest->sample_warning,
+			    newest->sample_error,
+			    newest->sample_io_fault,
+			    newest->status);
+	}
+
+	return 0;
+}
+
+/* motor encoder trace dump [count] */
+int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor encoder trace dump [count]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t requested = 32U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &requested) || requested == 0U ||
+		    requested > MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES) {
+			shell_error(sh, "count must be in [1, %u]",
+				    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+			return -EINVAL;
+		}
+	}
+
+	uint16_t stored = g_motor_params->encoder_raw_trace_count;
+	if (stored == 0U) {
+		shell_print(sh, "No raw trace samples");
+		return 0;
+	}
+
+	uint16_t count = (uint16_t)MIN(requested, stored);
+	uint16_t start = (uint16_t)((g_motor_params->encoder_raw_trace_write_idx +
+				     MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - count) %
+				    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+
+	if (g_motor_params->encoder_raw_trace_enabled) {
+		shell_warn(sh,
+			   "Raw trace is still running; dump may include concurrently updated samples.");
+	}
+
+	shell_print(sh,
+		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad obs_in_rad q fresh warn err io status enabled");
+	for (uint16_t i = 0U; i < count; i++) {
+		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+		const struct motor_encoder_raw_trace_sample *sample =
+			&g_motor_params->encoder_raw_trace_samples[idx];
+		shell_print(sh,
+			    "%u %u %s %.3f %.6f %.3f %.6f %.6f 0x%02X %u %u %u %u 0x%02X %u",
+			    i,
+			    sample->control_loop_count,
+			    motor_encoder_input_source_to_string(sample->input_source),
+			    (double)sample->raw_angle_deg,
+			    (double)sample->raw_angle_rad,
+			    (double)sample->control_angle_deg,
+			    (double)sample->control_angle_rad,
+			    (double)sample->observer_input_rad,
+			    sample->quality_flags,
+			    sample->sample_fresh,
+			    sample->sample_warning,
+			    sample->sample_error,
+			    sample->sample_io_fault,
+			    sample->status,
+			    sample->sample_enabled);
+	}
+
 	return 0;
 }
 
