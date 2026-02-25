@@ -27,6 +27,8 @@ Append one entry per task execution.
 | 2026-02-24 | T0603 | done | n/a | Expanded `tests/unit/control` with FOC regression for current-loop saturation headroom, decoupling enable/disable determinism, transform finite round-trip, and PWM clamp behavior; full Twister run passed (`23/23`, `183/183`) via `west twister ... --outdir /tmp/twister-full`. ISR-time parity note: no ISR cycle-budget regression introduced in P06 split (apply stage still consumes finalized modulation only). |
 | 2026-02-25 | T0701 | done | n/a | Composed process-stage entrypoint as `motor_core_step_fast(...)` in `modules/motor_core/src/runtime/motor_core_step.c`; `app/src/motor_control_loop.c` now acts as a thin orchestration wrapper into runtime core-step API. |
 | 2026-02-25 | T0702 | done | n/a | Added runtime boundary checks in `tests/unit/runtime` to fail on queue/logging side-effect tokens in fast-step source, documented side-effect policy in architecture target, and validated unit + firmware build parity after pipeline composition. |
+| 2026-02-25 | T0801 | done | n/a | Added coherent config snapshot handoff (`motor/runtime/config_snapshot`) with epoch tagging and lock-free double buffer; state thread now publishes complete ISR config snapshots each SMF cycle and fast process step consumes one snapshot per cycle for state/feature/decimation inputs. |
+| 2026-02-25 | T0802 | done | n/a | Added P08 runtime mixed epoch snapshot regression tests (`tests/unit/runtime`) with adversarial alternating publish/read scenarios and monotonic-epoch checks; validated transition determinism by full unit run (`24/24`, `186/186`) and firmware build pass. |
 
 ## Blocker Template
 
