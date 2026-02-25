@@ -29,6 +29,8 @@ Append one entry per task execution.
 | 2026-02-25 | T0702 | done | n/a | Added runtime boundary checks in `tests/unit/runtime` to fail on queue/logging side-effect tokens in fast-step source, documented side-effect policy in architecture target, and validated unit + firmware build parity after pipeline composition. |
 | 2026-02-25 | T0801 | done | n/a | Added coherent config snapshot handoff (`motor/runtime/config_snapshot`) with epoch tagging and lock-free double buffer; state thread now publishes complete ISR config snapshots each SMF cycle and fast process step consumes one snapshot per cycle for state/feature/decimation inputs. |
 | 2026-02-25 | T0802 | done | n/a | Added P08 runtime mixed epoch snapshot regression tests (`tests/unit/runtime`) with adversarial alternating publish/read scenarios and monotonic-epoch checks; validated transition determinism by full unit run (`24/24`, `186/186`) and firmware build pass. |
+| 2026-02-25 | T0901 | done | 150fcb1 | Partitioned `motor_core` at link level into `motor_core_rt`, `motor_core_motion`, `motor_core_estimation`, and `motor_core_commission` via `modules/motor_core/src/CMakeLists.txt`; validation build passed for `smartstepper_v2_mt6835`. |
+| 2026-02-25 | T0902 | done | n/a | Captured P09 size/link map/jitter evidence: link map shows new `libmotor_core_*` archives; `smartstepper_v2_mt6835` moved from `FLASH=231704,RAM=109984` to `FLASH=232128,RAM=110112` (`+424B/+128B`), while `smartstepper_v2` remained `FLASH=236560,RAM=111008`; no dedicated HIL jitter run in P09 (evidence-only). |
 
 ## Blocker Template
 
