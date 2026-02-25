@@ -1,0 +1,10 @@
+tests:
+  chopper.runtime.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - runtime
+    harness: ztest
+    integration_platforms:
+      - native_sim

@@ -5,6 +5,7 @@ CONTAINER_NAME="${PODMAN_CONTAINER:-priceless_wiles}"
 CONTAINER_PROJECT_PATH="${CHOPPER_CONTAINER_PATH:-/workspace/chopper}"
 PLATFORM="${TWISTER_PLATFORM:-native_sim}"
 TEST_ROOT="${TWISTER_TEST_ROOT:-tests/unit}"
+OUTDIR="${TWISTER_OUTDIR:-/tmp/twister-unit}"
 
 if [[ $# -gt 0 ]]; then
 	CONTAINER_NAME="$1"
@@ -25,6 +26,7 @@ twister_cmd=(
 	west twister
 	-T "${TEST_ROOT}"
 	-p "${PLATFORM}"
+	--outdir "${OUTDIR}"
 	--inline-logs
 	-v
 )

@@ -59,3 +59,5 @@ Rules:
 
 1. Allowed side effects: updates to `fast` state and explicit output structs.
 2. Disallowed side effects: queue operations, kernel calls, blocking I/O, logs.
+3. Fast-step call graph policy: no queue APIs and no kernel queue primitives in
+   the process path; enforce with runtime unit boundary checks.
