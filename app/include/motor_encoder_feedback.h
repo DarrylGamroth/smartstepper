@@ -12,6 +12,8 @@
 
 #include <zephyr/dsp/types.h>
 
+#include "motor/observers/angle_path.h"
+
 struct motor_parameters;
 struct motor_control_encoder_sample;
 
@@ -33,6 +35,8 @@ struct motor_encoder_feedback {
 	float32_t observer_input_rad;
 	float32_t observer_mech_rad;
 	float32_t observer_elec_rad;
+
+	struct motor_encoder_control_sample control;
 
 	float32_t position_mech_rad;
 	float32_t speed_mech_rad_s;

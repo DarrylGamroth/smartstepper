@@ -261,10 +261,11 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->observer_input_rad = encoder_fb->observer_input_rad;
 	control_fb->observer_mech_rad = encoder_fb->observer_mech_rad;
 	control_fb->observer_elec_rad = encoder_fb->observer_elec_rad;
-	control_fb->position_mech_rad = encoder_fb->position_mech_rad;
-	control_fb->speed_mech_rad_s = encoder_fb->speed_mech_rad_s;
-	control_fb->accel_mech_rad_s2 = encoder_fb->accel_mech_rad_s2;
-	control_fb->speed_mech_filtered_rad_s = encoder_fb->speed_mech_filtered_rad_s;
+	control_fb->position_mech_rad = encoder_fb->control.position_mech_rad;
+	control_fb->speed_mech_rad_s = encoder_fb->control.speed_mech_rad_s;
+	control_fb->accel_mech_rad_s2 = encoder_fb->control.accel_mech_rad_s2;
+	control_fb->speed_mech_filtered_rad_s = encoder_fb->control.speed_mech_filtered_rad_s;
+	control_fb->input_source = encoder_fb->control.input_source;
 }
 
 static inline void motor_capture_feedback_from_encoder(

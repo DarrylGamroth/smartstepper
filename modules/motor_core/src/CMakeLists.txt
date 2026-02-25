@@ -49,8 +49,7 @@ add_library(motor_core_rt STATIC
 	runtime/keepalive_policy.c
 	protection/interlocks.c
 	observers/angle_observer.c
-	observers/angle_tracking.c
-	observers/encoder_source.c
+	observers/angle_path.c
 	observers/encoder_feedback_core.c
 	control/dob.c
 	control/mpr.c
