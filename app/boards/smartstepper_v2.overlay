@@ -7,31 +7,6 @@
 #include <dt-bindings/current-sense.h>
 
 / {
-	user_parameters: user_parameters {
-		compatible = "rubus,user-parameters";
-		nominal_voltage-mv = <24000>;
-		pwm-frequency-hz = <20000>;
-		control-loop-frequency-hz = <20000>;
-		current-loop-bandwidth-hz = <150>;
-		offset-pole-hz = <300>;
-		align-current-ma = <67>;
-		align-duration-ms = <100>;
-		brake-current-ma = <1000>;
-		max-modulation-index-mpu = <950>;  /* 0.95 - reserves 5% voltage margin for H-bridge control headroom */
-		roverl-est-current-ma = <100>;   /* 10-20% of rated (0.67A motor) */
-		roverl-est-freq-hz = <250>;     /* Increase if motor twitches */
-		roverl-est-settling-ms = <50>;  /* PI settling before measurement */
-		roverl-est-duration-ms = <5000>;
-		rs-est-current-ma = <100>;       /* Same as RoverL */
-		rs-est-rampup-ms = <1000>;      /* Ramp to avoid transients */
-		rs-est-duration-ms = <1000>;    /* ~31 time constants at 5Hz filter BW */
-		rls-excitation-current-ma = <100>; /* PRBS amplitude for RLS identification */
-		velocity-max-hz = <50>;         /* Maximum velocity (50 Hz = 3000 RPM) */
-		velocity-max-accel-hz-per-s = <10>; /* Acceleration limit */
-		velocity-initial-hz = <0>;      /* Start from stopped */
-		encoder-direction-sign = <(-1)>; /* Verified mapping: negative sign aligns encoder with generated motion */
-	};
-
 	voltage_sense: voltage_sense {
 		compatible = "rubus,voltage-sense";
 		channel = <0>;
@@ -50,30 +25,10 @@
 		vref-mv = <3000>;
 	};
 
-	motor_parameters: motor_parameters {
-		compatible = "rubus,motor-parameters";
-		inductance-d-uh = <3400>;
-		inductance-q-uh = <3400>;
-		resistance-mohms = <5600>;
-		flux_linkage_uvphz = <17675>;
-		pole-pairs = <50>;
-		max-current-ma = <670>;
-		inertia-mgcm2 = <9000>;
-		max-speed-hz = <50>;
-	};
-
 	angle_observer: angle_observer {
 		compatible = "rubus,angle-observer";
 		/* Observer bandwidth in Hz (position tracking) */
 		bandwidth-hz = <200>;
-	};
-
-	fault_detection: fault_detection {
-		compatible = "rubus,fault-detection";
-		/* Consecutive encoder read failures before triggering fault */
-		encoder-fault-threshold = <100>;
-		/* Overcurrent threshold in milliamps (typically 120% of max) */
-		overcurrent-threshold-ma = <800>;  /* 120% of 0.67A max current */
 	};
 };
 

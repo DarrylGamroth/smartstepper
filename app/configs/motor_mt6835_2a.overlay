@@ -16,24 +16,40 @@
 		encoder1 = &mt6835;
 	};
 
-	user_parameters {
+	user_parameters: user_parameters {
+		compatible = "rubus,user-parameters";
+		nominal_voltage-mv = <24000>;
+		pwm-frequency-hz = <20000>;
+		control-loop-frequency-hz = <20000>;
+		current-loop-bandwidth-hz = <150>;
+		offset-pole-hz = <300>;
 		/* Start conservative; verify direction with velocity_open capture. */
 		encoder-direction-sign = <1>;
 		align-current-ma = <200>;
+		align-duration-ms = <100>;
 		brake-current-ma = <1500>;
+		max-modulation-index-mpu = <950>;
 		roverl-est-current-ma = <300>;
+		roverl-est-freq-hz = <250>;
+		roverl-est-settling-ms = <50>;
+		roverl-est-duration-ms = <5000>;
 		rs-est-current-ma = <300>;
+		rs-est-rampup-ms = <1000>;
+		rs-est-duration-ms = <1000>;
+		rls-excitation-current-ma = <100>;
 		velocity-max-hz = <30>;
 		velocity-max-accel-hz-per-s = <20>;
+		velocity-initial-hz = <0>;
 	};
 
-	motor_parameters {
+	motor_parameters: motor_parameters {
+		compatible = "rubus,motor-parameters";
 		/* Updated from on-hardware commissioning (ROVERL + RS_EST). */
 		inductance-d-uh = <2903>;
 		inductance-q-uh = <2903>;
 		resistance-mohms = <2253>;
 		flux_linkage_uvphz = <17675>;
-		max-current-ma = <2000>;
+		max-current-ma = <1500>;
 		/*
 		 * These are placeholders. Set from measured motor:
 		 * - pole-pairs
@@ -41,13 +57,15 @@
 		 * - max-speed-hz
 		 */
 		pole-pairs = <50>;
-		inertia-mgcm2 = <9000>;
+		inertia-mgcm2 = <57000>;
 		max-speed-hz = <30>;
 	};
 
-	fault_detection {
-		/* 120% of 2.0 A current limit. */
-		overcurrent-threshold-ma = <2400>;
+	fault_detection: fault_detection {
+		compatible = "rubus,fault-detection";
+		encoder-fault-threshold = <100>;
+		/* 120% of 1.5 A current limit. */
+		overcurrent-threshold-ma = <1800>;
 	};
 };
 
