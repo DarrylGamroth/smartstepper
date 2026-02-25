@@ -1,0 +1,49 @@
+/*
+ * Motor profile overlay for AEAT-9955 encoder setup (0.67 A class motor).
+ *
+ * Usage:
+ *   west build ... -- \
+ *     -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_aeat9955_067a.overlay"
+ *
+ * Notes:
+ * - This mirrors the current AEAT-based motor configuration from
+ *   smartstepper_v2 overlay so it can be selected explicitly as a profile.
+ * - Keep board pin/peripheral wiring in the board overlay.
+ */
+
+/ {
+	aliases {
+		/* Use AEAT-9955 sensor for control-loop encoder input. */
+		encoder1 = &aeat9955;
+	};
+
+	user_parameters {
+		encoder-direction-sign = <(-1)>;
+		align-current-ma = <67>;
+		brake-current-ma = <1000>;
+		roverl-est-current-ma = <100>;
+		rs-est-current-ma = <100>;
+		velocity-max-hz = <50>;
+		velocity-max-accel-hz-per-s = <10>;
+	};
+
+	motor_parameters {
+		inductance-d-uh = <3400>;
+		inductance-q-uh = <3400>;
+		resistance-mohms = <5600>;
+		flux_linkage_uvphz = <17675>;
+		pole-pairs = <50>;
+		max-current-ma = <670>;
+		inertia-mgcm2 = <9000>;
+		max-speed-hz = <50>;
+	};
+
+	fault_detection {
+		/* 120% of 0.67 A current limit. */
+		overcurrent-threshold-ma = <800>;
+	};
+};
+
+&aeat9955 {
+	status = "okay";
+};
