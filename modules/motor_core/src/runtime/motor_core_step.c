@@ -28,6 +28,7 @@
 #include "motor/observers/angle_observer.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
+#include "motor/runtime/config_snapshot.h"
 #include "motor/runtime/keepalive_policy.h"
 #include "motor_rls_runtime.h"
 #include "motor/control/foc_voltage_pwm.h"
@@ -295,6 +296,7 @@ static inline void motor_capture_feedback_from_encoder(
 }
 
 struct motor_control_step_ctx {
+	uint32_t config_epoch;
 	const struct smf_state *state;
 	atomic_val_t feature_flags;
 	bool feature_angle_gen;
@@ -303,6 +305,7 @@ struct motor_control_step_ctx {
 	bool feature_velocity_traj;
 	bool feature_use_commanded_currents;
 	bool feature_braking;
+	bool profile_sequence_running;
 	bool online_control_state;
 	bool control_armed;
 	float32_t dt_s;
@@ -323,8 +326,11 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 					       const struct motor_parameters *params)
 {
 	memset(ctx, 0, sizeof(*ctx));
-	ctx->state = params->state_for_isr;
-	ctx->feature_flags = atomic_get(&params->feature_flags);
+	struct motor_rt_config_snapshot cfg = {0};
+	bool cfg_valid = motor_config_snapshot_read(&cfg);
+	ctx->config_epoch = cfg.epoch;
+	ctx->state = cfg_valid ? cfg.state : params->state_for_isr;
+	ctx->feature_flags = cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
 	ctx->feature_angle_gen = (ctx->feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
 	ctx->feature_pwm_output = (ctx->feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
 	ctx->feature_pi_control = (ctx->feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
@@ -332,14 +338,18 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	ctx->feature_use_commanded_currents =
 		(ctx->feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
 	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
+	ctx->profile_sequence_running = cfg_valid ? cfg.profile_sequence_running :
+					      params->profile_sequence_running;
 	ctx->online_control_state = motor_state_ptr_is_online_control_state(ctx->state);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
 	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	ctx->velocity_loop_decimation =
-		CLAMP(params->velocity_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		CLAMP(cfg_valid ? cfg.velocity_loop_decimation : params->velocity_loop_decimation,
+		      OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
 	ctx->position_loop_decimation =
-		CLAMP(params->position_loop_decimation, OUTER_LOOP_DECIMATION_MIN,
+		CLAMP(cfg_valid ? cfg.position_loop_decimation : params->position_loop_decimation,
+		      OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
 	ctx->velocity_loop_dt_s = ctx->dt_s * (float32_t)ctx->velocity_loop_decimation;
 	ctx->position_loop_dt_s = ctx->dt_s * (float32_t)ctx->position_loop_decimation;
@@ -372,6 +382,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	bool feature_velocity_traj = ctx.feature_velocity_traj;
 	bool feature_use_commanded_currents = ctx.feature_use_commanded_currents;
 	bool feature_braking = ctx.feature_braking;
+	bool profile_sequence_running = ctx.profile_sequence_running;
 	bool online_control_state = ctx.online_control_state;
 	bool control_armed = ctx.control_armed;
 	bool autonomous_keepalive = false;
@@ -445,7 +456,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 	autonomous_keepalive =
 		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
-						 params->profile_sequence_running,
+						 profile_sequence_running,
 						 params->chopper_cal_active,
 						 motion_profile_quintic_is_active(&params->position_profile));
 	if (autonomous_keepalive) {

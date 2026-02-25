@@ -6,6 +6,7 @@ add_library(motor_core STATIC
 	src/observers/encoder_source.c
 	src/runtime/commission_tune.c
 	src/runtime/motor_core_step.c
+	src/runtime/config_snapshot.c
 	src/runtime/command_arbitration.c
 	src/protection/interlocks.c
 	src/control/dob.c

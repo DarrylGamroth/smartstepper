@@ -36,6 +36,7 @@
 #include "motor_states_online.h"
 #include "motor_commission.h"
 #include "motor_torque.h"
+#include "motor/runtime/config_snapshot.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -60,6 +61,29 @@ static inline void motor_enable_isr_feature_flags(struct motor_parameters *param
 static inline void motor_disable_isr_feature_flags(struct motor_parameters *params, atomic_val_t mask)
 {
 	params->feature_flags_next &= ~mask;
+}
+
+static inline void motor_publish_isr_config_snapshot(struct motor_parameters *params)
+{
+	struct motor_rt_config_snapshot snapshot = {
+		.epoch = 0U,
+		.state = params->smf.current,
+		.feature_flags = params->feature_flags_next,
+		.velocity_loop_decimation = params->velocity_loop_decimation,
+		.position_loop_decimation = params->position_loop_decimation,
+		.profile_sequence_running = params->profile_sequence_running,
+		.profile_sequence_loop = params->profile_sequence_loop,
+		.profile_sequence_trigger_source = params->profile_sequence_trigger_source,
+		.profile_sequence_trigger_edge = params->profile_sequence_trigger_edge,
+		.profile_sequence_trigger_channel = params->profile_sequence_trigger_channel,
+		.profile_sequence_period_ticks = params->profile_sequence_period_ticks,
+		.profile_sequence_period_ms = params->profile_sequence_period_ms,
+	};
+
+	/* Keep legacy published fields in sync during transition. */
+	params->state_for_isr = snapshot.state;
+	atomic_set(&params->feature_flags, snapshot.feature_flags);
+	motor_config_snapshot_publish(&snapshot);
 }
 
 static inline void motor_force_safe_pwm_outputs(void)
@@ -944,6 +968,7 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 		LOG_ERR("Failed to initialize motor control API");
 		return;
 	}
+	motor_config_snapshot_init();
 
 	/* Initialize state timer */
 	k_timer_init(&motor_params.state_timer, state_timer_expiry, NULL);
@@ -953,8 +978,9 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 	atomic_set(&motor_isr_event_head, 0);
 	atomic_set(&motor_isr_event_tail, 0);
 
-	/* Update ISR-safe state after initialization complete */
-	motor_params.state_for_isr = motor_params.smf.current;
+	/* Publish initial coherent ISR snapshot. */
+	motor_params.feature_flags_next = atomic_get(&motor_params.feature_flags);
+	motor_publish_isr_config_snapshot(&motor_params);
 
 	/* Event-driven state machine loop */
 	while (1) {
@@ -983,9 +1009,8 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 			break;
 		}
 
-		/* Update ISR-safe state and feature flags after all actions complete */
-		motor_params.state_for_isr = motor_params.smf.current;
-		atomic_set(&motor_params.feature_flags, motor_params.feature_flags_next);
+		/* Publish coherent ISR config after SMF actions complete. */
+		motor_publish_isr_config_snapshot(&motor_params);
 	}
 }
 
