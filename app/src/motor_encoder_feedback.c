@@ -17,7 +17,7 @@
 #include "motor/math/angle_wrap.h"
 #include "motor/observers/encoder_source.h"
 #include "motor/observers/angle_tracking.h"
-#include "motor/observers/motor_encoder_feedback_core.h"
+#include "motor/observers/encoder_feedback_core.h"
 
 int motor_encoder_feedback_update(struct motor_parameters *params,
 				  const struct motor_control_encoder_sample *encoder_sample,

@@ -9,7 +9,7 @@
 #include "motor/math/math_constants.h"
 #include "motor/observers/angle_tracking.h"
 #include "motor/observers/encoder_source.h"
-#include "motor/observers/motor_encoder_feedback_core.h"
+#include "motor/observers/encoder_feedback_core.h"
 
 static struct motor_encoder_feedback_core_input base_input(void)
 {

@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "motor/observers/motor_position_convert.h"
+#include "motor/observers/position_convert.h"
 
 static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 {

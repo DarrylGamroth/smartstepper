@@ -4,8 +4,8 @@ status: pending
 title: Introduce fast and diagnostic runtime state structs
 objective: Define `motor_rt_fast_state` and `motor_rt_diag_state` with clear ownership and update core config types
 touch_files:
-  - modules/motor_core/include/motor/runtime/motor_runtime_state.h
-  - modules/motor_core/include/motor/runtime/motor_runtime_diag.h
+  - modules/motor_core/include/motor/runtime/runtime_state.h
+  - modules/motor_core/include/motor/runtime/runtime_diag.h
   - app/include/config.h
 do_not_touch:
   - encoder SPI driver files

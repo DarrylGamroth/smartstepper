@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/observers/motor_position_convert.h"
+#include "motor/observers/position_convert.h"
 
 #include <errno.h>
 #include <math.h>

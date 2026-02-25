@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/motion/motor_motion_modules.h"
+#include "motor/motion/motion_planner.h"
 
 #include <errno.h>
 

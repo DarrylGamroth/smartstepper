@@ -5,7 +5,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/runtime/motor_keepalive_policy.h"
+#include "motor/runtime/keepalive_policy.h"
 
 ZTEST(motor_keepalive_policy, test_keepalive_false_when_disarmed)
 {

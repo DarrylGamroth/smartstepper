@@ -5,7 +5,7 @@
  */
 
 #include "config.h"
-#include "motor/telemetry/motor_capture.h"
+#include "motor/telemetry/capture.h"
 
 /* Phase P03 scaffold helper. Kept out of the ISR callback wiring for now. */
 void motor_control_telemetry_refresh_diag(struct motor_parameters *params)

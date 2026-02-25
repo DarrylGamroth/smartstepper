@@ -13,7 +13,7 @@
 #include "motor_state_utils.h"
 #include "config.h"
 #include "motor/math/angle_wrap.h"
-#include "motor/motion/motor_motion_modules.h"
+#include "motor/motion/motion_planner.h"
 #include "shell_parse.h"
 
 #include <zephyr/logging/log.h>

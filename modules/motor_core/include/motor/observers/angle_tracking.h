@@ -13,7 +13,7 @@
 #include <zephyr/dsp/types.h>
 
 #include "motor/observers/angle_observer.h"
-#include "motor/observers/motor_encoder_feedback_core.h"
+#include "motor/observers/encoder_feedback_core.h"
 
 struct motor_angle_tracking_result {
 	float32_t observer_input_rad;

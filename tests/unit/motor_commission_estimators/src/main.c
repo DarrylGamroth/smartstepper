@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/estimation/motor_commission_id.h"
+#include "motor/estimation/commission_estimators.h"
 
 static float32_t flux_model_vq(const struct motor_flux_id_config *cfg,
 			       float32_t elec_speed_rad_s,
@@ -47,7 +47,7 @@ static float32_t mech_model_torque(float32_t inertia_kgm2,
 	       coulomb_nm * sign_term + offset_nm;
 }
 
-ZTEST(motor_commission_id, test_validate_flux_config)
+ZTEST(motor_commission_estimators, test_validate_flux_config)
 {
 	struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -68,7 +68,7 @@ ZTEST(motor_commission_id, test_validate_flux_config)
 	zassert_equal(motor_flux_id_validate_config(&cfg), -EINVAL, NULL);
 }
 
-ZTEST(motor_commission_id, test_validate_mech_config)
+ZTEST(motor_commission_estimators, test_validate_mech_config)
 {
 	struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.12f,
@@ -87,7 +87,7 @@ ZTEST(motor_commission_id, test_validate_mech_config)
 	zassert_equal(motor_mech_id_validate_config(&cfg), -EINVAL, NULL);
 }
 
-ZTEST(motor_commission_id, test_init_with_invalid_config_disables_estimator)
+ZTEST(motor_commission_estimators, test_init_with_invalid_config_disables_estimator)
 {
 	const struct motor_flux_id_config flux_cfg_bad = {
 		.rs_ohm = NAN,
@@ -121,7 +121,7 @@ ZTEST(motor_commission_id, test_init_with_invalid_config_disables_estimator)
 	zassert_equal(motor_mech_id_finalize(&mech_state, &mech_result), -EINVAL, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_init_and_rejects_bad_samples)
+ZTEST(motor_commission_estimators, test_flux_init_and_rejects_bad_samples)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -146,7 +146,7 @@ ZTEST(motor_commission_id, test_flux_init_and_rejects_bad_samples)
 	zassert_equal(state.sample_count, 1u, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_identifies_nominal_model)
+ZTEST(motor_commission_estimators, test_flux_identifies_nominal_model)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.45f,
@@ -185,7 +185,7 @@ ZTEST(motor_commission_id, test_flux_identifies_nominal_model)
 	zassert_true(result.residual_rms_v < 1e-3f, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_finalize_rejects_insufficient_samples)
+ZTEST(motor_commission_estimators, test_flux_finalize_rejects_insufficient_samples)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -212,7 +212,7 @@ ZTEST(motor_commission_id, test_flux_finalize_rejects_insufficient_samples)
 	zassert_equal(result.sample_count, 4u, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_finalize_rejects_small_speed_span)
+ZTEST(motor_commission_estimators, test_flux_finalize_rejects_small_speed_span)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -238,7 +238,7 @@ ZTEST(motor_commission_id, test_flux_finalize_rejects_small_speed_span)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_finalize_flags_negative_psi_when_required)
+ZTEST(motor_commission_estimators, test_flux_finalize_flags_negative_psi_when_required)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -265,7 +265,7 @@ ZTEST(motor_commission_id, test_flux_finalize_flags_negative_psi_when_required)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_flux_finalize_flags_low_r2)
+ZTEST(motor_commission_estimators, test_flux_finalize_flags_low_r2)
 {
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = 0.4f,
@@ -293,7 +293,7 @@ ZTEST(motor_commission_id, test_flux_finalize_flags_low_r2)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_init_and_rejects_bad_samples)
+ZTEST(motor_commission_estimators, test_mech_init_and_rejects_bad_samples)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.12f,
@@ -315,7 +315,7 @@ ZTEST(motor_commission_id, test_mech_init_and_rejects_bad_samples)
 	zassert_false(motor_mech_id_accumulate(&state, 1.0f, 2.0f, 0.5f), NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_identifies_nominal_model)
+ZTEST(motor_commission_estimators, test_mech_identifies_nominal_model)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.18f,
@@ -355,7 +355,7 @@ ZTEST(motor_commission_id, test_mech_identifies_nominal_model)
 	zassert_within(result.residual_rms_nm, 0.0f, 1e-6f, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_finalize_rejects_insufficient_samples)
+ZTEST(motor_commission_estimators, test_mech_finalize_rejects_insufficient_samples)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.1f,
@@ -377,7 +377,7 @@ ZTEST(motor_commission_id, test_mech_finalize_rejects_insufficient_samples)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_finalize_rejects_singular_matrix)
+ZTEST(motor_commission_estimators, test_mech_finalize_rejects_singular_matrix)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.1f,
@@ -399,7 +399,7 @@ ZTEST(motor_commission_id, test_mech_finalize_rejects_singular_matrix)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_finalize_flags_negative_inertia)
+ZTEST(motor_commission_estimators, test_mech_finalize_flags_negative_inertia)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.2f,
@@ -428,7 +428,7 @@ ZTEST(motor_commission_id, test_mech_finalize_flags_negative_inertia)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_finalize_flags_negative_viscous)
+ZTEST(motor_commission_estimators, test_mech_finalize_flags_negative_viscous)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.2f,
@@ -457,7 +457,7 @@ ZTEST(motor_commission_id, test_mech_finalize_flags_negative_viscous)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST(motor_commission_id, test_mech_finalize_flags_low_r2)
+ZTEST(motor_commission_estimators, test_mech_finalize_flags_low_r2)
 {
 	const struct motor_mech_id_config cfg = {
 		.kt_nm_per_a = 0.1f,
@@ -484,4 +484,4 @@ ZTEST(motor_commission_id, test_mech_finalize_flags_low_r2)
 	zassert_false(result.valid, NULL);
 }
 
-ZTEST_SUITE(motor_commission_id, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(motor_commission_estimators, NULL, NULL, NULL, NULL, NULL);

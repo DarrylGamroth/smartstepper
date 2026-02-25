@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/runtime/motor_commission_tune.h"
+#include "motor/runtime/commission_tune.h"
 
 static struct motor_commission_tune_config default_cfg(void)
 {

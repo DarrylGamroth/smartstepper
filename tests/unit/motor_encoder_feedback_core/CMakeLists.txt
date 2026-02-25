@@ -7,7 +7,7 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/motor_encoder_feedback_core.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/encoder_feedback_core.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/encoder_source.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/angle_tracking.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/angle_observer.c

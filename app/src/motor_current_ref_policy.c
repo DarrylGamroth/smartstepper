@@ -13,8 +13,8 @@
 #include "motor/filters/pi.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/angle_gen.h"
-#include "motor/control/motor_mpr.h"
-#include "motor/control/motor_dob.h"
+#include "motor/control/mpr.h"
+#include "motor/control/dob.h"
 #include "motor/protection/interlocks.h"
 #include "motor/runtime/command_arbitration.h"
 

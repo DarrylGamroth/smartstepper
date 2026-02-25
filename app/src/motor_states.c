@@ -30,7 +30,7 @@
 #include "motor/motion/traj.h"
 #include "motor/observers/angle_observer.h"
 #include "motor/math/angle_wrap.h"
-#include "motor/motion/motor_motion_modules.h"
+#include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"

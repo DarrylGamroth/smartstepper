@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/control/motor_current_ref_policy_core.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/control/current_ref_policy_core.c
 	src/main.c
 )

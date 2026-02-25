@@ -12,7 +12,7 @@
 
 #include <zephyr/dsp/types.h>
 
-#include "motor/observers/motor_encoder_feedback_core.h"
+#include "motor/observers/encoder_feedback_core.h"
 
 struct motor_encoder_source_sample {
 	bool sample_enabled;

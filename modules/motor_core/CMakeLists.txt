@@ -4,26 +4,28 @@ add_library(motor_core STATIC
 	src/observers/angle_observer.c
 	src/observers/angle_tracking.c
 	src/observers/encoder_source.c
-	src/runtime/motor_commission_tune.c
+	src/runtime/commission_tune.c
 	src/runtime/command_arbitration.c
 	src/protection/interlocks.c
-	src/control/motor_dob.c
-	src/control/motor_mpr.c
+	src/control/dob.c
+	src/control/mpr.c
 	src/control/current_loop.c
 	src/control/dq_decoupling.c
 	src/control/transforms.c
 	src/control/pwm_synthesis.c
-	src/motion/motor_motion_modules.c
-	src/observers/motor_position_convert.c
-	src/control/motor_foc_voltage_pwm.c
+	src/motion/motion_planner.c
+	src/observers/position_convert.c
+	src/control/foc_voltage_pwm.c
 	src/control/position_regulator.c
 	src/control/velocity_regulator.c
-	src/estimation/motor_commission_id.c
+	src/math/matrix_solve.c
+	src/estimation/flux_id_estimator.c
+	src/estimation/mech_id_estimator.c
 	src/motion/motion_profile.c
-	src/runtime/motor_keepalive_policy.c
-	src/observers/motor_encoder_feedback_core.c
-	src/motion/motor_outer_loop_sched.c
-	src/control/motor_current_ref_policy_core.c
+	src/runtime/keepalive_policy.c
+	src/observers/encoder_feedback_core.c
+	src/motion/outer_loop_sched.c
+	src/control/current_ref_policy_core.c
 	src/math/prbs.c
 	src/estimation/rls_motor_est.c
 	src/estimation/rs_online.c

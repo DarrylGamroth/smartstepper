@@ -18,7 +18,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "motor_state_utils.h"
-#include "motor/runtime/motor_keepalive_policy.h"
+#include "motor/runtime/keepalive_policy.h"
 #include "motor_hardware.h"
 #include "motor_encoder_pipeline.h"
 #include "config.h"

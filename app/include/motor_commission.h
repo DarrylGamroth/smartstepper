@@ -13,7 +13,7 @@
 #include <zephyr/dsp/utils.h>
 #include <zephyr/smf.h>
 
-#include "motor_commission_tune.h"
+#include "motor/runtime/commission_tune.h"
 
 struct motor_parameters;
 

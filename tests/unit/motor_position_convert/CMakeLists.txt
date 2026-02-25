@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/motor_position_convert.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/observers/position_convert.c
 	src/main.c
 )

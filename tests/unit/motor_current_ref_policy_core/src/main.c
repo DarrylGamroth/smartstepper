@@ -6,7 +6,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/control/motor_current_ref_policy_core.h"
+#include "motor/control/current_ref_policy_core.h"
 
 static struct motor_current_ref_policy_core_input base_input(void)
 {

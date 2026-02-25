@@ -16,14 +16,14 @@
 #include "motor/filters/filter_so.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/angle_gen.h"
-#include "motor/motion/motor_motion_modules.h"
-#include "motor/control/motor_mpr.h"
-#include "motor/control/motor_dob.h"
+#include "motor/motion/motion_planner.h"
+#include "motor/control/mpr.h"
+#include "motor/control/dob.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
 #include "motor_torque.h"
 #include "motor_control_quality.h"
-#include "motor/motion/motor_outer_loop_sched.h"
+#include "motor/motion/outer_loop_sched.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {

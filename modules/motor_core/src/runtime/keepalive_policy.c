@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/runtime/motor_keepalive_policy.h"
+#include "motor/runtime/keepalive_policy.h"
 
 bool motor_keepalive_policy_should_keepalive(bool control_armed,
 					     bool autonomous_mode_active,

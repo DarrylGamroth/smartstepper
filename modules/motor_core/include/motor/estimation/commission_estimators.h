@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_COMMISSION_ID_H_
-#define MOTOR_COMMISSION_ID_H_
+#ifndef MOTOR_COMMISSION_ESTIMATORS_H_
+#define MOTOR_COMMISSION_ESTIMATORS_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -97,4 +97,4 @@ bool motor_mech_id_accumulate(struct motor_mech_id_state *state,
 int motor_mech_id_finalize(const struct motor_mech_id_state *state,
 			   struct motor_mech_id_result *result);
 
-#endif /* MOTOR_COMMISSION_ID_H_ */
+#endif /* MOTOR_COMMISSION_ESTIMATORS_H_ */

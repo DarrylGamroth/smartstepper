@@ -6,8 +6,8 @@ objective: Relocate commissioning, telemetry, and debug-only fields from fast st
 
 touch_files:
   - app/src/motor_control_loop.c
-  - modules/motor_core/include/motor/runtime/motor_runtime_state.h
-  - modules/motor_core/include/motor/runtime/motor_runtime_diag.h
+  - modules/motor_core/include/motor/runtime/runtime_state.h
+  - modules/motor_core/include/motor/runtime/runtime_diag.h
   - app/src/motor_control_telemetry.c
 do_not_touch:
   - low-level ADC/PWM ISR callback wiring

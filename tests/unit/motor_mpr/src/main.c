@@ -7,7 +7,7 @@
 #include <math.h>
 #include <zephyr/ztest.h>
 
-#include "motor/control/motor_mpr.h"
+#include "motor/control/mpr.h"
 
 #define EPS 1e-6f
 

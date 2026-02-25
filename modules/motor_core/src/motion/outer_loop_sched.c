@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/motion/motor_outer_loop_sched.h"
+#include "motor/motion/outer_loop_sched.h"
 
 #include <stddef.h>
 

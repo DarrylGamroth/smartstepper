@@ -6,7 +6,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "motor/motion/motor_outer_loop_sched.h"
+#include "motor/motion/outer_loop_sched.h"
 
 ZTEST(motor_outer_loop_sched, test_decimation_tick_returns_true_for_phase_null)
 {

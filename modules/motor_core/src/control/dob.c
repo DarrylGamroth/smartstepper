@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor/control/motor_dob.h"
+#include "motor/control/dob.h"
 
 #include <errno.h>
 #include <math.h>

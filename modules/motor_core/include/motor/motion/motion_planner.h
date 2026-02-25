@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_MOTION_MODULES_H_
-#define MOTOR_MOTION_MODULES_H_
+#ifndef MOTION_PLANNER_H_
+#define MOTION_PLANNER_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -86,4 +86,4 @@ int motor_position_sequence_take_next(const float32_t *points_rad,
 }
 #endif
 
-#endif /* MOTOR_MOTION_MODULES_H_ */
+#endif /* MOTION_PLANNER_H_ */

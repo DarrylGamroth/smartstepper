@@ -11,7 +11,7 @@
 
 #include "motor_commission.h"
 #include "config.h"
-#include "motor/estimation/motor_commission_id.h"
+#include "motor/estimation/commission_estimators.h"
 #include "motor_state_utils.h"
 #include "motor_states.h"
 #include "motor_torque.h"

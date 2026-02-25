@@ -1,5 +1,5 @@
 tests:
-  chopper.motor_commission_id.unit:
+  chopper.motor_commission_estimators.unit:
     tags:
       - chopper
       - motor

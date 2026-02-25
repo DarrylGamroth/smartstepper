@@ -7,6 +7,6 @@ target_include_directories(app PRIVATE
 )
 
 target_sources(app PRIVATE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/motor_commission_tune.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/commission_tune.c
 	src/main.c
 )

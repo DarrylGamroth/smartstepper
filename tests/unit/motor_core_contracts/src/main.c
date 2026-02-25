@@ -10,10 +10,10 @@
 
 #include "motor/math/angle_wrap.h"
 #include "motor/math/math_constants.h"
-#include "motor/control/motor_dob.h"
-#include "motor/motion/motor_motion_modules.h"
-#include "motor/control/motor_mpr.h"
-#include "motor/observers/motor_position_convert.h"
+#include "motor/control/dob.h"
+#include "motor/motion/motion_planner.h"
+#include "motor/control/mpr.h"
+#include "motor/observers/position_convert.h"
 
 static void position_convert_update_sample(struct motor_position_convert_state *state,
 					   const struct motor_position_convert_config *cfg,
