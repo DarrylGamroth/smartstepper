@@ -2,6 +2,19 @@
 
 Date: 2026-02-25
 
+## Refactor Policy
+
+This work is a simplification/refactor effort and does **not** require backward compatibility with the current encoder/angle path structure, intermediate APIs, or legacy telemetry field shapes.
+
+Allowed:
+- breaking internal module interfaces to reduce complexity
+- removing redundant state/flags/modules
+- replacing existing shell/debug command layouts when needed to match the simplified architecture
+
+Required:
+- preserve functional behavior targets (safe control operation, diagnosable faults)
+- provide clear migration notes for renamed/removed interfaces and shell commands
+
 ## Why This Plan
 
 Current encoder handling is still doing too much in one place (`app/src/motor_encoder_feedback.c`), mixing:
