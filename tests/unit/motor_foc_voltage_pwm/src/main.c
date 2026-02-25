@@ -26,7 +26,7 @@ static struct motor_foc_voltage_pwm_inputs make_base_inputs(void)
 		.vbus_v = 24.0f,
 		.max_modulation_index = 0.9f,
 		.inv_park_angle_rad = 0.0f,
-		.decoupling_enabled = false,
+		.dq_decoupling_enabled = false,
 		.electrical_speed_rad_s = 0.0f,
 		.ld_h = 0.001f,
 		.lq_h = 0.001f,
@@ -80,7 +80,7 @@ ZTEST(motor_foc_voltage_pwm, test_rejects_invalid_inputs)
 	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
 
 	in = make_base_inputs();
-	in.decoupling_enabled = true;
+	in.dq_decoupling_enabled = true;
 	in.electrical_speed_rad_s = NAN;
 	zassert_equal(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), -EINVAL, NULL);
 
@@ -120,7 +120,7 @@ ZTEST(motor_foc_voltage_pwm, test_decoupling_disabled_keeps_feedforward_zero)
 	in.id_a = 2.0f;
 	in.iq_a = -1.5f;
 	in.electrical_speed_rad_s = 300.0f;
-	in.decoupling_enabled = false;
+	in.dq_decoupling_enabled = false;
 
 	zassert_ok(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), NULL);
 	zassert_within(out.vd_ff_v, 0.0f, 1e-6f, NULL);
@@ -145,7 +145,7 @@ ZTEST(motor_foc_voltage_pwm, test_decoupling_feedforward_terms_applied)
 	in.lq_h = 0.002f;
 	in.flux_linkage_wb = 0.05f;
 	in.electrical_speed_rad_s = 100.0f;
-	in.decoupling_enabled = true;
+	in.dq_decoupling_enabled = true;
 
 	zassert_ok(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), NULL);
 	zassert_within(out.vd_ff_v, -0.6f, 1e-5f, NULL);
@@ -173,7 +173,7 @@ ZTEST(motor_foc_voltage_pwm, test_vq_is_limited_by_resulting_vd_headroom)
 	in.lq_h = 0.01f;
 	in.flux_linkage_wb = 0.0f;
 	in.electrical_speed_rad_s = 500.0f;
-	in.decoupling_enabled = true;
+	in.dq_decoupling_enabled = true;
 
 	zassert_ok(motor_foc_voltage_pwm_step(&pi_d, &pi_q, &in, &out), NULL);
 
@@ -196,7 +196,7 @@ ZTEST(motor_foc_voltage_pwm, test_pwm_outputs_stay_bounded_under_braking)
 	init_zero_pi(&pi_d);
 	init_zero_pi(&pi_q);
 
-	in.decoupling_enabled = true;
+	in.dq_decoupling_enabled = true;
 	in.id_a = 2.0f;
 	in.iq_a = -3.0f;
 	in.electrical_speed_rad_s = 600.0f;

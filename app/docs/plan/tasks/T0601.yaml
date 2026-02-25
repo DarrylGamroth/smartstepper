@@ -6,9 +6,9 @@ objective: Split decoupling enable/validation and feed-forward math from core Id
 
 touch_files:
   - modules/motor_core/include/motor/control/current_loop.h
-  - modules/motor_core/include/motor/control/decoupling.h
+  - modules/motor_core/include/motor/control/dq_decoupling.h
   - modules/motor_core/src/control/current_loop.c
-  - modules/motor_core/src/control/decoupling.c
+  - modules/motor_core/src/control/dq_decoupling.c
   - app/src/motor_control_loop.c
 do_not_touch:
   - state-machine transition modules

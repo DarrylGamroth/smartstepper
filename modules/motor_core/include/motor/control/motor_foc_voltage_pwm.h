@@ -27,11 +27,13 @@ struct motor_foc_voltage_pwm_inputs {
 	float32_t vbus_v;
 	float32_t max_modulation_index;
 	float32_t inv_park_angle_rad;
-	bool decoupling_enabled;
+	bool dq_decoupling_enabled;
 	float32_t electrical_speed_rad_s;
 	float32_t ld_h;
 	float32_t lq_h;
 	float32_t flux_linkage_wb;
+	float32_t dq_decoupling_flux_headroom_ratio;
+	float32_t dq_decoupling_ff_limit_ratio;
 
 	bool braking_enabled;
 	float32_t braking_iq_ref_a;

@@ -150,7 +150,7 @@ To avoid ambiguity:
 
 1. `motor_foc_transform` (Park/iPark/SVPWM prep and electrical frame handling)
 2. `motor_current_ctrl` (Id/Iq PI and anti-windup/limit handling)
-3. `motor_decoupling` (cross-coupling/feedforward enable + validation)
+3. `motor_dq_decoupling` (cross-coupling/feedforward enable + validation)
 4. `motor_pwm_synth` (duty computation / output packing)
 
 ### F. Protection/Fault Modules
@@ -325,7 +325,7 @@ Acceptance:
 
 1. Isolate current control path into:
    - `motor_current_ctrl`
-   - `motor_decoupling`
+   - `motor_dq_decoupling`
    - `motor_foc_transform`
    - `motor_pwm_synth`
 2. Keep module contracts fixed-size and scalar-heavy to reduce stack pressure.

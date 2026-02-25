@@ -9,7 +9,7 @@
 #include <zephyr/ztest.h>
 
 #include "motor/control/current_loop.h"
-#include "motor/control/decoupling.h"
+#include "motor/control/dq_decoupling.h"
 #include "motor/control/pwm_synthesis.h"
 #include "motor/control/transforms.h"
 #include "motor/protection/interlocks.h"
@@ -200,7 +200,7 @@ ZTEST(control_ref_path, test_foc_current_loop_saturates_vq_after_vd_headroom)
 
 ZTEST(control_ref_path, test_decoupling_disable_path_is_deterministic_zero_ff)
 {
-	struct motor_decoupling_feedforward_input in = {
+	struct motor_dq_decoupling_feedforward_input in = {
 		.enabled = false,
 		.electrical_speed_rad_s = NAN,
 		.ld_h = NAN,
@@ -210,19 +210,19 @@ ZTEST(control_ref_path, test_decoupling_disable_path_is_deterministic_zero_ff)
 		.iq_a = NAN,
 		.max_voltage_magnitude_v = NAN,
 	};
-	struct motor_decoupling_feedforward_output out = {
+	struct motor_dq_decoupling_feedforward_output out = {
 		.vd_ff_v = 123.0f,
 		.vq_ff_v = 456.0f,
 	};
 
-	zassert_ok(motor_decoupling_feedforward_step(&in, &out), NULL);
+	zassert_ok(motor_dq_decoupling_feedforward_step(&in, &out), NULL);
 	zassert_within(out.vd_ff_v, 0.0f, 1e-6f, NULL);
 	zassert_within(out.vq_ff_v, 0.0f, 1e-6f, NULL);
 }
 
 ZTEST(control_ref_path, test_decoupling_enable_gate_requires_all_conditions)
 {
-	struct motor_decoupling_enable_input in = {
+	struct motor_dq_decoupling_enable_input in = {
 		.feature_enabled = true,
 		.online_control_state = true,
 		.control_armed = true,
@@ -233,9 +233,9 @@ ZTEST(control_ref_path, test_decoupling_enable_gate_requires_all_conditions)
 		.feedback_valid = true,
 	};
 
-	zassert_true(motor_decoupling_is_enabled(&in), NULL);
+	zassert_true(motor_dq_decoupling_is_enabled(&in), NULL);
 	in.speed_valid = false;
-	zassert_false(motor_decoupling_is_enabled(&in), NULL);
+	zassert_false(motor_dq_decoupling_is_enabled(&in), NULL);
 }
 
 ZTEST(control_ref_path, test_foc_transforms_roundtrip_is_finite)

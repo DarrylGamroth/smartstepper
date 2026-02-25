@@ -40,5 +40,20 @@ int motor_current_loop_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		return -ERANGE;
 	}
 
+	/* Final vector clamp keeps Vdq inside the available voltage circle. */
+	float32_t v_norm_sq = (out->vd_v * out->vd_v) + (out->vq_v * out->vq_v);
+	float32_t v_limit_sq = in->max_voltage_magnitude_v * in->max_voltage_magnitude_v;
+	if (v_norm_sq > v_limit_sq && v_norm_sq > 0.0f) {
+		float32_t scale = in->max_voltage_magnitude_v / sqrtf(v_norm_sq);
+		out->vd_v *= scale;
+		out->vq_v *= scale;
+	}
+
+	float32_t vq_headroom_sq = v_limit_sq - (out->vd_v * out->vd_v);
+	if (vq_headroom_sq < 0.0f) {
+		vq_headroom_sq = 0.0f;
+	}
+	out->vq_limit_v = sqrtf(vq_headroom_sq);
+
 	return 0;
 }

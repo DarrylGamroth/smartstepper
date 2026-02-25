@@ -42,7 +42,7 @@
 #include "motor_current_ref_policy.h"
 #include "motor_control_quality.h"
 #include "motor/protection/interlocks.h"
-#include "motor/control/decoupling.h"
+#include "motor/control/dq_decoupling.h"
 #include "motor/control/transforms.h"
 
 /**
@@ -77,6 +77,8 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 	(2.0f * PI_F32 * CURRENT_DECOUPLING_MIN_MECH_SPEED_HZ)
 #define CURRENT_DECOUPLING_MIN_FLUX_WB 1.0e-5f
 #define CURRENT_DECOUPLING_MAX_FLUX_WB 1.0f
+#define CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO 0.60f
+#define CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO 0.70f
 
 static inline bool motor_is_align_injection_state(const struct smf_state *state)
 {
@@ -718,7 +720,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 				       decoupling_speed_limit_rad_s);
 	bool decoupling_feedback_valid = feature_angle_gen ||
 					 motor_velocity_feedback_is_valid(params->position_quality_flags);
-	struct motor_decoupling_enable_input decoupling_enable_in = {
+	struct motor_dq_decoupling_enable_input decoupling_enable_in = {
 		.feature_enabled = CURRENT_DECOUPLING_ENABLED,
 		.online_control_state = online_control_state,
 		.control_armed = control_armed,
@@ -728,10 +730,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.speed_valid = decoupling_speed_valid,
 		.feedback_valid = decoupling_feedback_valid,
 	};
-	bool decoupling_enabled = motor_decoupling_is_enabled(&decoupling_enable_in);
+	bool dq_decoupling_enabled = motor_dq_decoupling_is_enabled(&decoupling_enable_in);
 	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
 
-		struct motor_foc_voltage_pwm_inputs foc_inputs = {
+	struct motor_foc_voltage_pwm_inputs foc_inputs = {
 		.id_ref_a = Id_ref_A,
 		.iq_ref_a = Iq_ref_A,
 		.id_a = Id_A,
@@ -742,18 +744,19 @@ void motor_control_loop_step(struct motor_parameters *params,
 		/* Keep decoupling/feedforward in ONLINE control only; calibration states
 		 * (ALIGN/RS_EST/ROVERL) can have transient observer speed spikes.
 		 */
-		.decoupling_enabled = decoupling_enabled,
+		.dq_decoupling_enabled = dq_decoupling_enabled,
 		.electrical_speed_rad_s = decoupling_speed_rad_s,
 		.ld_h = params->Ld_est,
 		.lq_h = params->Lq_est,
 		.flux_linkage_wb = params->flux_linkage_wb_active,
-			.braking_enabled =
-				feature_braking,
-			.braking_iq_ref_a = Iq_ref_A,
-			.braking_speed_rad_s = speed_mech_rad_s,
-			.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
-			.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
-		};
+		.dq_decoupling_flux_headroom_ratio = CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO,
+		.dq_decoupling_ff_limit_ratio = CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO,
+		.braking_enabled = feature_braking,
+		.braking_iq_ref_a = Iq_ref_A,
+		.braking_speed_rad_s = speed_mech_rad_s,
+		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
+		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
+	};
 	struct motor_foc_voltage_pwm_outputs foc_outputs = {0};
 	int foc_ret = motor_foc_voltage_pwm_step(&params->pi_Id, &params->pi_Iq,
 						 &foc_inputs, &foc_outputs);

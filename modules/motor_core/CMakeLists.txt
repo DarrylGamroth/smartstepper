@@ -10,7 +10,7 @@ add_library(motor_core STATIC
 	src/control/motor_dob.c
 	src/control/motor_mpr.c
 	src/control/current_loop.c
-	src/control/decoupling.c
+	src/control/dq_decoupling.c
 	src/control/transforms.c
 	src/control/pwm_synthesis.c
 	src/motion/motor_motion_modules.c

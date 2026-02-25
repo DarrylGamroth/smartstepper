@@ -10,7 +10,7 @@
 #include <math.h>
 
 #include "motor/control/current_loop.h"
-#include "motor/control/decoupling.h"
+#include "motor/control/dq_decoupling.h"
 #include "motor/control/pwm_synthesis.h"
 #include "motor/control/transforms.h"
 
@@ -44,8 +44,8 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		return -ERANGE;
 	}
 
-	struct motor_decoupling_feedforward_input decoupling_in = {
-		.enabled = in->decoupling_enabled,
+	struct motor_dq_decoupling_feedforward_input decoupling_in = {
+		.enabled = in->dq_decoupling_enabled,
 		.electrical_speed_rad_s = in->electrical_speed_rad_s,
 		.ld_h = in->ld_h,
 		.lq_h = in->lq_h,
@@ -53,9 +53,11 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		.id_a = in->id_a,
 		.iq_a = in->iq_a,
 		.max_voltage_magnitude_v = max_voltage_magnitude_v,
+		.flux_headroom_ratio = in->dq_decoupling_flux_headroom_ratio,
+		.ff_limit_ratio = in->dq_decoupling_ff_limit_ratio,
 	};
-	struct motor_decoupling_feedforward_output decoupling_out = {0};
-	int decoupling_ret = motor_decoupling_feedforward_step(&decoupling_in, &decoupling_out);
+	struct motor_dq_decoupling_feedforward_output decoupling_out = {0};
+	int decoupling_ret = motor_dq_decoupling_feedforward_step(&decoupling_in, &decoupling_out);
 	if (decoupling_ret != 0) {
 		return decoupling_ret;
 	}
