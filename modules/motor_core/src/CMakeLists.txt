@@ -55,7 +55,6 @@ add_library(motor_core_rt STATIC
 	control/mpr.c
 	control/current_loop.c
 	control/dq_decoupling.c
-	control/transforms.c
 	control/pwm_synthesis.c
 	control/foc_voltage_pwm.c
 	control/position_regulator.c
