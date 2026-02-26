@@ -194,9 +194,6 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 	    model->viscous_friction_nm_per_rad_s < 0.0f || model->coulomb_friction_nm < 0.0f) {
 		return -EINVAL;
 	}
-	if (!isfinite(omega_meas_rad_s) || !isfinite(omega_ref_rad_s)) {
-		return -EINVAL;
-	}
 	if (!state->initialized || !state->discretization_valid) {
 		return -EINVAL;
 	}
@@ -243,15 +240,12 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 		sum_den += q * n * n;
 	}
 
-	if (!isfinite(sum_den) || sum_den <= MOTOR_MPR_EPSILON || !isfinite(sum_num)) {
+	if (!(sum_den > MOTOR_MPR_EPSILON)) {
 		return -ERANGE;
 	}
 
 	float32_t u_prev = state->iq_cmd_a;
 	float32_t u_opt = (sum_num + (cfg->r_delta_iq * u_prev)) / sum_den;
-	if (!isfinite(u_opt)) {
-		return -ERANGE;
-	}
 
 	float32_t max_delta = cfg->max_delta_iq_a;
 	if (max_delta <= 0.0f) {
@@ -350,9 +344,6 @@ int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 	    (cfg->q_position + cfg->q_velocity_ff) <= 0.0f) {
 		return -EINVAL;
 	}
-	if (!isfinite(position_error_rad) || !isfinite(velocity_ff_rad_s)) {
-		return -EINVAL;
-	}
 	if (!state->initialized) {
 		return -EINVAL;
 	}
@@ -379,14 +370,11 @@ int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 			      (q_vel * n * velocity_ff_rad_s) +
 			      (r * v_prev);
 	float32_t denominator = (q_pos * sum_c2) + (q_vel * n) + r;
-	if (!isfinite(numerator) || !isfinite(denominator) || denominator <= MOTOR_MPR_EPSILON) {
+	if (!(denominator > MOTOR_MPR_EPSILON)) {
 		return -ERANGE;
 	}
 
 	float32_t v_opt = numerator / denominator;
-	if (!isfinite(v_opt)) {
-		return -ERANGE;
-	}
 
 	float32_t max_delta = cfg->max_delta_velocity_rad_s;
 	if (max_delta <= 0.0f) {

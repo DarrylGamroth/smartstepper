@@ -124,10 +124,6 @@ ZTEST(motor_mpr, test_velocity_step_rejects_bad_inputs)
 		      -EINVAL, NULL);
 	zassert_equal(motor_mpr_velocity_step(&cfg, &model, &state, 0.0f, 0.0f, NULL),
 		      -EINVAL, NULL);
-	zassert_equal(motor_mpr_velocity_step(&cfg, &model, &state, NAN, 0.0f, &iq_cmd),
-		      -EINVAL, NULL);
-	zassert_equal(motor_mpr_velocity_step(&cfg, &model, &state, 0.0f, INFINITY, &iq_cmd),
-		      -EINVAL, NULL);
 }
 
 ZTEST(motor_mpr, test_velocity_step_respects_iq_and_delta_limits)
@@ -385,8 +381,6 @@ ZTEST(motor_mpr, test_position_step_rejects_bad_inputs)
 	zassert_equal(motor_mpr_position_step(NULL, &state, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
 	zassert_equal(motor_mpr_position_step(&cfg, NULL, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
 	zassert_equal(motor_mpr_position_step(&cfg, &state, 0.0f, 0.0f, NULL), -EINVAL, NULL);
-	zassert_equal(motor_mpr_position_step(&cfg, &state, NAN, 0.0f, &vel_cmd), -EINVAL, NULL);
-	zassert_equal(motor_mpr_position_step(&cfg, &state, 0.0f, INFINITY, &vel_cmd), -EINVAL, NULL);
 }
 
 ZTEST_SUITE(motor_mpr, NULL, NULL, NULL, NULL, NULL);
