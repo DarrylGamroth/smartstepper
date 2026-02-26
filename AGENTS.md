@@ -23,7 +23,7 @@ Incremental build (fast path):
 podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'
 ```
 
-Clean reconfigure + build:
+Clean reconfigure + build (MT6835 profile overlay enabled):
 
 ```bash
 podman exec priceless_wiles bash -lc '\
@@ -31,8 +31,15 @@ podman exec priceless_wiles bash -lc '\
     -b smartstepper_v2/stm32h743xx \
     /workspace/chopper/app \
     -d /workspace/build/chopper/smartstepper_v2 \
-    -S serial-shell -S serial-console'
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_mt6835_2a.overlay"'
 ```
+
+Overlay note:
+
+- The build requires a motor profile overlay that defines `/user_parameters` and `/motor_parameters`.
+- Default profile is `app/configs/motor_mt6835_2a.overlay`.
+- For AEAT-9955 hardware, switch to `app/configs/motor_aeat9955_067a.overlay`.
 
 ## Unit Tests
 

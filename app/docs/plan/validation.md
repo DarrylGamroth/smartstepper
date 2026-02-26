@@ -4,12 +4,24 @@
 
 1. Firmware build (smartstepper_v2):
 ```bash
-podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'
+podman exec priceless_wiles bash -lc '\
+  west build -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_mt6835_2a.overlay"'
 ```
 
 2. Firmware build (smartstepper_v2_mt6835):
 ```bash
-podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'
+podman exec priceless_wiles bash -lc '\
+  west build -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2_mt6835 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_mt6835_2a.overlay"'
 ```
 
 ## Unit Tests
