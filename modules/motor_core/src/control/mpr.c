@@ -60,47 +60,6 @@ static void motor_mpr_velocity_discretize(const struct motor_mpr_velocity_model 
 	*bd_out = dt_s / j;
 }
 
-static bool motor_mpr_velocity_cache_matches(const struct motor_mpr_velocity_state *state,
-					     const struct motor_mpr_velocity_config *cfg,
-					     const struct motor_mpr_velocity_model *model)
-{
-	return state->discretization_valid &&
-	       state->cached_dt_s == cfg->dt_s &&
-	       state->cached_inertia_kgm2 == model->inertia_kgm2 &&
-	       state->cached_viscous_friction_nm_per_rad_s ==
-		       model->viscous_friction_nm_per_rad_s &&
-	       state->cached_torque_constant_nm_per_a == model->torque_constant_nm_per_a;
-}
-
-static void motor_mpr_velocity_refresh_discretization(struct motor_mpr_velocity_state *state,
-						      const struct motor_mpr_velocity_config *cfg,
-						      const struct motor_mpr_velocity_model *model)
-{
-	if (motor_mpr_velocity_cache_matches(state, cfg, model)) {
-		return;
-	}
-
-	motor_mpr_velocity_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
-	state->cached_dt_s = cfg->dt_s;
-	state->cached_inertia_kgm2 = model->inertia_kgm2;
-	state->cached_viscous_friction_nm_per_rad_s = model->viscous_friction_nm_per_rad_s;
-	state->cached_torque_constant_nm_per_a = model->torque_constant_nm_per_a;
-	state->discretization_valid = true;
-}
-
-static bool motor_mpr_position_cache_matches(const struct motor_mpr_position_state *state,
-					     const struct motor_mpr_position_config *cfg)
-{
-	return state->initialized &&
-	       state->cached_dt_s == cfg->dt_s &&
-	       state->cached_horizon == cfg->horizon &&
-	       state->cached_q_position == cfg->q_position &&
-	       state->cached_q_velocity_ff == cfg->q_velocity_ff &&
-	       state->cached_r_delta_velocity == cfg->r_delta_velocity &&
-	       state->cached_velocity_limit_rad_s == cfg->velocity_limit_rad_s &&
-	       state->cached_max_delta_velocity_rad_s == cfg->max_delta_velocity_rad_s;
-}
-
 int motor_mpr_velocity_validate(const struct motor_mpr_velocity_config *cfg,
 				const struct motor_mpr_velocity_model *model)
 {
@@ -143,23 +102,13 @@ int motor_mpr_velocity_init(const struct motor_mpr_velocity_config *cfg,
 		return -EINVAL;
 	}
 
-	motor_mpr_velocity_refresh_discretization(state, cfg, model);
+	motor_mpr_velocity_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
 	state->initialized = true;
 	state->iq_cmd_a = isfinite(iq_initial_a) ? iq_initial_a : 0.0f;
 	state->omega_model_rad_s = isfinite(omega_initial_rad_s) ? omega_initial_rad_s : 0.0f;
 	state->disturbance_nm = 0.0f;
 	state->last_omega_error_rad_s = 0.0f;
 	return 0;
-}
-
-bool motor_mpr_velocity_is_configured(const struct motor_mpr_velocity_state *state,
-				      const struct motor_mpr_velocity_config *cfg,
-				      const struct motor_mpr_velocity_model *model)
-{
-	if (state == NULL || cfg == NULL || model == NULL) {
-		return false;
-	}
-	return motor_mpr_velocity_cache_matches(state, cfg, model);
 }
 
 void motor_mpr_velocity_reset(struct motor_mpr_velocity_state *state,
@@ -170,7 +119,6 @@ void motor_mpr_velocity_reset(struct motor_mpr_velocity_state *state,
 		return;
 	}
 
-	state->initialized = true;
 	state->iq_cmd_a = isfinite(iq_initial_a) ? iq_initial_a : 0.0f;
 	state->omega_model_rad_s = isfinite(omega_initial_rad_s) ? omega_initial_rad_s : 0.0f;
 	state->disturbance_nm = 0.0f;
@@ -194,7 +142,7 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 	    model->viscous_friction_nm_per_rad_s < 0.0f || model->coulomb_friction_nm < 0.0f) {
 		return -EINVAL;
 	}
-	if (!state->initialized || !state->discretization_valid) {
+	if (!state->initialized) {
 		return -EINVAL;
 	}
 	float32_t a = state->a;
@@ -299,23 +247,7 @@ int motor_mpr_position_init(const struct motor_mpr_position_config *cfg,
 	state->initialized = true;
 	state->velocity_cmd_rad_s = isfinite(velocity_initial_rad_s) ? velocity_initial_rad_s : 0.0f;
 	state->last_position_error_rad = 0.0f;
-	state->cached_dt_s = cfg->dt_s;
-	state->cached_horizon = cfg->horizon;
-	state->cached_q_position = cfg->q_position;
-	state->cached_q_velocity_ff = cfg->q_velocity_ff;
-	state->cached_r_delta_velocity = cfg->r_delta_velocity;
-	state->cached_velocity_limit_rad_s = cfg->velocity_limit_rad_s;
-	state->cached_max_delta_velocity_rad_s = cfg->max_delta_velocity_rad_s;
 	return 0;
-}
-
-bool motor_mpr_position_is_configured(const struct motor_mpr_position_state *state,
-				      const struct motor_mpr_position_config *cfg)
-{
-	if (state == NULL || cfg == NULL) {
-		return false;
-	}
-	return motor_mpr_position_cache_matches(state, cfg);
 }
 
 void motor_mpr_position_reset(struct motor_mpr_position_state *state,
@@ -325,7 +257,6 @@ void motor_mpr_position_reset(struct motor_mpr_position_state *state,
 		return;
 	}
 
-	state->initialized = true;
 	state->velocity_cmd_rad_s = isfinite(velocity_initial_rad_s) ? velocity_initial_rad_s : 0.0f;
 	state->last_position_error_rad = 0.0f;
 }

@@ -47,11 +47,6 @@ struct motor_mpr_velocity_state {
 	float32_t omega_model_rad_s;
 	float32_t disturbance_nm;
 	float32_t last_omega_error_rad_s;
-	bool discretization_valid;
-	float32_t cached_dt_s;
-	float32_t cached_inertia_kgm2;
-	float32_t cached_viscous_friction_nm_per_rad_s;
-	float32_t cached_torque_constant_nm_per_a;
 	float32_t a;
 	float32_t b_u;
 	float32_t b_d;
@@ -80,13 +75,6 @@ struct motor_mpr_position_state {
 	bool initialized;
 	float32_t velocity_cmd_rad_s;
 	float32_t last_position_error_rad;
-	float32_t cached_dt_s;
-	uint16_t cached_horizon;
-	float32_t cached_q_position;
-	float32_t cached_q_velocity_ff;
-	float32_t cached_r_delta_velocity;
-	float32_t cached_velocity_limit_rad_s;
-	float32_t cached_max_delta_velocity_rad_s;
 };
 
 int motor_mpr_velocity_validate(const struct motor_mpr_velocity_config *cfg,
@@ -97,10 +85,6 @@ int motor_mpr_velocity_init(const struct motor_mpr_velocity_config *cfg,
 			    struct motor_mpr_velocity_state *state,
 			    float32_t omega_initial_rad_s,
 			    float32_t iq_initial_a);
-
-bool motor_mpr_velocity_is_configured(const struct motor_mpr_velocity_state *state,
-				      const struct motor_mpr_velocity_config *cfg,
-				      const struct motor_mpr_velocity_model *model);
 
 void motor_mpr_velocity_reset(struct motor_mpr_velocity_state *state,
 			      float32_t omega_initial_rad_s,
@@ -118,9 +102,6 @@ int motor_mpr_position_validate(const struct motor_mpr_position_config *cfg);
 int motor_mpr_position_init(const struct motor_mpr_position_config *cfg,
 			    struct motor_mpr_position_state *state,
 			    float32_t velocity_initial_rad_s);
-
-bool motor_mpr_position_is_configured(const struct motor_mpr_position_state *state,
-				      const struct motor_mpr_position_config *cfg);
 
 void motor_mpr_position_reset(struct motor_mpr_position_state *state,
 			      float32_t velocity_initial_rad_s);

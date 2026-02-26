@@ -89,8 +89,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 					params->profile_max_velocity_rad_s;
 				params->position_mpr_cfg.max_delta_velocity_rad_s =
 					params->profile_max_accel_rad_s2 * in->position_loop_dt_s;
-				if (!motor_mpr_position_is_configured(&params->position_mpr_state,
-								      &params->position_mpr_cfg)) {
+				if (!params->position_mpr_state.initialized) {
 					(void)motor_mpr_position_init(&params->position_mpr_cfg,
 								      &params->position_mpr_state,
 								      out->velocity_target_rad_s);
@@ -200,9 +199,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 
 				params->velocity_mpr_cfg.dt_s = in->velocity_loop_dt_s;
 				params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
-				if (!motor_mpr_velocity_is_configured(&params->velocity_mpr_state,
-								      &params->velocity_mpr_cfg,
-								      &mpr_model)) {
+				if (!params->velocity_mpr_state.initialized) {
 					(void)motor_mpr_velocity_init(&params->velocity_mpr_cfg,
 								      &mpr_model,
 								      &params->velocity_mpr_state,
