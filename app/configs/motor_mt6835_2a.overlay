@@ -58,7 +58,7 @@
 		 */
 		pole-pairs = <50>;
 		inertia-mgcm2 = <57000>;
-		max-speed-hz = <30>;
+		max-speed-hz = <13>;
 	};
 
 	fault_detection: fault_detection {
