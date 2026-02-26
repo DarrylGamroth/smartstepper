@@ -89,6 +89,12 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 					params->profile_max_velocity_rad_s;
 				params->position_mpr_cfg.max_delta_velocity_rad_s =
 					params->profile_max_accel_rad_s2 * in->position_loop_dt_s;
+				if (!motor_mpr_position_is_configured(&params->position_mpr_state,
+								      &params->position_mpr_cfg)) {
+					(void)motor_mpr_position_init(&params->position_mpr_cfg,
+								      &params->position_mpr_state,
+								      out->velocity_target_rad_s);
+				}
 				int mpr_ret = motor_mpr_position_step(&params->position_mpr_cfg,
 								      &params->position_mpr_state,
 								      position_error_rad,
@@ -110,11 +116,14 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 					.output_limit_rad_s = params->profile_max_velocity_rad_s,
 				};
 				struct motor_position_regulator_state pos_state = {
+					.initialized = false,
 					.integrator_rad_s = params->position_cl_i_term_rad_s,
 				};
 				float32_t velocity_target = clampf(profile_velocity_ff_rad_s,
 								   -params->profile_max_velocity_rad_s,
 								   params->profile_max_velocity_rad_s);
+				(void)motor_position_regulator_init(&pos_cfg, &pos_state,
+								 params->position_cl_i_term_rad_s);
 				int pos_ret = motor_position_regulator_step(
 					&pos_cfg, &pos_state, position_error_rad,
 					profile_velocity_ff_rad_s, in->position_loop_dt_s,
@@ -191,6 +200,15 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 
 				params->velocity_mpr_cfg.dt_s = in->velocity_loop_dt_s;
 				params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
+				if (!motor_mpr_velocity_is_configured(&params->velocity_mpr_state,
+								      &params->velocity_mpr_cfg,
+								      &mpr_model)) {
+					(void)motor_mpr_velocity_init(&params->velocity_mpr_cfg,
+								      &mpr_model,
+								      &params->velocity_mpr_state,
+								      out->speed_mech_filtered_rad_s,
+								      out->iq_ref_a);
+				}
 				int mpr_ret = motor_mpr_velocity_step(&params->velocity_mpr_cfg, &mpr_model,
 								      &params->velocity_mpr_state,
 								      out->speed_mech_filtered_rad_s,
@@ -217,9 +235,12 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 					.output_limit_a = params->velocity_cl_iq_limit_A,
 				};
 				struct motor_velocity_regulator_state vel_state = {
+					.initialized = false,
 					.integrator_a = params->velocity_cl_i_term_A,
 				};
 				float32_t iq_cmd = 0.0f;
+				(void)motor_velocity_regulator_init(&vel_cfg, &vel_state,
+								 params->velocity_cl_i_term_A);
 				int vel_ret = motor_velocity_regulator_step(&vel_cfg, &vel_state,
 									 speed_error_rad_s,
 									 in->velocity_loop_dt_s,

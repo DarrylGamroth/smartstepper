@@ -7,6 +7,7 @@
 #ifndef MOTOR_POSITION_REGULATOR_H_
 #define MOTOR_POSITION_REGULATOR_H_
 
+#include <stdbool.h>
 #include <zephyr/dsp/types.h>
 
 struct motor_position_regulator_config {
@@ -17,10 +18,15 @@ struct motor_position_regulator_config {
 };
 
 struct motor_position_regulator_state {
+	bool initialized;
 	float32_t integrator_rad_s;
 };
 
 int motor_position_regulator_validate(const struct motor_position_regulator_config *cfg);
+
+int motor_position_regulator_init(const struct motor_position_regulator_config *cfg,
+				  struct motor_position_regulator_state *state,
+				  float32_t integrator_rad_s);
 
 void motor_position_regulator_reset(struct motor_position_regulator_state *state,
 				    float32_t integrator_rad_s);

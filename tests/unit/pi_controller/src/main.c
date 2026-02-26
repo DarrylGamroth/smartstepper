@@ -22,6 +22,7 @@ ZTEST(pi_controller, test_position_regulator_step_includes_ff_and_pi_terms)
 	};
 	struct motor_position_regulator_state state = {0};
 	float32_t cmd = 0.0f;
+	zassert_ok(motor_position_regulator_init(&cfg, &state, 0.0f), NULL);
 
 	zassert_ok(motor_position_regulator_step(&cfg, &state, 0.5f, 1.0f, 0.1f, &cmd), NULL);
 	zassert_within(state.integrator_rad_s, 0.2f, 1e-6f, NULL);
@@ -38,6 +39,7 @@ ZTEST(pi_controller, test_position_regulator_clamps_integrator_and_output)
 	};
 	struct motor_position_regulator_state state = {0};
 	float32_t cmd = 0.0f;
+	zassert_ok(motor_position_regulator_init(&cfg, &state, 0.0f), NULL);
 
 	for (int i = 0; i < 8; i++) {
 		zassert_ok(motor_position_regulator_step(&cfg, &state, 1.0f, 0.0f, 0.1f, &cmd),
@@ -58,6 +60,7 @@ ZTEST(pi_controller, test_velocity_regulator_step_and_unwind)
 	};
 	struct motor_velocity_regulator_state state = {0};
 	float32_t cmd = 0.0f;
+	zassert_ok(motor_velocity_regulator_init(&cfg, &state, 0.0f), NULL);
 
 	zassert_ok(motor_velocity_regulator_step(&cfg, &state, 0.4f, 0.1f, &cmd), NULL);
 	zassert_within(state.integrator_a, 0.2f, 1e-6f, NULL);
@@ -78,6 +81,7 @@ ZTEST(pi_controller, test_velocity_regulator_limits_iq_command)
 	};
 	struct motor_velocity_regulator_state state = {0};
 	float32_t cmd = 0.0f;
+	zassert_ok(motor_velocity_regulator_init(&cfg, &state, 0.0f), NULL);
 
 	zassert_ok(motor_velocity_regulator_step(&cfg, &state, 1.0f, 0.1f, &cmd), NULL);
 	zassert_within(cmd, 0.5f, 1e-6f, NULL);
@@ -119,6 +123,8 @@ ZTEST(pi_controller, test_regulator_step_rejects_nonfinite_or_bad_dt)
 	struct motor_position_regulator_state pos_state = {0};
 	struct motor_velocity_regulator_state vel_state = {0};
 	float32_t out = 0.0f;
+	zassert_ok(motor_position_regulator_init(&pos_cfg, &pos_state, 0.0f), NULL);
+	zassert_ok(motor_velocity_regulator_init(&vel_cfg, &vel_state, 0.0f), NULL);
 
 	zassert_equal(motor_position_regulator_step(&pos_cfg, &pos_state, NAN, 0.0f, 0.001f, &out),
 		      -EINVAL, NULL);

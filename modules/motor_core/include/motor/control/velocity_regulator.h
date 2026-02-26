@@ -7,6 +7,7 @@
 #ifndef MOTOR_VELOCITY_REGULATOR_H_
 #define MOTOR_VELOCITY_REGULATOR_H_
 
+#include <stdbool.h>
 #include <zephyr/dsp/types.h>
 
 struct motor_velocity_regulator_config {
@@ -17,10 +18,15 @@ struct motor_velocity_regulator_config {
 };
 
 struct motor_velocity_regulator_state {
+	bool initialized;
 	float32_t integrator_a;
 };
 
 int motor_velocity_regulator_validate(const struct motor_velocity_regulator_config *cfg);
+
+int motor_velocity_regulator_init(const struct motor_velocity_regulator_config *cfg,
+				  struct motor_velocity_regulator_state *state,
+				  float32_t integrator_a);
 
 void motor_velocity_regulator_reset(struct motor_velocity_regulator_state *state,
 				    float32_t integrator_a);

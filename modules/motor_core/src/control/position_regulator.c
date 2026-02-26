@@ -29,12 +29,25 @@ int motor_position_regulator_validate(const struct motor_position_regulator_conf
 	return 0;
 }
 
+int motor_position_regulator_init(const struct motor_position_regulator_config *cfg,
+				  struct motor_position_regulator_state *state,
+				  float32_t integrator_rad_s)
+{
+	if (motor_position_regulator_validate(cfg) != 0 || state == NULL) {
+		return -EINVAL;
+	}
+	state->initialized = true;
+	state->integrator_rad_s = isfinite(integrator_rad_s) ? integrator_rad_s : 0.0f;
+	return 0;
+}
+
 void motor_position_regulator_reset(struct motor_position_regulator_state *state,
 				    float32_t integrator_rad_s)
 {
 	if (state == NULL) {
 		return;
 	}
+	state->initialized = true;
 	state->integrator_rad_s = isfinite(integrator_rad_s) ? integrator_rad_s : 0.0f;
 }
 
@@ -48,8 +61,14 @@ int motor_position_regulator_step(const struct motor_position_regulator_config *
 	if (cfg == NULL || state == NULL || velocity_cmd_rad_s_out == NULL) {
 		return -EINVAL;
 	}
+	if (!state->initialized) {
+		return -EINVAL;
+	}
 	if (dt_s <= 0.0f || cfg->output_limit_rad_s <= 0.0f ||
 	    cfg->integrator_limit_rad_s < 0.0f) {
+		return -EINVAL;
+	}
+	if (!isfinite(position_error_rad) || !isfinite(velocity_ff_rad_s) || !isfinite(dt_s)) {
 		return -EINVAL;
 	}
 

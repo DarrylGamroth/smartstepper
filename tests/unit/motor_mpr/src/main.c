@@ -114,6 +114,7 @@ ZTEST(motor_mpr, test_velocity_step_rejects_bad_inputs)
 	};
 	struct motor_mpr_velocity_state state = {0};
 	float32_t iq_cmd = 0.0f;
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model, &state, 0.0f, 0.0f), NULL);
 
 	zassert_equal(motor_mpr_velocity_step(NULL, &model, &state, 0.0f, 0.0f, &iq_cmd),
 		      -EINVAL, NULL);
@@ -149,6 +150,7 @@ ZTEST(motor_mpr, test_velocity_step_respects_iq_and_delta_limits)
 	struct motor_mpr_velocity_state state = {0};
 	float32_t iq_cmd = 0.0f;
 	float32_t omega = 0.0f;
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model, &state, omega, 0.0f), NULL);
 
 	for (int i = 0; i < 1200; i++) {
 		float32_t prev = state.iq_cmd_a;
@@ -183,6 +185,7 @@ ZTEST(motor_mpr, test_velocity_tracks_reference_without_load)
 	float32_t iq_cmd = 0.0f;
 	float32_t mean_abs_err = 0.0f;
 	int count = 0;
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model, &state, omega, 0.0f), NULL);
 
 	for (int i = 0; i < 6000; i++) {
 		zassert_ok(motor_mpr_velocity_step(&cfg, &model, &state, omega, omega_ref, &iq_cmd), NULL);
@@ -226,6 +229,7 @@ ZTEST(motor_mpr, test_velocity_disturbance_observer_improves_steady_state_error)
 		float32_t iq_cmd = 0.0f;
 		float32_t err_sum = 0.0f;
 		int count = 0;
+		zassert_ok(motor_mpr_velocity_init(&cfg, &model, &state, omega, 0.0f), NULL);
 
 		if (pass == 1) {
 			cfg.disturbance_ki_nm_per_rad_s = 0.05f;
@@ -299,6 +303,7 @@ ZTEST(motor_mpr, test_position_step_respects_limits_and_delta)
 	};
 	struct motor_mpr_position_state state = {0};
 	float32_t vel_cmd = 0.0f;
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
 
 	for (int i = 0; i < 200; i++) {
 		float32_t prev = state.velocity_cmd_rad_s;
@@ -324,6 +329,7 @@ ZTEST(motor_mpr, test_position_reduces_error_in_closed_loop)
 	float32_t theta = 0.0f;
 	const float32_t target = 1.4f;
 	float32_t vel_cmd = 0.0f;
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
 
 	for (int i = 0; i < 8000; i++) {
 		float32_t err = target - theta;
@@ -350,6 +356,7 @@ ZTEST(motor_mpr, test_position_feedforward_drives_velocity_command)
 	struct motor_mpr_position_state state = {0};
 	float32_t vel_cmd = 0.0f;
 	const float32_t ff = 6.0f;
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
 
 	for (int i = 0; i < 80; i++) {
 		zassert_ok(motor_mpr_position_step(&cfg, &state, 0.0f, ff, &vel_cmd), NULL);
@@ -373,6 +380,7 @@ ZTEST(motor_mpr, test_position_step_rejects_bad_inputs)
 	};
 	struct motor_mpr_position_state state = {0};
 	float32_t vel_cmd = 0.0f;
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
 
 	zassert_equal(motor_mpr_position_step(NULL, &state, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
 	zassert_equal(motor_mpr_position_step(&cfg, NULL, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
