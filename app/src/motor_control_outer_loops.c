@@ -254,27 +254,42 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 				if (!isfinite(dob_cfg.iq_ff_limit_a) || dob_cfg.iq_ff_limit_a <= 0.0f) {
 					dob_cfg.iq_ff_limit_a = iq_limit;
 				}
+				bool dob_ready = true;
+				if (!motor_dob_is_configured(&params->velocity_dob_state, &dob_cfg,
+							     &dob_model)) {
+					int dob_init_ret = motor_dob_init(&dob_cfg, &dob_model,
+									  &params->velocity_dob_state,
+									  out->speed_mech_filtered_rad_s);
+					if (dob_init_ret != 0) {
+						params->velocity_dob_iq_ff_a = 0.0f;
+						params->velocity_dob_disturbance_nm = 0.0f;
+						params->velocity_dob_residual_rad_s = 0.0f;
+						dob_ready = false;
+					}
+				}
 
-				float32_t iq_dob_ff_a = 0.0f;
-				int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
-							     out->speed_mech_filtered_rad_s,
-							     iq_cmd_pre_dob_a,
-							     &iq_dob_ff_a);
-				if (dob_ret == 0) {
-					params->velocity_dob_iq_ff_a = iq_dob_ff_a;
-					params->velocity_dob_disturbance_nm =
-						params->velocity_dob_state.disturbance_nm;
-					params->velocity_dob_residual_rad_s =
-						params->velocity_dob_state.residual_rad_s;
-					out->iq_ref_a = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
-							      -params->velocity_cl_iq_limit_A,
-							      params->velocity_cl_iq_limit_A);
-				} else {
-					motor_dob_reset(&params->velocity_dob_state,
-							out->speed_mech_filtered_rad_s);
-					params->velocity_dob_iq_ff_a = 0.0f;
-					params->velocity_dob_disturbance_nm = 0.0f;
-					params->velocity_dob_residual_rad_s = 0.0f;
+				if (dob_ready) {
+					float32_t iq_dob_ff_a = 0.0f;
+					int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
+								     out->speed_mech_filtered_rad_s,
+								     iq_cmd_pre_dob_a,
+								     &iq_dob_ff_a);
+					if (dob_ret == 0) {
+						params->velocity_dob_iq_ff_a = iq_dob_ff_a;
+						params->velocity_dob_disturbance_nm =
+							params->velocity_dob_state.disturbance_nm;
+						params->velocity_dob_residual_rad_s =
+							params->velocity_dob_state.residual_rad_s;
+						out->iq_ref_a = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
+								      -params->velocity_cl_iq_limit_A,
+								      params->velocity_cl_iq_limit_A);
+					} else {
+						motor_dob_reset(&params->velocity_dob_state,
+								out->speed_mech_filtered_rad_s);
+						params->velocity_dob_iq_ff_a = 0.0f;
+						params->velocity_dob_disturbance_nm = 0.0f;
+						params->velocity_dob_residual_rad_s = 0.0f;
+					}
 				}
 			}
 		}

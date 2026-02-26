@@ -58,6 +58,15 @@ struct motor_dob_state {
 int motor_dob_validate(const struct motor_dob_config *cfg,
 		       const struct motor_dob_model *model);
 
+int motor_dob_init(const struct motor_dob_config *cfg,
+	   const struct motor_dob_model *model,
+	   struct motor_dob_state *state,
+	   float32_t omega_initial_rad_s);
+
+bool motor_dob_is_configured(const struct motor_dob_state *state,
+		     const struct motor_dob_config *cfg,
+		     const struct motor_dob_model *model);
+
 void motor_dob_reset(struct motor_dob_state *state,
 	    float32_t omega_initial_rad_s);
 

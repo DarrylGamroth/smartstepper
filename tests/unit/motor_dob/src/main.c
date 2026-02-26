@@ -116,7 +116,7 @@ ZTEST(motor_dob, test_disabled_mode_outputs_zero_feedforward)
 	zassert_equal(iq_ff, 0.0f, NULL);
 	zassert_equal(state.disturbance_nm, 0.0f, NULL);
 	zassert_equal(state.iq_ff_a, 0.0f, NULL);
-	zassert_true(state.initialized, NULL);
+	zassert_false(state.initialized, NULL);
 }
 
 ZTEST(motor_dob, test_step_rejects_non_finite_inputs)
@@ -171,6 +171,9 @@ ZTEST(motor_dob, test_dob_reduces_steady_state_error_under_constant_load)
 		uint32_t count = 0U;
 
 		cfg.enabled = (pass == 1);
+		if (cfg.enabled) {
+			zassert_ok(motor_dob_init(&cfg, &model, &state, omega), NULL);
+		}
 		for (int i = 0; i < 7000; i++) {
 			float32_t iq_base = kp * (omega_ref - omega);
 			iq_base = clampf32(iq_base, -iq_limit, iq_limit);
@@ -217,6 +220,7 @@ ZTEST(motor_dob, test_resisting_load_yields_positive_iq_feedforward)
 	struct motor_dob_state state = {0};
 	float32_t omega = 20.0f;
 	float32_t iq_ff = 0.0f;
+	zassert_ok(motor_dob_init(&cfg, &model, &state, omega), NULL);
 
 	for (int i = 0; i < 3000; i++) {
 		zassert_ok(motor_dob_step(&cfg, &model, &state, omega, 0.0f, &iq_ff), NULL);

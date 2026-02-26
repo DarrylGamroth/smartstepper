@@ -73,22 +73,6 @@ static bool motor_dob_cache_matches(const struct motor_dob_state *state,
 	       state->cached_torque_constant_nm_per_a == model->torque_constant_nm_per_a;
 }
 
-static void motor_dob_refresh_discretization(struct motor_dob_state *state,
-					     const struct motor_dob_config *cfg,
-					     const struct motor_dob_model *model)
-{
-	if (motor_dob_cache_matches(state, cfg, model)) {
-		return;
-	}
-
-	motor_dob_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
-	state->cached_dt_s = cfg->dt_s;
-	state->cached_inertia_kgm2 = model->inertia_kgm2;
-	state->cached_viscous_friction_nm_per_rad_s = model->viscous_friction_nm_per_rad_s;
-	state->cached_torque_constant_nm_per_a = model->torque_constant_nm_per_a;
-	state->discretization_valid = true;
-}
-
 int motor_dob_validate(const struct motor_dob_config *cfg,
 		       const struct motor_dob_model *model)
 {
@@ -111,6 +95,43 @@ int motor_dob_validate(const struct motor_dob_config *cfg,
 	return 0;
 }
 
+int motor_dob_init(const struct motor_dob_config *cfg,
+	   const struct motor_dob_model *model,
+	   struct motor_dob_state *state,
+	   float32_t omega_initial_rad_s)
+{
+	int ret = motor_dob_validate(cfg, model);
+
+	if (ret != 0 || state == NULL) {
+		return -EINVAL;
+	}
+
+	motor_dob_discretize(model, cfg->dt_s, &state->a, &state->b_u, &state->b_d);
+	state->cached_dt_s = cfg->dt_s;
+	state->cached_inertia_kgm2 = model->inertia_kgm2;
+	state->cached_viscous_friction_nm_per_rad_s = model->viscous_friction_nm_per_rad_s;
+	state->cached_torque_constant_nm_per_a = model->torque_constant_nm_per_a;
+	state->discretization_valid = true;
+	state->initialized = true;
+	state->omega_model_rad_s = isfinite(omega_initial_rad_s) ? omega_initial_rad_s : 0.0f;
+	state->disturbance_nm = 0.0f;
+	state->iq_ff_a = 0.0f;
+	state->residual_rad_s = 0.0f;
+
+	return 0;
+}
+
+bool motor_dob_is_configured(const struct motor_dob_state *state,
+		     const struct motor_dob_config *cfg,
+		     const struct motor_dob_model *model)
+{
+	if (state == NULL || cfg == NULL || model == NULL) {
+		return false;
+	}
+
+	return motor_dob_cache_matches(state, cfg, model);
+}
+
 void motor_dob_reset(struct motor_dob_state *state,
 	    float32_t omega_initial_rad_s)
 {
@@ -123,14 +144,6 @@ void motor_dob_reset(struct motor_dob_state *state,
 	state->disturbance_nm = 0.0f;
 	state->iq_ff_a = 0.0f;
 	state->residual_rad_s = 0.0f;
-	state->discretization_valid = false;
-	state->cached_dt_s = 0.0f;
-	state->cached_inertia_kgm2 = 0.0f;
-	state->cached_viscous_friction_nm_per_rad_s = 0.0f;
-	state->cached_torque_constant_nm_per_a = 0.0f;
-	state->a = 0.0f;
-	state->b_u = 0.0f;
-	state->b_d = 0.0f;
 }
 
 int motor_dob_step(const struct motor_dob_config *cfg,
@@ -148,9 +161,8 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	    model->inertia_kgm2 <= 0.0f || model->torque_constant_nm_per_a <= 0.0f) {
 		return -EINVAL;
 	}
-
-	if (!state->initialized) {
-		motor_dob_reset(state, omega_meas_rad_s);
+	if (!isfinite(omega_meas_rad_s) || !isfinite(iq_cmd_a)) {
+		return -EINVAL;
 	}
 
 	if (!cfg->enabled) {
@@ -162,7 +174,9 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 		return 0;
 	}
 
-	motor_dob_refresh_discretization(state, cfg, model);
+	if (!state->initialized || !state->discretization_valid) {
+		return -EINVAL;
+	}
 	float32_t a = state->a;
 	float32_t b_u = state->b_u;
 	float32_t b_d = state->b_d;
