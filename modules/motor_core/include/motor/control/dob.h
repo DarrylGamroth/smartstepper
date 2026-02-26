@@ -45,11 +45,6 @@ struct motor_dob_state {
 	float32_t disturbance_nm;
 	float32_t iq_ff_a;
 	float32_t residual_rad_s;
-	bool discretization_valid;
-	float32_t cached_dt_s;
-	float32_t cached_inertia_kgm2;
-	float32_t cached_viscous_friction_nm_per_rad_s;
-	float32_t cached_torque_constant_nm_per_a;
 	float32_t a;
 	float32_t b_u;
 	float32_t b_d;
@@ -63,12 +58,8 @@ int motor_dob_init(const struct motor_dob_config *cfg,
 	   struct motor_dob_state *state,
 	   float32_t omega_initial_rad_s);
 
-bool motor_dob_is_configured(const struct motor_dob_state *state,
-		     const struct motor_dob_config *cfg,
-		     const struct motor_dob_model *model);
-
 void motor_dob_reset(struct motor_dob_state *state,
-	    float32_t omega_initial_rad_s);
+		    float32_t omega_initial_rad_s);
 
 int motor_dob_step(const struct motor_dob_config *cfg,
 	  const struct motor_dob_model *model,

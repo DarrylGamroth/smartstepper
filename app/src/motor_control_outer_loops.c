@@ -273,8 +273,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 					dob_cfg.iq_ff_limit_a = iq_limit;
 				}
 				bool dob_ready = true;
-				if (!motor_dob_is_configured(&params->velocity_dob_state, &dob_cfg,
-							     &dob_model)) {
+				if (!params->velocity_dob_state.initialized) {
 					int dob_init_ret = motor_dob_init(&dob_cfg, &dob_model,
 									  &params->velocity_dob_state,
 									  out->speed_mech_filtered_rad_s);
