@@ -7,7 +7,6 @@
 #include "motor/control/foc_voltage_pwm.h"
 
 #include <errno.h>
-#include <math.h>
 
 #include "motor/control/current_loop.h"
 #include "motor/control/dq_decoupling.h"
@@ -24,23 +23,13 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	if (!isfinite(in->vbus_v) || in->vbus_v <= 0.0f) {
 		return -EINVAL;
 	}
-	if (!isfinite(in->max_modulation_index) || in->max_modulation_index <= 0.0f ||
-	    in->max_modulation_index > 1.0f) {
-		return -EINVAL;
-	}
 	if (!isfinite(in->inv_park_angle_rad) || !isfinite(in->id_ref_a) || !isfinite(in->iq_ref_a) ||
 	    !isfinite(in->id_a) || !isfinite(in->iq_a)) {
 		return -EINVAL;
 	}
-	if (in->braking_enabled &&
-	    (!isfinite(in->braking_iq_ref_a) || !isfinite(in->braking_speed_rad_s) ||
-	     !isfinite(in->braking_vbus_limit_v) || !isfinite(in->braking_vbus_margin_inv) ||
-	     in->braking_vbus_limit_v < 0.0f || in->braking_vbus_margin_inv <= 0.0f)) {
-		return -EINVAL;
-	}
 
 	float32_t max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
-	if (!isfinite(max_voltage_magnitude_v) || max_voltage_magnitude_v <= 0.0f) {
+	if (max_voltage_magnitude_v <= 0.0f) {
 		return -ERANGE;
 	}
 

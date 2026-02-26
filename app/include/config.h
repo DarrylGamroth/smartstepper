@@ -410,6 +410,9 @@ struct motor_parameters {
 #define ALIGN_STABILIZE_DURATION_S ((float32_t)ALIGN_STABILIZE_MS / 1000.0f)
 #define BRAKE_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, brake_current_ma) / 1000.0f)
 #define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) / 1000.0f)
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
+	     DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) <= 1000,
+	     "user_parameters.max-modulation-index-mpu must be in (0,1000]");
 #define ROVERL_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma) / 1000.0f)
 #define ROVERL_EST_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_freq_hz))
 #define ROVERL_EST_SETTLING_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms) / 1000.0f)
@@ -457,6 +460,8 @@ struct motor_parameters {
 #define VBUS_MAX_V (VBUS_FULL_SCALE_V * 0.95f)  /* 95% of full scale for safety margin */
 #define VBUS_REGEN_LIMIT_V (NOMINAL_VOLTAGE_V * 1.1f)  /* Start blending to short-circuit at 110% nominal */
 #define VBUS_VOLTAGE_MARGIN_INV (1.0f / (VBUS_MAX_V - VBUS_REGEN_LIMIT_V))  /* Inverse for fast computation */
+BUILD_ASSERT(VBUS_MAX_V > VBUS_REGEN_LIMIT_V,
+	     "VBUS_REGEN_LIMIT_V must be below VBUS_MAX_V");
 
 
 #define CURRENT_SENSE_NODE DT_PATH(current_sense)
