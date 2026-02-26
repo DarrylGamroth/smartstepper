@@ -28,8 +28,8 @@ int motor_current_loop_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	if (vq_limit_sq < 0.0f) {
 		vq_limit_sq = 0.0f;
 	}
-	out->vq_limit_v = sqrtf(vq_limit_sq);
-	pi_set_min_max(pi_iq, -out->vq_limit_v, out->vq_limit_v);
+	float32_t vq_limit_for_pi = sqrtf(vq_limit_sq);
+	pi_set_min_max(pi_iq, -vq_limit_for_pi, vq_limit_for_pi);
 	pi_run_series(pi_iq, in->iq_ref_a, in->iq_a, in->vq_ff_v, &out->vq_v);
 
 	/* Final vector clamp keeps Vdq inside the available voltage circle. */
