@@ -16,6 +16,25 @@ extern "C" {
 #endif
 
 /**
+ * @file dob.h
+ * @brief Disturbance observer for velocity-loop feedforward compensation.
+ *
+ * The observer runs on the same reduced mechanical model used by velocity control:
+ * omega[k+1] = a * omega[k] + b_u * i_q[k] + b_d * (d[k] - tau_coulomb[k]).
+ *
+ * Each step:
+ * 1. Predict omega using previous state and commanded i_q.
+ * 2. Compute residual: omega_meas - omega_pred.
+ * 3. Integrate residual into disturbance estimate (bounded by torque_limit_nm).
+ * 4. Convert estimated disturbance to i_q feedforward (bounded by iq_ff_limit_a).
+ *
+ * Lifecycle:
+ * - Call init() when entering the closed-loop mode or after config/model changes.
+ * - Call step() in the loop.
+ * - reset() clears dynamic state only; it does not configure/discretize the model.
+ */
+
+/**
  * @brief Mechanical speed plant parameters for the velocity disturbance observer.
  */
 struct motor_dob_model {

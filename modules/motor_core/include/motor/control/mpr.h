@@ -16,6 +16,29 @@ extern "C" {
 #endif
 
 /**
+ * @file mpr.h
+ * @brief Lightweight model predictive regulators for cascaded position/velocity control.
+ *
+ * Velocity MPR:
+ * - Uses a 1st-order mechanical model:
+ *   omega[k+1] = a * omega[k] + b_u * i_q[k] + b_d * d[k]
+ * - Solves a one-move finite-horizon quadratic objective each step:
+ *   sum q_speed*(omega_ref-omega_pred)^2 + r_delta_iq*(i_q-i_q_prev)^2
+ * - Applies output and slew-rate limits to the selected i_q command.
+ * - Includes an internal disturbance estimate used as a simple bias term.
+ *
+ * Position MPR:
+ * - Generates velocity command from wrapped position error and velocity feedforward.
+ * - Solves an analogous finite-horizon quadratic objective on velocity command.
+ * - Applies velocity and slew-rate limits before output.
+ *
+ * Lifecycle:
+ * - Call init() when entering a mode or changing model/config parameters.
+ * - Call step() in the loop.
+ * - reset() clears dynamic state only; it does not configure/discretize the model.
+ */
+
+/**
  * @brief Mechanical speed plant parameters for velocity MPR.
  */
 struct motor_mpr_velocity_model {

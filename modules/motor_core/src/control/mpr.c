@@ -181,6 +181,10 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 	float32_t n = 0.0f;
 	uint16_t horizon = cfg->horizon;
 
+	/* One-move horizon expansion:
+	 * m tracks free response, n tracks input influence.
+	 * This accumulates J = q*||e||^2 + r*||delta_u||^2 over the horizon.
+	 */
 	for (uint16_t i = 0U; i < horizon; i++) {
 		m = a * m + d_term;
 		n = a * n + b_u;
@@ -284,6 +288,7 @@ int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 	float32_t sum_c2 = 0.0f;
 	uint16_t horizon = cfg->horizon;
 
+	/* Position-to-velocity one-move horizon terms. */
 	for (uint16_t i = 1U; i <= horizon; i++) {
 		float32_t c_i = (float32_t)i * dt;
 

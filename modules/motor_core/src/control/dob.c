@@ -160,6 +160,7 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	}
 
 	float32_t tau_coulomb_nm = model->coulomb_friction_nm * sign_speed;
+	/* Predict -> residual -> disturbance estimate -> i_q feedforward. */
 	float32_t omega_pred = a * state->omega_model_rad_s +
 			       b_u * iq_cmd_a +
 			       b_d * (state->disturbance_nm - tau_coulomb_nm);
