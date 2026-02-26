@@ -45,12 +45,11 @@ int motor_position_regulator_step(const struct motor_position_regulator_config *
 				  float32_t dt_s,
 				  float32_t *velocity_cmd_rad_s_out)
 {
-	if (motor_position_regulator_validate(cfg) != 0 || state == NULL ||
-	    velocity_cmd_rad_s_out == NULL) {
+	if (cfg == NULL || state == NULL || velocity_cmd_rad_s_out == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(position_error_rad) || !isfinite(velocity_ff_rad_s) || !isfinite(dt_s) ||
-	    dt_s <= 0.0f) {
+	if (dt_s <= 0.0f || cfg->output_limit_rad_s <= 0.0f ||
+	    cfg->integrator_limit_rad_s < 0.0f) {
 		return -EINVAL;
 	}
 

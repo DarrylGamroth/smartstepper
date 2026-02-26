@@ -44,10 +44,10 @@ int motor_velocity_regulator_step(const struct motor_velocity_regulator_config *
 				  float32_t dt_s,
 				  float32_t *iq_cmd_a_out)
 {
-	if (motor_velocity_regulator_validate(cfg) != 0 || state == NULL || iq_cmd_a_out == NULL) {
+	if (cfg == NULL || state == NULL || iq_cmd_a_out == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(speed_error_rad_s) || !isfinite(dt_s) || dt_s <= 0.0f) {
+	if (dt_s <= 0.0f || cfg->output_limit_a <= 0.0f || cfg->integrator_limit_a < 0.0f) {
 		return -EINVAL;
 	}
 

@@ -148,12 +148,14 @@ int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 			    float32_t omega_ref_rad_s,
 			    float32_t *iq_cmd_a_out)
 {
-	int ret = motor_mpr_velocity_validate(cfg, model);
-
-	if (ret != 0 || state == NULL || iq_cmd_a_out == NULL) {
+	if (cfg == NULL || model == NULL || state == NULL || iq_cmd_a_out == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(omega_meas_rad_s) || !isfinite(omega_ref_rad_s)) {
+	if (cfg->dt_s <= 0.0f || cfg->horizon == 0U || cfg->q_speed <= 0.0f ||
+	    cfg->r_delta_iq <= 0.0f || cfg->iq_limit_a <= 0.0f ||
+	    cfg->max_delta_iq_a < 0.0f || cfg->disturbance_ki_nm_per_rad_s < 0.0f ||
+	    model->inertia_kgm2 <= 0.0f || model->torque_constant_nm_per_a <= 0.0f ||
+	    model->viscous_friction_nm_per_rad_s < 0.0f || model->coulomb_friction_nm < 0.0f) {
 		return -EINVAL;
 	}
 
@@ -272,12 +274,12 @@ int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 			    float32_t velocity_ff_rad_s,
 			    float32_t *velocity_cmd_rad_s_out)
 {
-	int ret = motor_mpr_position_validate(cfg);
-
-	if (ret != 0 || state == NULL || velocity_cmd_rad_s_out == NULL) {
+	if (cfg == NULL || state == NULL || velocity_cmd_rad_s_out == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(position_error_rad) || !isfinite(velocity_ff_rad_s)) {
+	if (cfg->dt_s <= 0.0f || cfg->horizon == 0U || cfg->r_delta_velocity <= 0.0f ||
+	    cfg->velocity_limit_rad_s <= 0.0f || cfg->max_delta_velocity_rad_s < 0.0f ||
+	    (cfg->q_position + cfg->q_velocity_ff) <= 0.0f) {
 		return -EINVAL;
 	}
 	if (!state->initialized) {
