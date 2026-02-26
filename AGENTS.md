@@ -32,14 +32,14 @@ podman exec priceless_wiles bash -lc '\
     /workspace/chopper/app \
     -d /workspace/build/chopper/smartstepper_v2 \
     -S serial-shell -S serial-console -- \
-    -DDTC_OVERLAY_FILE="app/boards/smartstepper_v2.overlay;app/configs/motor_mt6835_2a.overlay"'
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"'
 ```
 
 Overlay note:
 
 - The build requires a motor profile overlay that defines `/user_parameters` and `/motor_parameters`.
-- Default profile is `app/configs/motor_mt6835_2a.overlay`.
-- For AEAT-9955 hardware, switch to `app/configs/motor_aeat9955_067a.overlay`.
+- Default profile is `configs/motor_mt6835_2a.overlay`.
+- For AEAT-9955 hardware, switch to `configs/motor_aeat9955_067a.overlay`.
 
 ## Unit Tests
 
