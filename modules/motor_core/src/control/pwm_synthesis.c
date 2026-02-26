@@ -37,9 +37,6 @@ int motor_pwm_synthesis_step(const struct motor_pwm_synthesis_input *in,
 	float32_t vbus_inv = 1.0f / in->vbus_v;
 	out->ua_pu = in->va_v * vbus_inv;
 	out->ub_pu = in->vb_v * vbus_inv;
-	if (!isfinite(out->ua_pu) || !isfinite(out->ub_pu)) {
-		return -ERANGE;
-	}
 
 	pwmgen_spwm_2phase_f32(out->ua_pu, out->ub_pu, &out->da_pu, &out->db_pu);
 	out->da_pu = clamp_unit_interval(out->da_pu);

@@ -38,9 +38,6 @@ int motor_transforms_park(float32_t ia_a,
 	float32_t angle_deg = elec_angle_rad * (180.0f / PI_F32);
 	arm_sin_cos_f32(angle_deg, &sin_theta, &cos_theta);
 	arm_park_f32(ia_a, ib_a, id_a, iq_a, sin_theta, cos_theta);
-	if (!isfinite(*id_a) || !isfinite(*iq_a)) {
-		return -ERANGE;
-	}
 
 	return 0;
 }
@@ -61,9 +58,6 @@ int motor_transforms_inv_park(float32_t vd_v,
 	float32_t angle_deg = elec_angle_rad * (180.0f / PI_F32);
 	arm_sin_cos_f32(angle_deg, &sin_theta, &cos_theta);
 	arm_inv_park_f32(vd_v, vq_v, va_v, vb_v, sin_theta, cos_theta);
-	if (!isfinite(*va_v) || !isfinite(*vb_v)) {
-		return -ERANGE;
-	}
 
 	return 0;
 }
