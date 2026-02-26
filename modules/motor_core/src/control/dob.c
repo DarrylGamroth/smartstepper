@@ -140,12 +140,12 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	  float32_t iq_cmd_a,
 	  float32_t *iq_ff_a_out)
 {
-	int ret = motor_dob_validate(cfg, model);
-
-	if (ret != 0 || state == NULL || iq_ff_a_out == NULL) {
+	if (cfg == NULL || model == NULL || state == NULL || iq_ff_a_out == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(omega_meas_rad_s) || !isfinite(iq_cmd_a)) {
+	/* Hot-path structural guards: caller/config path owns full finite validation. */
+	if (cfg->dt_s <= 0.0f || cfg->torque_limit_nm <= 0.0f ||
+	    model->inertia_kgm2 <= 0.0f || model->torque_constant_nm_per_a <= 0.0f) {
 		return -EINVAL;
 	}
 
@@ -193,15 +193,11 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	if (iq_limit <= 0.0f) {
 		iq_limit = cfg->torque_limit_nm / model->torque_constant_nm_per_a;
 	}
-	if (!isfinite(iq_limit) || iq_limit <= 0.0f) {
+	if (iq_limit <= 0.0f) {
 		return -ERANGE;
 	}
 
 	float32_t iq_ff = -state->disturbance_nm / model->torque_constant_nm_per_a;
-	if (!isfinite(iq_ff)) {
-		return -ERANGE;
-	}
-
 	iq_ff = clampf(iq_ff, -iq_limit, iq_limit);
 	state->iq_ff_a = iq_ff;
 	state->omega_model_rad_s = omega_meas_rad_s;
