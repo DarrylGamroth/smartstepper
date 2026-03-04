@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #include <zephyr/dsp/utils.h>
-#include <zephyr/smf.h>
 
 #include "motor/runtime/commission_tune.h"
 
@@ -101,7 +100,8 @@ struct motor_commission_results {
 
 struct motor_commission_observation {
 	uint32_t control_loop_count;
-	const struct smf_state *state;
+	bool mode_velocity_closed;
+	bool mode_torque;
 	bool control_armed;
 	bool encoder_fresh;
 	bool encoder_warning;

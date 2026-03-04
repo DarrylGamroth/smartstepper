@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_current_ref_policy.h"
+#include "motor/runtime/current_ref_policy_runtime.h"
 
 #include <errno.h>
 

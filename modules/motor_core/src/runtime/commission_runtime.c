@@ -9,11 +9,9 @@
 
 #include <zephyr/sys/util.h>
 
-#include "motor_commission.h"
+#include "motor/runtime/commission_runtime.h"
 #include "config.h"
 #include "motor/estimation/commission_estimators.h"
-#include "motor_state_utils.h"
-#include "motor_states.h"
 #include "motor_torque.h"
 
 #define MOTOR_COMMISSION_DERIV_ALPHA 0.2f
@@ -43,16 +41,21 @@ static inline uint32_t motor_commission_default_decimation(void)
 	return MAX(decim, 1U);
 }
 
-static inline bool motor_commission_state_matches_expected(const struct smf_state *state,
-							   uint8_t expected_mode)
+static inline bool motor_commission_obs_matches_expected(
+	const struct motor_commission_observation *obs,
+	uint8_t expected_mode)
 {
+	if (obs == NULL) {
+		return false;
+	}
+
 	switch (expected_mode) {
 	case MOTOR_COMMISSION_EXPECT_ANY:
 		return true;
 	case MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED:
-		return motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+		return obs->mode_velocity_closed;
 	case MOTOR_COMMISSION_EXPECT_TORQUE:
-		return motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
+		return obs->mode_torque;
 	default:
 		return false;
 	}
@@ -752,7 +755,7 @@ void motor_commission_update(struct motor_parameters *params,
 		ctx->reject_data_invalid++;
 		return;
 	}
-	if (!motor_commission_state_matches_expected(obs->state, ctx->expected_mode)) {
+	if (!motor_commission_obs_matches_expected(obs, ctx->expected_mode)) {
 		ctx->rejected_samples++;
 		ctx->reject_mode_mismatch++;
 		return;

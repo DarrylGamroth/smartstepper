@@ -18,7 +18,7 @@
 #include "motor/estimation/rs_online.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/motion_profile.h"
-#include "motor_commission.h"
+#include "motor/runtime/commission_runtime.h"
 #include "motor_events.h"
 #include "motor_states.h"
 #include "motor/runtime/runtime_state.h"

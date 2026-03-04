@@ -34,7 +34,7 @@
 #include "motor_state_utils.h"
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
-#include "motor_commission.h"
+#include "motor/runtime/commission_runtime.h"
 #include "motor_torque.h"
 #include "motor/runtime/config_snapshot.h"
 

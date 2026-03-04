@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_ENCODER_FEEDBACK_H_
-#define MOTOR_ENCODER_FEEDBACK_H_
+#ifndef MOTOR_OBSERVERS_ENCODER_FEEDBACK_H_
+#define MOTOR_OBSERVERS_ENCODER_FEEDBACK_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -61,4 +61,4 @@ int motor_encoder_feedback_prepare_capture(const struct motor_parameters *params
 					   const struct motor_encoder_feedback *feedback,
 					   struct motor_capture_feedback *capture);
 
-#endif /* MOTOR_ENCODER_FEEDBACK_H_ */
+#endif /* MOTOR_OBSERVERS_ENCODER_FEEDBACK_H_ */

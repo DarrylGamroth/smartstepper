@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_RLS_RUNTIME_H_
-#define MOTOR_RLS_RUNTIME_H_
+#ifndef MOTOR_ESTIMATION_RLS_RUNTIME_H_
+#define MOTOR_ESTIMATION_RLS_RUNTIME_H_
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+
 #include <zephyr/dsp/types.h>
 
 struct motor_parameters;
@@ -70,4 +71,4 @@ static inline void motor_rls_update_estimators(struct motor_parameters *params,
 }
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 
-#endif /* MOTOR_RLS_RUNTIME_H_ */
+#endif /* MOTOR_ESTIMATION_RLS_RUNTIME_H_ */

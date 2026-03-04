@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_encoder_feedback.h"
+#include "motor/observers/encoder_feedback.h"
 
 #include <errno.h>
 #include <math.h>

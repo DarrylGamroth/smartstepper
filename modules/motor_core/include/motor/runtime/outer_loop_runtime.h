@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_CONTROL_OUTER_LOOPS_H_
-#define MOTOR_CONTROL_OUTER_LOOPS_H_
+#ifndef MOTOR_RUNTIME_OUTER_LOOP_RUNTIME_H_
+#define MOTOR_RUNTIME_OUTER_LOOP_RUNTIME_H_
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include <zephyr/dsp/types.h>
-#include <zephyr/smf.h>
 
 struct motor_parameters;
 
 struct motor_outer_loop_inputs {
-	const struct smf_state *state;
+	bool position_active;
+	bool velocity_active;
 	bool feature_angle_gen;
 	bool feature_velocity_traj;
 	uint32_t velocity_loop_decimation;
@@ -41,8 +41,8 @@ struct motor_outer_loop_outputs {
 	float32_t iq_ref_a;
 };
 
-int motor_control_outer_loops_step(struct motor_parameters *params,
-				   const struct motor_outer_loop_inputs *in,
-				   struct motor_outer_loop_outputs *out);
+int motor_outer_loop_runtime_step(struct motor_parameters *params,
+				  const struct motor_outer_loop_inputs *in,
+				  struct motor_outer_loop_outputs *out);
 
-#endif /* MOTOR_CONTROL_OUTER_LOOPS_H_ */
+#endif /* MOTOR_RUNTIME_OUTER_LOOP_RUNTIME_H_ */

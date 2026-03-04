@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_rls_runtime.h"
+#include "motor/estimation/rls_runtime.h"
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 

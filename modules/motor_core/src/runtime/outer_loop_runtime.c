@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_control_outer_loops.h"
+#include "motor/runtime/outer_loop_runtime.h"
 
 #include <errno.h>
 #include <math.h>
 
+#include <zephyr/sys/atomic.h>
+
 #include "config.h"
-#include "motor_states.h"
-#include "motor_state_utils.h"
+#include "motor/math/math_constants.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/filters/filter_so.h"
 #include "motor/motion/traj.h"
@@ -21,18 +22,18 @@
 #include "motor/control/dob.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
+#include "motor/motion/outer_loop_sched.h"
 #include "motor_torque.h"
 #include "motor_control_quality.h"
-#include "motor/motion/outer_loop_sched.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {
 	return params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR;
 }
 
-int motor_control_outer_loops_step(struct motor_parameters *params,
-				   const struct motor_outer_loop_inputs *in,
-				   struct motor_outer_loop_outputs *out)
+int motor_outer_loop_runtime_step(struct motor_parameters *params,
+				  const struct motor_outer_loop_inputs *in,
+				  struct motor_outer_loop_outputs *out)
 {
 	if (params == NULL || in == NULL || out == NULL) {
 		return -EINVAL;
@@ -44,12 +45,9 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
 
-	bool position_active = (in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]);
-	bool velocity_active = (in->state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] ||
-				in->state == &motor_states[MOTOR_STATE_ONLINE_POSITION]);
 	struct motor_outer_loop_sched_input sched_in = {
-		.position_active = position_active,
-		.velocity_active = velocity_active,
+		.position_active = in->position_active,
+		.velocity_active = in->velocity_active,
 		.position_decimation = in->position_loop_decimation,
 		.velocity_decimation = in->velocity_loop_decimation,
 	};
@@ -63,7 +61,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	params->velocity_loop_phase = sched_state.velocity_phase;
 
 	/* Position cascade: generate velocity target from position error. */
-	if (position_active) {
+	if (in->position_active) {
 		float32_t position_error_rad;
 		float32_t profile_velocity_ff_rad_s = 0.0f;
 		float32_t pos_i_limit_rad_s = params->profile_max_velocity_rad_s;
@@ -144,8 +142,8 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	/* Update velocity trajectory if enabled */
 	if (in->feature_velocity_traj) {
 		motor_velocity_plan_step(&params->traj_velocity,
-					&out->velocity_target_rad_s,
-					&out->velocity_ref_rad_s);
+					 &out->velocity_target_rad_s,
+					 &out->velocity_ref_rad_s);
 
 		/* Open-loop commutation uses the trajectory directly. */
 		if (in->feature_angle_gen) {
@@ -154,7 +152,7 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 	}
 
 	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
-	if (velocity_active) {
+	if (in->velocity_active) {
 		out->speed_mech_filtered_rad_s =
 			filter_so_run(&params->filter_velocity_notch, in->speed_mech_rad_s);
 		bool velocity_feedback_valid =
@@ -287,7 +285,8 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 
 				if (dob_ready) {
 					float32_t iq_dob_ff_a = 0.0f;
-					int dob_ret = motor_dob_step(&dob_cfg, &dob_model, &params->velocity_dob_state,
+					int dob_ret = motor_dob_step(&dob_cfg, &dob_model,
+								     &params->velocity_dob_state,
 								     out->speed_mech_filtered_rad_s,
 								     iq_cmd_pre_dob_a,
 								     &iq_dob_ff_a);
@@ -298,8 +297,8 @@ int motor_control_outer_loops_step(struct motor_parameters *params,
 						params->velocity_dob_residual_rad_s =
 							params->velocity_dob_state.residual_rad_s;
 						out->iq_ref_a = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
-								      -params->velocity_cl_iq_limit_A,
-								      params->velocity_cl_iq_limit_A);
+								       -params->velocity_cl_iq_limit_A,
+								       params->velocity_cl_iq_limit_A);
 					} else {
 						motor_dob_reset(&params->velocity_dob_state,
 								out->speed_mech_filtered_rad_s);

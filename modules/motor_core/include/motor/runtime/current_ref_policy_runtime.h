@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_CURRENT_REF_POLICY_H_
-#define MOTOR_CURRENT_REF_POLICY_H_
+#ifndef MOTOR_RUNTIME_CURRENT_REF_POLICY_RUNTIME_H_
+#define MOTOR_RUNTIME_CURRENT_REF_POLICY_RUNTIME_H_
 
 #include <stdbool.h>
 
@@ -38,4 +38,4 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 				   const struct motor_current_ref_policy_inputs *in,
 				   struct motor_current_ref_policy_outputs *out);
 
-#endif /* MOTOR_CURRENT_REF_POLICY_H_ */
+#endif /* MOTOR_RUNTIME_CURRENT_REF_POLICY_RUNTIME_H_ */

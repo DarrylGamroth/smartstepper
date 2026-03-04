@@ -28,6 +28,7 @@ motor_core_configure_target(motor_core_motion)
 
 add_library(motor_core_estimation STATIC
 	estimation/rls_motor_est.c
+	estimation/rls_runtime.c
 	estimation/rs_online.c
 	estimation/thermal_model.c
 	math/prbs.c
@@ -44,12 +45,16 @@ motor_core_configure_target(motor_core_commission)
 
 add_library(motor_core_rt STATIC
 	runtime/motor_core_step.c
+	runtime/commission_runtime.c
+	runtime/outer_loop_runtime.c
+	runtime/current_ref_policy_runtime.c
 	runtime/config_snapshot.c
 	runtime/command_arbitration.c
 	runtime/keepalive_policy.c
 	protection/interlocks.c
 	observers/angle_observer.c
 	observers/angle_path.c
+	observers/encoder_feedback.c
 	observers/encoder_feedback_core.c
 	control/dob.c
 	control/mpr.c

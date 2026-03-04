@@ -30,18 +30,18 @@
 #include "motor/math/angle_wrap.h"
 #include "motor/runtime/config_snapshot.h"
 #include "motor/runtime/keepalive_policy.h"
-#include "motor_rls_runtime.h"
+#include "motor/estimation/rls_runtime.h"
 #include "motor/control/foc_voltage_pwm.h"
 #include "motor_state_utils.h"
-#include "motor_commission.h"
+#include "motor/runtime/commission_runtime.h"
 #include "motor/control/dob.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_torque.h"
-#include "motor_encoder_feedback.h"
+#include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback.h"
 #include "motor/telemetry/capture.h"
-#include "motor_control_outer_loops.h"
-#include "motor_current_ref_policy.h"
+#include "motor/runtime/outer_loop_runtime.h"
+#include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor_control_quality.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
@@ -317,7 +317,9 @@ void motor_core_step_fast(struct motor_parameters *params,
 	bool autonomous_keepalive = false;
 	struct motor_commission_observation commission_obs = {
 		.control_loop_count = 0U,
-		.state = state,
+		.mode_velocity_closed = motor_state_ptr_is_mode(
+			state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED),
+		.mode_torque = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE),
 		.control_armed = control_armed,
 		.encoder_fresh = false,
 		.encoder_warning = false,
@@ -592,7 +594,9 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	struct motor_outer_loop_inputs outer_inputs = {
-		.state = state,
+		.position_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION),
+		.velocity_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+				   motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION),
 		.feature_angle_gen = feature_angle_gen,
 		.feature_velocity_traj = feature_velocity_traj,
 		.velocity_loop_decimation = velocity_loop_decimation,
@@ -609,7 +613,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 		.iq_ref_a = Iq_ref_A,
 	};
 	struct motor_outer_loop_outputs outer_outputs = {0};
-	(void)motor_control_outer_loops_step(params, &outer_inputs, &outer_outputs);
+	(void)motor_outer_loop_runtime_step(params, &outer_inputs, &outer_outputs);
 	velocity_target_rad_s = outer_outputs.velocity_target_rad_s;
 	velocity_ref_rad_s = outer_outputs.velocity_ref_rad_s;
 	speed_mech_filtered_rad_s = outer_outputs.speed_mech_filtered_rad_s;
@@ -779,7 +783,10 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 isr_done:
 	commission_obs.control_armed = control_armed;
-	commission_obs.state = state;
+	commission_obs.mode_velocity_closed =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+	commission_obs.mode_torque =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
 	commission_obs.fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
 	motor_runtime_fast_sync(params, control_armed);
 	motor_runtime_diag_sync(params);

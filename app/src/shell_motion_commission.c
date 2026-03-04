@@ -12,7 +12,7 @@
 
 #include "shell_commands_commission.h"
 #include "shell_commands_motion.h"
-#include "motor_commission.h"
+#include "motor/runtime/commission_runtime.h"
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "shell_parse.h"
