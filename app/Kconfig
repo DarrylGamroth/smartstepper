@@ -72,4 +72,13 @@ config MOTOR_OUTER_LOOP_MPR
 	  Enables SpinTAC-style model predictive regulators for the velocity and
 	  position outer loops. Disable to use legacy PI outer loops.
 
+config MOTOR_ISR_SANITY_CHECKS
+	bool "Enable runtime finite/sanity checks in ISR control path"
+	default y
+	help
+	  Enables finite-value guards in the fast ISR control path.
+	  Keep enabled during bring-up/debugging for fault containment.
+	  Disable in performance-focused builds to remove redundant hot-path checks
+	  after the signal chain and configuration are validated.
+
 endmenu

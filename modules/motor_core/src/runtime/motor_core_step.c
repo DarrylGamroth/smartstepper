@@ -676,10 +676,19 @@ void motor_core_step_fast(struct motor_parameters *params,
 		.feedback_valid = decoupling_feedback_valid,
 	};
 	bool dq_decoupling_enabled = motor_dq_decoupling_is_enabled(&decoupling_enable_in);
-	float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
+		float32_t decoupling_speed_rad_s = decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
 
-	struct motor_foc_voltage_pwm_inputs foc_inputs = {
-		.id_ref_a = Id_ref_A,
+#if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
+		/* Fast-path ingress sanity gate for downstream control modules. */
+		if (!isfinite(inv_park_angle_rad) || !isfinite(Id_ref_A) || !isfinite(Iq_ref_A) ||
+		    !isfinite(Id_A) || !isfinite(Iq_A) || !isfinite(Vbus_V) ||
+		    !isfinite(params->max_modulation_index) || params->max_modulation_index <= 0.0f) {
+			goto isr_done;
+		}
+#endif
+
+		struct motor_foc_voltage_pwm_inputs foc_inputs = {
+			.id_ref_a = Id_ref_A,
 		.iq_ref_a = Iq_ref_A,
 		.id_a = Id_A,
 		.iq_a = Iq_A,

@@ -20,6 +20,7 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	if (pi_id == NULL || pi_iq == NULL || in == NULL || out == NULL) {
 		return -EINVAL;
 	}
+#if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
 	if (!isfinite(in->vbus_v) || in->vbus_v <= 0.0f) {
 		return -EINVAL;
 	}
@@ -27,6 +28,11 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	    !isfinite(in->id_a) || !isfinite(in->iq_a)) {
 		return -EINVAL;
 	}
+#else
+	if (in->vbus_v <= 0.0f) {
+		return -EINVAL;
+	}
+#endif
 
 	float32_t max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
 	if (max_voltage_magnitude_v <= 0.0f) {
