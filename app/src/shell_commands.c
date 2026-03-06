@@ -1369,21 +1369,21 @@ static int cmd_motor_rls_status(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "");
 	
 	/* D-axis status */
-	bool d_converged = rls_motor_est_is_converged(&g_motor_params->rls_d);
-	float32_t d_residual = rls_motor_est_get_residual(&g_motor_params->rls_d);
+	bool d_converged = rls_motor_est_is_converged(&g_motor_params->rls.d);
+	float32_t d_residual = rls_motor_est_get_residual(&g_motor_params->rls.d);
 	shell_print(sh, "D-axis:");
 	shell_print(sh, "  Converged:     %s", d_converged ? "YES" : "NO");
 	shell_print(sh, "  Residual:      %.6f V", (double)d_residual);
-	shell_print(sh, "  Update count:  %u", g_motor_params->rls_d.num_updates);
+	shell_print(sh, "  Update count:  %u", g_motor_params->rls.d.num_updates);
 	
 	/* Q-axis status */
-	bool q_converged = rls_motor_est_is_converged(&g_motor_params->rls_q);
-	float32_t q_residual = rls_motor_est_get_residual(&g_motor_params->rls_q);
+	bool q_converged = rls_motor_est_is_converged(&g_motor_params->rls.q);
+	float32_t q_residual = rls_motor_est_get_residual(&g_motor_params->rls.q);
 	shell_print(sh, "");
 	shell_print(sh, "Q-axis:");
 	shell_print(sh, "  Converged:     %s", q_converged ? "YES" : "NO");
 	shell_print(sh, "  Residual:      %.6f V", (double)q_residual);
-	shell_print(sh, "  Update count:  %u", g_motor_params->rls_q.num_updates);
+	shell_print(sh, "  Update count:  %u", g_motor_params->rls.q.num_updates);
 	
 	return 0;
 }
@@ -1397,16 +1397,16 @@ static int cmd_motor_rls_params(const struct shell *sh, size_t argc, char **argv
 	}
 	
 	/* D-axis estimates */
-	float32_t Rs_d = rls_motor_est_get_Rs(&g_motor_params->rls_d);
-	float32_t Ld = rls_motor_est_get_L(&g_motor_params->rls_d);
-	float32_t Vbias_d = rls_motor_est_get_Vbias(&g_motor_params->rls_d);
-	float32_t Vdt_d = rls_motor_est_get_Vdt_sign(&g_motor_params->rls_d);
+	float32_t Rs_d = rls_motor_est_get_Rs(&g_motor_params->rls.d);
+	float32_t Ld = rls_motor_est_get_L(&g_motor_params->rls.d);
+	float32_t Vbias_d = rls_motor_est_get_Vbias(&g_motor_params->rls.d);
+	float32_t Vdt_d = rls_motor_est_get_Vdt_sign(&g_motor_params->rls.d);
 	
 	/* Q-axis estimates */
-	float32_t Rs_q = rls_motor_est_get_Rs(&g_motor_params->rls_q);
-	float32_t Lq = rls_motor_est_get_L(&g_motor_params->rls_q);
-	float32_t Vbias_q = rls_motor_est_get_Vbias(&g_motor_params->rls_q);
-	float32_t Vdt_q = rls_motor_est_get_Vdt_sign(&g_motor_params->rls_q);
+	float32_t Rs_q = rls_motor_est_get_Rs(&g_motor_params->rls.q);
+	float32_t Lq = rls_motor_est_get_L(&g_motor_params->rls.q);
+	float32_t Vbias_q = rls_motor_est_get_Vbias(&g_motor_params->rls.q);
+	float32_t Vdt_q = rls_motor_est_get_Vdt_sign(&g_motor_params->rls.q);
 	
 	/* Averaged/synthesized values */
 	float32_t Rs_avg = g_motor_params->Rs_measured_ohm;
@@ -1440,9 +1440,9 @@ static int cmd_motor_rls_temp(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 	
-	float32_t T_rls = g_motor_params->T_rls_C;
-	float32_t T_thermal = thermal_model_get_temperature(&g_motor_params->thermal);
-	float32_t P_loss = thermal_model_get_power_loss(&g_motor_params->thermal);
+	float32_t T_rls = g_motor_params->thermal.t_rls_c;
+	float32_t T_thermal = thermal_model_get_temperature(&g_motor_params->thermal.model);
+	float32_t P_loss = thermal_model_get_power_loss(&g_motor_params->thermal.model);
 	float32_t T_delta = T_rls - T_thermal;
 	
 	shell_print(sh, "Temperature Estimates:");
@@ -1453,9 +1453,9 @@ static int cmd_motor_rls_temp(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "");
 	shell_print(sh, "Thermal Model:");
 	shell_print(sh, "  Power loss:            %.3f W", (double)P_loss);
-	shell_print(sh, "  Ambient temp:          %.2f °C", (double)g_motor_params->thermal.T_ambient);
-	shell_print(sh, "  R_th:                  %.3f °C/W", (double)g_motor_params->thermal.R_th);
-	shell_print(sh, "  C_th:                  %.1f J/°C", (double)g_motor_params->thermal.C_th);
+	shell_print(sh, "  Ambient temp:          %.2f °C", (double)g_motor_params->thermal.model.T_ambient);
+	shell_print(sh, "  R_th:                  %.3f °C/W", (double)g_motor_params->thermal.model.R_th);
+	shell_print(sh, "  C_th:                  %.1f J/°C", (double)g_motor_params->thermal.model.C_th);
 	
 	return 0;
 }
@@ -1471,27 +1471,27 @@ static int cmd_motor_rls_gating(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "RLS Gating Conditions:");
 	shell_print(sh, "");
 	shell_print(sh, "Thresholds:");
-	shell_print(sh, "  Min current:     %.3f A", (double)g_motor_params->rls_min_current_A);
+	shell_print(sh, "  Min current:     %.3f A", (double)g_motor_params->rls.min_current_a);
 	/* Convert rad/s to Hz for display */
-	float32_t min_speed_hz = g_motor_params->rls_min_speed_rad_s / (2.0f * PI_F32);
+	float32_t min_speed_hz = g_motor_params->rls.min_speed_rad_s / (2.0f * PI_F32);
 	shell_print(sh, "  Min speed:       %.2f Hz", (double)min_speed_hz);
-	shell_print(sh, "  Max voltage:     %.2f V", (double)g_motor_params->rls_max_voltage_V);
-	shell_print(sh, "  Max residual:    %.4f V", (double)g_motor_params->rls_max_residual);
+	shell_print(sh, "  Max voltage:     %.2f V", (double)g_motor_params->rls.max_voltage_v);
+	shell_print(sh, "  Max residual:    %.4f V", (double)g_motor_params->rls.max_residual_v);
 	shell_print(sh, "");
 	shell_print(sh, "Current Status:");
 	float32_t Id_abs = fabsf(g_motor_params->Id_A);
 	float32_t Iq_abs = fabsf(g_motor_params->Iq_A);
 	float32_t omega_hz = fabsf(g_motor_params->velocity_rad_s / (2.0f * PI_F32));
 	shell_print(sh, "  |Id|:             %.3f A %s", (double)Id_abs,
-	            Id_abs > g_motor_params->rls_min_current_A ? "[OK]" : "[LOW]");
+	            Id_abs > g_motor_params->rls.min_current_a ? "[OK]" : "[LOW]");
 	shell_print(sh, "  |Iq|:             %.3f A %s", (double)Iq_abs,
-	            Iq_abs > g_motor_params->rls_min_current_A ? "[OK]" : "[LOW]");
+	            Iq_abs > g_motor_params->rls.min_current_a ? "[OK]" : "[LOW]");
 	shell_print(sh, "  Speed:           %.2f Hz %s", (double)omega_hz,
 	            omega_hz > min_speed_hz ? "[OK]" : "[LOW]");
-	shell_print(sh, "  D residual:      %.6f V %s", (double)g_motor_params->rls_d.residual,
-	            fabsf(g_motor_params->rls_d.residual) < g_motor_params->rls_max_residual ? "[OK]" : "[HIGH]");
-	shell_print(sh, "  Q residual:      %.6f V %s", (double)g_motor_params->rls_q.residual,
-	            fabsf(g_motor_params->rls_q.residual) < g_motor_params->rls_max_residual ? "[OK]" : "[HIGH]");
+	shell_print(sh, "  D residual:      %.6f V %s", (double)g_motor_params->rls.d.residual,
+	            fabsf(g_motor_params->rls.d.residual) < g_motor_params->rls.max_residual_v ? "[OK]" : "[HIGH]");
+	shell_print(sh, "  Q residual:      %.6f V %s", (double)g_motor_params->rls.q.residual,
+	            fabsf(g_motor_params->rls.q.residual) < g_motor_params->rls.max_residual_v ? "[OK]" : "[HIGH]");
 	
 	return 0;
 }
@@ -1505,23 +1505,23 @@ static int cmd_motor_rls_reset(const struct shell *sh, size_t argc, char **argv)
 	}
 	
 	/* Reset both RLS estimators */
-	rls_motor_est_reset(&g_motor_params->rls_d);
-	rls_motor_est_reset(&g_motor_params->rls_q);
-	prbs_reset(&g_motor_params->prbs_gen);
+	rls_motor_est_reset(&g_motor_params->rls.d);
+	rls_motor_est_reset(&g_motor_params->rls.q);
+	prbs_reset(&g_motor_params->rls.prbs_gen);
 
 	/* Reset estimator side-state used by ISR update gating/derivative timing. */
-	g_motor_params->Id_rls_prev = 0.0f;
-	g_motor_params->Iq_rls_prev = 0.0f;
-	g_motor_params->rls_d_prev_cycle = g_motor_params->control_loop_count;
-	g_motor_params->rls_q_prev_cycle = g_motor_params->control_loop_count;
-	g_motor_params->rls_d_prev_valid = 0u;
-	g_motor_params->rls_q_prev_valid = 0u;
+	g_motor_params->rls.id_prev_a = 0.0f;
+	g_motor_params->rls.iq_prev_a = 0.0f;
+	g_motor_params->rls.d_prev_cycle = g_motor_params->control_loop_count;
+	g_motor_params->rls.q_prev_cycle = g_motor_params->control_loop_count;
+	g_motor_params->rls.d_prev_valid = 0u;
+	g_motor_params->rls.q_prev_valid = 0u;
 
 	/* Restore synthesized values to reset estimator baselines. */
-	g_motor_params->Ld_est = rls_motor_est_get_L(&g_motor_params->rls_d);
-	g_motor_params->Lq_est = rls_motor_est_get_L(&g_motor_params->rls_q);
-	g_motor_params->Rs_measured_ohm = rls_motor_est_get_Rs(&g_motor_params->rls_d);
-	g_motor_params->T_rls_C = THERMAL_T_AMBIENT;
+	g_motor_params->rls.ld_est_h = rls_motor_est_get_L(&g_motor_params->rls.d);
+	g_motor_params->rls.lq_est_h = rls_motor_est_get_L(&g_motor_params->rls.q);
+	g_motor_params->Rs_measured_ohm = rls_motor_est_get_Rs(&g_motor_params->rls.d);
+	g_motor_params->thermal.t_rls_c = THERMAL_T_AMBIENT;
 
 	shell_print(sh, "RLS estimators fully reset (state, covariance, PRBS, side-state)");
 

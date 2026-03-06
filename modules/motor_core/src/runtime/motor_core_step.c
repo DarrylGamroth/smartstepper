@@ -221,10 +221,10 @@ static inline void motor_post_error_with_snapshot(struct motor_parameters *param
 static inline void motor_runtime_fast_sync(struct motor_parameters *params, bool control_armed)
 {
 	params->rt_fast.control_loop_count = params->control_loop_count;
-	params->rt_fast.rls_d_prev_cycle = params->rls_d_prev_cycle;
-	params->rt_fast.rls_q_prev_cycle = params->rls_q_prev_cycle;
-	params->rt_fast.rls_d_prev_valid = params->rls_d_prev_valid;
-	params->rt_fast.rls_q_prev_valid = params->rls_q_prev_valid;
+	params->rt_fast.rls_d_prev_cycle = params->rls.d_prev_cycle;
+	params->rt_fast.rls_q_prev_cycle = params->rls.q_prev_cycle;
+	params->rt_fast.rls_d_prev_valid = params->rls.d_prev_valid;
+	params->rt_fast.rls_q_prev_valid = params->rls.q_prev_valid;
 	params->rt_fast.Id_setpoint_A = params->Id_setpoint_A;
 	params->rt_fast.Iq_setpoint_A = params->Iq_setpoint_A;
 	params->rt_fast.Vd_V = params->Vd_V;
@@ -828,8 +828,8 @@ void motor_core_step_fast(struct motor_parameters *params,
 		 */
 		.dq_decoupling_enabled = dq_decoupling_enabled,
 		.electrical_speed_rad_s = decoupling_speed_rad_s,
-		.ld_h = params->Ld_est,
-		.lq_h = params->Lq_est,
+		.ld_h = params->rls.ld_est_h,
+		.lq_h = params->rls.lq_est_h,
 		.flux_linkage_wb = params->flux_linkage_wb_active,
 		.dq_decoupling_flux_headroom_ratio = CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO,
 		.dq_decoupling_ff_limit_ratio = CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO,

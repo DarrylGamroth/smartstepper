@@ -209,6 +209,36 @@ struct motor_fault_snapshot_ctx {
 	struct motor_fault_snapshot_sample samples[MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES];
 };
 
+struct motor_rls_ctx {
+	struct prbs_gen prbs_gen;        /* PRBS generator state */
+	struct rls_motor_est d;          /* D-axis RLS estimator */
+	struct rls_motor_est q;          /* Q-axis RLS estimator */
+	uint32_t decimation;             /* RLS update rate decimation (power-of-2) */
+	uint32_t stagger_offset;         /* Q-axis RLS stagger offset for load spreading */
+	float32_t excitation_current_a;  /* PRBS d-axis current excitation amplitude */
+	float32_t ld_est_h;              /* D-axis inductance estimate for cross-coupling */
+	float32_t lq_est_h;              /* Q-axis inductance estimate for cross-coupling */
+	float32_t id_prev_a;             /* Previous accepted RLS Id sample for dI/dt */
+	float32_t iq_prev_a;             /* Previous accepted RLS Iq sample for dI/dt */
+	uint32_t d_prev_cycle;           /* Control-loop count of previous accepted d-axis sample */
+	uint32_t q_prev_cycle;           /* Control-loop count of previous accepted q-axis sample */
+	uint8_t d_prev_valid;            /* Previous d-axis sample initialized */
+	uint8_t q_prev_valid;            /* Previous q-axis sample initialized */
+	float32_t min_current_a;         /* Minimum current for observability */
+	float32_t min_speed_rad_s;       /* Minimum electrical speed for back-EMF observability */
+	float32_t max_residual_v;        /* Maximum residual before disabling RLS */
+	float32_t max_voltage_v;         /* Maximum voltage magnitude for validity check */
+};
+
+struct motor_thermal_ctx {
+	struct thermal_model model;      /* Thermal model state */
+	uint32_t decimation;             /* Thermal update rate decimation (power-of-2) */
+	float32_t rs_ref_ohm;            /* Reference Rs from calibration (at ref temp) */
+	float32_t rs_ref_temp_c;         /* Reference temperature for Rs measurement (deg C) */
+	float32_t rs_temp_coeff;         /* Rs temperature coefficient (1/deg C) */
+	float32_t t_rls_c;               /* Temperature from RLS Rs estimate (deg C) */
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -346,35 +376,9 @@ struct motor_parameters {
 	atomic_t feature_flags;
 	atomic_val_t feature_flags_next;  /* Pending flags to apply after state entry completes (state machine thread only) */
 
-	/* RLS parameter estimation */
-	struct prbs_gen prbs_gen;        /* PRBS generator state */
-	struct rls_motor_est rls_d;      /* D-axis RLS estimator */
-	struct rls_motor_est rls_q;      /* Q-axis RLS estimator */
-	uint32_t rls_decimation;         /* RLS update rate decimation (power-of-2) */
-	uint32_t rls_stagger_offset;     /* Q-axis RLS stagger offset for load spreading */
-	float32_t rls_excitation_current_A; /* PRBS d-axis current excitation amplitude */
-	float32_t Ld_est;                /* D-axis inductance estimate for cross-coupling */
-	float32_t Lq_est;                /* Q-axis inductance estimate for cross-coupling */
-	float32_t Id_rls_prev;           /* Previous accepted RLS Id sample for dI/dt */
-	float32_t Iq_rls_prev;           /* Previous accepted RLS Iq sample for dI/dt */
-	uint32_t rls_d_prev_cycle;       /* Control-loop count of previous accepted d-axis sample */
-	uint32_t rls_q_prev_cycle;       /* Control-loop count of previous accepted q-axis sample */
-	uint8_t rls_d_prev_valid;        /* Previous d-axis sample initialized */
-	uint8_t rls_q_prev_valid;        /* Previous q-axis sample initialized */
-
-	/* Thermal model */
-	struct thermal_model thermal;    /* Thermal model state */
-	uint32_t thermal_decimation;     /* Thermal update rate decimation (power-of-2) */
-	float32_t Rs_ref_ohm;            /* Reference Rs from calibration (at ref temp) */
-	float32_t Rs_ref_temp_C;         /* Reference temperature for Rs measurement (°C) */
-	float32_t Rs_temp_coeff;         /* Rs temperature coefficient (1/°C) */
-	float32_t T_rls_C;               /* Temperature from RLS Rs estimate (°C) */
-
-	/* RLS gating conditions */
-	float32_t rls_min_current_A;    /* Minimum current for observability */
-	float32_t rls_min_speed_rad_s;  /* Minimum electrical speed for back-EMF observability */
-	float32_t rls_max_residual;     /* Maximum residual before disabling RLS */
-	float32_t rls_max_voltage_V;    /* Maximum voltage magnitude for validity check */
+	/* RLS + thermal estimator runtime. */
+	struct motor_rls_ctx rls;
+	struct motor_thermal_ctx thermal;
 
 	/* Live telemetry snapshot (updated in ISR) */
 	float32_t position_rad;

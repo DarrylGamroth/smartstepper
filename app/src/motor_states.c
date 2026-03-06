@@ -588,8 +588,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->inertia_kgm2_active = MOTOR_INERTIA_KGM2;
 	params->viscous_friction_nm_per_rad_s_active = 0.0f;
 	params->coulomb_friction_nm_active = 0.0f;
-	params->Ld_est = MOTOR_INDUCTANCE_D_H;
-	params->Lq_est = MOTOR_INDUCTANCE_Q_H;
+	params->rls.ld_est_h = MOTOR_INDUCTANCE_D_H;
+	params->rls.lq_est_h = MOTOR_INDUCTANCE_Q_H;
 	atomic_set(&params->control_armed, 0);
 	params->command_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
 	params->last_command_update_ms = k_uptime_get_32();
@@ -674,67 +674,67 @@ static void motor_state_ctrl_init_entry(void *obj)
 
 	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	/* Initialize PRBS generator and RLS parameters */
-	prbs_init(&params->prbs_gen);
-	params->rls_decimation = RLS_DECIMATION;
-	if (!is_power_of_two(params->rls_decimation)) {
-		LOG_WRN("Invalid rls_decimation=%u, forcing 1", params->rls_decimation);
-		params->rls_decimation = 1u;
+	prbs_init(&params->rls.prbs_gen);
+	params->rls.decimation = RLS_DECIMATION;
+	if (!is_power_of_two(params->rls.decimation)) {
+		LOG_WRN("Invalid rls_decimation=%u, forcing 1", params->rls.decimation);
+		params->rls.decimation = 1u;
 	}
-	params->rls_stagger_offset = RLS_STAGGER_OFFSET;
-	if (params->rls_stagger_offset >= params->rls_decimation) {
-		params->rls_stagger_offset &= (params->rls_decimation - 1u);
+	params->rls.stagger_offset = RLS_STAGGER_OFFSET;
+	if (params->rls.stagger_offset >= params->rls.decimation) {
+		params->rls.stagger_offset &= (params->rls.decimation - 1u);
 	}
-	params->rls_excitation_current_A = RLS_EXCITATION_CURRENT_A;
-	params->Ld_est = params->Ls_measured_H;  /* Initial estimate from calibration */
-	params->Lq_est = RLS_INITIAL_LQ_H;
-	params->Id_rls_prev = 0.0f;  /* Initialize previous RLS current for dI/dt */
-	params->Iq_rls_prev = 0.0f;
-	params->rls_d_prev_cycle = 0u;
-	params->rls_q_prev_cycle = 0u;
-	params->rls_d_prev_valid = 0u;
-	params->rls_q_prev_valid = 0u;
+	params->rls.excitation_current_a = RLS_EXCITATION_CURRENT_A;
+	params->rls.ld_est_h = params->Ls_measured_H;  /* Initial estimate from calibration */
+	params->rls.lq_est_h = RLS_INITIAL_LQ_H;
+	params->rls.id_prev_a = 0.0f;  /* Initialize previous RLS current for dI/dt */
+	params->rls.iq_prev_a = 0.0f;
+	params->rls.d_prev_cycle = 0u;
+	params->rls.q_prev_cycle = 0u;
+	params->rls.d_prev_valid = 0u;
+	params->rls.q_prev_valid = 0u;
 
 	/* Initialize d-axis RLS estimator */
-	rls_motor_est_init(&params->rls_d,
+	rls_motor_est_init(&params->rls.d,
 	                   RLS_LAMBDA,
-	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls_decimation,
+	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls.decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
 	                   params->Ls_measured_H,
 	                   RLS_INITIAL_COVARIANCE);
 
 	/* Initialize q-axis RLS estimator */
-	rls_motor_est_init(&params->rls_q,
+	rls_motor_est_init(&params->rls.q,
 	                   RLS_LAMBDA,
-	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls_decimation,
+	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls.decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
 	                   RLS_INITIAL_LQ_H,
 	                   RLS_INITIAL_COVARIANCE);
 
 	/* Initialize thermal model */
-	params->thermal_decimation = THERMAL_DECIMATION;
-	if (!is_power_of_two(params->thermal_decimation)) {
-		LOG_WRN("Invalid thermal_decimation=%u, forcing 1", params->thermal_decimation);
-		params->thermal_decimation = 1u;
+	params->thermal.decimation = THERMAL_DECIMATION;
+	if (!is_power_of_two(params->thermal.decimation)) {
+		LOG_WRN("Invalid thermal_decimation=%u, forcing 1", params->thermal.decimation);
+		params->thermal.decimation = 1u;
 	}
-	params->Rs_ref_ohm = params->Rs_measured_ohm;  /* Save calibrated Rs as reference */
-	params->Rs_ref_temp_C = RS_REF_TEMP_C;
-	params->Rs_temp_coeff = RS_TEMP_COEFF;
-	params->T_rls_C = THERMAL_T_AMBIENT;  /* Initialize to ambient */
+	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;  /* Save calibrated Rs as reference */
+	params->thermal.rs_ref_temp_c = RS_REF_TEMP_C;
+	params->thermal.rs_temp_coeff = RS_TEMP_COEFF;
+	params->thermal.t_rls_c = THERMAL_T_AMBIENT;  /* Initialize to ambient */
 
-	float32_t thermal_update_freq = CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->thermal_decimation;
-	thermal_model_init(&params->thermal,
+	float32_t thermal_update_freq = CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->thermal.decimation;
+	thermal_model_init(&params->thermal.model,
 	                   THERMAL_R_TH,
 	                   THERMAL_C_TH,
 	                   THERMAL_T_AMBIENT,
 	                   thermal_update_freq);
 
 	/* Initialize RLS gating conditions */
-	params->rls_min_current_A = RLS_MIN_CURRENT_A;
-	params->rls_min_speed_rad_s = RLS_MIN_SPEED_RAD_S;
-	params->rls_max_residual = RLS_MAX_RESIDUAL;
-	params->rls_max_voltage_V = RLS_MAX_VOLTAGE_V;
+	params->rls.min_current_a = RLS_MIN_CURRENT_A;
+	params->rls.min_speed_rad_s = RLS_MIN_SPEED_RAD_S;
+	params->rls.max_residual_v = RLS_MAX_RESIDUAL;
+	params->rls.max_voltage_v = RLS_MAX_VOLTAGE_V;
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 }
 

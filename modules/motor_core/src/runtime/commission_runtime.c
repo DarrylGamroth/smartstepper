@@ -171,8 +171,8 @@ static void motor_commission_estimate_flux(struct motor_parameters *params)
 	struct motor_flux_id_result estimate;
 	const struct motor_flux_id_config cfg = {
 		.rs_ohm = params->Rs_measured_ohm,
-		.ld_h = params->Ld_est,
-		.lq_h = params->Lq_est,
+		.ld_h = params->rls.ld_est_h,
+		.lq_h = params->rls.lq_est_h,
 		.min_abs_speed_rad_s = MOTOR_COMMISSION_MIN_SPEED_RAD_S,
 		.min_speed_span_rad_s = 2.0f * MOTOR_COMMISSION_MIN_SPEED_RAD_S,
 		.min_samples = MOTOR_COMMISSION_MIN_FLUX_SAMPLES,

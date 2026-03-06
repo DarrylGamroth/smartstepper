@@ -27,7 +27,7 @@ float32_t motor_rls_prepare_id_reference(struct motor_parameters *params,
 		return id_ref_a;
 	}
 
-	runtime_state->rls_mask = params->rls_decimation - 1U;
+	runtime_state->rls_mask = params->rls.decimation - 1U;
 
 	bool rls_feature_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION);
@@ -40,9 +40,9 @@ float32_t motor_rls_prepare_id_reference(struct motor_parameters *params,
 
 	if (runtime_state->rls_runtime_enabled &&
 	    (params->control_loop_count & runtime_state->rls_mask) == 0U) {
-		uint32_t prbs_bit = prbs_advance(&params->prbs_gen);
+		uint32_t prbs_bit = prbs_advance(&params->rls.prbs_gen);
 		float32_t i_prbs_d =
-			(2.0f * (float32_t)prbs_bit - 1.0f) * params->rls_excitation_current_A;
+			(2.0f * (float32_t)prbs_bit - 1.0f) * params->rls.excitation_current_a;
 		id_ref_a += i_prbs_d;
 	}
 
@@ -66,39 +66,39 @@ void motor_rls_update_estimators(struct motor_parameters *params,
 		float32_t vd_abs = fabsf(vd_applied_v);
 		float32_t omega_elec = angle_observer_get_elec_speed(&params->observer);
 
-		bool voltage_ok = (vd_abs < params->rls_max_voltage_V);
+		bool voltage_ok = (vd_abs < params->rls.max_voltage_v);
 		bool pi_ok = (fabsf(vd_applied_v - pi_get_out_max(&params->pi_Id)) > 0.1f) &&
 			     (fabsf(vd_applied_v - pi_get_out_min(&params->pi_Id)) > 0.1f);
-		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
-		bool residual_ok = (params->rls_max_residual <= 0.0f) ||
-				   (params->rls_d.num_updates == 0U) ||
-				   (fabsf(params->rls_d.residual) <= params->rls_max_residual);
+		bool speed_ok = (fabsf(omega_elec) > params->rls.min_speed_rad_s);
+		bool residual_ok = (params->rls.max_residual_v <= 0.0f) ||
+				   (params->rls.d.num_updates == 0U) ||
+				   (fabsf(params->rls.d.residual) <= params->rls.max_residual_v);
 
 		if (voltage_ok && pi_ok && speed_ok && residual_ok) {
-			if (params->rls_d_prev_valid == 0U) {
-				params->Id_rls_prev = id_a;
-				params->rls_d_prev_cycle = params->control_loop_count;
-				params->rls_d_prev_valid = 1U;
+			if (params->rls.d_prev_valid == 0U) {
+				params->rls.id_prev_a = id_a;
+				params->rls.d_prev_cycle = params->control_loop_count;
+				params->rls.d_prev_valid = 1U;
 			} else {
 				uint32_t sample_cycles =
-					params->control_loop_count - params->rls_d_prev_cycle;
+					params->control_loop_count - params->rls.d_prev_cycle;
 				if (sample_cycles == 0U) {
 					sample_cycles = 1U;
 				}
 				float32_t sample_period_s =
 					(float32_t)sample_cycles / CONTROL_LOOP_FREQUENCY_HZ;
 
-				rls_motor_est_update(&params->rls_d, vd_applied_v, id_a,
-						     params->Id_rls_prev, omega_elec,
-						     params->Lq_est, iq_a, sample_period_s);
-				params->Id_rls_prev = id_a;
-				params->rls_d_prev_cycle = params->control_loop_count;
+				rls_motor_est_update(&params->rls.d, vd_applied_v, id_a,
+						     params->rls.id_prev_a, omega_elec,
+						     params->rls.lq_est_h, iq_a, sample_period_s);
+				params->rls.id_prev_a = id_a;
+				params->rls.d_prev_cycle = params->control_loop_count;
 			}
 		}
 	}
 
 	/* Q-axis RLS parameter estimation (staggered by offset for load spreading) */
-	const uint32_t rls_offset = params->rls_stagger_offset;
+	const uint32_t rls_offset = params->rls.stagger_offset;
 	if (runtime_state->rls_runtime_enabled &&
 	    ((params->control_loop_count & runtime_state->rls_mask) == rls_offset)) {
 		float32_t omega_elec = angle_observer_get_elec_speed(&params->observer);
@@ -110,23 +110,23 @@ void motor_rls_update_estimators(struct motor_parameters *params,
 		float32_t iq_abs = fabsf(iq_a);
 		float32_t vq_comp_abs = fabsf(vq_compensated);
 
-		bool current_ok = (iq_abs > params->rls_min_current_A);
-		bool voltage_ok = (vq_comp_abs < params->rls_max_voltage_V);
+		bool current_ok = (iq_abs > params->rls.min_current_a);
+		bool voltage_ok = (vq_comp_abs < params->rls.max_voltage_v);
 		bool pi_ok = (fabsf(vq_applied_v - pi_get_out_max(&params->pi_Iq)) > 0.1f) &&
 			     (fabsf(vq_applied_v - pi_get_out_min(&params->pi_Iq)) > 0.1f);
-		bool speed_ok = (fabsf(omega_elec) > params->rls_min_speed_rad_s);
-		bool residual_ok = (params->rls_max_residual <= 0.0f) ||
-				   (params->rls_q.num_updates == 0U) ||
-				   (fabsf(params->rls_q.residual) <= params->rls_max_residual);
+		bool speed_ok = (fabsf(omega_elec) > params->rls.min_speed_rad_s);
+		bool residual_ok = (params->rls.max_residual_v <= 0.0f) ||
+				   (params->rls.q.num_updates == 0U) ||
+				   (fabsf(params->rls.q.residual) <= params->rls.max_residual_v);
 
 		if (current_ok && voltage_ok && pi_ok && speed_ok && residual_ok) {
-			if (params->rls_q_prev_valid == 0U) {
-				params->Iq_rls_prev = iq_a;
-				params->rls_q_prev_cycle = params->control_loop_count;
-				params->rls_q_prev_valid = 1U;
+			if (params->rls.q_prev_valid == 0U) {
+				params->rls.iq_prev_a = iq_a;
+				params->rls.q_prev_cycle = params->control_loop_count;
+				params->rls.q_prev_valid = 1U;
 			} else {
 				uint32_t sample_cycles =
-					params->control_loop_count - params->rls_q_prev_cycle;
+					params->control_loop_count - params->rls.q_prev_cycle;
 				if (sample_cycles == 0U) {
 					sample_cycles = 1U;
 				}
@@ -134,35 +134,35 @@ void motor_rls_update_estimators(struct motor_parameters *params,
 					(float32_t)sample_cycles / CONTROL_LOOP_FREQUENCY_HZ;
 
 				/* Q-axis: pass -omega so RLS subtracts cross-coupling ω·Ld·Id. */
-				rls_motor_est_update(&params->rls_q, vq_compensated, iq_a,
-						     params->Iq_rls_prev, -omega_elec,
-						     params->Ld_est, id_a, sample_period_s);
-				params->Iq_rls_prev = iq_a;
-				params->rls_q_prev_cycle = params->control_loop_count;
+				rls_motor_est_update(&params->rls.q, vq_compensated, iq_a,
+						     params->rls.iq_prev_a, -omega_elec,
+						     params->rls.ld_est_h, id_a, sample_period_s);
+				params->rls.iq_prev_a = iq_a;
+				params->rls.q_prev_cycle = params->control_loop_count;
 			}
 		}
 
-		if (rls_motor_est_is_converged(&params->rls_d) &&
-		    rls_motor_est_is_converged(&params->rls_q)) {
-			params->Ld_est = rls_motor_est_get_L(&params->rls_d);
-			params->Lq_est = rls_motor_est_get_L(&params->rls_q);
+		if (rls_motor_est_is_converged(&params->rls.d) &&
+		    rls_motor_est_is_converged(&params->rls.q)) {
+			params->rls.ld_est_h = rls_motor_est_get_L(&params->rls.d);
+			params->rls.lq_est_h = rls_motor_est_get_L(&params->rls.q);
 
-			float32_t rs_d = rls_motor_est_get_Rs(&params->rls_d);
-			float32_t rs_q = rls_motor_est_get_Rs(&params->rls_q);
+			float32_t rs_d = rls_motor_est_get_Rs(&params->rls.d);
+			float32_t rs_q = rls_motor_est_get_Rs(&params->rls.q);
 			params->Rs_measured_ohm = (rs_d + rs_q) * 0.5f;
 
-			params->T_rls_C = thermal_Rs_to_temperature(params->Rs_measured_ohm,
-							     params->Rs_ref_ohm,
-							     params->Rs_ref_temp_C,
-							     params->Rs_temp_coeff);
+			params->thermal.t_rls_c = thermal_Rs_to_temperature(params->Rs_measured_ohm,
+							     params->thermal.rs_ref_ohm,
+							     params->thermal.rs_ref_temp_c,
+							     params->thermal.rs_temp_coeff);
 		}
 	}
 
 	/* Thermal model update (heavily decimated, ~10Hz). */
-	const uint32_t thermal_mask = params->thermal_decimation - 1U;
+	const uint32_t thermal_mask = params->thermal.decimation - 1U;
 	if (runtime_state->rls_control_enabled &&
 	    (params->control_loop_count & thermal_mask) == 0U) {
-		thermal_model_update(&params->thermal, id_a, iq_a, params->Rs_measured_ohm);
+		thermal_model_update(&params->thermal.model, id_a, iq_a, params->Rs_measured_ohm);
 	}
 }
 
