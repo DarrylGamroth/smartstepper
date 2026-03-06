@@ -38,5 +38,4 @@
 
 1. Devicetree schema redesign.
 2. Sensor driver protocol changes.
-3. New control algorithms beyond decomposition and existing behavior-preserving extraction.
 

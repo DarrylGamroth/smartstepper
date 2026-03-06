@@ -35,6 +35,19 @@ podman exec priceless_wiles bash -lc '\
     -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"'
 ```
 
+Clean reconfigure + build with debug logging enabled (`debug.conf`):
+
+```bash
+podman exec priceless_wiles bash -lc '\
+  west build -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay" \
+    -DEXTRA_CONF_FILE=debug.conf'
+```
+
 Overlay note:
 
 - The build requires a motor profile overlay that defines `/user_parameters` and `/motor_parameters`.
@@ -67,6 +80,18 @@ Run one unit test suite (example):
 - Baud rate: `115200`
 - Use this serial shell to run HIL commands against the actual motor hardware
   (state transitions, current/velocity/position modes, commissioning, and safety checks).
+
+### Reliable Serial Workflow (Important)
+
+- Use a single persistent serial session (recommended: `tio`) for command/response cycles.
+- Do **not** use repeated short-lived `cat`/`timeout` open-close cycles for each command; this can leave reads empty/intermittent even when writes still work.
+- Recommended interactive command:
+
+```bash
+tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
+```
+
+- For automation in this environment, keep one PTY session open to `tio` and send commands through that persistent session.
 
 ## Debug Probe
 

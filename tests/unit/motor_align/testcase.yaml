@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_align.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - align
+      - calibration
+    harness: ztest
+    integration_platforms:
+      - native_sim

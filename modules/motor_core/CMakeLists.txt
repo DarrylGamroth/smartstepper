@@ -10,6 +10,7 @@ set(MOTOR_CORE_INCLUDE_DIRS
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/runtime
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/estimation
 	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/protection
+	${CMAKE_CURRENT_SOURCE_DIR}/include/motor/calibration
 )
 
 add_library(motor_core INTERFACE)

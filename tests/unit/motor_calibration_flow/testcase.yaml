@@ -1,0 +1,10 @@
+tests:
+  chopper.motor_calibration_flow.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - calibration
+    harness: ztest
+    integration_platforms:
+      - native_sim

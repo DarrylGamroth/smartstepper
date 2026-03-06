@@ -12,6 +12,7 @@ function(motor_core_configure_target target_name)
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/runtime
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/estimation
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/protection
+		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/calibration
 		PRIVATE
 		${APPLICATION_SOURCE_DIR}/include
 	)
@@ -52,6 +53,11 @@ add_library(motor_core_rt STATIC
 	runtime/command_arbitration.c
 	runtime/keepalive_policy.c
 	protection/interlocks.c
+	calibration/align.c
+	calibration/offset.c
+	calibration/rl_ident.c
+	calibration/timing.c
+	calibration/window.c
 	observers/angle_observer.c
 	observers/angle_path.c
 	observers/encoder_feedback.c

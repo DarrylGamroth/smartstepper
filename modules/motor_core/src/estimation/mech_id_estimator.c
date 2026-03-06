@@ -116,7 +116,8 @@ int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor
 	memset(result, 0, sizeof(*result));
 	result->sample_count = (uint16_t)MIN(state->sample_count, UINT16_MAX);
 
-	const uint32_t min_samples = (state->cfg.min_samples > 0U) ? state->cfg.min_samples : 1U;
+	/* Config validation guarantees min_samples > 0. */
+	const uint32_t min_samples = state->cfg.min_samples;
 	if (state->sample_count < min_samples) {
 		return -ENODATA;
 	}
@@ -132,6 +133,7 @@ int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor
 	}
 
 	const float32_t n = (float32_t)state->sample_count;
+	/* Use accumulated regressor vector state->b; local solver copy is mutated in-place. */
 	const float32_t theta_dot_b = theta[0] * state->b[0] + theta[1] * state->b[1] +
 				      theta[2] * state->b[2] + theta[3] * state->b[3];
 	float32_t sse = state->sum_z2 - theta_dot_b;
@@ -140,8 +142,14 @@ int motor_mech_id_finalize(const struct motor_mech_id_state *state, struct motor
 	}
 
 	const float32_t mean_z = state->sum_z / n;
-	const float32_t sst = state->sum_z2 - n * mean_z * mean_z;
-	const float32_t residual_rms_nm = sqrtf(sse / n);
+	float32_t sst = state->sum_z2 - n * mean_z * mean_z;
+	if (sst < 0.0f) {
+		sst = 0.0f;
+	}
+
+	/* 4-parameter model -> residual dof = n - 4 when available. */
+	const float32_t residual_dof = (state->sample_count > 4U) ? (n - 4.0f) : n;
+	const float32_t residual_rms_nm = sqrtf(sse / residual_dof);
 	const float32_t r2 = (sst > MOTOR_MECH_ID_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
 
 	result->inertia_kgm2 = theta[0];
