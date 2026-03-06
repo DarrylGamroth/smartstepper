@@ -174,8 +174,8 @@ static inline void motor_fault_snapshot_try_store(struct motor_parameters *param
 		return;
 	}
 
-	uint16_t idx = params->fault_snapshot_write_idx;
-	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot_samples[idx];
+	uint16_t idx = params->fault_snapshot.write_idx;
+	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot.samples[idx];
 
 	sample->control_loop_count = params->rt_fast.control_loop_count;
 	sample->encoder_angle_deg = encoder_angle_deg;
@@ -197,12 +197,12 @@ static inline void motor_fault_snapshot_try_store(struct motor_parameters *param
 	sample->status = status;
 	sample->position_quality_flags = position_quality_flags;
 
-	params->fault_snapshot_write_idx =
+	params->fault_snapshot.write_idx =
 		(uint16_t)((idx + 1U) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
-	if (params->fault_snapshot_count < MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES) {
-		params->fault_snapshot_count++;
+	if (params->fault_snapshot.count < MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES) {
+		params->fault_snapshot.count++;
 	} else {
-		params->fault_snapshot_overrun_count++;
+		params->fault_snapshot.overrun_count++;
 	}
 }
 
@@ -210,9 +210,9 @@ static inline void motor_post_error_with_snapshot(struct motor_parameters *param
 						  uint32_t error_code)
 {
 	if (params != NULL) {
-		params->fault_snapshot_latched = 1U;
-		params->fault_snapshot_latch_error_code = error_code;
-		params->fault_snapshot_latch_loop = params->rt_fast.control_loop_count;
+		params->fault_snapshot.latched = 1U;
+		params->fault_snapshot.latch_error_code = error_code;
+		params->fault_snapshot.latch_loop = params->rt_fast.control_loop_count;
 	}
 
 	motor_api_post_error(error_code);
@@ -242,10 +242,10 @@ static inline void motor_runtime_diag_sync(struct motor_parameters *params)
 	params->rt_diag.max_isr_cycles = params->max_isr_cycles;
 	params->rt_diag.total_isr_cycles = params->total_isr_cycles;
 	params->rt_diag.overrun_count = params->overrun_count;
-	params->rt_diag.encoder_capture_overrun_count = params->encoder_capture_overrun_count;
-	params->rt_diag.fault_snapshot_overrun_count = params->fault_snapshot_overrun_count;
-	params->rt_diag.fault_snapshot_latch_loop = params->fault_snapshot_latch_loop;
-	params->rt_diag.fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
+	params->rt_diag.encoder_capture_overrun_count = params->encoder_capture.overrun_count;
+	params->rt_diag.fault_snapshot_overrun_count = params->fault_snapshot.overrun_count;
+	params->rt_diag.fault_snapshot_latch_loop = params->fault_snapshot.latch_loop;
+	params->rt_diag.fault_snapshot_latch_error_code = params->fault_snapshot.latch_error_code;
 	params->rt_diag.command_timeout_count = params->command_timeout_count;
 	params->rt_diag.profile_sequence_event_drop_count = params->profile_seq.event_drop_count;
 }
@@ -492,7 +492,7 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 		}
 	}
 
-	if (params->encoder_capture_enabled) {
+	if (params->encoder_capture.enabled) {
 		(void)motor_encoder_feedback_prepare_capture(params, &ctx->encoder_fb, &capture_fb);
 		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
 	}

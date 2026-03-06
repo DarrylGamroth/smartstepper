@@ -35,6 +35,7 @@ Append one entry per task execution.
 | 2026-03-06 | n/a | done | n/a | Grouped profile sequence runtime fields into `struct motor_profile_sequence_ctx` (`params->profile_seq.*`) and migrated app/runtime call sites from flat `params->profile_sequence_*` fields; build + targeted unit suites passed. |
 | 2026-03-06 | n/a | done | n/a | Grouped chopper calibration runtime fields into `struct motor_chopper_cal_ctx` (`params->chopper_cal.*`) and migrated app/runtime call sites from flat `params->chopper_cal_*` fields; `smartstepper_v2` build and `tests/unit/runtime` passed. |
 | 2026-03-06 | n/a | done | n/a | Grouped calibration/ALIGN runtime fields into `struct motor_calibration_ctx` (`params->calibration.*`) and migrated state/shell/runtime call sites; `smartstepper_v2` build and `tests/unit/runtime` passed. |
+| 2026-03-06 | n/a | done | n/a | Grouped telemetry capture rings into context structs: `encoder_capture`, `encoder_raw_trace`, and `fault_snapshot`; migrated ISR/shell/telemetry call sites from flat fields; `smartstepper_v2` build and unit suites `tests/unit/runtime` + `tests/unit/motor_align` passed. |
 
 ## Blocker Template
 

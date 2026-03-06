@@ -195,12 +195,12 @@ static void motor_encoder_capture_reset(struct motor_parameters *params, bool cl
 		return;
 	}
 
-	params->encoder_capture_phase = 0U;
-	params->encoder_capture_write_idx = 0U;
-	params->encoder_capture_count = 0U;
-	params->encoder_capture_overrun_count = 0U;
+	params->encoder_capture.phase = 0U;
+	params->encoder_capture.write_idx = 0U;
+	params->encoder_capture.count = 0U;
+	params->encoder_capture.overrun_count = 0U;
 	if (clear_samples) {
-		memset(params->encoder_capture_samples, 0, sizeof(params->encoder_capture_samples));
+		memset(params->encoder_capture.samples, 0, sizeof(params->encoder_capture.samples));
 	}
 }
 
@@ -210,12 +210,12 @@ static void motor_encoder_raw_trace_reset(struct motor_parameters *params, bool 
 		return;
 	}
 
-	params->encoder_raw_trace_phase = 0U;
-	params->encoder_raw_trace_write_idx = 0U;
-	params->encoder_raw_trace_count = 0U;
-	params->encoder_raw_trace_overrun_count = 0U;
+	params->encoder_raw_trace.phase = 0U;
+	params->encoder_raw_trace.write_idx = 0U;
+	params->encoder_raw_trace.count = 0U;
+	params->encoder_raw_trace.overrun_count = 0U;
 	if (clear_samples) {
-		memset(params->encoder_raw_trace_samples, 0, sizeof(params->encoder_raw_trace_samples));
+		memset(params->encoder_raw_trace.samples, 0, sizeof(params->encoder_raw_trace.samples));
 	}
 }
 
@@ -225,14 +225,14 @@ static void motor_fault_snapshot_reset(struct motor_parameters *params, bool cle
 		return;
 	}
 
-	params->fault_snapshot_write_idx = 0U;
-	params->fault_snapshot_count = 0U;
-	params->fault_snapshot_overrun_count = 0U;
-	params->fault_snapshot_latched = 0U;
-	params->fault_snapshot_latch_loop = 0U;
-	params->fault_snapshot_latch_error_code = ERROR_NONE;
+	params->fault_snapshot.write_idx = 0U;
+	params->fault_snapshot.count = 0U;
+	params->fault_snapshot.overrun_count = 0U;
+	params->fault_snapshot.latched = 0U;
+	params->fault_snapshot.latch_loop = 0U;
+	params->fault_snapshot.latch_error_code = ERROR_NONE;
 	if (clear_samples) {
-		memset(params->fault_snapshot_samples, 0, sizeof(params->fault_snapshot_samples));
+		memset(params->fault_snapshot.samples, 0, sizeof(params->fault_snapshot.samples));
 	}
 }
 
@@ -1042,13 +1042,13 @@ int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **
 		}
 	}
 
-	g_motor_params->encoder_capture_decimation = (uint16_t)decimation;
+	g_motor_params->encoder_capture.decimation = (uint16_t)decimation;
 	motor_encoder_capture_reset(g_motor_params, false);
-	g_motor_params->encoder_capture_enabled = true;
+	g_motor_params->encoder_capture.enabled = true;
 
 	shell_print(sh,
 		    "Encoder capture started: decimation=%u, capacity=%u samples",
-		    g_motor_params->encoder_capture_decimation,
+		    g_motor_params->encoder_capture.decimation,
 		    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 	return 0;
 }
@@ -1064,10 +1064,10 @@ int cmd_motor_encoder_capture_stop(const struct shell *sh, size_t argc, char **a
 		return -ENODEV;
 	}
 
-	g_motor_params->encoder_capture_enabled = false;
+	g_motor_params->encoder_capture.enabled = false;
 	shell_print(sh, "Encoder capture stopped: stored=%u overrun=%u",
-		    g_motor_params->encoder_capture_count,
-		    g_motor_params->encoder_capture_overrun_count);
+		    g_motor_params->encoder_capture.count,
+		    g_motor_params->encoder_capture.overrun_count);
 	return 0;
 }
 
@@ -1082,7 +1082,7 @@ int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	g_motor_params->encoder_capture_enabled = false;
+	g_motor_params->encoder_capture.enabled = false;
 	motor_encoder_capture_reset(g_motor_params, true);
 	shell_print(sh, "Encoder capture cleared");
 	return 0;
@@ -1109,12 +1109,12 @@ int cmd_motor_encoder_trace_start(const struct shell *sh, size_t argc, char **ar
 		}
 	}
 
-	g_motor_params->encoder_raw_trace_decimation = (uint16_t)decimation;
+	g_motor_params->encoder_raw_trace.decimation = (uint16_t)decimation;
 	motor_encoder_raw_trace_reset(g_motor_params, false);
-	g_motor_params->encoder_raw_trace_enabled = true;
+	g_motor_params->encoder_raw_trace.enabled = true;
 
 	shell_print(sh, "Encoder raw trace started: decimation=%u, capacity=%u samples",
-		    g_motor_params->encoder_raw_trace_decimation,
+		    g_motor_params->encoder_raw_trace.decimation,
 		    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 	return 0;
 }
@@ -1130,10 +1130,10 @@ int cmd_motor_encoder_trace_stop(const struct shell *sh, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	g_motor_params->encoder_raw_trace_enabled = false;
+	g_motor_params->encoder_raw_trace.enabled = false;
 	shell_print(sh, "Encoder raw trace stopped: stored=%u overrun=%u",
-		    g_motor_params->encoder_raw_trace_count,
-		    g_motor_params->encoder_raw_trace_overrun_count);
+		    g_motor_params->encoder_raw_trace.count,
+		    g_motor_params->encoder_raw_trace.overrun_count);
 	return 0;
 }
 
@@ -1148,7 +1148,7 @@ int cmd_motor_encoder_trace_clear(const struct shell *sh, size_t argc, char **ar
 		return -ENODEV;
 	}
 
-	g_motor_params->encoder_raw_trace_enabled = false;
+	g_motor_params->encoder_raw_trace.enabled = false;
 	motor_encoder_raw_trace_reset(g_motor_params, true);
 	shell_print(sh, "Encoder raw trace cleared");
 	return 0;
@@ -1166,19 +1166,19 @@ int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **a
 	}
 
 	shell_print(sh, "Encoder raw trace:");
-	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_raw_trace_enabled ? "YES" : "NO");
-	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_raw_trace_decimation);
+	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_raw_trace.enabled ? "YES" : "NO");
+	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_raw_trace.decimation);
 	shell_print(sh, "  Stored:     %u / %u",
-		    g_motor_params->encoder_raw_trace_count,
+		    g_motor_params->encoder_raw_trace.count,
 		    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
-	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_raw_trace_overrun_count);
+	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_raw_trace.overrun_count);
 
-	if (g_motor_params->encoder_raw_trace_count > 0U) {
-		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_raw_trace_write_idx +
+	if (g_motor_params->encoder_raw_trace.count > 0U) {
+		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_raw_trace.write_idx +
 						  MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - 1U) %
 						 MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *newest =
-			&g_motor_params->encoder_raw_trace_samples[newest_idx];
+			&g_motor_params->encoder_raw_trace.samples[newest_idx];
 		shell_print(sh,
 			    "  Latest:     loop=%u src=%s raw_deg=%.3f ctrl_deg=%.3f q=0x%02X fresh=%u warn=%u err=%u io=%u status=0x%02X",
 			    newest->control_loop_count,
@@ -1218,18 +1218,18 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 		}
 	}
 
-	uint16_t stored = g_motor_params->encoder_raw_trace_count;
+	uint16_t stored = g_motor_params->encoder_raw_trace.count;
 	if (stored == 0U) {
 		shell_print(sh, "No raw trace samples");
 		return 0;
 	}
 
 	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->encoder_raw_trace_write_idx +
+	uint16_t start = (uint16_t)((g_motor_params->encoder_raw_trace.write_idx +
 				     MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - count) %
 				    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 
-	if (g_motor_params->encoder_raw_trace_enabled) {
+	if (g_motor_params->encoder_raw_trace.enabled) {
 		shell_warn(sh,
 			   "Raw trace is still running; dump may include concurrently updated samples.");
 	}
@@ -1239,7 +1239,7 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *sample =
-			&g_motor_params->encoder_raw_trace_samples[idx];
+			&g_motor_params->encoder_raw_trace.samples[idx];
 		shell_print(sh,
 			    "%u %u %s %.3f %.6f %.3f %.6f %.6f 0x%02X %u %u %u %u 0x%02X %u",
 			    i,
@@ -1274,19 +1274,19 @@ int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char *
 	}
 
 	shell_print(sh, "Encoder capture:");
-	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_capture_enabled ? "YES" : "NO");
-	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_capture_decimation);
+	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_capture.enabled ? "YES" : "NO");
+	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_capture.decimation);
 	shell_print(sh, "  Stored:     %u / %u",
-		    g_motor_params->encoder_capture_count,
+		    g_motor_params->encoder_capture.count,
 		    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
-	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_capture_overrun_count);
+	shell_print(sh, "  Overrun:    %u", g_motor_params->encoder_capture.overrun_count);
 
-	if (g_motor_params->encoder_capture_count > 0U) {
-		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+	if (g_motor_params->encoder_capture.count > 0U) {
+		uint16_t newest_idx = (uint16_t)((g_motor_params->encoder_capture.write_idx +
 						  MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - 1U) %
 						 MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *newest =
-			&g_motor_params->encoder_capture_samples[newest_idx];
+			&g_motor_params->encoder_capture.samples[newest_idx];
 		shell_print(sh,
 			    "  Latest:     loop=%u src=%s deg=%.3f fresh=%u warn=%u err=%u status=0x%02X enabled=%u",
 			    newest->control_loop_count,
@@ -1334,18 +1334,18 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 		}
 	}
 
-	uint16_t stored = g_motor_params->encoder_capture_count;
+	uint16_t stored = g_motor_params->encoder_capture.count;
 	if (stored == 0U) {
 		shell_print(sh, "No captured encoder samples");
 		return 0;
 	}
 
 	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+	uint16_t start = (uint16_t)((g_motor_params->encoder_capture.write_idx +
 				     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - count) %
 				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 
-	if (g_motor_params->encoder_capture_enabled) {
+	if (g_motor_params->encoder_capture.enabled) {
 		shell_warn(sh,
 			   "Capture is still running; dump may include concurrently updated samples.");
 	}
@@ -1355,7 +1355,7 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *sample =
-			&g_motor_params->encoder_capture_samples[idx];
+			&g_motor_params->encoder_capture.samples[idx];
 		float32_t norm = motor_encoder_normalized_from_rad(sample->angle_rad);
 		int32_t q31 = motor_encoder_q31_from_rad(sample->angle_rad);
 		shell_print(sh,
@@ -1416,18 +1416,18 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 		}
 	}
 
-	uint16_t stored = g_motor_params->encoder_capture_count;
+	uint16_t stored = g_motor_params->encoder_capture.count;
 	if (stored == 0U) {
 		shell_print(sh, "No captured encoder samples");
 		return 0;
 	}
 
 	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->encoder_capture_write_idx +
+	uint16_t start = (uint16_t)((g_motor_params->encoder_capture.write_idx +
 				     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - count) %
 				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 
-	if (g_motor_params->encoder_capture_enabled) {
+	if (g_motor_params->encoder_capture.enabled) {
 		shell_warn(sh,
 			   "Capture is still running; compare dump may include concurrently updated samples.");
 	}
@@ -1439,7 +1439,7 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *sample =
-			&g_motor_params->encoder_capture_samples[idx];
+			&g_motor_params->encoder_capture.samples[idx];
 		float32_t enc_m_deg = sample->encoder_mech_rad * (180.0f / PI_F32);
 		float32_t enc_e_deg = sample->encoder_elec_rad * (180.0f / PI_F32);
 		float32_t ref_mech_rad =
@@ -1504,24 +1504,24 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh, "Fault snapshot:");
-	shell_print(sh, "  Latched:    %s", g_motor_params->fault_snapshot_latched ? "YES" : "NO");
-	if (g_motor_params->fault_snapshot_latched) {
+	shell_print(sh, "  Latched:    %s", g_motor_params->fault_snapshot.latched ? "YES" : "NO");
+	if (g_motor_params->fault_snapshot.latched) {
 		shell_print(sh, "  Fault:      %s (%u)",
-			    motor_error_to_string((int)g_motor_params->fault_snapshot_latch_error_code),
-			    g_motor_params->fault_snapshot_latch_error_code);
-		shell_print(sh, "  Fault loop: %u", g_motor_params->fault_snapshot_latch_loop);
+			    motor_error_to_string((int)g_motor_params->fault_snapshot.latch_error_code),
+			    g_motor_params->fault_snapshot.latch_error_code);
+		shell_print(sh, "  Fault loop: %u", g_motor_params->fault_snapshot.latch_loop);
 	}
 	shell_print(sh, "  Stored:     %u / %u",
-		    g_motor_params->fault_snapshot_count,
+		    g_motor_params->fault_snapshot.count,
 		    MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
-	shell_print(sh, "  Overrun:    %u", g_motor_params->fault_snapshot_overrun_count);
+	shell_print(sh, "  Overrun:    %u", g_motor_params->fault_snapshot.overrun_count);
 
-	if (g_motor_params->fault_snapshot_count > 0U) {
-		uint16_t newest_idx = (uint16_t)((g_motor_params->fault_snapshot_write_idx +
+	if (g_motor_params->fault_snapshot.count > 0U) {
+		uint16_t newest_idx = (uint16_t)((g_motor_params->fault_snapshot.write_idx +
 						  MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES - 1U) %
 						 MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 		const struct motor_fault_snapshot_sample *newest =
-			&g_motor_params->fault_snapshot_samples[newest_idx];
+			&g_motor_params->fault_snapshot.samples[newest_idx];
 		shell_print(sh,
 			    "  Latest:     loop=%u src=%s enc=%.3fdeg iq_ref=%.3fA iq=%.3fA ia=%.3fA ib=%.3fA fresh=%u warn=%u err=%u status=0x%02X",
 			    newest->control_loop_count,
@@ -1562,14 +1562,14 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 		}
 	}
 
-	uint16_t stored = g_motor_params->fault_snapshot_count;
+	uint16_t stored = g_motor_params->fault_snapshot.count;
 	if (stored == 0U) {
 		shell_print(sh, "No fault snapshot samples");
 		return 0;
 	}
 
 	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->fault_snapshot_write_idx +
+	uint16_t start = (uint16_t)((g_motor_params->fault_snapshot.write_idx +
 				     MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES - count) %
 				    MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 
@@ -1583,7 +1583,7 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 		const struct motor_fault_snapshot_sample *sample =
-			&g_motor_params->fault_snapshot_samples[idx];
+			&g_motor_params->fault_snapshot.samples[idx];
 		shell_print(sh,
 			    "%u %u %s %u %u %u 0x%02X 0x%02X %.3f %.6f %.6f %.6f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
 			    i,

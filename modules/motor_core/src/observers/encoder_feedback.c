@@ -55,7 +55,7 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	uint8_t raw_status = raw_sample_present ? encoder_sample->status : 0U;
 	float32_t raw_angle_deg = raw_sample_present ? encoder_sample->angle_deg : 0.0f;
 	bool sample_available = raw_sample_present &&
-				(raw_sample_enabled || params->encoder_capture_enabled);
+				(raw_sample_enabled || params->encoder_capture.enabled);
 	feedback->sample_enabled = raw_sample_enabled;
 	feedback->sample_available = sample_available;
 	feedback->fresh = raw_fresh;

@@ -28,10 +28,10 @@ void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
 	diag->max_isr_cycles = params->max_isr_cycles;
 	diag->total_isr_cycles = params->total_isr_cycles;
 	diag->overrun_count = params->overrun_count;
-	diag->encoder_capture_overrun_count = params->encoder_capture_overrun_count;
-	diag->fault_snapshot_overrun_count = params->fault_snapshot_overrun_count;
-	diag->fault_snapshot_latch_loop = params->fault_snapshot_latch_loop;
-	diag->fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
+	diag->encoder_capture_overrun_count = params->encoder_capture.overrun_count;
+	diag->fault_snapshot_overrun_count = params->fault_snapshot.overrun_count;
+	diag->fault_snapshot_latch_loop = params->fault_snapshot.latch_loop;
+	diag->fault_snapshot_latch_error_code = params->fault_snapshot.latch_error_code;
 	diag->command_timeout_count = params->command_timeout_count;
 	diag->profile_sequence_event_drop_count = params->profile_seq.event_drop_count;
 }
@@ -45,19 +45,19 @@ void motor_control_telemetry_consume_capture(const struct motor_capture_feedback
 void motor_control_telemetry_store_encoder_capture(struct motor_parameters *params,
 						   const struct motor_capture_feedback *capture)
 {
-	if (params == NULL || capture == NULL || !params->encoder_capture_enabled) {
+	if (params == NULL || capture == NULL || !params->encoder_capture.enabled) {
 		return;
 	}
 
-	uint16_t decimation = MAX((uint16_t)1U, params->encoder_capture_decimation);
-	if (params->encoder_capture_phase > 0U) {
-		params->encoder_capture_phase--;
+	uint16_t decimation = MAX((uint16_t)1U, params->encoder_capture.decimation);
+	if (params->encoder_capture.phase > 0U) {
+		params->encoder_capture.phase--;
 		return;
 	}
-	params->encoder_capture_phase = decimation - 1U;
+	params->encoder_capture.phase = decimation - 1U;
 
-	uint16_t idx = params->encoder_capture_write_idx;
-	struct motor_encoder_capture_sample *sample = &params->encoder_capture_samples[idx];
+	uint16_t idx = params->encoder_capture.write_idx;
+	struct motor_encoder_capture_sample *sample = &params->encoder_capture.samples[idx];
 	sample->control_loop_count = params->rt_fast.control_loop_count;
 	sample->angle_deg = capture->angle_deg;
 	sample->angle_rad = capture->angle_rad;
@@ -77,12 +77,12 @@ void motor_control_telemetry_store_encoder_capture(struct motor_parameters *para
 	sample->sample_error = capture->sample_error ? 1U : 0U;
 	sample->status = capture->status;
 
-	params->encoder_capture_write_idx =
+	params->encoder_capture.write_idx =
 		(uint16_t)((idx + 1U) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
-	if (params->encoder_capture_count < MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
-		params->encoder_capture_count++;
+	if (params->encoder_capture.count < MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
+		params->encoder_capture.count++;
 	} else {
-		params->encoder_capture_overrun_count++;
+		params->encoder_capture.overrun_count++;
 	}
 }
 
@@ -93,20 +93,20 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	uint8_t position_quality_flags)
 {
 	if (params == NULL || raw_sample == NULL || control_fb == NULL ||
-	    !params->encoder_raw_trace_enabled) {
+	    !params->encoder_raw_trace.enabled) {
 		return;
 	}
 
-	uint16_t decimation = MAX((uint16_t)1U, params->encoder_raw_trace_decimation);
-	if (params->encoder_raw_trace_phase > 0U) {
-		params->encoder_raw_trace_phase--;
+	uint16_t decimation = MAX((uint16_t)1U, params->encoder_raw_trace.decimation);
+	if (params->encoder_raw_trace.phase > 0U) {
+		params->encoder_raw_trace.phase--;
 		return;
 	}
-	params->encoder_raw_trace_phase = decimation - 1U;
+	params->encoder_raw_trace.phase = decimation - 1U;
 
-	uint16_t idx = params->encoder_raw_trace_write_idx;
+	uint16_t idx = params->encoder_raw_trace.write_idx;
 	struct motor_encoder_raw_trace_sample *sample =
-		&params->encoder_raw_trace_samples[idx];
+		&params->encoder_raw_trace.samples[idx];
 	memset(sample, 0, sizeof(*sample));
 
 	sample->control_loop_count = params->rt_fast.control_loop_count;
@@ -124,11 +124,11 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	sample->sample_io_fault = raw_sample->io_fault ? 1U : 0U;
 	sample->status = raw_sample->status;
 
-	params->encoder_raw_trace_write_idx =
+	params->encoder_raw_trace.write_idx =
 		(uint16_t)((idx + 1U) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
-	if (params->encoder_raw_trace_count < MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES) {
-		params->encoder_raw_trace_count++;
+	if (params->encoder_raw_trace.count < MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES) {
+		params->encoder_raw_trace.count++;
 	} else {
-		params->encoder_raw_trace_overrun_count++;
+		params->encoder_raw_trace.overrun_count++;
 	}
 }

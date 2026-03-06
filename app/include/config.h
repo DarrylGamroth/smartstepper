@@ -179,6 +179,36 @@ struct motor_calibration_ctx {
 	float32_t align_neg_mech_angle_rad; /* Circular mean of -Id sample window */
 };
 
+struct motor_encoder_capture_ctx {
+	bool enabled;
+	uint16_t decimation;
+	uint16_t phase;
+	uint16_t write_idx;
+	uint16_t count;
+	uint32_t overrun_count;
+	struct motor_encoder_capture_sample samples[MOTOR_ENCODER_CAPTURE_MAX_SAMPLES];
+};
+
+struct motor_encoder_raw_trace_ctx {
+	bool enabled;
+	uint16_t decimation;
+	uint16_t phase;
+	uint16_t write_idx;
+	uint16_t count;
+	uint32_t overrun_count;
+	struct motor_encoder_raw_trace_sample samples[MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES];
+};
+
+struct motor_fault_snapshot_ctx {
+	uint16_t write_idx;
+	uint16_t count;
+	uint32_t overrun_count;
+	uint32_t latch_loop;
+	uint32_t latch_error_code;
+	uint8_t latched;
+	struct motor_fault_snapshot_sample samples[MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES];
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -300,33 +330,10 @@ struct motor_parameters {
 	uint32_t total_isr_cycles;
 	uint32_t overrun_count;
 
-	/* Encoder debug capture ring buffer (ISR producer, shell reader) */
-	bool encoder_capture_enabled;
-	uint16_t encoder_capture_decimation;
-	uint16_t encoder_capture_phase;
-	uint16_t encoder_capture_write_idx;
-	uint16_t encoder_capture_count;
-	uint32_t encoder_capture_overrun_count;
-	struct motor_encoder_capture_sample
-		encoder_capture_samples[MOTOR_ENCODER_CAPTURE_MAX_SAMPLES];
-	bool encoder_raw_trace_enabled;
-	uint16_t encoder_raw_trace_decimation;
-	uint16_t encoder_raw_trace_phase;
-	uint16_t encoder_raw_trace_write_idx;
-	uint16_t encoder_raw_trace_count;
-	uint32_t encoder_raw_trace_overrun_count;
-	struct motor_encoder_raw_trace_sample
-		encoder_raw_trace_samples[MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES];
-
-	/* Continuous ISR fault snapshot ring (latest samples for post-fault debug). */
-	uint16_t fault_snapshot_write_idx;
-	uint16_t fault_snapshot_count;
-	uint32_t fault_snapshot_overrun_count;
-	uint32_t fault_snapshot_latch_loop;
-	uint32_t fault_snapshot_latch_error_code;
-	uint8_t fault_snapshot_latched;
-	struct motor_fault_snapshot_sample
-		fault_snapshot_samples[MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES];
+	/* Telemetry capture rings (ISR producer, shell reader). */
+	struct motor_encoder_capture_ctx encoder_capture;
+	struct motor_encoder_raw_trace_ctx encoder_raw_trace;
+	struct motor_fault_snapshot_ctx fault_snapshot;
 
 	/* Error tracking */
 	uint32_t last_error_code;  /* Last error that caused ERROR state entry */
