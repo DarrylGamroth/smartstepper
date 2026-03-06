@@ -809,7 +809,7 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 			shell_error(sh, "Capture device not ready");
 			return -ENODEV;
 		}
-		if (g_motor_params->chopper_cal_active &&
+		if (g_motor_params->chopper_cal.active &&
 		    g_motor_params->profile_seq.trigger_channel == CHOPPER_CAL_CAPTURE_CHANNEL) {
 			shell_error(sh, "Chopper calibration is using capture channel %u",
 				    CHOPPER_CAL_CAPTURE_CHANNEL);

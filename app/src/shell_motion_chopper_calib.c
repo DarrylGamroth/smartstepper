@@ -37,22 +37,22 @@ static void motor_chopper_cal_reset_buffers(struct motor_parameters *params)
 		return;
 	}
 
-	params->chopper_cal_complete = false;
-	params->chopper_cal_valid = false;
-	params->chopper_cal_midpoint_count = 0U;
-	params->chopper_cal_total_edges_target = 0U;
-	params->chopper_cal_total_edges_captured = 0U;
-	params->chopper_cal_discarded_edges = 0U;
-	params->chopper_cal_last_wrapped_rad = 0.0f;
-	params->chopper_cal_last_unwrapped_rad = 0.0f;
-	params->chopper_cal_start_unwrapped_rad = 0.0f;
+	params->chopper_cal.complete = false;
+	params->chopper_cal.valid = false;
+	params->chopper_cal.midpoint_count = 0U;
+	params->chopper_cal.total_edges_target = 0U;
+	params->chopper_cal.total_edges_captured = 0U;
+	params->chopper_cal.discarded_edges = 0U;
+	params->chopper_cal.last_wrapped_rad = 0.0f;
+	params->chopper_cal.last_unwrapped_rad = 0.0f;
+	params->chopper_cal.start_unwrapped_rad = 0.0f;
 
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_EDGES; i++) {
-		params->chopper_cal_edge_sum_rad[i] = 0.0f;
-		params->chopper_cal_edge_count[i] = 0U;
+		params->chopper_cal.edge_sum_rad[i] = 0.0f;
+		params->chopper_cal.edge_count[i] = 0U;
 	}
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
-		params->chopper_blade_midpoints_rad[i] = 0.0f;
+		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
 	}
 }
 
@@ -61,7 +61,7 @@ static inline void motor_chopper_cal_restore_timeout(struct motor_parameters *pa
 	if (!params) {
 		return;
 	}
-	params->command_timeout_ms = params->chopper_cal_saved_timeout_ms;
+	params->command_timeout_ms = params->chopper_cal.saved_timeout_ms;
 }
 
 static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
@@ -69,35 +69,35 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 	if (!params) {
 		return -ENODEV;
 	}
-	if (params->chopper_cal_slots == 0U || params->chopper_cal_slots > CHOPPER_CAL_MAX_SLOTS) {
+	if (params->chopper_cal.slots == 0U || params->chopper_cal.slots > CHOPPER_CAL_MAX_SLOTS) {
 		return -EINVAL;
 	}
 
-	uint16_t edge_bins = (uint16_t)(2U * params->chopper_cal_slots);
+	uint16_t edge_bins = (uint16_t)(2U * params->chopper_cal.slots);
 	for (uint16_t i = 0U; i < edge_bins; i++) {
-		if (params->chopper_cal_edge_count[i] == 0U) {
-			params->chopper_cal_valid = false;
-			params->chopper_cal_midpoint_count = 0U;
+		if (params->chopper_cal.edge_count[i] == 0U) {
+			params->chopper_cal.valid = false;
+			params->chopper_cal.midpoint_count = 0U;
 			return -ENODATA;
 		}
 	}
 
-	for (uint16_t i = 0U; i < params->chopper_cal_slots; i++) {
+	for (uint16_t i = 0U; i < params->chopper_cal.slots; i++) {
 		uint16_t rise_idx = (uint16_t)(2U * i);
 		uint16_t fall_idx = (uint16_t)(rise_idx + 1U);
 		float32_t rise_mean =
-			params->chopper_cal_edge_sum_rad[rise_idx] /
-			(float32_t)params->chopper_cal_edge_count[rise_idx];
+			params->chopper_cal.edge_sum_rad[rise_idx] /
+			(float32_t)params->chopper_cal.edge_count[rise_idx];
 		float32_t fall_mean =
-			params->chopper_cal_edge_sum_rad[fall_idx] /
-			(float32_t)params->chopper_cal_edge_count[fall_idx];
+			params->chopper_cal.edge_sum_rad[fall_idx] /
+			(float32_t)params->chopper_cal.edge_count[fall_idx];
 		float32_t midpoint = rise_mean + 0.5f * (fall_mean - rise_mean);
 
-		params->chopper_blade_midpoints_rad[i] = wrap_rad_2pi(midpoint);
+		params->chopper_cal.blade_midpoints_rad[i] = wrap_rad_2pi(midpoint);
 	}
 
-	params->chopper_cal_midpoint_count = params->chopper_cal_slots;
-	params->chopper_cal_valid = true;
+	params->chopper_cal.midpoint_count = params->chopper_cal.slots;
+	params->chopper_cal.valid = true;
 	return 0;
 }
 
@@ -128,58 +128,58 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	ARG_UNUSED(user_data);
 
 	struct motor_parameters *params = g_motor_params;
-	if (!params || !params->chopper_cal_active) {
+	if (!params || !params->chopper_cal.active) {
 		return;
 	}
 	if (!motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
 	    atomic_get(&params->control_armed) == 0) {
-		params->chopper_cal_active = false;
-		params->chopper_cal_complete = false;
-		params->chopper_cal_valid = false;
+		params->chopper_cal.active = false;
+		params->chopper_cal.complete = false;
+		params->chopper_cal.valid = false;
 		motor_chopper_cal_restore_timeout(params);
 		return;
 	}
 
 	if (status < 0 || channel != CHOPPER_CAL_CAPTURE_CHANNEL) {
-		params->chopper_cal_discarded_edges++;
+		params->chopper_cal.discarded_edges++;
 		return;
 	}
 
-	uint16_t slots = params->chopper_cal_slots;
+	uint16_t slots = params->chopper_cal.slots;
 	uint16_t edge_bins = (uint16_t)(2U * slots);
 	if (edge_bins == 0U || edge_bins > CHOPPER_CAL_MAX_EDGES) {
-		params->chopper_cal_discarded_edges++;
+		params->chopper_cal.discarded_edges++;
 		return;
 	}
 
-	uint32_t captured = params->chopper_cal_total_edges_captured;
+	uint32_t captured = params->chopper_cal.total_edges_captured;
 	float32_t wrapped_rad = wrap_rad_2pi(params->position_rad);
 	float32_t unwrapped_rad = wrapped_rad;
 
 	if (captured == 0U) {
-		params->chopper_cal_start_unwrapped_rad = wrapped_rad;
-		params->chopper_cal_last_wrapped_rad = wrapped_rad;
-		params->chopper_cal_last_unwrapped_rad = wrapped_rad;
+		params->chopper_cal.start_unwrapped_rad = wrapped_rad;
+		params->chopper_cal.last_wrapped_rad = wrapped_rad;
+		params->chopper_cal.last_unwrapped_rad = wrapped_rad;
 	} else {
-		float32_t delta_rad = wrap_rad_pi(wrapped_rad - params->chopper_cal_last_wrapped_rad);
-		if (fabsf(delta_rad) < params->chopper_cal_edge_min_step_rad) {
-			params->chopper_cal_discarded_edges++;
+		float32_t delta_rad = wrap_rad_pi(wrapped_rad - params->chopper_cal.last_wrapped_rad);
+		if (fabsf(delta_rad) < params->chopper_cal.edge_min_step_rad) {
+			params->chopper_cal.discarded_edges++;
 			return;
 		}
-		unwrapped_rad = params->chopper_cal_last_unwrapped_rad + delta_rad;
-		params->chopper_cal_last_wrapped_rad = wrapped_rad;
-		params->chopper_cal_last_unwrapped_rad = unwrapped_rad;
+		unwrapped_rad = params->chopper_cal.last_unwrapped_rad + delta_rad;
+		params->chopper_cal.last_wrapped_rad = wrapped_rad;
+		params->chopper_cal.last_unwrapped_rad = unwrapped_rad;
 	}
 
 	uint16_t bin = (uint16_t)(captured % edge_bins);
-	params->chopper_cal_edge_sum_rad[bin] += unwrapped_rad;
-	params->chopper_cal_edge_count[bin]++;
-	params->chopper_cal_total_edges_captured = captured + 1U;
+	params->chopper_cal.edge_sum_rad[bin] += unwrapped_rad;
+	params->chopper_cal.edge_count[bin]++;
+	params->chopper_cal.total_edges_captured = captured + 1U;
 
-	if (params->chopper_cal_total_edges_captured >= params->chopper_cal_total_edges_target) {
-		params->chopper_cal_active = false;
-		params->chopper_cal_complete = true;
-		params->chopper_cal_valid = false;
+	if (params->chopper_cal.total_edges_captured >= params->chopper_cal.total_edges_target) {
+		params->chopper_cal.active = false;
+		params->chopper_cal.complete = true;
+		params->chopper_cal.valid = false;
 		motor_chopper_cal_restore_timeout(params);
 	}
 }
@@ -200,11 +200,11 @@ int cmd_motor_chopper_calib_clear(const struct shell *sh, size_t argc, char **ar
 	(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 #endif
 
-	g_motor_params->chopper_cal_active = false;
-	g_motor_params->chopper_cal_slots = 0U;
-	g_motor_params->chopper_cal_revs_target = 0U;
-	g_motor_params->chopper_cal_samples_per_edge = 0U;
-	g_motor_params->chopper_cal_speed_target_rad_s = 0.0f;
+	g_motor_params->chopper_cal.active = false;
+	g_motor_params->chopper_cal.slots = 0U;
+	g_motor_params->chopper_cal.revs_target = 0U;
+	g_motor_params->chopper_cal.samples_per_edge = 0U;
+	g_motor_params->chopper_cal.speed_target_rad_s = 0.0f;
 	motor_chopper_cal_restore_timeout(g_motor_params);
 	motor_chopper_cal_reset_buffers(g_motor_params);
 
@@ -302,21 +302,21 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 #endif
 
-	if (g_motor_params->chopper_cal_active) {
+	if (g_motor_params->chopper_cal.active) {
 		motor_chopper_cal_restore_timeout(g_motor_params);
 	}
 
-	g_motor_params->chopper_cal_active = false;
-	g_motor_params->chopper_cal_slots = slots;
-	g_motor_params->chopper_cal_revs_target = revs;
-	g_motor_params->chopper_cal_samples_per_edge = revs;
-	g_motor_params->chopper_cal_speed_target_rad_s = speed_target_rad_s;
-	g_motor_params->chopper_cal_edge_min_step_rad = CHOPPER_CAL_MIN_STEP_DEG_DEFAULT * PI_F32 / 180.0f;
-	g_motor_params->chopper_cal_saved_timeout_ms = g_motor_params->command_timeout_ms;
+	g_motor_params->chopper_cal.active = false;
+	g_motor_params->chopper_cal.slots = slots;
+	g_motor_params->chopper_cal.revs_target = revs;
+	g_motor_params->chopper_cal.samples_per_edge = revs;
+	g_motor_params->chopper_cal.speed_target_rad_s = speed_target_rad_s;
+	g_motor_params->chopper_cal.edge_min_step_rad = CHOPPER_CAL_MIN_STEP_DEG_DEFAULT * PI_F32 / 180.0f;
+	g_motor_params->chopper_cal.saved_timeout_ms = g_motor_params->command_timeout_ms;
 	g_motor_params->command_timeout_ms = 0U; /* Prevent disarm while calibration runs. */
 	motor_chopper_cal_reset_buffers(g_motor_params);
-	g_motor_params->chopper_cal_total_edges_target = (uint32_t)edges_target_u64;
-	g_motor_params->chopper_cal_active = true;
+	g_motor_params->chopper_cal.total_edges_target = (uint32_t)edges_target_u64;
+	g_motor_params->chopper_cal.active = true;
 
 #if CHOPPER_CAL_CAPTURE_AVAILABLE
 	ret = timer_ic_configure_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL,
@@ -324,7 +324,7 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 						 TIMER_IC_CAPTURE_MODE_CONTINUOUS,
 					 motor_chopper_capture_callback, NULL);
 	if (ret < 0) {
-		g_motor_params->chopper_cal_active = false;
+		g_motor_params->chopper_cal.active = false;
 		motor_chopper_cal_restore_timeout(g_motor_params);
 		shell_error(sh, "Failed to configure capture channel %u (err %d)",
 			    CHOPPER_CAL_CAPTURE_CHANNEL, ret);
@@ -333,7 +333,7 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 
 	ret = timer_ic_enable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 	if (ret < 0) {
-		g_motor_params->chopper_cal_active = false;
+		g_motor_params->chopper_cal.active = false;
 		motor_chopper_cal_restore_timeout(g_motor_params);
 		shell_error(sh, "Failed to enable capture channel %u (err %d)",
 			    CHOPPER_CAL_CAPTURE_CHANNEL, ret);
@@ -345,7 +345,7 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh,
 		    "Chopper calibration started: slots=%u revs=%u edges=%u speed=%.3f Hz (channel=%u)",
-		    slots, revs, g_motor_params->chopper_cal_total_edges_target,
+		    slots, revs, g_motor_params->chopper_cal.total_edges_target,
 		    (double)(speed_target_rad_s / (2.0f * PI_F32)),
 		    CHOPPER_CAL_CAPTURE_CHANNEL);
 	return 0;
@@ -366,7 +366,7 @@ int cmd_motor_chopper_calib_stop(const struct shell *sh, size_t argc, char **arg
 	(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 #endif
 
-	g_motor_params->chopper_cal_active = false;
+	g_motor_params->chopper_cal.active = false;
 	motor_chopper_cal_restore_timeout(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 	int ret = motor_hardware_set_photo_interruptor_enable(false);
@@ -374,7 +374,7 @@ int cmd_motor_chopper_calib_stop(const struct shell *sh, size_t argc, char **arg
 		shell_warn(sh, "Failed to disable photo interrupter output (%d)", ret);
 	}
 
-	if (g_motor_params->chopper_cal_complete && !g_motor_params->chopper_cal_valid) {
+	if (g_motor_params->chopper_cal.complete && !g_motor_params->chopper_cal.valid) {
 		ret = motor_chopper_cal_compute_midpoints(g_motor_params);
 		if (ret < 0) {
 			shell_warn(sh, "Capture stopped; midpoint computation failed (err %d)", ret);
@@ -396,7 +396,7 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 		return -ENODEV;
 	}
 
-	if (g_motor_params->chopper_cal_complete && !g_motor_params->chopper_cal_valid) {
+	if (g_motor_params->chopper_cal.complete && !g_motor_params->chopper_cal.valid) {
 		int ret = motor_chopper_cal_compute_midpoints(g_motor_params);
 		if (ret < 0) {
 			shell_warn(sh, "Midpoint computation incomplete (err %d)", ret);
@@ -404,30 +404,30 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 	}
 
 #if CHOPPER_CAL_CAPTURE_AVAILABLE
-	if (!g_motor_params->chopper_cal_active && g_motor_params->chopper_cal_complete) {
+	if (!g_motor_params->chopper_cal.active && g_motor_params->chopper_cal.complete) {
 		(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 	}
 #endif
 
 	shell_print(sh, "Chopper Calibration:");
-	shell_print(sh, "  Active:         %s", g_motor_params->chopper_cal_active ? "YES" : "NO");
-	shell_print(sh, "  Complete:       %s", g_motor_params->chopper_cal_complete ? "YES" : "NO");
-	shell_print(sh, "  Valid:          %s", g_motor_params->chopper_cal_valid ? "YES" : "NO");
-	shell_print(sh, "  Slots:          %u", g_motor_params->chopper_cal_slots);
-	shell_print(sh, "  Revolutions:    %u", g_motor_params->chopper_cal_revs_target);
-	shell_print(sh, "  Samples/edge:   %u", g_motor_params->chopper_cal_samples_per_edge);
+	shell_print(sh, "  Active:         %s", g_motor_params->chopper_cal.active ? "YES" : "NO");
+	shell_print(sh, "  Complete:       %s", g_motor_params->chopper_cal.complete ? "YES" : "NO");
+	shell_print(sh, "  Valid:          %s", g_motor_params->chopper_cal.valid ? "YES" : "NO");
+	shell_print(sh, "  Slots:          %u", g_motor_params->chopper_cal.slots);
+	shell_print(sh, "  Revolutions:    %u", g_motor_params->chopper_cal.revs_target);
+	shell_print(sh, "  Samples/edge:   %u", g_motor_params->chopper_cal.samples_per_edge);
 	shell_print(sh, "  Speed target:   %.3f Hz",
-		    (double)(g_motor_params->chopper_cal_speed_target_rad_s / (2.0f * PI_F32)));
+		    (double)(g_motor_params->chopper_cal.speed_target_rad_s / (2.0f * PI_F32)));
 	shell_print(sh, "  Edges:          %u / %u",
-		    g_motor_params->chopper_cal_total_edges_captured,
-		    g_motor_params->chopper_cal_total_edges_target);
-	shell_print(sh, "  Discarded:      %u", g_motor_params->chopper_cal_discarded_edges);
-	shell_print(sh, "  Midpoints:      %u", g_motor_params->chopper_cal_midpoint_count);
+		    g_motor_params->chopper_cal.total_edges_captured,
+		    g_motor_params->chopper_cal.total_edges_target);
+	shell_print(sh, "  Discarded:      %u", g_motor_params->chopper_cal.discarded_edges);
+	shell_print(sh, "  Midpoints:      %u", g_motor_params->chopper_cal.midpoint_count);
 
-	if (g_motor_params->chopper_cal_valid && g_motor_params->chopper_cal_midpoint_count > 0U) {
-		for (uint16_t i = 0U; i < g_motor_params->chopper_cal_midpoint_count; i++) {
+	if (g_motor_params->chopper_cal.valid && g_motor_params->chopper_cal.midpoint_count > 0U) {
+		for (uint16_t i = 0U; i < g_motor_params->chopper_cal.midpoint_count; i++) {
 			shell_print(sh, "    [%u] %.3f deg", i,
-				    (double)(g_motor_params->chopper_blade_midpoints_rad[i] *
+				    (double)(g_motor_params->chopper_cal.blade_midpoints_rad[i] *
 					     180.0f / PI_F32));
 		}
 	}
@@ -446,7 +446,7 @@ int cmd_motor_chopper_calib_apply(const struct shell *sh, size_t argc, char **ar
 		return -ENODEV;
 	}
 
-	if (g_motor_params->chopper_cal_complete && !g_motor_params->chopper_cal_valid) {
+	if (g_motor_params->chopper_cal.complete && !g_motor_params->chopper_cal.valid) {
 		int ret = motor_chopper_cal_compute_midpoints(g_motor_params);
 		if (ret < 0) {
 			shell_error(sh, "Calibration data incomplete (err %d)", ret);
@@ -455,22 +455,22 @@ int cmd_motor_chopper_calib_apply(const struct shell *sh, size_t argc, char **ar
 	}
 
 #if CHOPPER_CAL_CAPTURE_AVAILABLE
-	if (!g_motor_params->chopper_cal_active && g_motor_params->chopper_cal_complete) {
+	if (!g_motor_params->chopper_cal.active && g_motor_params->chopper_cal.complete) {
 		(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 	}
 #endif
 
-	if (!g_motor_params->chopper_cal_valid || g_motor_params->chopper_cal_midpoint_count == 0U) {
+	if (!g_motor_params->chopper_cal.valid || g_motor_params->chopper_cal.midpoint_count == 0U) {
 		shell_error(sh, "No valid midpoint table. Run 'motor chopper calib start ...' first.");
 		return -EINVAL;
 	}
 
 	g_motor_params->profile_seq.running = false;
 	g_motor_params->profile_seq.tick_counter = 0U;
-	g_motor_params->profile_seq.count = g_motor_params->chopper_cal_midpoint_count;
+	g_motor_params->profile_seq.count = g_motor_params->chopper_cal.midpoint_count;
 	g_motor_params->profile_seq.next_idx = 0U;
 	for (uint16_t i = 0U; i < g_motor_params->profile_seq.count; i++) {
-		g_motor_params->profile_seq.points_rad[i] = g_motor_params->chopper_blade_midpoints_rad[i];
+		g_motor_params->profile_seq.points_rad[i] = g_motor_params->chopper_cal.blade_midpoints_rad[i];
 	}
 	motor_command_feed_watchdog(g_motor_params);
 

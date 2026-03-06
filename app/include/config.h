@@ -139,6 +139,28 @@ struct motor_profile_sequence_ctx {
 	float32_t points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute targets [0, 2pi) */
 };
 
+struct motor_chopper_cal_ctx {
+	bool active;            /* Edge capture in progress */
+	bool complete;          /* Capture complete and midpoint table valid */
+	bool valid;             /* Midpoint table can be used */
+	uint16_t slots;         /* Number of blades/slots being calibrated */
+	uint16_t revs_target;   /* Number of revolutions to average */
+	uint16_t samples_per_edge; /* Expected samples per edge bin */
+	uint16_t midpoint_count; /* Number of valid midpoint entries */
+	uint32_t total_edges_target;   /* 2 * slots * revs */
+	uint32_t total_edges_captured; /* Number of accepted edges */
+	uint32_t discarded_edges;      /* Edges rejected by sanity checks */
+	uint32_t saved_timeout_ms;     /* Timeout restored after calibration */
+	float32_t edge_min_step_rad;   /* Reject edges too close together */
+	float32_t speed_target_rad_s;  /* Open-loop speed command used for calibration */
+	float32_t last_wrapped_rad;    /* Last wrapped encoder angle sample */
+	float32_t last_unwrapped_rad;  /* Last unwrapped encoder angle sample */
+	float32_t start_unwrapped_rad; /* Unwrapped angle when capture started */
+	float32_t edge_sum_rad[CHOPPER_CAL_MAX_EDGES];      /* Unwrapped angle sum per edge bin */
+	uint32_t edge_count[CHOPPER_CAL_MAX_EDGES];         /* Sample count per edge bin */
+	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -207,26 +229,8 @@ struct motor_parameters {
 	/* Hardware-timer-driven position sequence profile runtime. */
 	struct motor_profile_sequence_ctx profile_seq;
 
-	/* Chopper edge calibration (photo-interrupter + encoder angle snapshots) */
-	bool chopper_cal_active;            /* Edge capture in progress */
-	bool chopper_cal_complete;          /* Capture complete and midpoint table valid */
-	bool chopper_cal_valid;             /* Midpoint table can be used */
-	uint16_t chopper_cal_slots;         /* Number of blades/slots being calibrated */
-	uint16_t chopper_cal_revs_target;   /* Number of revolutions to average */
-	uint16_t chopper_cal_samples_per_edge; /* Expected samples per edge bin */
-	uint16_t chopper_cal_midpoint_count; /* Number of valid midpoint entries */
-	uint32_t chopper_cal_total_edges_target;   /* 2 * slots * revs */
-	uint32_t chopper_cal_total_edges_captured; /* Number of accepted edges */
-	uint32_t chopper_cal_discarded_edges;      /* Edges rejected by sanity checks */
-	uint32_t chopper_cal_saved_timeout_ms;     /* Timeout restored after calibration */
-	float32_t chopper_cal_edge_min_step_rad;   /* Reject edges too close together */
-	float32_t chopper_cal_speed_target_rad_s;  /* Open-loop speed command used for calibration */
-	float32_t chopper_cal_last_wrapped_rad;    /* Last wrapped encoder angle sample */
-	float32_t chopper_cal_last_unwrapped_rad;  /* Last unwrapped encoder angle sample */
-	float32_t chopper_cal_start_unwrapped_rad; /* Unwrapped angle when capture started */
-	float32_t chopper_cal_edge_sum_rad[CHOPPER_CAL_MAX_EDGES];      /* Unwrapped angle sum per edge bin */
-	uint32_t chopper_cal_edge_count[CHOPPER_CAL_MAX_EDGES];         /* Sample count per edge bin */
-	float32_t chopper_blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
+	/* Chopper edge calibration runtime. */
+	struct motor_chopper_cal_ctx chopper_cal;
 
 	/* Cascaded control scaffolding (velocity/position/motion profile) */
 	uint8_t outer_loop_mode;                /* MOTOR_OUTER_LOOP_MODE_* */

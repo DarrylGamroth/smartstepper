@@ -410,7 +410,7 @@ static inline bool motor_core_step_apply_keepalive_and_timeout(
 
 	bool autonomous_keepalive = motor_keepalive_policy_should_keepalive(
 		*control_armed, autonomous_mode_active, profile_sequence_running,
-		params->chopper_cal_active, motion_profile_quintic_is_active(&params->position_profile));
+		params->chopper_cal.active, motion_profile_quintic_is_active(&params->position_profile));
 	if (autonomous_keepalive) {
 		now_ms = k_uptime_get_32();
 		params->last_command_update_ms = now_ms;

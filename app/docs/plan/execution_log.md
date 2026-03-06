@@ -33,6 +33,7 @@ Append one entry per task execution.
 | 2026-02-25 | T0902 | done | n/a | Captured P09 size/link map/jitter evidence: link map shows new `libmotor_core_*` archives; `smartstepper_v2_mt6835` moved from `FLASH=231704,RAM=109984` to `FLASH=232128,RAM=110112` (`+424B/+128B`), while `smartstepper_v2` remained `FLASH=236560,RAM=111008`; no dedicated HIL jitter run in P09 (evidence-only). |
 | 2026-03-06 | n/a | done | n/a | Refactored `motor_core_step_fast()` into explicit helper stages (commission init, PWM init, keepalive+timeout gate, encoder stage, finalization) with no behavior change intent; `smartstepper_v2` build passed and unit suites `tests/unit/runtime` + `tests/unit/motor_commission_estimators` passed on `native_sim`. |
 | 2026-03-06 | n/a | done | n/a | Grouped profile sequence runtime fields into `struct motor_profile_sequence_ctx` (`params->profile_seq.*`) and migrated app/runtime call sites from flat `params->profile_sequence_*` fields; build + targeted unit suites passed. |
+| 2026-03-06 | n/a | done | n/a | Grouped chopper calibration runtime fields into `struct motor_chopper_cal_ctx` (`params->chopper_cal.*`) and migrated app/runtime call sites from flat `params->chopper_cal_*` fields; `smartstepper_v2` build and `tests/unit/runtime` passed. |
 
 ## Blocker Template
 

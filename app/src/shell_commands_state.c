@@ -438,7 +438,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	bool autonomous_keepalive =
 		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_seq.running,
-						 g_motor_params->chopper_cal_active,
+						 g_motor_params->chopper_cal.active,
 						 motion_profile_quintic_is_active(
 							 &g_motor_params->position_profile));
 	
@@ -621,7 +621,7 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	bool autonomous_keepalive =
 		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_seq.running,
-						 g_motor_params->chopper_cal_active,
+						 g_motor_params->chopper_cal.active,
 						 motion_profile_quintic_is_active(
 							 &g_motor_params->position_profile));
 	bool timeout_expired = timeout_enabled && !autonomous_keepalive &&
