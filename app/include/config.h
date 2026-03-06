@@ -161,6 +161,24 @@ struct motor_chopper_cal_ctx {
 	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
 };
 
+struct motor_calibration_ctx {
+	bool complete;  /* True if calibration has been run successfully */
+	bool running;   /* True while calibration/commissioning state machine is active */
+	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
+	uint8_t mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
+	uint8_t requested_online_mode; /* Requested ONLINE submode when entering ONLINE */
+	uint8_t align_pos_sample_retries; /* Retry count for +Id ALIGN sample window */
+	uint8_t align_neg_sample_retries; /* Retry count for -Id ALIGN sample window */
+	uint16_t align_pos_sample_count;  /* Fresh +Id encoder samples accumulated in ISR */
+	uint16_t align_neg_sample_count;  /* Fresh -Id encoder samples accumulated in ISR */
+	float32_t align_pos_sum_sin;      /* Circular-mean accumulator for +Id sample */
+	float32_t align_pos_sum_cos;      /* Circular-mean accumulator for +Id sample */
+	float32_t align_neg_sum_sin;      /* Circular-mean accumulator for -Id sample */
+	float32_t align_neg_sum_cos;      /* Circular-mean accumulator for -Id sample */
+	float32_t align_pos_mech_angle_rad; /* Circular mean of +Id sample window */
+	float32_t align_neg_mech_angle_rad; /* Circular mean of -Id sample window */
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -313,22 +331,8 @@ struct motor_parameters {
 	/* Error tracking */
 	uint32_t last_error_code;  /* Last error that caused ERROR state entry */
 
-	/* Calibration status */
-	bool calibration_complete;  /* True if calibration has been run successfully */
-	bool calibration_running;   /* True while calibration/commissioning state machine is active */
-	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
-	uint8_t calibration_mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
-	uint8_t requested_online_mode; /* Requested ONLINE submode when entering ONLINE from non-ONLINE states */
-	uint8_t align_pos_sample_retries; /* Retry count for +Id ALIGN sample window */
-	uint8_t align_neg_sample_retries; /* Retry count for -Id ALIGN sample window */
-	uint16_t align_pos_sample_count;  /* Fresh +Id encoder samples accumulated in ISR */
-	uint16_t align_neg_sample_count;  /* Fresh -Id encoder samples accumulated in ISR */
-	float32_t align_pos_sum_sin;      /* Circular-mean accumulator for +Id sample */
-	float32_t align_pos_sum_cos;      /* Circular-mean accumulator for +Id sample */
-	float32_t align_neg_sum_sin;      /* Circular-mean accumulator for -Id sample */
-	float32_t align_neg_sum_cos;      /* Circular-mean accumulator for -Id sample */
-	float32_t align_pos_mech_angle_rad; /* Circular mean of +Id sample window */
-	float32_t align_neg_mech_angle_rad; /* Circular mean of -Id sample window */
+	/* Calibration runtime + ALIGN scratch. */
+	struct motor_calibration_ctx calibration;
 	struct motor_commission_ctx commission; /* Commissioning runtime and capture buffers */
 
 	/* ISR feature flags (atomic for thread-safe access) */

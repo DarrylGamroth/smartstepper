@@ -451,29 +451,29 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Timeout latch: %s", g_motor_params->command_timeout_latched ? "SET" : "CLEAR");
 	shell_print(sh, "  Timeout count: %u", g_motor_params->command_timeout_count);
 	shell_print(sh, "  Auto keepalive: %s", autonomous_keepalive ? "ACTIVE" : "INACTIVE");
-	shell_print(sh, "  Cal complete: %s", g_motor_params->calibration_complete ? "YES" : "NO");
-	shell_print(sh, "  Cal running:  %s", g_motor_params->calibration_running ? "YES" : "NO");
+	shell_print(sh, "  Cal complete: %s", g_motor_params->calibration.complete ? "YES" : "NO");
+	shell_print(sh, "  Cal running:  %s", g_motor_params->calibration.running ? "YES" : "NO");
 	shell_print(sh, "  Cal mode:     %s",
-		    motor_calibration_mode_to_string(g_motor_params->calibration_mode));
+		    motor_calibration_mode_to_string(g_motor_params->calibration.mode));
 	shell_print(sh, "  Commissioned: %s",
-		    g_motor_params->commissioning_complete ? "YES" : "NO");
+		    g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
 	shell_print(sh, "  Online mode:  %s",
-		    motor_state_to_string(g_motor_params->requested_online_mode));
+		    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
 	shell_print(sh, "  Enc dir sign: %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
-	if (g_motor_params->calibration_running || motor_state_is_align_phase(state)) {
+	if (g_motor_params->calibration.running || motor_state_is_align_phase(state)) {
 		shell_print(sh, "  Align phase:  %s", state_str);
 		shell_print(sh,
 			    "  Align +Id:   samples=%u retries=%u mean=%.2f deg",
-			    g_motor_params->align_pos_sample_count,
-			    g_motor_params->align_pos_sample_retries,
-			    (double)(g_motor_params->align_pos_mech_angle_rad *
+			    g_motor_params->calibration.align_pos_sample_count,
+			    g_motor_params->calibration.align_pos_sample_retries,
+			    (double)(g_motor_params->calibration.align_pos_mech_angle_rad *
 				     (180.0f / PI_F32)));
 		shell_print(sh,
 			    "  Align -Id:   samples=%u retries=%u mean=%.2f deg",
-			    g_motor_params->align_neg_sample_count,
-			    g_motor_params->align_neg_sample_retries,
-			    (double)(g_motor_params->align_neg_mech_angle_rad *
+			    g_motor_params->calibration.align_neg_sample_count,
+			    g_motor_params->calibration.align_neg_sample_retries,
+			    (double)(g_motor_params->calibration.align_neg_mech_angle_rad *
 				     (180.0f / PI_F32)));
 		shell_print(sh,
 			    "  Align offset: %.2f deg",
@@ -496,7 +496,7 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 	bool online_active = (current_state == MOTOR_STATE_ONLINE) ||
 			    motor_state_is_online_submode(current_state);
 	if (!online_active) {
-		g_motor_params->requested_online_mode = (uint8_t)target_state;
+		g_motor_params->calibration.requested_online_mode = (uint8_t)target_state;
 		shell_print(sh,
 			    "Online mode set to %s (will apply on next ONLINE entry)",
 			    mode_name);
@@ -699,7 +699,7 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  R/L:            %.3f rad/s", (double)g_motor_params->R_over_L_measured);
 	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
 	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);
-	shell_print(sh, "  Commissioned:   %s", g_motor_params->commissioning_complete ? "YES" : "NO");
+	shell_print(sh, "  Commissioned:   %s", g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
 	
 	return 0;
 }

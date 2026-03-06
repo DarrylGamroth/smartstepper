@@ -134,7 +134,7 @@ static inline enum motor_state motor_resolve_requested_online_mode(const struct 
 	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
 
 	if (params != NULL) {
-		mode = (enum motor_state)params->requested_online_mode;
+		mode = (enum motor_state)params->calibration.requested_online_mode;
 	}
 
 	if (!motor_state_is_online_submode(mode)) {
@@ -498,7 +498,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	/* Initialize velocity/position scaffold defaults */
 	params->position_target_rad = 0.0f;
 	params->encoder_direction_sign = (ENCODER_DIRECTION_SIGN >= 0) ? 1 : -1;
-	params->requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	params->calibration.requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
 	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
 	params->outer_loop_mode = OUTER_LOOP_MPR_DEFAULT_ENABLED ?
@@ -595,25 +595,25 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->last_command_update_ms = k_uptime_get_32();
 	params->command_timeout_count = 0U;
 	params->command_timeout_latched = false;
-	params->calibration_complete = false;
-	params->calibration_running = false;
-	params->commissioning_complete = false;
-	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
-	params->align_pos_sample_retries = 0U;
-	params->align_neg_sample_retries = 0U;
+	params->calibration.complete = false;
+	params->calibration.running = false;
+	params->calibration.commissioning_complete = false;
+	params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
+	params->calibration.align_pos_sample_retries = 0U;
+	params->calibration.align_neg_sample_retries = 0U;
 	{
 		struct motor_align_sample_accum align_acc = {0};
 
 		motor_align_accum_reset(&align_acc);
-		params->align_pos_sample_count = align_acc.count;
-		params->align_pos_sum_sin = align_acc.sum_sin;
-		params->align_pos_sum_cos = align_acc.sum_cos;
-		params->align_neg_sample_count = align_acc.count;
-		params->align_neg_sum_sin = align_acc.sum_sin;
-		params->align_neg_sum_cos = align_acc.sum_cos;
+		params->calibration.align_pos_sample_count = align_acc.count;
+		params->calibration.align_pos_sum_sin = align_acc.sum_sin;
+		params->calibration.align_pos_sum_cos = align_acc.sum_cos;
+		params->calibration.align_neg_sample_count = align_acc.count;
+		params->calibration.align_neg_sum_sin = align_acc.sum_sin;
+		params->calibration.align_neg_sum_cos = align_acc.sum_cos;
 	}
-	params->align_pos_mech_angle_rad = 0.0f;
-	params->align_neg_mech_angle_rad = 0.0f;
+	params->calibration.align_pos_mech_angle_rad = 0.0f;
+	params->calibration.align_neg_mech_angle_rad = 0.0f;
 	motor_commission_init(params);
 
 	motor_velocity_plan_init(&params->traj_velocity,
@@ -774,7 +774,7 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_ONLINE:
-		if (params->calibration_complete) {
+		if (params->calibration.complete) {
 			enum motor_state online_mode =
 				motor_resolve_requested_online_mode(params);
 			LOG_INF("ONLINE request received, transitioning to ONLINE");
@@ -792,13 +792,13 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 
 	case MOTOR_EVENT_CALIBRATE_REQUEST:
 		LOG_INF("Calibrate request received, running boot calibration");
-		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_COMMISSION_REQUEST:
 		LOG_INF("Commission request received, running commissioning sequence");
-		params->calibration_mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
@@ -836,9 +836,9 @@ static void motor_state_offline_entry(void *obj)
 	drv8328_enable_channel(gate_driver_b, 1);
 
 	/* First OFFLINE entry after boot runs fast boot calibration sequence. */
-	if (!params->calibration_complete &&
-	    params->calibration_mode != MOTOR_CALIBRATION_MODE_COMMISSIONING) {
-		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+	if (!params->calibration.complete &&
+	    params->calibration.mode != MOTOR_CALIBRATION_MODE_COMMISSIONING) {
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 	}
 }
 
@@ -877,13 +877,13 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 
 	case MOTOR_EVENT_CALIBRATE_REQUEST:
 		LOG_INF("Calibrate request received, running boot calibration");
-		params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_COMMISSION_REQUEST:
 		LOG_INF("Commission request received, running commissioning sequence");
-		params->calibration_mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
@@ -894,7 +894,7 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 	/* Auto-enter ONLINE once OFFLINE has no active calibration and the required
 	 * boot calibration has already completed.
 	 */
-	if (!params->calibration_running && params->calibration_complete) {
+	if (!params->calibration.running && params->calibration.complete) {
 		enum motor_state online_mode = motor_resolve_requested_online_mode(params);
 		LOG_INF("Calibration already complete, transitioning to ONLINE");
 		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);

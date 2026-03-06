@@ -678,7 +678,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		shell_error(sh, "Commission capture is already active");
 		return -EBUSY;
 	}
-	if (!g_motor_params->calibration_complete) {
+	if (!g_motor_params->calibration.complete) {
 		shell_error(sh, "Calibration is not complete; run calibration before auto commission");
 		return -EACCES;
 	}

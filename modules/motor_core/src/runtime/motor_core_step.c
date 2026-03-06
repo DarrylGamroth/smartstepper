@@ -109,9 +109,9 @@ static inline void motor_align_load_pos_accum(const struct motor_parameters *par
 		return;
 	}
 
-	acc->sum_sin = params->align_pos_sum_sin;
-	acc->sum_cos = params->align_pos_sum_cos;
-	acc->count = params->align_pos_sample_count;
+	acc->sum_sin = params->calibration.align_pos_sum_sin;
+	acc->sum_cos = params->calibration.align_pos_sum_cos;
+	acc->count = params->calibration.align_pos_sample_count;
 }
 
 static inline void motor_align_store_pos_accum(struct motor_parameters *params,
@@ -121,9 +121,9 @@ static inline void motor_align_store_pos_accum(struct motor_parameters *params,
 		return;
 	}
 
-	params->align_pos_sum_sin = acc->sum_sin;
-	params->align_pos_sum_cos = acc->sum_cos;
-	params->align_pos_sample_count = acc->count;
+	params->calibration.align_pos_sum_sin = acc->sum_sin;
+	params->calibration.align_pos_sum_cos = acc->sum_cos;
+	params->calibration.align_pos_sample_count = acc->count;
 }
 
 static inline void motor_align_load_neg_accum(const struct motor_parameters *params,
@@ -133,9 +133,9 @@ static inline void motor_align_load_neg_accum(const struct motor_parameters *par
 		return;
 	}
 
-	acc->sum_sin = params->align_neg_sum_sin;
-	acc->sum_cos = params->align_neg_sum_cos;
-	acc->count = params->align_neg_sample_count;
+	acc->sum_sin = params->calibration.align_neg_sum_sin;
+	acc->sum_cos = params->calibration.align_neg_sum_cos;
+	acc->count = params->calibration.align_neg_sample_count;
 }
 
 static inline void motor_align_store_neg_accum(struct motor_parameters *params,
@@ -145,9 +145,9 @@ static inline void motor_align_store_neg_accum(struct motor_parameters *params,
 		return;
 	}
 
-	params->align_neg_sum_sin = acc->sum_sin;
-	params->align_neg_sum_cos = acc->sum_cos;
-	params->align_neg_sample_count = acc->count;
+	params->calibration.align_neg_sum_sin = acc->sum_sin;
+	params->calibration.align_neg_sum_cos = acc->sum_cos;
+	params->calibration.align_neg_sample_count = acc->count;
 }
 
 static inline void motor_fault_snapshot_try_store(struct motor_parameters *params,
