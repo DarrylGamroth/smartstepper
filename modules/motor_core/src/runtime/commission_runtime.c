@@ -713,12 +713,12 @@ int motor_commission_apply_staged_auto_tune(struct motor_parameters *params)
 	params->velocity_dob_cfg.torque_limit_nm = staged->velocity_dob_torque_limit_nm;
 	params->velocity_dob_cfg.iq_ff_limit_a = staged->velocity_dob_iq_ff_limit_a;
 
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, params->velocity_rad_s, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, params->position_rad);
-	motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, params->live.velocity_rad_s, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, params->live.position_rad);
+	motor_dob_reset(&params->velocity_dob_state, params->live.velocity_rad_s);
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 
 	ctx->auto_tune_applied = true;
 	ctx->auto_tune_last_error = 0;

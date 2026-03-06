@@ -156,9 +156,9 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 		out->speed_mech_filtered_rad_s =
 			filter_so_run(&params->filter_velocity_notch, in->speed_mech_rad_s);
 		bool velocity_feedback_valid =
-			motor_velocity_feedback_is_valid(params->position_quality_flags);
+			motor_velocity_feedback_is_valid(params->live.position_quality_flags);
 		bool velocity_feedback_fresh =
-			(params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
+			(params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
 		bool velocity_loop_update = sched_out.velocity_update;
 		if (!velocity_feedback_valid) {
 			/* Hold measured dq currents and reset outer-loop observers while encoder
@@ -169,16 +169,16 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 			out->iq_ref_a = in->iq_meas_a;
 			out->velocity_target_rad_s = 0.0f;
 			out->velocity_ref_rad_s = 0.0f;
-			params->velocity_target_rad_s = 0.0f;
-			params->velocity_ref_rad_s = 0.0f;
+			params->live.velocity_target_rad_s = 0.0f;
+			params->live.velocity_ref_rad_s = 0.0f;
 			traj_set_target_value(&params->traj_velocity, 0.0f);
 			motor_mpr_velocity_reset(&params->velocity_mpr_state,
 						 out->speed_mech_filtered_rad_s,
 						 out->iq_ref_a);
 			motor_dob_reset(&params->velocity_dob_state, out->speed_mech_filtered_rad_s);
-			params->velocity_dob_iq_ff_a = 0.0f;
-			params->velocity_dob_disturbance_nm = 0.0f;
-			params->velocity_dob_residual_rad_s = 0.0f;
+			params->live.velocity_dob_iq_ff_a = 0.0f;
+			params->live.velocity_dob_disturbance_nm = 0.0f;
+			params->live.velocity_dob_residual_rad_s = 0.0f;
 		} else if (velocity_loop_update && velocity_feedback_fresh) {
 			bool use_mpr = motor_outer_loop_use_mpr(params);
 			bool mpr_applied = false;
@@ -276,9 +276,9 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 									  &params->velocity_dob_state,
 									  out->speed_mech_filtered_rad_s);
 					if (dob_init_ret != 0) {
-						params->velocity_dob_iq_ff_a = 0.0f;
-						params->velocity_dob_disturbance_nm = 0.0f;
-						params->velocity_dob_residual_rad_s = 0.0f;
+						params->live.velocity_dob_iq_ff_a = 0.0f;
+						params->live.velocity_dob_disturbance_nm = 0.0f;
+						params->live.velocity_dob_residual_rad_s = 0.0f;
 						dob_ready = false;
 					}
 				}
@@ -291,10 +291,10 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 								     iq_cmd_pre_dob_a,
 								     &iq_dob_ff_a);
 					if (dob_ret == 0) {
-						params->velocity_dob_iq_ff_a = iq_dob_ff_a;
-						params->velocity_dob_disturbance_nm =
+						params->live.velocity_dob_iq_ff_a = iq_dob_ff_a;
+						params->live.velocity_dob_disturbance_nm =
 							params->velocity_dob_state.disturbance_nm;
-						params->velocity_dob_residual_rad_s =
+						params->live.velocity_dob_residual_rad_s =
 							params->velocity_dob_state.residual_rad_s;
 						out->iq_ref_a = clampf(iq_cmd_pre_dob_a + iq_dob_ff_a,
 								       -params->velocity_cl_iq_limit_A,
@@ -302,9 +302,9 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 					} else {
 						motor_dob_reset(&params->velocity_dob_state,
 								out->speed_mech_filtered_rad_s);
-						params->velocity_dob_iq_ff_a = 0.0f;
-						params->velocity_dob_disturbance_nm = 0.0f;
-						params->velocity_dob_residual_rad_s = 0.0f;
+						params->live.velocity_dob_iq_ff_a = 0.0f;
+						params->live.velocity_dob_disturbance_nm = 0.0f;
+						params->live.velocity_dob_residual_rad_s = 0.0f;
 					}
 				}
 			}

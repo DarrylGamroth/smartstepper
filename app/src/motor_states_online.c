@@ -40,18 +40,18 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 
 static inline void motor_online_reset_feedback_quality(struct motor_parameters *params)
 {
-	params->position_quality_flags = 0U;
-	params->position_stale_count = 0U;
-	params->position_stale_events = 0U;
-	params->position_glitch_count = 0U;
-	params->position_jitter_count = 0U;
+	params->live.position_quality_flags = 0U;
+	params->live.position_stale_count = 0U;
+	params->live.position_stale_events = 0U;
+	params->live.position_glitch_count = 0U;
+	params->live.position_jitter_count = 0U;
 }
 
 static int motor_position_plan_sequence_move(struct motor_parameters *params, float32_t target_wrapped_rad)
 {
 	int ret = motor_position_move_plan_sequence_segment(&params->position_profile,
-							    params->position_rad,
-							    params->velocity_rad_s,
+							    params->live.position_rad,
+							    params->live.velocity_rad_s,
 							    target_wrapped_rad,
 							    params->profile_seq.end_velocity_rad_s,
 							    params->profile_seq.move_duration_s,
@@ -61,7 +61,7 @@ static int motor_position_plan_sequence_move(struct motor_parameters *params, fl
 		return ret;
 	}
 
-	params->position_target_rad = wrap_rad_2pi(params->position_rad);
+	params->position_target_rad = wrap_rad_2pi(params->live.position_rad);
 	params->last_command_update_ms = k_uptime_get_32();
 	params->command_timeout_latched = false;
 
@@ -168,17 +168,17 @@ void motor_state_online_torque_entry(void *obj)
 	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state,
-				 params->velocity_rad_s,
+				 params->live.velocity_rad_s,
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state,
-			params->velocity_rad_s);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+			params->live.velocity_rad_s);
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
 void motor_state_online_torque_exit(void *obj)
@@ -205,7 +205,7 @@ enum smf_state_result motor_state_online_torque_run(void *obj)
 void motor_state_online_velocity_open_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t mech_angle_rad = params->position_rad;
+	float32_t mech_angle_rad = params->live.position_rad;
 
 	LOG_INF("Entering ONLINE_VELOCITY_OPEN substate");
 
@@ -235,9 +235,9 @@ void motor_state_online_velocity_open_entry(void *obj)
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 
 	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
 		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
@@ -274,7 +274,7 @@ void motor_state_online_velocity_open_exit(void *obj)
 void motor_state_online_velocity_closed_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = params->velocity_rad_s;
+	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
 
 	LOG_INF("Entering ONLINE_VELOCITY_CLOSED substate");
 
@@ -292,10 +292,10 @@ void motor_state_online_velocity_closed_entry(void *obj)
 				 0.0f);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
-	params->Id_ref_A = params->Id_setpoint_A;
-	params->Iq_ref_A = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
+	params->live.Id_ref_A = params->Id_setpoint_A;
+	params->live.Iq_ref_A = 0.0f;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
@@ -303,9 +303,9 @@ void motor_state_online_velocity_closed_entry(void *obj)
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
 	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
 enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
@@ -330,8 +330,8 @@ void motor_state_online_velocity_closed_exit(void *obj)
 void motor_state_online_position_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = params->velocity_rad_s;
-	float32_t position_mech_rad = params->position_rad;
+	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
+	float32_t position_mech_rad = params->live.position_rad;
 
 	LOG_INF("Entering ONLINE_POSITION substate");
 
@@ -351,19 +351,19 @@ void motor_state_online_position_entry(void *obj)
 				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
 				 speed_mech_rad_s);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = speed_mech_rad_s;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = speed_mech_rad_s;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->Iq_ref_A);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->live.Iq_ref_A);
 	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
 	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
 enum smf_state_result motor_state_online_position_run(void *obj)
@@ -428,10 +428,10 @@ void motor_state_online_position_exit(void *obj)
 
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
-	params->velocity_target_rad_s = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
 	motion_profile_quintic_cancel(&params->position_profile,
-				      params->position_rad);
-	params->velocity_ref_rad_s = 0.0f;
+				      params->live.position_rad);
+	params->live.velocity_ref_rad_s = 0.0f;
 	params->profile_seq.running = false;
 	params->profile_seq.tick_counter = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
@@ -439,9 +439,9 @@ void motor_state_online_position_exit(void *obj)
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));

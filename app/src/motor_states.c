@@ -100,8 +100,8 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 {
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
@@ -114,19 +114,19 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	pi_set_ui(&params->pi_Iq, 0.0f);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	motor_mpr_velocity_reset(&params->velocity_mpr_state,
-				 params->velocity_rad_s,
+				 params->live.velocity_rad_s,
 				 0.0f);
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state,
-			params->velocity_rad_s);
-	params->position_quality_flags = 0U;
-	params->position_stale_count = 0U;
-	params->position_stale_events = 0U;
-	params->position_glitch_count = 0U;
-	params->position_jitter_count = 0U;
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+			params->live.velocity_rad_s);
+	params->live.position_quality_flags = 0U;
+	params->live.position_stale_count = 0U;
+	params->live.position_stale_events = 0U;
+	params->live.position_glitch_count = 0U;
+	params->live.position_jitter_count = 0U;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
 static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
@@ -553,19 +553,19 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_dob_cfg.torque_limit_nm = params->torque_gain_nm_per_a_active *
 						   params->velocity_cl_iq_limit_A;
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
-	params->velocity_filtered_rad_s = 0.0f;
-	params->position_rad = 0.0f;
-	params->position_unwrapped_rad = 0.0f;
-	params->position_innovation_rad = 0.0f;
-	params->velocity_rad_s = 0.0f;
-	params->acceleration_rad_s2 = 0.0f;
-	params->position_quality_flags = 0U;
-	params->position_stale_count = 0U;
-	params->position_stale_events = 0U;
-	params->position_glitch_count = 0U;
-	params->position_jitter_count = 0U;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
+	params->live.velocity_filtered_rad_s = 0.0f;
+	params->live.position_rad = 0.0f;
+	params->live.position_unwrapped_rad = 0.0f;
+	params->live.position_innovation_rad = 0.0f;
+	params->live.velocity_rad_s = 0.0f;
+	params->live.acceleration_rad_s2 = 0.0f;
+	params->live.position_quality_flags = 0U;
+	params->live.position_stale_count = 0U;
+	params->live.position_stale_events = 0U;
+	params->live.position_glitch_count = 0U;
+	params->live.position_jitter_count = 0U;
 	params->encoder_capture.enabled = false;
 	params->encoder_capture.decimation = 1U;
 	params->encoder_capture.phase = 0U;
@@ -578,9 +578,9 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->encoder_raw_trace.write_idx = 0U;
 	params->encoder_raw_trace.count = 0U;
 	params->encoder_raw_trace.overrun_count = 0U;
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = 0.0f;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 	params->Rs_measured_ohm = MOTOR_RESISTANCE_OHM;
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
 	params->R_over_L_measured =
@@ -621,8 +621,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 				 params->profile_max_accel_rad_s2,
 				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
 				 0.0f);
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
 	motion_profile_quintic_init(&params->position_profile, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	motion_profile_quintic_cancel(&params->position_profile, 0.0f);
 	params->profile_seq.running = false;

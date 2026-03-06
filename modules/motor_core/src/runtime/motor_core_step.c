@@ -347,12 +347,12 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 		      OUTER_LOOP_DECIMATION_MAX);
 	ctx->velocity_loop_dt_s = ctx->dt_s * (float32_t)ctx->velocity_loop_decimation;
 	ctx->position_loop_dt_s = ctx->dt_s * (float32_t)ctx->position_loop_decimation;
-	ctx->velocity_target_rad_s = params->velocity_target_rad_s;
-	ctx->velocity_ref_rad_s = params->velocity_ref_rad_s;
-	ctx->position_mech_rad = params->position_rad;
-	ctx->speed_mech_rad_s = params->velocity_rad_s;
-	ctx->accel_mech_rad_s2 = params->acceleration_rad_s2;
-	ctx->speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
+	ctx->velocity_target_rad_s = params->live.velocity_target_rad_s;
+	ctx->velocity_ref_rad_s = params->live.velocity_ref_rad_s;
+	ctx->position_mech_rad = params->live.position_rad;
+	ctx->speed_mech_rad_s = params->live.velocity_rad_s;
+	ctx->accel_mech_rad_s2 = params->live.acceleration_rad_s2;
+	ctx->speed_mech_filtered_rad_s = params->live.velocity_filtered_rad_s;
 }
 
 static inline void motor_core_step_init_pwm_output(struct motor_control_pwm_output *pwm_out)
@@ -497,7 +497,7 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
 	}
 	motor_control_telemetry_store_encoder_raw_trace(params, encoder_sample, &enc_res->control_fb,
-							params->position_quality_flags);
+							params->live.position_quality_flags);
 
 	return 0;
 }
@@ -559,8 +559,8 @@ void motor_core_step_fast(struct motor_parameters *params,
 	float32_t Ua_pu, Ub_pu;
 	float32_t Da_pu, Db_pu;
 	float32_t Da_hb1_pu, Da_hb2_pu, Db_hb1_pu, Db_hb2_pu;
-	float32_t Id_ref_A = params->Id_ref_A;
-	float32_t Iq_ref_A = params->Iq_ref_A;
+	float32_t Id_ref_A = params->live.Id_ref_A;
+	float32_t Iq_ref_A = params->live.Iq_ref_A;
 	float32_t Vd_V, Vq_V;
 	float32_t max_voltage_magnitude_V;
 	float32_t inv_park_angle_rad;
@@ -576,9 +576,9 @@ void motor_core_step_fast(struct motor_parameters *params,
 	float32_t speed_mech_filtered_rad_s = ctx.speed_mech_filtered_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 
-	params->velocity_dob_iq_ff_a = 0.0f;
-	params->velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
-	params->velocity_dob_residual_rad_s = 0.0f;
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
 
 	(void)motor_core_step_apply_keepalive_and_timeout(params, state, profile_sequence_running,
 							  online_control_state, &control_armed);
@@ -646,7 +646,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 	motor_fault_snapshot_try_store(params,
 				      angle_control_degrees,
-				      params->encoder_observer_input_rad,
+				      params->live.encoder_observer_input_rad,
 				      park_angle_rad,
 				      angle_observer_get_elec_speed(&params->observer),
 				      Id_ref_A,
@@ -662,7 +662,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 				      encoder_frame_warning,
 				      encoder_frame_error,
 				      encoder_frame_status,
-				      params->position_quality_flags);
+				      params->live.position_quality_flags);
 
 	/* Fault detection: Check for overcurrent after offset removal */
 	if (fabsf(Ia_A) > OVERCURRENT_THRESHOLD_A || fabsf(Ib_A) > OVERCURRENT_THRESHOLD_A) {
@@ -792,7 +792,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 				      (fabsf(observer_elec_speed_rad_s) <=
 				       decoupling_speed_limit_rad_s);
 	bool decoupling_feedback_valid = feature_angle_gen ||
-					 motor_velocity_feedback_is_valid(params->position_quality_flags);
+					 motor_velocity_feedback_is_valid(params->live.position_quality_flags);
 	struct motor_dq_decoupling_enable_input decoupling_enable_in = {
 		.feature_enabled = CURRENT_DECOUPLING_ENABLED,
 		.online_control_state = online_control_state,
@@ -873,35 +873,35 @@ void motor_core_step_fast(struct motor_parameters *params,
 	motor_rls_update_estimators(params, &rls_runtime, Id_A, Iq_A);
 
 	/* Update telemetry snapshot (mechanical-domain feedback from observer path). */
-	params->position_rad = position_mech_rad;
-	params->position_unwrapped_rad = position_mech_rad;
-	params->position_innovation_rad = 0.0f;
-	params->velocity_rad_s = speed_mech_rad_s;
-	params->acceleration_rad_s2 = accel_mech_rad_s2;
-	params->velocity_filtered_rad_s = speed_mech_filtered_rad_s;
-	params->velocity_target_rad_s = velocity_target_rad_s;
-	params->velocity_ref_rad_s = velocity_ref_rad_s;
+	params->live.position_rad = position_mech_rad;
+	params->live.position_unwrapped_rad = position_mech_rad;
+	params->live.position_innovation_rad = 0.0f;
+	params->live.velocity_rad_s = speed_mech_rad_s;
+	params->live.acceleration_rad_s2 = accel_mech_rad_s2;
+	params->live.velocity_filtered_rad_s = speed_mech_filtered_rad_s;
+	params->live.velocity_target_rad_s = velocity_target_rad_s;
+	params->live.velocity_ref_rad_s = velocity_ref_rad_s;
 
-	params->Id_ref_A = Id_ref_A;
-	params->Iq_ref_A = Iq_ref_A;
-	params->Id_A = Id_A;
-	params->Iq_A = Iq_A;
-	params->Ia_A = Ia_A;
-	params->Ib_A = Ib_A;
+	params->live.Id_ref_A = Id_ref_A;
+	params->live.Iq_ref_A = Iq_ref_A;
+	params->live.Id_A = Id_A;
+	params->live.Iq_A = Iq_A;
+	params->live.Ia_A = Ia_A;
+	params->live.Ib_A = Ib_A;
 	params->Vd_V = Vd_V;
 	params->Vq_V = Vq_V;
-	params->Va_V = Va_V;
-	params->Vb_V = Vb_V;
+	params->live.Va_V = Va_V;
+	params->live.Vb_V = Vb_V;
 	params->max_voltage_magnitude_V = max_voltage_magnitude_V;
-	params->elec_angle_rad = inv_park_angle_rad;
-	params->dc_bus_voltage_V = Vbus_V;
+	params->live.elec_angle_rad = inv_park_angle_rad;
+	params->live.dc_bus_voltage_V = Vbus_V;
 
 	commission_obs.data_valid = true;
 	commission_obs.id_a = Id_A;
 	commission_obs.iq_a = Iq_A;
 	commission_obs.vd_v = Vd_V;
 	commission_obs.vq_v = Vq_V;
-	commission_obs.mech_speed_rad_s = params->velocity_rad_s;
+	commission_obs.mech_speed_rad_s = params->live.velocity_rad_s;
 	commission_obs.elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
 	commission_obs.saturation = voltage_saturated;
 

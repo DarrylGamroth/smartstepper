@@ -153,7 +153,7 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	}
 
 	uint32_t captured = params->chopper_cal.total_edges_captured;
-	float32_t wrapped_rad = wrap_rad_2pi(params->position_rad);
+	float32_t wrapped_rad = wrap_rad_2pi(params->live.position_rad);
 	float32_t unwrapped_rad = wrapped_rad;
 
 	if (captured == 0U) {

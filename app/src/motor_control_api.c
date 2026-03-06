@@ -241,12 +241,12 @@ static void motor_param_apply_profile_limits(struct motor_parameters *params)
 					  params->profile_max_velocity_rad_s,
 					  params->profile_max_accel_rad_s2,
 					  1.0f / CONTROL_LOOP_FREQUENCY_HZ);
-	params->velocity_target_rad_s =
-		clampf(params->velocity_target_rad_s,
+	params->live.velocity_target_rad_s =
+		clampf(params->live.velocity_target_rad_s,
 		       -params->profile_max_velocity_rad_s,
 		       params->profile_max_velocity_rad_s);
-	params->velocity_ref_rad_s =
-		clampf(params->velocity_ref_rad_s,
+	params->live.velocity_ref_rad_s =
+		clampf(params->live.velocity_ref_rad_s,
 		       -params->profile_max_velocity_rad_s,
 		       params->profile_max_velocity_rad_s);
 }
@@ -559,16 +559,16 @@ void motor_api_get_telemetry(float *id_meas, float *iq_meas,
 	 * Single 32-bit float reads are atomic on Cortex-M
 	 */
 	if (id_meas != NULL) {
-		*id_meas = g_motor_params->Id_A;
+		*id_meas = g_motor_params->live.Id_A;
 	}
 	if (iq_meas != NULL) {
-		*iq_meas = g_motor_params->Iq_A;
+		*iq_meas = g_motor_params->live.Iq_A;
 	}
 	if (speed_hz != NULL) {
-		*speed_hz = g_motor_params->velocity_rad_s / (2.0f * PI_F32);
+		*speed_hz = g_motor_params->live.velocity_rad_s / (2.0f * PI_F32);
 	}
 	if (vbus_V != NULL) {
-		*vbus_V = g_motor_params->dc_bus_voltage_V;
+		*vbus_V = g_motor_params->live.dc_bus_voltage_V;
 	}
 }
 
@@ -722,10 +722,10 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->outer_loop_mode = (uint8_t)(value + 0.5f);
-		motor_mpr_velocity_reset(&params->velocity_mpr_state, params->velocity_rad_s,
-					 params->Iq_ref_A);
-		motor_mpr_position_reset(&params->position_mpr_state, params->velocity_ref_rad_s);
-		motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
+		motor_mpr_velocity_reset(&params->velocity_mpr_state, params->live.velocity_rad_s,
+					 params->live.Iq_ref_A);
+		motor_mpr_position_reset(&params->position_mpr_state, params->live.velocity_ref_rad_s);
+		motor_dob_reset(&params->velocity_dob_state, params->live.velocity_rad_s);
 		LOG_DBG("Updated outer_loop_mode = %u", params->outer_loop_mode);
 		break;
 	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
@@ -775,7 +775,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->velocity_dob_cfg.enabled = (value >= 0.5f);
-		motor_dob_reset(&params->velocity_dob_state, params->velocity_rad_s);
+		motor_dob_reset(&params->velocity_dob_state, params->live.velocity_rad_s);
 		LOG_DBG("Updated velocity_dob_enable = %u", params->velocity_dob_cfg.enabled ? 1U : 0U);
 		break;
 	case PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S:
@@ -914,11 +914,11 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->encoder_direction_sign = sign;
-		params->position_quality_flags = 0U;
-		params->position_stale_count = 0U;
-		params->position_stale_events = 0U;
-		params->position_glitch_count = 0U;
-		params->position_jitter_count = 0U;
+		params->live.position_quality_flags = 0U;
+		params->live.position_stale_count = 0U;
+		params->live.position_stale_events = 0U;
+		params->live.position_glitch_count = 0U;
+		params->live.position_jitter_count = 0U;
 		LOG_DBG("Updated encoder_direction_sign = %d", sign);
 		break;
 	}

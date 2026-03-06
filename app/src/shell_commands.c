@@ -677,14 +677,14 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 
 	/* Get values from trajectory/controller (in rad/s) and convert to Hz for display */
 	float target_rad_s = traj_get_target_value(&g_motor_params->traj_velocity);
-	float ref_rad_s = g_motor_params->velocity_ref_rad_s;
-	float meas_rad_s = g_motor_params->velocity_rad_s;
+	float ref_rad_s = g_motor_params->live.velocity_ref_rad_s;
+	float meas_rad_s = g_motor_params->live.velocity_rad_s;
 	float target_hz = target_rad_s / (2.0f * PI_F32);
 	float ref_hz = ref_rad_s / (2.0f * PI_F32);
 	float meas_hz = meas_rad_s / (2.0f * PI_F32);
 	float error_hz = ref_hz - meas_hz;
 	bool traj_at_target = traj_is_at_target(&g_motor_params->traj_velocity);
-	uint8_t quality_flags = g_motor_params->position_quality_flags;
+	uint8_t quality_flags = g_motor_params->live.position_quality_flags;
 	bool feedback_valid =
 		((quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U) &&
 		((quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U);
@@ -756,9 +756,9 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 			    (double)g_motor_params->velocity_dob_cfg.torque_limit_nm,
 			    (double)g_motor_params->velocity_dob_cfg.iq_ff_limit_a);
 		shell_print(sh, "  DOB est:    %.5f Nm, iq_ff=%.5f A, res=%.5f rad/s",
-			    (double)g_motor_params->velocity_dob_disturbance_nm,
-			    (double)g_motor_params->velocity_dob_iq_ff_a,
-			    (double)g_motor_params->velocity_dob_residual_rad_s);
+			    (double)g_motor_params->live.velocity_dob_disturbance_nm,
+			    (double)g_motor_params->live.velocity_dob_iq_ff_a,
+			    (double)g_motor_params->live.velocity_dob_residual_rad_s);
 	}
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
 
@@ -947,9 +947,9 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 		shell_print(sh, "  Iq FF limit: %.6f A",
 			    (double)g_motor_params->velocity_dob_cfg.iq_ff_limit_a);
 		shell_print(sh, "  State:       d=%.6f Nm, ff=%.6f A, res=%.6f rad/s",
-			    (double)g_motor_params->velocity_dob_disturbance_nm,
-			    (double)g_motor_params->velocity_dob_iq_ff_a,
-			    (double)g_motor_params->velocity_dob_residual_rad_s);
+			    (double)g_motor_params->live.velocity_dob_disturbance_nm,
+			    (double)g_motor_params->live.velocity_dob_iq_ff_a,
+			    (double)g_motor_params->live.velocity_dob_residual_rad_s);
 		return 0;
 	}
 
@@ -1170,7 +1170,7 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 	}
 
 	float target_rad = g_motor_params->position_target_rad;
-	float meas_rad = g_motor_params->position_rad;
+	float meas_rad = g_motor_params->live.position_rad;
 	float err_rad = wrap_rad_pi(target_rad - meas_rad);
 	uint32_t position_decimation =
 		MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->position_loop_decimation);
@@ -1479,9 +1479,9 @@ static int cmd_motor_rls_gating(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "  Max residual:    %.4f V", (double)g_motor_params->rls.max_residual_v);
 	shell_print(sh, "");
 	shell_print(sh, "Current Status:");
-	float32_t Id_abs = fabsf(g_motor_params->Id_A);
-	float32_t Iq_abs = fabsf(g_motor_params->Iq_A);
-	float32_t omega_hz = fabsf(g_motor_params->velocity_rad_s / (2.0f * PI_F32));
+	float32_t Id_abs = fabsf(g_motor_params->live.Id_A);
+	float32_t Iq_abs = fabsf(g_motor_params->live.Iq_A);
+	float32_t omega_hz = fabsf(g_motor_params->live.velocity_rad_s / (2.0f * PI_F32));
 	shell_print(sh, "  |Id|:             %.3f A %s", (double)Id_abs,
 	            Id_abs > g_motor_params->rls.min_current_a ? "[OK]" : "[LOW]");
 	shell_print(sh, "  |Iq|:             %.3f A %s", (double)Iq_abs,

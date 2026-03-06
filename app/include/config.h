@@ -239,6 +239,43 @@ struct motor_thermal_ctx {
 	float32_t t_rls_c;               /* Temperature from RLS Rs estimate (deg C) */
 };
 
+struct motor_live_telemetry_ctx {
+	float32_t position_rad;
+	float32_t position_unwrapped_rad;
+	float32_t position_innovation_rad;
+	float32_t velocity_rad_s;
+	float32_t acceleration_rad_s2;
+	float32_t velocity_filtered_rad_s;
+	float32_t encoder_raw_deg;
+	float32_t encoder_raw_rad;
+	float32_t encoder_observer_input_rad;
+	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
+	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
+	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */
+	float32_t velocity_dob_disturbance_nm; /* Estimated lumped disturbance torque */
+	float32_t velocity_dob_residual_rad_s; /* Observer speed residual */
+	float32_t Id_ref_A;
+	float32_t Iq_ref_A;
+	float32_t Id_A;
+	float32_t Iq_A;
+	float32_t Ia_A;
+	float32_t Ib_A;
+	float32_t Va_V;
+	float32_t Vb_V;
+	float32_t elec_angle_rad;
+	float32_t dc_bus_voltage_V;
+	uint8_t encoder_last_status;
+	uint8_t encoder_sample_fresh;
+	uint8_t encoder_sample_warning;
+	uint8_t encoder_sample_error;
+	uint8_t encoder_input_source;
+	uint8_t position_quality_flags;
+	uint16_t position_stale_count;
+	uint32_t position_stale_events;
+	uint32_t position_glitch_count;
+	uint32_t position_jitter_count;
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -380,41 +417,8 @@ struct motor_parameters {
 	struct motor_rls_ctx rls;
 	struct motor_thermal_ctx thermal;
 
-	/* Live telemetry snapshot (updated in ISR) */
-	float32_t position_rad;
-	float32_t position_unwrapped_rad;
-	float32_t position_innovation_rad;
-	float32_t velocity_rad_s;
-	float32_t acceleration_rad_s2;
-	float32_t velocity_filtered_rad_s;
-	float32_t encoder_raw_deg;
-	float32_t encoder_raw_rad;
-	float32_t encoder_observer_input_rad;
-	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
-	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
-	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */
-	float32_t velocity_dob_disturbance_nm; /* Estimated lumped disturbance torque */
-	float32_t velocity_dob_residual_rad_s; /* Observer speed residual */
-	float32_t Id_ref_A;
-	float32_t Iq_ref_A;	
-	float32_t Id_A;
-	float32_t Iq_A;
-	float32_t Ia_A;
-	float32_t Ib_A;
-	float32_t Va_V;
-	float32_t Vb_V;
-	float32_t elec_angle_rad;
-	float32_t dc_bus_voltage_V;
-	uint8_t encoder_last_status;
-	uint8_t encoder_sample_fresh;
-	uint8_t encoder_sample_warning;
-	uint8_t encoder_sample_error;
-	uint8_t encoder_input_source;
-	uint8_t position_quality_flags;
-	uint16_t position_stale_count;
-	uint32_t position_stale_events;
-	uint32_t position_glitch_count;
-	uint32_t position_jitter_count;
+	/* Live telemetry snapshot (updated in ISR). */
+	struct motor_live_telemetry_ctx live;
 };
 
 /* Devicetree parameter extraction with unit conversion */

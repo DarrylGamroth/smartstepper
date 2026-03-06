@@ -133,12 +133,12 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
-	params->velocity_target_rad_s = 0.0f;
-	params->velocity_ref_rad_s = 0.0f;
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
-	motion_profile_quintic_cancel(&params->position_profile, params->position_rad);
-	params->position_target_rad = wrap_rad_2pi(params->position_rad);
+	motion_profile_quintic_cancel(&params->position_profile, params->live.position_rad);
+	params->position_target_rad = wrap_rad_2pi(params->live.position_rad);
 }
 
 static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, bool *mlo_out)
@@ -721,11 +721,11 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "Live Telemetry:");
 	shell_print(sh, "  State:          %s", motor_state_to_string(state));
 	shell_print(sh, "  Error:          %s", motor_error_to_string(error));
-	shell_print(sh, "  Angle (mech):   %.1f deg", (double)(g_motor_params->position_rad * 180.0f / PI_F32));
-	shell_print(sh, "  Angle (elec):   %.1f deg", (double)(g_motor_params->elec_angle_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Angle (mech):   %.1f deg", (double)(g_motor_params->live.position_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Angle (elec):   %.1f deg", (double)(g_motor_params->live.elec_angle_rad * 180.0f / PI_F32));
 	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
-		    (double)g_motor_params->encoder_raw_deg,
-		    (double)g_motor_params->encoder_raw_rad);
+		    (double)g_motor_params->live.encoder_raw_deg,
+		    (double)g_motor_params->live.encoder_raw_rad);
 	shell_print(sh, "  Enc dir sign:   %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	shell_print(sh, "  Enc trim:       elec=%.3f deg mech=%.4f deg",
@@ -733,13 +733,13 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    (double)((g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32)) /
 			     (float32_t)MOTOR_POLE_PAIRS));
 	shell_print(sh, "  Enc used:       %.6f rad (%s, fresh=%s)",
-		    (double)g_motor_params->encoder_observer_input_rad,
-		    motor_encoder_input_source_to_string(g_motor_params->encoder_input_source),
-		    g_motor_params->encoder_sample_fresh ? "yes" : "no");
+		    (double)g_motor_params->live.encoder_observer_input_rad,
+		    motor_encoder_input_source_to_string(g_motor_params->live.encoder_input_source),
+		    g_motor_params->live.encoder_sample_fresh ? "yes" : "no");
 	shell_print(sh, "  Enc flags:      status=0x%02X warn=%s err=%s",
-		    g_motor_params->encoder_last_status,
-		    g_motor_params->encoder_sample_warning ? "SET" : "CLEAR",
-		    g_motor_params->encoder_sample_error ? "SET" : "CLEAR");
+		    g_motor_params->live.encoder_last_status,
+		    g_motor_params->live.encoder_sample_warning ? "SET" : "CLEAR",
+		    g_motor_params->live.encoder_sample_error ? "SET" : "CLEAR");
 	shell_print(sh, "  Enc pipeline:   %s, %s",
 		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
 		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
@@ -747,31 +747,31 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    g_motor_params->encoder_warning_count,
 		    g_motor_params->encoder_error_count);
 	shell_print(sh, "  Pos quality:    0x%02X (valid=%s fresh=%s err=%s)",
-		    g_motor_params->position_quality_flags,
-		    (g_motor_params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) ? "yes" : "no",
-		    (g_motor_params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) ? "yes" : "no",
-		    (g_motor_params->position_quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) ? "yes" : "no");
-	shell_print(sh, "  Pos unwrapped:  %.6f rad", (double)g_motor_params->position_unwrapped_rad);
-	shell_print(sh, "  Pos innovation: %.6f rad", (double)g_motor_params->position_innovation_rad);
-	shell_print(sh, "  Pos accel:      %.3f rad/s^2", (double)g_motor_params->acceleration_rad_s2);
+		    g_motor_params->live.position_quality_flags,
+		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) ? "yes" : "no",
+		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) ? "yes" : "no",
+		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) ? "yes" : "no");
+	shell_print(sh, "  Pos unwrapped:  %.6f rad", (double)g_motor_params->live.position_unwrapped_rad);
+	shell_print(sh, "  Pos innovation: %.6f rad", (double)g_motor_params->live.position_innovation_rad);
+	shell_print(sh, "  Pos accel:      %.3f rad/s^2", (double)g_motor_params->live.acceleration_rad_s2);
 	shell_print(sh, "  Pos counts:     stale=%u events=%u",
-		    g_motor_params->position_stale_count,
-		    g_motor_params->position_stale_events);
+		    g_motor_params->live.position_stale_count,
+		    g_motor_params->live.position_stale_events);
 	shell_print(sh, "  Speed:          %.3f Hz (%.1f RPM)", 
-		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32)),
-		    (double)(g_motor_params->velocity_rad_s / (2.0f * PI_F32) * 60.0f));
-	shell_print(sh, "  Id reference:   %.3f A", (double)g_motor_params->Id_ref_A);
-	shell_print(sh, "  Iq reference:   %.3f A", (double)g_motor_params->Iq_ref_A);
-	shell_print(sh, "  Id measured:    %.3f A", (double)g_motor_params->Id_A);
-	shell_print(sh, "  Iq measured:    %.3f A", (double)g_motor_params->Iq_A);
-	shell_print(sh, "  Ia:             %.3f A", (double)g_motor_params->Ia_A);
-	shell_print(sh, "  Ib:             %.3f A", (double)g_motor_params->Ib_A);
+		    (double)(g_motor_params->live.velocity_rad_s / (2.0f * PI_F32)),
+		    (double)(g_motor_params->live.velocity_rad_s / (2.0f * PI_F32) * 60.0f));
+	shell_print(sh, "  Id reference:   %.3f A", (double)g_motor_params->live.Id_ref_A);
+	shell_print(sh, "  Iq reference:   %.3f A", (double)g_motor_params->live.Iq_ref_A);
+	shell_print(sh, "  Id measured:    %.3f A", (double)g_motor_params->live.Id_A);
+	shell_print(sh, "  Iq measured:    %.3f A", (double)g_motor_params->live.Iq_A);
+	shell_print(sh, "  Ia:             %.3f A", (double)g_motor_params->live.Ia_A);
+	shell_print(sh, "  Ib:             %.3f A", (double)g_motor_params->live.Ib_A);
 	shell_print(sh, "  Vd:             %.3f V", (double)g_motor_params->Vd_V);
 	shell_print(sh, "  Vq:             %.3f V", (double)g_motor_params->Vq_V);
-	shell_print(sh, "  Va:             %.3f V", (double)g_motor_params->Va_V);
-	shell_print(sh, "  Vb:             %.3f V", (double)g_motor_params->Vb_V);
+	shell_print(sh, "  Va:             %.3f V", (double)g_motor_params->live.Va_V);
+	shell_print(sh, "  Vb:             %.3f V", (double)g_motor_params->live.Vb_V);
 	shell_print(sh, "  Vmag(max):      %.3f V", (double)g_motor_params->max_voltage_magnitude_V);
-	shell_print(sh, "  Vbus:           %.1f V", (double)g_motor_params->dc_bus_voltage_V);
+	shell_print(sh, "  Vbus:           %.1f V", (double)g_motor_params->live.dc_bus_voltage_V);
 	shell_print(sh, "  Encoder OK:     %s", g_motor_params->encoder_fault_counter == 0 ? "yes" : "no");
 	shell_print(sh, "  Encoder faults: %u", g_motor_params->encoder_fault_counter);
 	

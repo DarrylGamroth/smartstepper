@@ -37,10 +37,10 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		.fault_counter = params->encoder_fault_counter,
 		.warning_count = params->encoder_warning_count,
 		.error_count = params->encoder_error_count,
-		.sample_fresh = params->encoder_sample_fresh,
-		.sample_warning = params->encoder_sample_warning,
-		.sample_error = params->encoder_sample_error,
-		.last_status = params->encoder_last_status,
+		.sample_fresh = params->live.encoder_sample_fresh,
+		.sample_warning = params->live.encoder_sample_warning,
+		.sample_error = params->live.encoder_sample_error,
+		.last_status = params->live.encoder_last_status,
 	};
 
 	float32_t encoder_direction_sign =
@@ -67,7 +67,7 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	feedback->angle_control_deg = raw_angle_deg * encoder_direction_sign;
 
 	if (feedback->sample_available && (feedback->fresh || feedback->warning || feedback->error)) {
-		params->encoder_last_status = feedback->status;
+		params->live.encoder_last_status = feedback->status;
 	}
 
 	struct motor_encoder_feedback_core_input core_in = {
@@ -85,10 +85,10 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	params->encoder_fault_counter = core_state.fault_counter;
 	params->encoder_warning_count = core_state.warning_count;
 	params->encoder_error_count = core_state.error_count;
-	params->encoder_sample_fresh = core_state.sample_fresh;
-	params->encoder_sample_warning = core_state.sample_warning;
-	params->encoder_sample_error = core_state.sample_error;
-	params->encoder_last_status = core_state.last_status;
+	params->live.encoder_sample_fresh = core_state.sample_fresh;
+	params->live.encoder_sample_warning = core_state.sample_warning;
+	params->live.encoder_sample_error = core_state.sample_error;
+	params->live.encoder_last_status = core_state.last_status;
 
 	if (threshold_exceeded) {
 		return -EIO;
@@ -113,33 +113,33 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	}
 
 	feedback->input_source = path_out.control.input_source;
-	params->encoder_observer_input_rad = path_out.observer_input_rad;
-	params->encoder_input_source = feedback->input_source;
+	params->live.encoder_observer_input_rad = path_out.observer_input_rad;
+	params->live.encoder_input_source = feedback->input_source;
 	feedback->observer_input_rad = path_out.observer_input_rad;
 	feedback->observer_mech_rad = path_out.observer_mech_rad;
 	feedback->observer_elec_rad = path_out.observer_elec_rad;
 	feedback->control = path_out.control;
 
 	if (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) {
-		params->encoder_raw_deg = feedback->angle_sensor_deg;
-		params->encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
+		params->live.encoder_raw_deg = feedback->angle_sensor_deg;
+		params->live.encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
 	}
 
 	uint8_t quality_flags = feedback->control.quality_flags;
 	bool sample_fresh = (quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
 
 	if (sample_fresh) {
-		params->position_stale_count = 0U;
-	} else if (params->position_stale_count < UINT16_MAX) {
-		params->position_stale_count++;
-		if (params->position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
-			params->position_stale_events++;
+		params->live.position_stale_count = 0U;
+	} else if (params->live.position_stale_count < UINT16_MAX) {
+		params->live.position_stale_count++;
+		if (params->live.position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
+			params->live.position_stale_events++;
 		}
 	}
 
-	params->position_quality_flags = quality_flags;
-	params->position_glitch_count = 0U;
-	params->position_jitter_count = 0U;
+	params->live.position_quality_flags = quality_flags;
+	params->live.position_glitch_count = 0U;
+	params->live.position_jitter_count = 0U;
 
 	feedback->position_mech_rad = feedback->control.position_mech_rad;
 	feedback->speed_mech_rad_s = feedback->control.speed_mech_rad_s;

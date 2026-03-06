@@ -31,7 +31,7 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
 
-	bool feedback_valid = motor_velocity_feedback_is_valid(params->position_quality_flags);
+	bool feedback_valid = motor_velocity_feedback_is_valid(params->live.position_quality_flags);
 	struct motor_command_arbitration_input arb_in = {
 		.online_control_state = in->online_control_state,
 		.feature_angle_gen = in->feature_angle_gen,
@@ -72,8 +72,8 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 		params->Iq_setpoint_A = 0.0f;
 		out->velocity_target_rad_s = 0.0f;
 		out->velocity_ref_rad_s = 0.0f;
-		params->velocity_target_rad_s = 0.0f;
-		params->velocity_ref_rad_s = 0.0f;
+		params->live.velocity_target_rad_s = 0.0f;
+		params->live.velocity_ref_rad_s = 0.0f;
 		params->velocity_cl_i_term_A = 0.0f;
 		params->position_cl_i_term_rad_s = 0.0f;
 		traj_set_target_value(&params->traj_velocity, 0.0f);
@@ -83,9 +83,9 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 					 in->speed_mech_filtered_rad_s, 0.0f);
 		motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 		motor_dob_reset(&params->velocity_dob_state, in->speed_mech_filtered_rad_s);
-		params->velocity_dob_iq_ff_a = 0.0f;
-		params->velocity_dob_disturbance_nm = 0.0f;
-		params->velocity_dob_residual_rad_s = 0.0f;
+		params->live.velocity_dob_iq_ff_a = 0.0f;
+		params->live.velocity_dob_disturbance_nm = 0.0f;
+		params->live.velocity_dob_residual_rad_s = 0.0f;
 	}
 
 	return 0;

@@ -82,8 +82,8 @@ int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	float start_pos_rad = g_motor_params->position_rad;
-	float start_vel_rad_s = g_motor_params->velocity_rad_s;
+	float start_pos_rad = g_motor_params->live.position_rad;
+	float start_vel_rad_s = g_motor_params->live.velocity_rad_s;
 	float target_wrapped_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
 	float end_vel_rad_s = end_vel_hz * 2.0f * PI_F32;
 	float duration_s = duration_ms * 0.001f;
@@ -134,7 +134,7 @@ int cmd_motor_profile_cancel(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	float hold_pos_rad = g_motor_params->position_rad;
+	float hold_pos_rad = g_motor_params->live.position_rad;
 	g_motor_params->profile_seq.running = false;
 	g_motor_params->profile_seq.tick_counter = 0U;
 	motion_profile_quintic_cancel(&g_motor_params->position_profile, hold_pos_rad);
@@ -162,9 +162,9 @@ int cmd_motor_profile_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Max accel:    %.2f Hz/s",
 		    (double)(g_motor_params->profile_max_accel_rad_s2 / (2.0f * PI_F32)));
 	shell_print(sh, "  Vel target:   %.2f Hz",
-		    (double)(g_motor_params->velocity_target_rad_s / (2.0f * PI_F32)));
+		    (double)(g_motor_params->live.velocity_target_rad_s / (2.0f * PI_F32)));
 	shell_print(sh, "  Vel ref:      %.2f Hz",
-		    (double)(g_motor_params->velocity_ref_rad_s / (2.0f * PI_F32)));
+		    (double)(g_motor_params->live.velocity_ref_rad_s / (2.0f * PI_F32)));
 	shell_print(sh, "  Quintic:      %s",
 		    motion_profile_quintic_is_active(&g_motor_params->position_profile) ?
 			    "ACTIVE" :
