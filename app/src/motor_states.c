@@ -29,6 +29,7 @@
 #include "motor/filters/filter_fo.h"
 #include "motor/motion/traj.h"
 #include "motor/observers/angle_observer.h"
+#include "motor/calibration/align.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
@@ -71,13 +72,13 @@ static inline void motor_publish_isr_config_snapshot(struct motor_parameters *pa
 		.feature_flags = params->feature_flags_next,
 		.velocity_loop_decimation = params->velocity_loop_decimation,
 		.position_loop_decimation = params->position_loop_decimation,
-		.profile_sequence_running = params->profile_sequence_running,
-		.profile_sequence_loop = params->profile_sequence_loop,
-		.profile_sequence_trigger_source = params->profile_sequence_trigger_source,
-		.profile_sequence_trigger_edge = params->profile_sequence_trigger_edge,
-		.profile_sequence_trigger_channel = params->profile_sequence_trigger_channel,
-		.profile_sequence_period_ticks = params->profile_sequence_period_ticks,
-		.profile_sequence_period_ms = params->profile_sequence_period_ms,
+		.profile_sequence_running = params->profile_seq.running,
+		.profile_sequence_loop = params->profile_seq.loop,
+		.profile_sequence_trigger_source = params->profile_seq.trigger_source,
+		.profile_sequence_trigger_edge = params->profile_seq.trigger_edge,
+		.profile_sequence_trigger_channel = params->profile_seq.trigger_channel,
+		.profile_sequence_period_ticks = params->profile_seq.period_ticks,
+		.profile_sequence_period_ms = params->profile_seq.period_ms,
 	};
 
 	/* Keep legacy published fields in sync during transition. */
@@ -600,12 +601,17 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration_mode = MOTOR_CALIBRATION_MODE_BOOT;
 	params->align_pos_sample_retries = 0U;
 	params->align_neg_sample_retries = 0U;
-	params->align_pos_sample_count = 0U;
-	params->align_neg_sample_count = 0U;
-	params->align_pos_sum_sin = 0.0f;
-	params->align_pos_sum_cos = 0.0f;
-	params->align_neg_sum_sin = 0.0f;
-	params->align_neg_sum_cos = 0.0f;
+	{
+		struct motor_align_sample_accum align_acc = {0};
+
+		motor_align_accum_reset(&align_acc);
+		params->align_pos_sample_count = align_acc.count;
+		params->align_pos_sum_sin = align_acc.sum_sin;
+		params->align_pos_sum_cos = align_acc.sum_cos;
+		params->align_neg_sample_count = align_acc.count;
+		params->align_neg_sum_sin = align_acc.sum_sin;
+		params->align_neg_sum_cos = align_acc.sum_cos;
+	}
 	params->align_pos_mech_angle_rad = 0.0f;
 	params->align_neg_mech_angle_rad = 0.0f;
 	motor_commission_init(params);
@@ -619,27 +625,27 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_ref_rad_s = 0.0f;
 	motion_profile_quintic_init(&params->position_profile, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	motion_profile_quintic_cancel(&params->position_profile, 0.0f);
-	params->profile_sequence_running = false;
-	params->profile_sequence_loop = false;
-	params->profile_sequence_count = 0U;
-	params->profile_sequence_next_idx = 0U;
-	params->profile_sequence_period_ms = 1000U;
-	params->profile_sequence_period_ticks =
-		MAX(1U, (uint32_t)((CONTROL_LOOP_FREQUENCY_HZ * params->profile_sequence_period_ms) / 1000.0f));
-	params->profile_sequence_tick_counter = 0U;
-	params->profile_sequence_event_drop_count = 0U;
-	params->profile_sequence_trigger_source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
-	params->profile_sequence_trigger_edge = PROFILE_SEQUENCE_TRIGGER_EDGE_RISING;
-	params->profile_sequence_trigger_channel = 0U;
-	params->profile_sequence_ext_capture_enabled = false;
-	params->profile_sequence_ext_last_capture_valid = false;
-	params->profile_sequence_ext_min_interval_us = 0U;
-	params->profile_sequence_ext_min_interval_cycles = 0U;
-	params->profile_sequence_ext_last_capture_cycles = 0U;
-	params->profile_sequence_ext_trigger_count = 0U;
-	params->profile_sequence_ext_reject_count = 0U;
-	params->profile_sequence_move_duration_s = 0.100f;
-	params->profile_sequence_end_velocity_rad_s = 0.0f;
+	params->profile_seq.running = false;
+	params->profile_seq.loop = false;
+	params->profile_seq.count = 0U;
+	params->profile_seq.next_idx = 0U;
+	params->profile_seq.period_ms = 1000U;
+	params->profile_seq.period_ticks =
+		MAX(1U, (uint32_t)((CONTROL_LOOP_FREQUENCY_HZ * params->profile_seq.period_ms) / 1000.0f));
+	params->profile_seq.tick_counter = 0U;
+	params->profile_seq.event_drop_count = 0U;
+	params->profile_seq.trigger_source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
+	params->profile_seq.trigger_edge = PROFILE_SEQUENCE_TRIGGER_EDGE_RISING;
+	params->profile_seq.trigger_channel = 0U;
+	params->profile_seq.ext_capture_enabled = false;
+	params->profile_seq.ext_last_capture_valid = false;
+	params->profile_seq.ext_min_interval_us = 0U;
+	params->profile_seq.ext_min_interval_cycles = 0U;
+	params->profile_seq.ext_last_capture_cycles = 0U;
+	params->profile_seq.ext_trigger_count = 0U;
+	params->profile_seq.ext_reject_count = 0U;
+	params->profile_seq.move_duration_s = 0.100f;
+	params->profile_seq.end_velocity_rad_s = 0.0f;
 
 	params->chopper_cal_active = false;
 	params->chopper_cal_complete = false;

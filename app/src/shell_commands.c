@@ -1100,8 +1100,8 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 		return -EINVAL;
 	}
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
-	g_motor_params->profile_sequence_running = false;
-	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_seq.running = false;
+	g_motor_params->profile_seq.tick_counter = 0U;
 	motion_profile_quintic_cancel(&g_motor_params->position_profile, target_rad);
 	g_motor_params->position_target_rad = target_rad;
 	motor_command_feed_watchdog(g_motor_params);

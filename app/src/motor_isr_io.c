@@ -83,31 +83,31 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 	/* Hardware-timer-driven position-sequence tick source.
 	 * Keep event posting out of encoder1_callback (direct ISR context).
 	 */
-	if (params->profile_sequence_running &&
+	if (params->profile_seq.running &&
 	    atomic_get(&params->control_armed) != 0 &&
-	    params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
+	    params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
 	    motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
-		uint32_t period_ticks = params->profile_sequence_period_ticks;
+		uint32_t period_ticks = params->profile_seq.period_ticks;
 		if (period_ticks == 0U) {
 			period_ticks = 1U;
 		}
 
-		uint32_t tick_counter = params->profile_sequence_tick_counter + 1U;
+		uint32_t tick_counter = params->profile_seq.tick_counter + 1U;
 		if (tick_counter >= period_ticks) {
 			struct motor_event evt = {
 				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
 			};
 
-			params->profile_sequence_tick_counter = 0U;
+			params->profile_seq.tick_counter = 0U;
 			int ret = motor_api_enqueue_event_from_isr(&evt);
 			if (ret != 0) {
-				params->profile_sequence_event_drop_count++;
+				params->profile_seq.event_drop_count++;
 			}
 		} else {
-			params->profile_sequence_tick_counter = tick_counter;
+			params->profile_seq.tick_counter = tick_counter;
 		}
 	} else {
-		params->profile_sequence_tick_counter = 0U;
+		params->profile_seq.tick_counter = 0U;
 	}
 
 	motor_control_loop_step(params,

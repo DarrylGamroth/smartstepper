@@ -93,9 +93,9 @@ static int motor_profile_seq_set_period_ms(struct motor_parameters *params, uint
 		return -EINVAL;
 	}
 
-	params->profile_sequence_period_ms = period_ms;
-	params->profile_sequence_period_ticks = motor_profile_period_ms_to_ticks(period_ms);
-	params->profile_sequence_tick_counter = 0U;
+	params->profile_seq.period_ms = period_ms;
+	params->profile_seq.period_ticks = motor_profile_period_ms_to_ticks(period_ms);
+	params->profile_seq.tick_counter = 0U;
 	return 0;
 }
 
@@ -108,7 +108,7 @@ static int motor_profile_seq_set_move_ms(struct motor_parameters *params, uint32
 		return -EINVAL;
 	}
 
-	params->profile_sequence_move_duration_s = (float32_t)move_ms * 0.001f;
+	params->profile_seq.move_duration_s = (float32_t)move_ms * 0.001f;
 	return 0;
 }
 
@@ -118,7 +118,7 @@ static int motor_profile_seq_set_end_vel_hz(struct motor_parameters *params, flo
 		return -EINVAL;
 	}
 
-	params->profile_sequence_end_velocity_rad_s = end_vel_hz * 2.0f * PI_F32;
+	params->profile_seq.end_velocity_rad_s = end_vel_hz * 2.0f * PI_F32;
 	return 0;
 }
 
@@ -128,7 +128,7 @@ static int motor_profile_seq_set_loop(struct motor_parameters *params, bool loop
 		return -ENODEV;
 	}
 
-	params->profile_sequence_loop = loop_enabled;
+	params->profile_seq.loop = loop_enabled;
 	return 0;
 }
 
@@ -141,13 +141,13 @@ static int motor_profile_seq_post_tick_event(struct motor_parameters *params, bo
 	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
 	if (ret != 0) {
 		if (params) {
-			params->profile_sequence_event_drop_count++;
+			params->profile_seq.event_drop_count++;
 		}
 		return ret;
 	}
 
 	if (params && external_trigger) {
-		params->profile_sequence_ext_trigger_count++;
+		params->profile_seq.ext_trigger_count++;
 	}
 
 	return 0;
@@ -179,29 +179,29 @@ static int motor_profile_seq_update_ext_min_interval_cycles(struct motor_paramet
 
 #if PROFILE_SEQ_CAPTURE_AVAILABLE
 	if (!device_is_ready(profile_seq_capture_dev)) {
-		params->profile_sequence_ext_min_interval_cycles = 0U;
+		params->profile_seq.ext_min_interval_cycles = 0U;
 		return -ENODEV;
 	}
 
 	uint64_t cycles_per_sec = 0U;
 	int ret = timer_ic_get_cycles_per_sec(profile_seq_capture_dev,
-					      params->profile_sequence_trigger_channel,
+					      params->profile_seq.trigger_channel,
 					      &cycles_per_sec);
 	if (ret < 0) {
-		params->profile_sequence_ext_min_interval_cycles = 0U;
+		params->profile_seq.ext_min_interval_cycles = 0U;
 		return ret;
 	}
 
-	uint64_t min_cycles = (cycles_per_sec * (uint64_t)params->profile_sequence_ext_min_interval_us +
+	uint64_t min_cycles = (cycles_per_sec * (uint64_t)params->profile_seq.ext_min_interval_us +
 			       999999ULL) /
 			      1000000ULL;
 	if (min_cycles > UINT32_MAX) {
 		min_cycles = UINT32_MAX;
 	}
-	params->profile_sequence_ext_min_interval_cycles = (uint32_t)min_cycles;
+	params->profile_seq.ext_min_interval_cycles = (uint32_t)min_cycles;
 	return 0;
 #else
-	params->profile_sequence_ext_min_interval_cycles = 0U;
+	params->profile_seq.ext_min_interval_cycles = 0U;
 	return -ENOTSUP;
 #endif
 }
@@ -214,16 +214,16 @@ static int motor_profile_seq_external_capture_disable(struct motor_parameters *p
 
 #if PROFILE_SEQ_CAPTURE_AVAILABLE
 	int ret = 0;
-	if (params->profile_sequence_ext_capture_enabled && device_is_ready(profile_seq_capture_dev)) {
+	if (params->profile_seq.ext_capture_enabled && device_is_ready(profile_seq_capture_dev)) {
 		ret = timer_ic_disable_capture(profile_seq_capture_dev,
-					       params->profile_sequence_trigger_channel);
+					       params->profile_seq.trigger_channel);
 	}
-	params->profile_sequence_ext_capture_enabled = false;
-	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_seq.ext_capture_enabled = false;
+	params->profile_seq.ext_last_capture_valid = false;
 	return ret;
 #else
-	params->profile_sequence_ext_capture_enabled = false;
-	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_seq.ext_capture_enabled = false;
+	params->profile_seq.ext_last_capture_valid = false;
 	return -ENOTSUP;
 #endif
 }
@@ -240,33 +240,33 @@ static int motor_profile_seq_external_capture_enable(struct motor_parameters *pa
 	}
 
 	timer_ic_flags_t flags = motor_profile_seq_ext_edge_to_capture_flags(
-		params->profile_sequence_trigger_edge) |
+		params->profile_seq.trigger_edge) |
 			       TIMER_IC_CAPTURE_MODE_CONTINUOUS;
 	int ret = timer_ic_configure_capture(profile_seq_capture_dev,
-					     params->profile_sequence_trigger_channel,
+					     params->profile_seq.trigger_channel,
 					     flags,
 					     motor_profile_seq_external_capture_callback,
 					     NULL);
 	if (ret < 0) {
-		params->profile_sequence_ext_capture_enabled = false;
-		params->profile_sequence_ext_last_capture_valid = false;
+		params->profile_seq.ext_capture_enabled = false;
+		params->profile_seq.ext_last_capture_valid = false;
 		return ret;
 	}
 
 	ret = timer_ic_enable_capture(profile_seq_capture_dev,
-				      params->profile_sequence_trigger_channel);
+				      params->profile_seq.trigger_channel);
 	if (ret < 0) {
-		params->profile_sequence_ext_capture_enabled = false;
-		params->profile_sequence_ext_last_capture_valid = false;
+		params->profile_seq.ext_capture_enabled = false;
+		params->profile_seq.ext_last_capture_valid = false;
 		return ret;
 	}
 
-	params->profile_sequence_ext_capture_enabled = true;
-	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_seq.ext_capture_enabled = true;
+	params->profile_seq.ext_last_capture_valid = false;
 	return 0;
 #else
-	params->profile_sequence_ext_capture_enabled = false;
-	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_seq.ext_capture_enabled = false;
+	params->profile_seq.ext_last_capture_valid = false;
 	return -ENOTSUP;
 #endif
 }
@@ -279,33 +279,33 @@ static void motor_profile_seq_external_capture_callback(const struct device *dev
 	ARG_UNUSED(user_data);
 
 	struct motor_parameters *params = g_motor_params;
-	if (!params || !params->profile_sequence_ext_capture_enabled ||
-	    params->profile_sequence_trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	if (!params || !params->profile_seq.ext_capture_enabled ||
+	    params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		return;
 	}
 
-	if (status < 0 || channel != params->profile_sequence_trigger_channel) {
-		params->profile_sequence_ext_reject_count++;
+	if (status < 0 || channel != params->profile_seq.trigger_channel) {
+		params->profile_seq.ext_reject_count++;
 		return;
 	}
 
-	if (!params->profile_sequence_running ||
+	if (!params->profile_seq.running ||
 	    atomic_get(&params->control_armed) == 0 ||
 	    !motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
 		return;
 	}
 
-	if (params->profile_sequence_ext_min_interval_cycles > 0U &&
-	    params->profile_sequence_ext_last_capture_valid) {
-		uint32_t delta_cycles = cycles - params->profile_sequence_ext_last_capture_cycles;
-		if (delta_cycles < params->profile_sequence_ext_min_interval_cycles) {
-			params->profile_sequence_ext_reject_count++;
+	if (params->profile_seq.ext_min_interval_cycles > 0U &&
+	    params->profile_seq.ext_last_capture_valid) {
+		uint32_t delta_cycles = cycles - params->profile_seq.ext_last_capture_cycles;
+		if (delta_cycles < params->profile_seq.ext_min_interval_cycles) {
+			params->profile_seq.ext_reject_count++;
 			return;
 		}
 	}
 
-	params->profile_sequence_ext_last_capture_valid = true;
-	params->profile_sequence_ext_last_capture_cycles = cycles;
+	params->profile_seq.ext_last_capture_valid = true;
+	params->profile_seq.ext_last_capture_cycles = cycles;
 	(void)motor_profile_seq_post_tick_event(params, true);
 }
 #endif
@@ -321,14 +321,14 @@ int cmd_motor_profile_seq_clear(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	g_motor_params->profile_sequence_running = false;
+	g_motor_params->profile_seq.running = false;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
-	g_motor_params->profile_sequence_count = 0U;
-	g_motor_params->profile_sequence_next_idx = 0U;
-	g_motor_params->profile_sequence_tick_counter = 0U;
-	g_motor_params->profile_sequence_event_drop_count = 0U;
-	g_motor_params->profile_sequence_ext_trigger_count = 0U;
-	g_motor_params->profile_sequence_ext_reject_count = 0U;
+	g_motor_params->profile_seq.count = 0U;
+	g_motor_params->profile_seq.next_idx = 0U;
+	g_motor_params->profile_seq.tick_counter = 0U;
+	g_motor_params->profile_seq.event_drop_count = 0U;
+	g_motor_params->profile_seq.ext_trigger_count = 0U;
+	g_motor_params->profile_seq.ext_reject_count = 0U;
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Profile sequence cleared");
@@ -348,7 +348,7 @@ int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	if (g_motor_params->profile_sequence_count >= MOTOR_PROFILE_SEQUENCE_MAX_POINTS) {
+	if (g_motor_params->profile_seq.count >= MOTOR_PROFILE_SEQUENCE_MAX_POINTS) {
 		shell_error(sh, "Sequence full (%u points max)", MOTOR_PROFILE_SEQUENCE_MAX_POINTS);
 		return -ENOMEM;
 	}
@@ -360,9 +360,9 @@ int cmd_motor_profile_seq_add(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
-	uint16_t idx = g_motor_params->profile_sequence_count;
-	g_motor_params->profile_sequence_points_rad[idx] = target_rad;
-	g_motor_params->profile_sequence_count++;
+	uint16_t idx = g_motor_params->profile_seq.count;
+	g_motor_params->profile_seq.points_rad[idx] = target_rad;
+	g_motor_params->profile_seq.count++;
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Added seq[%u] = %.2f deg", (unsigned int)idx,
@@ -397,8 +397,8 @@ int cmd_motor_profile_seq_period_ms(const struct shell *sh, size_t argc, char **
 
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence period set to %u ms (%u ticks)",
-		    g_motor_params->profile_sequence_period_ms,
-		    g_motor_params->profile_sequence_period_ticks);
+		    g_motor_params->profile_seq.period_ms,
+		    g_motor_params->profile_seq.period_ticks);
 	return 0;
 }
 
@@ -429,7 +429,7 @@ int cmd_motor_profile_seq_move_ms(const struct shell *sh, size_t argc, char **ar
 
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence move duration set to %.1f ms",
-		    (double)(g_motor_params->profile_sequence_move_duration_s * 1000.0f));
+		    (double)(g_motor_params->profile_seq.move_duration_s * 1000.0f));
 	return 0;
 }
 
@@ -460,7 +460,7 @@ int cmd_motor_profile_seq_end_vel_hz(const struct shell *sh, size_t argc, char *
 
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence end velocity set to %.2f Hz",
-		    (double)(g_motor_params->profile_sequence_end_velocity_rad_s / (2.0f * PI_F32)));
+		    (double)(g_motor_params->profile_seq.end_velocity_rad_s / (2.0f * PI_F32)));
 	return 0;
 }
 
@@ -490,7 +490,7 @@ int cmd_motor_profile_seq_loop(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Sequence loop set to %s", g_motor_params->profile_sequence_loop ? "YES" : "NO");
+	shell_print(sh, "Sequence loop set to %s", g_motor_params->profile_seq.loop ? "YES" : "NO");
 	return 0;
 }
 
@@ -556,8 +556,8 @@ int cmd_motor_profile_seq_config(const struct shell *sh, size_t argc, char **arg
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Sequence config: period=%u ms (%u ticks), move=%u ms, vend=%.2f Hz, loop=%s",
-		    period_ms, g_motor_params->profile_sequence_period_ticks, move_ms,
-		    (double)end_vel_hz, g_motor_params->profile_sequence_loop ? "YES" : "NO");
+		    period_ms, g_motor_params->profile_seq.period_ticks, move_ms,
+		    (double)end_vel_hz, g_motor_params->profile_seq.loop ? "YES" : "NO");
 	return 0;
 }
 
@@ -574,7 +574,7 @@ int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, ch
 		return -ENODEV;
 	}
 
-	if (g_motor_params->profile_sequence_running) {
+	if (g_motor_params->profile_seq.running) {
 		shell_error(sh, "Stop sequence before changing trigger source.");
 		return -EBUSY;
 	}
@@ -585,7 +585,7 @@ int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, ch
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_trigger_source = source;
+	g_motor_params->profile_seq.trigger_source = source;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
 	if (source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
@@ -614,7 +614,7 @@ int cmd_motor_profile_seq_trigger_edge(const struct shell *sh, size_t argc, char
 		return -ENODEV;
 	}
 
-	if (g_motor_params->profile_sequence_running) {
+	if (g_motor_params->profile_seq.running) {
 		shell_error(sh, "Stop sequence before changing trigger edge.");
 		return -EBUSY;
 	}
@@ -631,7 +631,7 @@ int cmd_motor_profile_seq_trigger_edge(const struct shell *sh, size_t argc, char
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_trigger_edge = edge;
+	g_motor_params->profile_seq.trigger_edge = edge;
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence trigger edge set to %s",
 		    motor_profile_seq_trigger_edge_to_string(edge));
@@ -651,7 +651,7 @@ int cmd_motor_profile_seq_trigger_channel(const struct shell *sh, size_t argc, c
 		return -ENODEV;
 	}
 
-	if (g_motor_params->profile_sequence_running) {
+	if (g_motor_params->profile_seq.running) {
 		shell_error(sh, "Stop sequence before changing trigger channel.");
 		return -EBUSY;
 	}
@@ -662,18 +662,18 @@ int cmd_motor_profile_seq_trigger_channel(const struct shell *sh, size_t argc, c
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_trigger_channel = (uint8_t)channel;
-	g_motor_params->profile_sequence_ext_last_capture_valid = false;
+	g_motor_params->profile_seq.trigger_channel = (uint8_t)channel;
+	g_motor_params->profile_seq.ext_last_capture_valid = false;
 
 	int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
 	if (ret < 0 &&
-	    g_motor_params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	    g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		shell_warn(sh, "Channel timing unavailable until capture device is ready (err %d)", ret);
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence trigger channel set to %u",
-		    g_motor_params->profile_sequence_trigger_channel);
+		    g_motor_params->profile_seq.trigger_channel);
 	return 0;
 }
 
@@ -696,19 +696,19 @@ int cmd_motor_profile_seq_trigger_min_interval(const struct shell *sh, size_t ar
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_ext_min_interval_us = interval;
-	g_motor_params->profile_sequence_ext_last_capture_valid = false;
+	g_motor_params->profile_seq.ext_min_interval_us = interval;
+	g_motor_params->profile_seq.ext_last_capture_valid = false;
 
 	int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
 	if (ret < 0 &&
-	    g_motor_params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	    g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		shell_warn(sh, "Capture timing conversion unavailable (err %d)", ret);
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Sequence trigger min interval set to %u us (%u cycles)",
-		    g_motor_params->profile_sequence_ext_min_interval_us,
-		    g_motor_params->profile_sequence_ext_min_interval_cycles);
+		    g_motor_params->profile_seq.ext_min_interval_us,
+		    g_motor_params->profile_seq.ext_min_interval_cycles);
 	return 0;
 }
 
@@ -723,12 +723,12 @@ int cmd_motor_profile_seq_trigger_fire(const struct shell *sh, size_t argc, char
 		return -ENODEV;
 	}
 
-	if (!g_motor_params->profile_sequence_running) {
+	if (!g_motor_params->profile_seq.running) {
 		shell_error(sh, "Sequence is not running.");
 		return -EACCES;
 	}
 
-	if (g_motor_params->profile_sequence_trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	if (g_motor_params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		shell_error(sh, "Trigger fire is only valid when source is 'external'.");
 		return -EACCES;
 	}
@@ -757,18 +757,18 @@ int cmd_motor_profile_seq_trigger_status(const struct shell *sh, size_t argc, ch
 	shell_print(sh, "Sequence Trigger:");
 	shell_print(sh, "  Source:       %s",
 		    motor_profile_seq_trigger_source_to_string(
-			    g_motor_params->profile_sequence_trigger_source));
+			    g_motor_params->profile_seq.trigger_source));
 	shell_print(sh, "  Edge:         %s",
 		    motor_profile_seq_trigger_edge_to_string(
-			    g_motor_params->profile_sequence_trigger_edge));
-	shell_print(sh, "  Channel:      %u", g_motor_params->profile_sequence_trigger_channel);
+			    g_motor_params->profile_seq.trigger_edge));
+	shell_print(sh, "  Channel:      %u", g_motor_params->profile_seq.trigger_channel);
 	shell_print(sh, "  Capture:      %s",
-		    g_motor_params->profile_sequence_ext_capture_enabled ? "ENABLED" : "DISABLED");
+		    g_motor_params->profile_seq.ext_capture_enabled ? "ENABLED" : "DISABLED");
 	shell_print(sh, "  Min interval: %u us (%u cycles)",
-		    g_motor_params->profile_sequence_ext_min_interval_us,
-		    g_motor_params->profile_sequence_ext_min_interval_cycles);
-	shell_print(sh, "  Accepted:     %u", g_motor_params->profile_sequence_ext_trigger_count);
-	shell_print(sh, "  Rejected:     %u", g_motor_params->profile_sequence_ext_reject_count);
+		    g_motor_params->profile_seq.ext_min_interval_us,
+		    g_motor_params->profile_seq.ext_min_interval_cycles);
+	shell_print(sh, "  Accepted:     %u", g_motor_params->profile_seq.ext_trigger_count);
+	shell_print(sh, "  Rejected:     %u", g_motor_params->profile_seq.ext_reject_count);
 	return 0;
 }
 
@@ -793,24 +793,24 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 		return -EACCES;
 	}
 
-	if (g_motor_params->profile_sequence_count == 0U) {
+	if (g_motor_params->profile_seq.count == 0U) {
 		shell_error(sh, "Sequence is empty. Add points with 'motor profile seq add <deg>'.");
 		return -EINVAL;
 	}
 
 #if !PROFILE_SEQ_CAPTURE_AVAILABLE
-	if (g_motor_params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		shell_error(sh, "External trigger source unavailable (capture driver not enabled).");
 		return -ENOTSUP;
 	}
 #else
-	if (g_motor_params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		if (!device_is_ready(profile_seq_capture_dev)) {
 			shell_error(sh, "Capture device not ready");
 			return -ENODEV;
 		}
 		if (g_motor_params->chopper_cal_active &&
-		    g_motor_params->profile_sequence_trigger_channel == CHOPPER_CAL_CAPTURE_CHANNEL) {
+		    g_motor_params->profile_seq.trigger_channel == CHOPPER_CAL_CAPTURE_CHANNEL) {
 			shell_error(sh, "Chopper calibration is using capture channel %u",
 				    CHOPPER_CAL_CAPTURE_CHANNEL);
 			return -EBUSY;
@@ -818,37 +818,37 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 	}
 #endif
 
-	g_motor_params->profile_sequence_running = true;
-	g_motor_params->profile_sequence_next_idx = 0U;
-	g_motor_params->profile_sequence_tick_counter = 0U;
-	g_motor_params->profile_sequence_event_drop_count = 0U;
-	g_motor_params->profile_sequence_ext_trigger_count = 0U;
-	g_motor_params->profile_sequence_ext_reject_count = 0U;
-	g_motor_params->profile_sequence_ext_last_capture_valid = false;
+	g_motor_params->profile_seq.running = true;
+	g_motor_params->profile_seq.next_idx = 0U;
+	g_motor_params->profile_seq.tick_counter = 0U;
+	g_motor_params->profile_seq.event_drop_count = 0U;
+	g_motor_params->profile_seq.ext_trigger_count = 0U;
+	g_motor_params->profile_seq.ext_reject_count = 0U;
+	g_motor_params->profile_seq.ext_last_capture_valid = false;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 
-	if (g_motor_params->profile_sequence_trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
+	if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
 		if (ret < 0) {
-			g_motor_params->profile_sequence_running = false;
+			g_motor_params->profile_seq.running = false;
 			shell_error(sh, "Failed to derive external trigger timing (err %d)", ret);
 			return ret;
 		}
 
 		ret = motor_profile_seq_external_capture_enable(g_motor_params);
 		if (ret < 0) {
-			g_motor_params->profile_sequence_running = false;
+			g_motor_params->profile_seq.running = false;
 			shell_error(sh, "Failed to enable external trigger capture (err %d)", ret);
 			return ret;
 		}
 
 		shell_print(sh,
 			    "Profile sequence started (%u points), source=EXTERNAL edge=%s ch=%u",
-			    g_motor_params->profile_sequence_count,
+			    g_motor_params->profile_seq.count,
 			    motor_profile_seq_trigger_edge_to_string(
-				    g_motor_params->profile_sequence_trigger_edge),
-			    g_motor_params->profile_sequence_trigger_channel);
+				    g_motor_params->profile_seq.trigger_edge),
+			    g_motor_params->profile_seq.trigger_channel);
 	} else {
 		int ret = motor_profile_seq_post_tick_event(g_motor_params, false);
 		if (ret != 0) {
@@ -856,12 +856,12 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 		}
 
 		if (g_motor_params->command_timeout_ms > 0U &&
-		    g_motor_params->profile_sequence_period_ms >= g_motor_params->command_timeout_ms) {
+		    g_motor_params->profile_seq.period_ms >= g_motor_params->command_timeout_ms) {
 			shell_warn(sh, "period_ms >= command_timeout_ms; increase timeout to avoid disarm");
 		}
 
 		shell_print(sh, "Profile sequence started (%u points), source=TIMER",
-			    g_motor_params->profile_sequence_count);
+			    g_motor_params->profile_seq.count);
 	}
 	return 0;
 }
@@ -877,8 +877,8 @@ int cmd_motor_profile_seq_stop(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	g_motor_params->profile_sequence_running = false;
-	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_seq.running = false;
+	g_motor_params->profile_seq.tick_counter = 0U;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Profile sequence stopped");
@@ -896,51 +896,51 @@ int cmd_motor_profile_seq_status(const struct shell *sh, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	if (!g_motor_params->profile_sequence_running &&
-	    g_motor_params->profile_sequence_ext_capture_enabled) {
+	if (!g_motor_params->profile_seq.running &&
+	    g_motor_params->profile_seq.ext_capture_enabled) {
 		(void)motor_profile_seq_external_capture_disable(g_motor_params);
 	}
 
 	shell_print(sh, "Profile Sequence:");
-	shell_print(sh, "  Running:      %s", g_motor_params->profile_sequence_running ? "YES" : "NO");
+	shell_print(sh, "  Running:      %s", g_motor_params->profile_seq.running ? "YES" : "NO");
 	shell_print(sh, "  Mode:         %s",
 		    motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ?
 			    "ONLINE_POSITION" :
 			    motor_state_to_string(motor_api_get_state()));
 	shell_print(sh, "  Armed:        %s", motor_control_is_armed(g_motor_params) ? "YES" : "NO");
-	shell_print(sh, "  Loop:         %s", g_motor_params->profile_sequence_loop ? "YES" : "NO");
-	shell_print(sh, "  Count:        %u / %u", g_motor_params->profile_sequence_count,
+	shell_print(sh, "  Loop:         %s", g_motor_params->profile_seq.loop ? "YES" : "NO");
+	shell_print(sh, "  Count:        %u / %u", g_motor_params->profile_seq.count,
 		    MOTOR_PROFILE_SEQUENCE_MAX_POINTS);
-	shell_print(sh, "  Next index:   %u", g_motor_params->profile_sequence_next_idx);
+	shell_print(sh, "  Next index:   %u", g_motor_params->profile_seq.next_idx);
 	shell_print(sh, "  Trigger src:  %s",
 		    motor_profile_seq_trigger_source_to_string(
-			    g_motor_params->profile_sequence_trigger_source));
+			    g_motor_params->profile_seq.trigger_source));
 	shell_print(sh, "  Trigger edge: %s",
 		    motor_profile_seq_trigger_edge_to_string(
-			    g_motor_params->profile_sequence_trigger_edge));
-	shell_print(sh, "  Trigger ch:   %u", g_motor_params->profile_sequence_trigger_channel);
+			    g_motor_params->profile_seq.trigger_edge));
+	shell_print(sh, "  Trigger ch:   %u", g_motor_params->profile_seq.trigger_channel);
 	shell_print(sh, "  Capture:      %s",
-		    g_motor_params->profile_sequence_ext_capture_enabled ? "ENABLED" : "DISABLED");
+		    g_motor_params->profile_seq.ext_capture_enabled ? "ENABLED" : "DISABLED");
 	shell_print(sh, "  Min trig dt:  %u us (%u cycles)",
-		    g_motor_params->profile_sequence_ext_min_interval_us,
-		    g_motor_params->profile_sequence_ext_min_interval_cycles);
-	shell_print(sh, "  Period:       %u ms (%u ticks)", g_motor_params->profile_sequence_period_ms,
-		    g_motor_params->profile_sequence_period_ticks);
+		    g_motor_params->profile_seq.ext_min_interval_us,
+		    g_motor_params->profile_seq.ext_min_interval_cycles);
+	shell_print(sh, "  Period:       %u ms (%u ticks)", g_motor_params->profile_seq.period_ms,
+		    g_motor_params->profile_seq.period_ticks);
 	shell_print(sh, "  Move:         %.1f ms",
-		    (double)(g_motor_params->profile_sequence_move_duration_s * 1000.0f));
+		    (double)(g_motor_params->profile_seq.move_duration_s * 1000.0f));
 	shell_print(sh, "  End vel:      %.2f Hz",
-		    (double)(g_motor_params->profile_sequence_end_velocity_rad_s / (2.0f * PI_F32)));
-	shell_print(sh, "  Dropped ticks:%u", g_motor_params->profile_sequence_event_drop_count);
-	shell_print(sh, "  Ext accepted: %u", g_motor_params->profile_sequence_ext_trigger_count);
-	shell_print(sh, "  Ext rejected: %u", g_motor_params->profile_sequence_ext_reject_count);
+		    (double)(g_motor_params->profile_seq.end_velocity_rad_s / (2.0f * PI_F32)));
+	shell_print(sh, "  Dropped ticks:%u", g_motor_params->profile_seq.event_drop_count);
+	shell_print(sh, "  Ext accepted: %u", g_motor_params->profile_seq.ext_trigger_count);
+	shell_print(sh, "  Ext rejected: %u", g_motor_params->profile_seq.ext_reject_count);
 
-	if (g_motor_params->profile_sequence_count > 0U) {
-		uint16_t idx = g_motor_params->profile_sequence_next_idx;
-		if (idx >= g_motor_params->profile_sequence_count) {
+	if (g_motor_params->profile_seq.count > 0U) {
+		uint16_t idx = g_motor_params->profile_seq.next_idx;
+		if (idx >= g_motor_params->profile_seq.count) {
 			idx = 0U;
 		}
 		shell_print(sh, "  Next target:  %.2f deg",
-			    (double)(g_motor_params->profile_sequence_points_rad[idx] *
+			    (double)(g_motor_params->profile_seq.points_rad[idx] *
 				     180.0f / PI_F32));
 	}
 
@@ -958,15 +958,15 @@ int cmd_motor_profile_seq_list(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	if (g_motor_params->profile_sequence_count == 0U) {
+	if (g_motor_params->profile_seq.count == 0U) {
 		shell_print(sh, "Sequence is empty");
 		return 0;
 	}
 
-	shell_print(sh, "Sequence Points (%u):", g_motor_params->profile_sequence_count);
-	for (uint16_t i = 0; i < g_motor_params->profile_sequence_count; i++) {
+	shell_print(sh, "Sequence Points (%u):", g_motor_params->profile_seq.count);
+	for (uint16_t i = 0; i < g_motor_params->profile_seq.count; i++) {
 		shell_print(sh, "  [%u] %.2f deg", (unsigned int)i,
-			    (double)(g_motor_params->profile_sequence_points_rad[i] *
+			    (double)(g_motor_params->profile_seq.points_rad[i] *
 				     180.0f / PI_F32));
 	}
 

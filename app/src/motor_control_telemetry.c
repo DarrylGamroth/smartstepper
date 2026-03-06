@@ -33,7 +33,7 @@ void motor_control_telemetry_refresh_diag(struct motor_parameters *params)
 	diag->fault_snapshot_latch_loop = params->fault_snapshot_latch_loop;
 	diag->fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
 	diag->command_timeout_count = params->command_timeout_count;
-	diag->profile_sequence_event_drop_count = params->profile_sequence_event_drop_count;
+	diag->profile_sequence_event_drop_count = params->profile_seq.event_drop_count;
 }
 
 /* Optional capture-path hook for extended observer/debug payloads. */

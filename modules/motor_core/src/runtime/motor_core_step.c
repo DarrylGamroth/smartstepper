@@ -36,6 +36,8 @@
 #include "motor/runtime/commission_runtime.h"
 #include "motor/control/dob.h"
 #include "motor/motion/motion_planner.h"
+#include "motor/calibration/align.h"
+#include "motor/calibration/rl_ident.h"
 #include "motor_torque.h"
 #include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback.h"
@@ -93,6 +95,59 @@ static inline bool motor_is_align_sample_state(const struct smf_state *state)
 {
 	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE) ||
 	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_SAMPLE);
+}
+
+static inline bool motor_is_align_active_state(const struct smf_state *state)
+{
+	return motor_is_align_injection_state(state) || motor_is_align_sample_state(state);
+}
+
+static inline void motor_align_load_pos_accum(const struct motor_parameters *params,
+					      struct motor_align_sample_accum *acc)
+{
+	if (params == NULL || acc == NULL) {
+		return;
+	}
+
+	acc->sum_sin = params->align_pos_sum_sin;
+	acc->sum_cos = params->align_pos_sum_cos;
+	acc->count = params->align_pos_sample_count;
+}
+
+static inline void motor_align_store_pos_accum(struct motor_parameters *params,
+					       const struct motor_align_sample_accum *acc)
+{
+	if (params == NULL || acc == NULL) {
+		return;
+	}
+
+	params->align_pos_sum_sin = acc->sum_sin;
+	params->align_pos_sum_cos = acc->sum_cos;
+	params->align_pos_sample_count = acc->count;
+}
+
+static inline void motor_align_load_neg_accum(const struct motor_parameters *params,
+					      struct motor_align_sample_accum *acc)
+{
+	if (params == NULL || acc == NULL) {
+		return;
+	}
+
+	acc->sum_sin = params->align_neg_sum_sin;
+	acc->sum_cos = params->align_neg_sum_cos;
+	acc->count = params->align_neg_sample_count;
+}
+
+static inline void motor_align_store_neg_accum(struct motor_parameters *params,
+					       const struct motor_align_sample_accum *acc)
+{
+	if (params == NULL || acc == NULL) {
+		return;
+	}
+
+	params->align_neg_sum_sin = acc->sum_sin;
+	params->align_neg_sum_cos = acc->sum_cos;
+	params->align_neg_sample_count = acc->count;
 }
 
 static inline void motor_fault_snapshot_try_store(struct motor_parameters *params,
@@ -192,7 +247,7 @@ static inline void motor_runtime_diag_sync(struct motor_parameters *params)
 	params->rt_diag.fault_snapshot_latch_loop = params->fault_snapshot_latch_loop;
 	params->rt_diag.fault_snapshot_latch_error_code = params->fault_snapshot_latch_error_code;
 	params->rt_diag.command_timeout_count = params->command_timeout_count;
-	params->rt_diag.profile_sequence_event_drop_count = params->profile_sequence_event_drop_count;
+	params->rt_diag.profile_sequence_event_drop_count = params->profile_seq.event_drop_count;
 }
 
 static inline void motor_control_feedback_from_encoder(
@@ -251,6 +306,16 @@ struct motor_control_step_ctx {
 	struct motor_encoder_feedback encoder_fb;
 };
 
+struct motor_encoder_stage_result {
+	struct motor_control_feedback control_fb;
+	uint8_t input_source;
+	float32_t angle_control_deg;
+	bool fresh;
+	uint8_t frame_status;
+	bool frame_warning;
+	bool frame_error;
+};
+
 static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ctx,
 					       const struct motor_parameters *params)
 {
@@ -268,7 +333,7 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 		(ctx->feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
 	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
 	ctx->profile_sequence_running = cfg_valid ? cfg.profile_sequence_running :
-					      params->profile_sequence_running;
+					      params->profile_seq.running;
 	ctx->online_control_state = motor_state_ptr_is_online_control_state(ctx->state);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
 	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
@@ -288,6 +353,169 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	ctx->speed_mech_rad_s = params->velocity_rad_s;
 	ctx->accel_mech_rad_s2 = params->acceleration_rad_s2;
 	ctx->speed_mech_filtered_rad_s = params->velocity_filtered_rad_s;
+}
+
+static inline void motor_core_step_init_pwm_output(struct motor_control_pwm_output *pwm_out)
+{
+	if (pwm_out == NULL) {
+		return;
+	}
+
+	pwm_out->update_pwm = false;
+	pwm_out->da_hb1_pu = 0.0f;
+	pwm_out->da_hb2_pu = 0.0f;
+	pwm_out->db_hb1_pu = 0.0f;
+	pwm_out->db_hb2_pu = 0.0f;
+}
+
+static inline void motor_core_step_init_commission_obs(struct motor_commission_observation *obs,
+						       const struct smf_state *state,
+						       bool control_armed)
+{
+	*obs = (struct motor_commission_observation){
+		.control_loop_count = 0U,
+		.mode_velocity_closed = motor_state_ptr_is_mode(
+			state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED),
+		.mode_torque = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE),
+		.control_armed = control_armed,
+		.encoder_fresh = false,
+		.encoder_warning = false,
+		.encoder_error = false,
+		.encoder_status = 0U,
+		.fault_active = false,
+		.saturation = false,
+		.data_valid = false,
+		.vbus_v = 0.0f,
+		.id_a = 0.0f,
+		.iq_a = 0.0f,
+		.vd_v = 0.0f,
+		.vq_v = 0.0f,
+		.mech_speed_rad_s = 0.0f,
+		.elec_speed_rad_s = 0.0f,
+	};
+}
+
+static inline bool motor_core_step_apply_keepalive_and_timeout(
+	struct motor_parameters *params,
+	const struct smf_state *state,
+	bool profile_sequence_running,
+	bool online_control_state,
+	bool *control_armed)
+{
+	uint32_t now_ms = 0U;
+	bool autonomous_mode_active =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
+
+	bool autonomous_keepalive = motor_keepalive_policy_should_keepalive(
+		*control_armed, autonomous_mode_active, profile_sequence_running,
+		params->chopper_cal_active, motion_profile_quintic_is_active(&params->position_profile));
+	if (autonomous_keepalive) {
+		now_ms = k_uptime_get_32();
+		params->last_command_update_ms = now_ms;
+		params->command_timeout_latched = false;
+	}
+
+	if (params->command_timeout_ms > 0U) {
+		now_ms = k_uptime_get_32();
+		struct motor_timeout_interlock_input timeout_in = {
+			.online_control_state = online_control_state,
+			.control_armed = *control_armed,
+			.autonomous_keepalive = autonomous_keepalive,
+			.command_timeout_ms = params->command_timeout_ms,
+			.now_ms = now_ms,
+			.last_command_update_ms = params->last_command_update_ms,
+		};
+		struct motor_timeout_interlock_output timeout_out = {0};
+		motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
+		if (timeout_out.disarm_control) {
+			*control_armed = false;
+			atomic_set(&params->control_armed, 0);
+			if (!params->command_timeout_latched) {
+				params->command_timeout_latched = true;
+				params->command_timeout_count++;
+			}
+		}
+	}
+
+	return autonomous_keepalive;
+}
+
+static int motor_core_step_encoder_stage(struct motor_parameters *params,
+					 struct motor_control_step_ctx *ctx,
+					 const struct smf_state *state,
+					 const struct motor_control_encoder_sample *encoder_sample,
+					 bool feature_angle_gen,
+					 struct motor_commission_observation *commission_obs,
+					 struct motor_encoder_stage_result *enc_res)
+{
+	struct motor_capture_feedback capture_fb = {0};
+	int enc_ret = motor_encoder_feedback_update(params, encoder_sample, feature_angle_gen,
+						    &ctx->encoder_fb);
+	motor_control_feedback_from_encoder(&ctx->encoder_fb, &enc_res->control_fb);
+
+	enc_res->input_source = enc_res->control_fb.input_source;
+	enc_res->angle_control_deg = enc_res->control_fb.angle_control_deg;
+	enc_res->fresh = enc_res->control_fb.fresh;
+	enc_res->frame_status = enc_res->control_fb.status;
+	enc_res->frame_warning = enc_res->control_fb.warning;
+	enc_res->frame_error = enc_res->control_fb.error;
+
+	if (enc_res->control_fb.sample_enabled) {
+		commission_obs->encoder_fresh = enc_res->fresh;
+		commission_obs->encoder_warning = enc_res->frame_warning;
+		commission_obs->encoder_error = enc_res->frame_error;
+		commission_obs->encoder_status = enc_res->frame_status;
+	}
+
+	if (enc_ret == -EIO) {
+		return -EIO;
+	}
+
+	if (motor_is_align_sample_state(state) &&
+	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
+	    enc_res->fresh &&
+	    !enc_res->frame_warning &&
+	    !enc_res->frame_error) {
+		float32_t align_mech_rad = enc_res->control_fb.observer_mech_rad;
+		if (motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE)) {
+			struct motor_align_sample_accum acc = {0};
+			motor_align_load_pos_accum(params, &acc);
+			motor_align_accum_push(&acc, align_mech_rad);
+			motor_align_store_pos_accum(params, &acc);
+		} else {
+			struct motor_align_sample_accum acc = {0};
+			motor_align_load_neg_accum(params, &acc);
+			motor_align_accum_push(&acc, align_mech_rad);
+			motor_align_store_neg_accum(params, &acc);
+		}
+	}
+
+	if (params->encoder_capture_enabled) {
+		(void)motor_encoder_feedback_prepare_capture(params, &ctx->encoder_fb, &capture_fb);
+		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
+	}
+	motor_control_telemetry_store_encoder_raw_trace(params, encoder_sample, &enc_res->control_fb,
+							params->position_quality_flags);
+
+	return 0;
+}
+
+static inline void motor_core_step_finalize(struct motor_parameters *params,
+					    const struct smf_state *state,
+					    bool control_armed,
+					    struct motor_commission_observation *commission_obs)
+{
+	commission_obs->control_armed = control_armed;
+	commission_obs->mode_velocity_closed =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+	commission_obs->mode_torque =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
+	commission_obs->fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
+	motor_runtime_fast_sync(params, control_armed);
+	motor_runtime_diag_sync(params);
+	motor_commission_update(params, commission_obs);
 }
 
 void motor_core_step_fast(struct motor_parameters *params,
@@ -314,36 +542,9 @@ void motor_core_step_fast(struct motor_parameters *params,
 	bool profile_sequence_running = ctx.profile_sequence_running;
 	bool online_control_state = ctx.online_control_state;
 	bool control_armed = ctx.control_armed;
-	bool autonomous_keepalive = false;
-	struct motor_commission_observation commission_obs = {
-		.control_loop_count = 0U,
-		.mode_velocity_closed = motor_state_ptr_is_mode(
-			state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED),
-		.mode_torque = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE),
-		.control_armed = control_armed,
-		.encoder_fresh = false,
-		.encoder_warning = false,
-		.encoder_error = false,
-		.encoder_status = 0U,
-		.fault_active = false,
-		.saturation = false,
-		.data_valid = false,
-		.vbus_v = 0.0f,
-		.id_a = 0.0f,
-		.iq_a = 0.0f,
-		.vd_v = 0.0f,
-		.vq_v = 0.0f,
-		.mech_speed_rad_s = 0.0f,
-		.elec_speed_rad_s = 0.0f,
-	};
-
-	if (pwm_out != NULL) {
-		pwm_out->update_pwm = false;
-		pwm_out->da_hb1_pu = 0.0f;
-		pwm_out->da_hb2_pu = 0.0f;
-		pwm_out->db_hb1_pu = 0.0f;
-		pwm_out->db_hb2_pu = 0.0f;
-	}
+	struct motor_commission_observation commission_obs;
+	motor_core_step_init_commission_obs(&commission_obs, state, control_armed);
+	motor_core_step_init_pwm_output(pwm_out);
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
@@ -351,7 +552,6 @@ void motor_core_step_fast(struct motor_parameters *params,
 	commission_obs.control_loop_count = params->control_loop_count;
 
 	float32_t angle_control_degrees = 0.0f;
-	float32_t sin_theta, cos_theta;
 	float32_t Ia_A, Ib_A;
 	float32_t Vbus_V;
 	float32_t Id_A, Iq_A;
@@ -375,112 +575,32 @@ void motor_core_step_fast(struct motor_parameters *params,
 	float32_t accel_mech_rad_s2 = ctx.accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s = ctx.speed_mech_filtered_rad_s;
 	uint8_t encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
-	uint32_t now_ms = 0U;
-	bool autonomous_mode_active =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
 
 	params->velocity_dob_iq_ff_a = 0.0f;
 	params->velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
 	params->velocity_dob_residual_rad_s = 0.0f;
 
-	autonomous_keepalive =
-		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
-						 profile_sequence_running,
-						 params->chopper_cal_active,
-						 motion_profile_quintic_is_active(&params->position_profile));
-	if (autonomous_keepalive) {
-		now_ms = k_uptime_get_32();
-		params->last_command_update_ms = now_ms;
-		params->command_timeout_latched = false;
-	}
-
-	/* Timeout interlock disarms output commands when command updates stop. */
-	if (params->command_timeout_ms > 0U) {
-		now_ms = k_uptime_get_32();
-		struct motor_timeout_interlock_input timeout_in = {
-			.online_control_state = online_control_state,
-			.control_armed = control_armed,
-			.autonomous_keepalive = autonomous_keepalive,
-			.command_timeout_ms = params->command_timeout_ms,
-			.now_ms = now_ms,
-			.last_command_update_ms = params->last_command_update_ms,
-		};
-		struct motor_timeout_interlock_output timeout_out = {0};
-		motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
-		if (timeout_out.disarm_control) {
-			control_armed = false;
-			atomic_set(&params->control_armed, 0);
-			if (!params->command_timeout_latched) {
-				params->command_timeout_latched = true;
-				params->command_timeout_count++;
-			}
-		}
-	}
+	(void)motor_core_step_apply_keepalive_and_timeout(params, state, profile_sequence_running,
+							  online_control_state, &control_armed);
 
 	/* Read encoder if feature is enabled */
-	int enc_ret = motor_encoder_feedback_update(params, encoder_sample, feature_angle_gen,
-						      &ctx.encoder_fb);
-	struct motor_control_feedback control_fb = {0};
-	struct motor_capture_feedback capture_fb = {0};
-	motor_control_feedback_from_encoder(&ctx.encoder_fb, &control_fb);
-	encoder_input_source = control_fb.input_source;
-	angle_control_degrees = control_fb.angle_control_deg;
-	bool fresh_encoder_sample = control_fb.fresh;
-	uint8_t encoder_frame_status = control_fb.status;
-	bool encoder_frame_warning = control_fb.warning;
-	bool encoder_frame_error = control_fb.error;
-
-	if (control_fb.sample_enabled) {
-		commission_obs.encoder_fresh = fresh_encoder_sample;
-		commission_obs.encoder_warning = encoder_frame_warning;
-		commission_obs.encoder_error = encoder_frame_error;
-		commission_obs.encoder_status = encoder_frame_status;
-	} else {
-		commission_obs.encoder_fresh = false;
-		commission_obs.encoder_warning = false;
-		commission_obs.encoder_error = false;
-	}
-
+	struct motor_encoder_stage_result enc_stage = {0};
+	int enc_ret = motor_core_step_encoder_stage(params, &ctx, state, encoder_sample,
+						    feature_angle_gen, &commission_obs, &enc_stage);
 	if (enc_ret == -EIO) {
 		motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}
-
-	/* ALIGN sample phases only accept fresh, warning-free encoder samples.
-	 * Accumulate circular means in ISR so state thread can validate sample quality.
-	 */
-	if (motor_is_align_sample_state(state) &&
-	    encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    fresh_encoder_sample &&
-	    !encoder_frame_warning &&
-	    !encoder_frame_error) {
-		float32_t align_mech_rad = control_fb.observer_mech_rad;
-		arm_sin_cos_f32(align_mech_rad, &sin_theta, &cos_theta);
-
-		if (motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE)) {
-			params->align_pos_sum_sin += sin_theta;
-			params->align_pos_sum_cos += cos_theta;
-			params->align_pos_sample_count++;
-		} else {
-			params->align_neg_sum_sin += sin_theta;
-			params->align_neg_sum_cos += cos_theta;
-			params->align_neg_sample_count++;
-		}
-	}
-
-	if (params->encoder_capture_enabled) {
-		(void)motor_encoder_feedback_prepare_capture(params, &ctx.encoder_fb, &capture_fb);
-		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
-	}
-	motor_control_telemetry_store_encoder_raw_trace(params, encoder_sample, &control_fb,
-							params->position_quality_flags);
-
-	position_mech_rad = control_fb.position_mech_rad;
-	speed_mech_rad_s = control_fb.speed_mech_rad_s;
-	accel_mech_rad_s2 = control_fb.accel_mech_rad_s2;
-	speed_mech_filtered_rad_s = control_fb.speed_mech_filtered_rad_s;
+	encoder_input_source = enc_stage.input_source;
+	angle_control_degrees = enc_stage.angle_control_deg;
+	bool fresh_encoder_sample = enc_stage.fresh;
+	uint8_t encoder_frame_status = enc_stage.frame_status;
+	bool encoder_frame_warning = enc_stage.frame_warning;
+	bool encoder_frame_error = enc_stage.frame_error;
+	position_mech_rad = enc_stage.control_fb.position_mech_rad;
+	speed_mech_rad_s = enc_stage.control_fb.speed_mech_rad_s;
+	accel_mech_rad_s2 = enc_stage.control_fb.accel_mech_rad_s2;
+	speed_mech_filtered_rad_s = enc_stage.control_fb.speed_mech_filtered_rad_s;
 
 	/* Skip control if PWM output not enabled */
 	if (!feature_pwm_output) {
@@ -564,29 +684,25 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 		/* Check if settling period complete using trajectory target */
 		if (traj_is_at_target(&params->traj_Id)) {
-			/* Accumulate for R/L extraction using previous cycle's voltage */
-			params->roverl_accumulator_Vd_Id += params->Vd_V * Id_A;
-			params->roverl_accumulator_Vq_Id += params->Vq_V * Id_A;
-			params->roverl_accumulator_Id2 += Id_A * Id_A;
+			/* Accumulate for R/L extraction using previous cycle's voltage. */
+			motor_roverl_accumulate_scalars(&params->roverl_accumulator_Vd_Id,
+							&params->roverl_accumulator_Vq_Id,
+							&params->roverl_accumulator_Id2,
+							params->Vd_V, params->Vq_V, Id_A);
 		}
 	}
 
 	/* Rs EST: filter V/I in d-axis for DC resistance */
 	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
-		traj_run(&params->traj_Id);
-
-		Id_ref_A = traj_get_int_value(&params->traj_Id);
+		motor_rs_est_step_filter(&params->traj_Id,
+					 &params->filter_rs_est_V,
+					 &params->filter_rs_est_I,
+					 params->Vd_V, Id_A, &Id_ref_A);
 		Iq_ref_A = 0.0f;
-
-		/* After rampup complete: filter voltage and current measurements using previous cycle's voltage */
-		if (traj_is_at_target(&params->traj_Id)) {
-			filter_fo_run(&params->filter_rs_est_V, params->Vd_V);
-			filter_fo_run(&params->filter_rs_est_I, Id_A);
-		}
 	}
 
-	/* ALIGN child states: ramp/hold calibration d-axis current target. */
-	if (motor_is_align_injection_state(state) || motor_is_align_sample_state(state)) {
+	/* ALIGN states must source d-axis reference from traj_Id only. */
+	if (motor_is_align_active_state(state)) {
 		traj_run(&params->traj_Id);
 
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -644,6 +760,14 @@ void motor_core_step_fast(struct motor_parameters *params,
 	Id_ref_A = motor_rls_prepare_id_reference(params, online_control_state, control_armed,
 						 fresh_encoder_sample, encoder_frame_error,
 						 encoder_input_source, Id_ref_A, &rls_runtime);
+
+	/* Invariant: ALIGN injection/sample references are trajectory-owned.
+	 * Force final refs from traj_Id after all other policy hooks.
+	 */
+	if (motor_is_align_active_state(state)) {
+		Id_ref_A = traj_get_int_value(&params->traj_Id);
+		Iq_ref_A = 0.0f;
+	}
 
 	/* Advance angle generator if enabled
 	 * This compensates for the fact that computed voltages will be applied in the next cycle
@@ -782,14 +906,6 @@ void motor_core_step_fast(struct motor_parameters *params,
 	commission_obs.saturation = voltage_saturated;
 
 isr_done:
-	commission_obs.control_armed = control_armed;
-	commission_obs.mode_velocity_closed =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
-	commission_obs.mode_torque =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
-	commission_obs.fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
-	motor_runtime_fast_sync(params, control_armed);
-	motor_runtime_diag_sync(params);
-	motor_commission_update(params, &commission_obs);
+	motor_core_step_finalize(params, state, control_armed, &commission_obs);
 	return;
 }

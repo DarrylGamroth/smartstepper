@@ -115,6 +115,30 @@ struct motor_fault_snapshot_sample {
 	uint8_t position_quality_flags;
 };
 
+struct motor_profile_sequence_ctx {
+	bool running;      /* Sequence engine active */
+	bool loop;         /* Loop sequence when last point is reached */
+	uint16_t count;    /* Number of valid points in sequence array */
+	uint16_t next_idx; /* Next point index to trigger */
+	uint32_t period_ms;      /* Target trigger period */
+	uint32_t period_ticks;   /* Hardware timer ISR ticks per trigger */
+	uint32_t tick_counter;   /* Runtime tick accumulator */
+	uint32_t event_drop_count; /* Dropped sequence-tick events */
+	uint8_t trigger_source; /* PROFILE_SEQUENCE_TRIGGER_SRC_* */
+	uint8_t trigger_edge;   /* PROFILE_SEQUENCE_TRIGGER_EDGE_* */
+	uint8_t trigger_channel; /* External capture channel index */
+	bool ext_capture_enabled; /* External capture currently armed */
+	bool ext_last_capture_valid; /* External filter history valid */
+	uint32_t ext_min_interval_us; /* Reject edges closer than this interval */
+	uint32_t ext_min_interval_cycles; /* Converted from min_interval_us */
+	uint32_t ext_last_capture_cycles; /* Last accepted capture cycle */
+	uint32_t ext_trigger_count; /* Accepted external triggers */
+	uint32_t ext_reject_count;  /* Rejected external edges (filter/status) */
+	float32_t move_duration_s; /* Quintic segment duration */
+	float32_t end_velocity_rad_s; /* Segment end velocity */
+	float32_t points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute targets [0, 2pi) */
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -180,28 +204,8 @@ struct motor_parameters {
 	struct motion_profile_quintic position_profile; /* Optional quintic position profile */
 	float32_t position_target_rad;  /* Position target for closed-loop position mode */
 
-	/* Hardware-timer-driven position sequence profile */
-	bool profile_sequence_running;      /* Sequence engine active */
-	bool profile_sequence_loop;         /* Loop sequence when last point is reached */
-	uint16_t profile_sequence_count;    /* Number of valid points in sequence array */
-	uint16_t profile_sequence_next_idx; /* Next point index to trigger */
-	uint32_t profile_sequence_period_ms;      /* Target trigger period */
-	uint32_t profile_sequence_period_ticks;   /* Hardware timer ISR ticks per trigger */
-	uint32_t profile_sequence_tick_counter;   /* Runtime tick accumulator */
-	uint32_t profile_sequence_event_drop_count; /* Dropped sequence-tick events */
-	uint8_t profile_sequence_trigger_source; /* PROFILE_SEQUENCE_TRIGGER_SRC_* */
-	uint8_t profile_sequence_trigger_edge;   /* PROFILE_SEQUENCE_TRIGGER_EDGE_* */
-	uint8_t profile_sequence_trigger_channel; /* External capture channel index */
-	bool profile_sequence_ext_capture_enabled; /* External capture currently armed */
-	bool profile_sequence_ext_last_capture_valid; /* External filter history valid */
-	uint32_t profile_sequence_ext_min_interval_us; /* Reject edges closer than this interval */
-	uint32_t profile_sequence_ext_min_interval_cycles; /* Converted from min_interval_us */
-	uint32_t profile_sequence_ext_last_capture_cycles; /* Last accepted capture cycle */
-	uint32_t profile_sequence_ext_trigger_count; /* Accepted external triggers */
-	uint32_t profile_sequence_ext_reject_count;  /* Rejected external edges (filter/status) */
-	float32_t profile_sequence_move_duration_s; /* Quintic segment duration */
-	float32_t profile_sequence_end_velocity_rad_s; /* Segment end velocity */
-	float32_t profile_sequence_points_rad[MOTOR_PROFILE_SEQUENCE_MAX_POINTS]; /* Absolute target points [0, 2pi) */
+	/* Hardware-timer-driven position sequence profile runtime. */
+	struct motor_profile_sequence_ctx profile_seq;
 
 	/* Chopper edge calibration (photo-interrupter + encoder angle snapshots) */
 	bool chopper_cal_active;            /* Edge capture in progress */
@@ -408,6 +412,8 @@ struct motor_parameters {
 #define ALIGN_INJECT_MS (DT_PROP(USER_PARAMS_NODE, align_duration_ms) - ALIGN_STABILIZE_MS)
 #define ALIGN_INJECT_DURATION_S ((float32_t)ALIGN_INJECT_MS / 1000.0f)
 #define ALIGN_STABILIZE_DURATION_S ((float32_t)ALIGN_STABILIZE_MS / 1000.0f)
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, align_duration_ms) > ALIGN_STABILIZE_MS,
+	     "user_parameters.align-duration-ms must be greater than ALIGN_STABILIZE_MS");
 #define BRAKE_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, brake_current_ma) / 1000.0f)
 #define MAX_VS_MPU ((float32_t)DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) / 1000.0f)
 BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&

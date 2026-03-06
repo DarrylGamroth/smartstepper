@@ -53,8 +53,8 @@ static int motor_position_plan_sequence_move(struct motor_parameters *params, fl
 							    params->position_rad,
 							    params->velocity_rad_s,
 							    target_wrapped_rad,
-							    params->profile_sequence_end_velocity_rad_s,
-							    params->profile_sequence_move_duration_s,
+							    params->profile_seq.end_velocity_rad_s,
+							    params->profile_seq.move_duration_s,
 							    params->profile_max_velocity_rad_s,
 							    params->profile_max_accel_rad_s2);
 	if (ret != 0) {
@@ -372,7 +372,7 @@ enum smf_state_result motor_state_online_position_run(void *obj)
 
 	switch (params->event.type) {
 	case MOTOR_EVENT_PROFILE_SEQ_TICK: {
-		if (!params->profile_sequence_running) {
+		if (!params->profile_seq.running) {
 			return SMF_EVENT_HANDLED;
 		}
 		if (atomic_get(&params->control_armed) == 0) {
@@ -381,35 +381,35 @@ enum smf_state_result motor_state_online_position_run(void *obj)
 
 		float32_t target_wrapped_rad = 0.0f;
 		bool complete_after_take = false;
-		int ret = motor_position_sequence_take_next(params->profile_sequence_points_rad,
-							    params->profile_sequence_count,
-							    params->profile_sequence_loop,
-							    &params->profile_sequence_next_idx,
+		int ret = motor_position_sequence_take_next(params->profile_seq.points_rad,
+							    params->profile_seq.count,
+							    params->profile_seq.loop,
+							    &params->profile_seq.next_idx,
 							    &target_wrapped_rad,
 							    &complete_after_take);
 		if (ret == -ENOENT) {
-			params->profile_sequence_running = false;
-			params->profile_sequence_tick_counter = 0U;
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
 			return SMF_EVENT_HANDLED;
 		}
 		if (ret != 0) {
 			LOG_ERR("Profile sequence index update failed (%d), stopping", ret);
-			params->profile_sequence_running = false;
-			params->profile_sequence_tick_counter = 0U;
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
 			return SMF_EVENT_HANDLED;
 		}
 
 		ret = motor_position_plan_sequence_move(params, target_wrapped_rad);
 		if (ret != 0) {
 			LOG_ERR("Profile sequence move planning failed (%d), stopping", ret);
-			params->profile_sequence_running = false;
-			params->profile_sequence_tick_counter = 0U;
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
 			return SMF_EVENT_HANDLED;
 		}
 
 		if (complete_after_take) {
-			params->profile_sequence_running = false;
-			params->profile_sequence_tick_counter = 0U;
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
 			LOG_INF("Profile sequence completed");
 		}
 		return SMF_EVENT_HANDLED;
@@ -432,8 +432,8 @@ void motor_state_online_position_exit(void *obj)
 	motion_profile_quintic_cancel(&params->position_profile,
 				      params->position_rad);
 	params->velocity_ref_rad_s = 0.0f;
-	params->profile_sequence_running = false;
-	params->profile_sequence_tick_counter = 0U;
+	params->profile_seq.running = false;
+	params->profile_seq.tick_counter = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);

@@ -87,8 +87,8 @@ int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **argv)
 	float target_wrapped_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
 	float end_vel_rad_s = end_vel_hz * 2.0f * PI_F32;
 	float duration_s = duration_ms * 0.001f;
-	g_motor_params->profile_sequence_running = false;
-	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_seq.running = false;
+	g_motor_params->profile_seq.tick_counter = 0U;
 
 	int ret = motor_position_move_plan_sequence_segment(&g_motor_params->position_profile,
 							    start_pos_rad,
@@ -135,8 +135,8 @@ int cmd_motor_profile_cancel(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	float hold_pos_rad = g_motor_params->position_rad;
-	g_motor_params->profile_sequence_running = false;
-	g_motor_params->profile_sequence_tick_counter = 0U;
+	g_motor_params->profile_seq.running = false;
+	g_motor_params->profile_seq.tick_counter = 0U;
 	motion_profile_quintic_cancel(&g_motor_params->position_profile, hold_pos_rad);
 	g_motor_params->position_target_rad = wrap_rad_2pi(hold_pos_rad);
 	motor_command_feed_watchdog(g_motor_params);
@@ -170,10 +170,10 @@ int cmd_motor_profile_status(const struct shell *sh, size_t argc, char **argv)
 			    "ACTIVE" :
 			    (g_motor_params->position_profile.valid ? "COMPLETE" : "IDLE"));
 	shell_print(sh, "  Sequence:     %s (%u points, next=%u, drops=%u)",
-		    g_motor_params->profile_sequence_running ? "RUNNING" : "STOPPED",
-		    g_motor_params->profile_sequence_count,
-		    g_motor_params->profile_sequence_next_idx,
-		    g_motor_params->profile_sequence_event_drop_count);
+		    g_motor_params->profile_seq.running ? "RUNNING" : "STOPPED",
+		    g_motor_params->profile_seq.count,
+		    g_motor_params->profile_seq.next_idx,
+		    g_motor_params->profile_seq.event_drop_count);
 
 	if (g_motor_params->position_profile.valid) {
 		shell_print(sh, "  Segment t/T:  %.1f / %.1f ms",

@@ -103,20 +103,20 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 
 static void motor_chopper_release_sequence_capture_channel(struct motor_parameters *params)
 {
-	if (!params || params->profile_sequence_running ||
-	    !params->profile_sequence_ext_capture_enabled ||
-	    params->profile_sequence_trigger_channel != CHOPPER_CAL_CAPTURE_CHANNEL) {
+	if (!params || params->profile_seq.running ||
+	    !params->profile_seq.ext_capture_enabled ||
+	    params->profile_seq.trigger_channel != CHOPPER_CAL_CAPTURE_CHANNEL) {
 		return;
 	}
 
 #if CHOPPER_CAL_CAPTURE_AVAILABLE
 	if (device_is_ready(chopper_capture_dev)) {
 		(void)timer_ic_disable_capture(chopper_capture_dev,
-					       params->profile_sequence_trigger_channel);
+					       params->profile_seq.trigger_channel);
 	}
 #endif
-	params->profile_sequence_ext_capture_enabled = false;
-	params->profile_sequence_ext_last_capture_valid = false;
+	params->profile_seq.ext_capture_enabled = false;
+	params->profile_seq.ext_last_capture_valid = false;
 }
 
 #if CHOPPER_CAL_CAPTURE_AVAILABLE
@@ -239,8 +239,8 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 		return -ENODEV;
 	}
 	motor_chopper_release_sequence_capture_channel(g_motor_params);
-	if (g_motor_params->profile_sequence_ext_capture_enabled &&
-	    g_motor_params->profile_sequence_trigger_channel == CHOPPER_CAL_CAPTURE_CHANNEL) {
+	if (g_motor_params->profile_seq.ext_capture_enabled &&
+	    g_motor_params->profile_seq.trigger_channel == CHOPPER_CAL_CAPTURE_CHANNEL) {
 		shell_error(sh, "Sequence external trigger is using capture channel %u",
 			    CHOPPER_CAL_CAPTURE_CHANNEL);
 		return -EBUSY;
@@ -465,16 +465,16 @@ int cmd_motor_chopper_calib_apply(const struct shell *sh, size_t argc, char **ar
 		return -EINVAL;
 	}
 
-	g_motor_params->profile_sequence_running = false;
-	g_motor_params->profile_sequence_tick_counter = 0U;
-	g_motor_params->profile_sequence_count = g_motor_params->chopper_cal_midpoint_count;
-	g_motor_params->profile_sequence_next_idx = 0U;
-	for (uint16_t i = 0U; i < g_motor_params->profile_sequence_count; i++) {
-		g_motor_params->profile_sequence_points_rad[i] = g_motor_params->chopper_blade_midpoints_rad[i];
+	g_motor_params->profile_seq.running = false;
+	g_motor_params->profile_seq.tick_counter = 0U;
+	g_motor_params->profile_seq.count = g_motor_params->chopper_cal_midpoint_count;
+	g_motor_params->profile_seq.next_idx = 0U;
+	for (uint16_t i = 0U; i < g_motor_params->profile_seq.count; i++) {
+		g_motor_params->profile_seq.points_rad[i] = g_motor_params->chopper_blade_midpoints_rad[i];
 	}
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Applied %u midpoint targets into profile sequence",
-		    g_motor_params->profile_sequence_count);
+		    g_motor_params->profile_seq.count);
 	return 0;
 }
