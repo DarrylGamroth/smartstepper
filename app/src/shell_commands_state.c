@@ -225,6 +225,7 @@ static void motor_fault_snapshot_reset(struct motor_parameters *params, bool cle
 		return;
 	}
 
+	params->fault_snapshot.phase = 0U;
 	params->fault_snapshot.write_idx = 0U;
 	params->fault_snapshot.count = 0U;
 	params->fault_snapshot.overrun_count = 0U;
@@ -1492,6 +1493,56 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 	return 0;
 }
 
+/* motor fault snapshot start [decimation] */
+int cmd_motor_fault_snapshot_start(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 1U && argc != 2U) {
+		shell_error(sh, "Usage: motor fault snapshot start [decimation]");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t decimation = 1U;
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &decimation) || decimation == 0U ||
+		    decimation > UINT16_MAX) {
+			shell_error(sh, "decimation must be in [1, %u]", UINT16_MAX);
+			return -EINVAL;
+		}
+	}
+
+	motor_fault_snapshot_reset(g_motor_params, false);
+	g_motor_params->fault_snapshot.decimation = (uint16_t)decimation;
+	g_motor_params->fault_snapshot.enabled = true;
+	shell_print(sh,
+		    "Fault snapshot started: decimation=%u, capacity=%u samples",
+		    g_motor_params->fault_snapshot.decimation,
+		    MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
+	return 0;
+}
+
+/* motor fault snapshot stop */
+int cmd_motor_fault_snapshot_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	g_motor_params->fault_snapshot.enabled = false;
+	shell_print(sh, "Fault snapshot stopped: stored=%u overrun=%u",
+		    g_motor_params->fault_snapshot.count,
+		    g_motor_params->fault_snapshot.overrun_count);
+	return 0;
+}
+
 /* motor fault snapshot status */
 int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **argv)
 {
@@ -1504,6 +1555,8 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh, "Fault snapshot:");
+	shell_print(sh, "  Enabled:    %s", g_motor_params->fault_snapshot.enabled ? "YES" : "NO");
+	shell_print(sh, "  Decimation: %u", g_motor_params->fault_snapshot.decimation);
 	shell_print(sh, "  Latched:    %s", g_motor_params->fault_snapshot.latched ? "YES" : "NO");
 	if (g_motor_params->fault_snapshot.latched) {
 		shell_print(sh, "  Fault:      %s (%u)",
@@ -1622,6 +1675,7 @@ int cmd_motor_fault_snapshot_clear(const struct shell *sh, size_t argc, char **a
 		return -ENODEV;
 	}
 
+	g_motor_params->fault_snapshot.enabled = false;
 	motor_fault_snapshot_reset(g_motor_params, true);
 	shell_print(sh, "Fault snapshot cleared");
 	return 0;

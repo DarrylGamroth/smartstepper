@@ -206,6 +206,9 @@ struct motor_encoder_raw_trace_ctx {
 };
 
 struct motor_fault_snapshot_ctx {
+	bool enabled;
+	uint16_t decimation;
+	uint16_t phase;
 	uint16_t write_idx;
 	uint16_t count;
 	uint32_t overrun_count;

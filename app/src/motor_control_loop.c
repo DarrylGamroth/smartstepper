@@ -626,25 +626,27 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 		return true;
 	}
 
-	motor_fault_snapshot_prepare(report,
-				     meas->angle_control_degrees,
-				     params->live.encoder_observer_input_rad,
-				     meas->park_angle_rad,
-				     angle_observer_get_elec_speed(&params->observer),
-				     refs->id_ref_a,
-				     refs->iq_ref_a,
-				     meas->id_a,
-				     meas->iq_a,
-				     meas->ia_a,
-				     meas->ib_a,
-				     params->Vd_V,
-				     params->Vq_V,
-				     meas->encoder_input_source,
-				     meas->fresh_encoder_sample,
-				     meas->encoder_frame_warning,
-				     meas->encoder_frame_error,
-				     meas->encoder_frame_status,
-				     params->live.position_quality_flags);
+	if (params->fault_snapshot.enabled) {
+		motor_fault_snapshot_prepare(report,
+					     meas->angle_control_degrees,
+					     params->live.encoder_observer_input_rad,
+					     meas->park_angle_rad,
+					     angle_observer_get_elec_speed(&params->observer),
+					     refs->id_ref_a,
+					     refs->iq_ref_a,
+					     meas->id_a,
+					     meas->iq_a,
+					     meas->ia_a,
+					     meas->ib_a,
+					     params->Vd_V,
+					     params->Vq_V,
+					     meas->encoder_input_source,
+					     meas->fresh_encoder_sample,
+					     meas->encoder_frame_warning,
+					     meas->encoder_frame_error,
+					     meas->encoder_frame_status,
+					     params->live.position_quality_flags);
+	}
 
 	if (fabsf(meas->ia_a) > OVERCURRENT_THRESHOLD_A ||
 	    fabsf(meas->ib_a) > OVERCURRENT_THRESHOLD_A) {

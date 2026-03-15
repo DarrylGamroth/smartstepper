@@ -137,7 +137,14 @@ void motor_control_telemetry_store_fault_snapshot(
 	struct motor_parameters *params,
 	const struct motor_control_fault_snapshot *snapshot)
 {
-	if (params == NULL || snapshot == NULL || !snapshot->valid) {
+	if (params == NULL || snapshot == NULL || !snapshot->valid ||
+	    !params->fault_snapshot.enabled) {
+		return;
+	}
+
+	uint16_t decimation = MAX((uint16_t)1U, params->fault_snapshot.decimation);
+	uint16_t phase = (uint16_t)(params->rt_fast.control_loop_count % decimation);
+	if (phase != params->fault_snapshot.phase) {
 		return;
 	}
 

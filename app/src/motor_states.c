@@ -630,6 +630,15 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->encoder_raw_trace.write_idx = 0U;
 	params->encoder_raw_trace.count = 0U;
 	params->encoder_raw_trace.overrun_count = 0U;
+	params->fault_snapshot.enabled = false;
+	params->fault_snapshot.decimation = 1U;
+	params->fault_snapshot.phase = 0U;
+	params->fault_snapshot.write_idx = 0U;
+	params->fault_snapshot.count = 0U;
+	params->fault_snapshot.overrun_count = 0U;
+	params->fault_snapshot.latch_loop = 0U;
+	params->fault_snapshot.latch_error_code = ERROR_NONE;
+	params->fault_snapshot.latched = 0U;
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;

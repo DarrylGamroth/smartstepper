@@ -1737,6 +1737,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_safety,
 
 /* motor fault snapshot subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault_snapshot,
+	SHELL_CMD_ARG(start, NULL, "Start fault snapshot capture [decimation]",
+		      cmd_motor_fault_snapshot_start, 1, 1),
+	SHELL_CMD(stop, NULL, "Stop fault snapshot capture", cmd_motor_fault_snapshot_stop),
 	SHELL_CMD(status, NULL, "Show fault snapshot ring status", cmd_motor_fault_snapshot_status),
 	SHELL_CMD_ARG(dump, NULL, "Dump latest fault snapshot rows [count]",
 		      cmd_motor_fault_snapshot_dump, 1, 1),
