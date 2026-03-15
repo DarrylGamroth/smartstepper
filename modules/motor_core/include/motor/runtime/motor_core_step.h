@@ -11,9 +11,9 @@
 
 #include <zephyr/dsp/types.h>
 
+#include "motor/runtime/io.h"
+
 struct motor_parameters;
-struct motor_control_encoder_sample;
-struct motor_control_pwm_output;
 
 void motor_core_step_fast(struct motor_parameters *params,
 			  const q31_t *values,

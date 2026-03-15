@@ -45,24 +45,17 @@ int motor_dq_decoupling_feedforward_step(const struct motor_dq_decoupling_feedfo
 	if (!in->enabled) {
 		return 0;
 	}
-#if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
 	if (!isfinite(in->electrical_speed_rad_s) || !isfinite(in->ld_h) || !isfinite(in->lq_h) ||
 	    !isfinite(in->flux_linkage_wb) || !isfinite(in->id_a) || !isfinite(in->iq_a) ||
 	    !isfinite(in->max_voltage_magnitude_v) || in->max_voltage_magnitude_v <= 0.0f) {
 		return -EINVAL;
 	}
-#else
-	if (in->max_voltage_magnitude_v <= 0.0f) {
-		return -EINVAL;
-	}
-#endif
 
 	float32_t omega_elec = in->electrical_speed_rad_s;
 	float32_t ld_h = fmaxf(in->ld_h, 0.0f);
 	float32_t lq_h = fmaxf(in->lq_h, 0.0f);
 	float32_t flux_headroom_ratio = in->flux_headroom_ratio;
 	float32_t ff_limit_ratio = in->ff_limit_ratio;
-#if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
 	if (!isfinite(flux_headroom_ratio) || flux_headroom_ratio <= 0.0f ||
 	    flux_headroom_ratio > 1.0f) {
 		flux_headroom_ratio = DQ_DECOUPLING_DEFAULT_FLUX_HEADROOM_RATIO;
@@ -70,14 +63,6 @@ int motor_dq_decoupling_feedforward_step(const struct motor_dq_decoupling_feedfo
 	if (!isfinite(ff_limit_ratio) || ff_limit_ratio <= 0.0f || ff_limit_ratio > 1.0f) {
 		ff_limit_ratio = DQ_DECOUPLING_DEFAULT_FF_LIMIT_RATIO;
 	}
-#else
-	if (flux_headroom_ratio <= 0.0f || flux_headroom_ratio > 1.0f) {
-		flux_headroom_ratio = DQ_DECOUPLING_DEFAULT_FLUX_HEADROOM_RATIO;
-	}
-	if (ff_limit_ratio <= 0.0f || ff_limit_ratio > 1.0f) {
-		ff_limit_ratio = DQ_DECOUPLING_DEFAULT_FF_LIMIT_RATIO;
-	}
-#endif
 	float32_t psi_f_wb = in->flux_linkage_wb;
 	if (psi_f_wb < 0.0f) {
 		psi_f_wb = 0.0f;

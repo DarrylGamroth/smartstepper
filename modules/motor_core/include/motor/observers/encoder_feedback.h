@@ -13,10 +13,10 @@
 #include <zephyr/dsp/types.h>
 
 #include "motor/observers/angle_path.h"
+#include "motor/runtime/io.h"
 #include "motor/telemetry/capture.h"
 
 struct motor_parameters;
-struct motor_control_encoder_sample;
 
 /**
  * @brief Normalized encoder/observer/position feedback for one control ISR step.

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef MOTOR_CONTROL_QUALITY_H_
-#define MOTOR_CONTROL_QUALITY_H_
+#ifndef MOTOR_RUNTIME_FEEDBACK_QUALITY_H_
+#define MOTOR_RUNTIME_FEEDBACK_QUALITY_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,9 +14,6 @@
 
 static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 {
-	/* Encoder updates may not be fresh every ISR tick (RTIO completion cadence),
-	 * but feedback is still usable while quality remains VALID.
-	 */
 	const uint8_t required = MOTOR_FEEDBACK_QUALITY_VALID;
 	const uint8_t forbidden = MOTOR_FEEDBACK_QUALITY_ERROR;
 
@@ -24,4 +21,4 @@ static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 	       ((quality_flags & forbidden) == 0U);
 }
 
-#endif /* MOTOR_CONTROL_QUALITY_H_ */
+#endif /* MOTOR_RUNTIME_FEEDBACK_QUALITY_H_ */

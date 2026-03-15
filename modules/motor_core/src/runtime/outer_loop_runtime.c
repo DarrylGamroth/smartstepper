@@ -24,7 +24,7 @@
 #include "motor/control/velocity_regulator.h"
 #include "motor/motion/outer_loop_sched.h"
 #include "motor_torque.h"
-#include "motor_control_quality.h"
+#include "motor/runtime/feedback_quality.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
 {
@@ -112,23 +112,24 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 					.integrator_limit_rad_s = pos_i_limit_rad_s,
 					.output_limit_rad_s = params->profile_max_velocity_rad_s,
 				};
-				struct motor_position_regulator_state pos_state = {
-					.initialized = false,
-					.integrator_rad_s = params->position_cl_i_term_rad_s,
-				};
 				float32_t velocity_target = clampf(profile_velocity_ff_rad_s,
 								   -params->profile_max_velocity_rad_s,
 								   params->profile_max_velocity_rad_s);
-				(void)motor_position_regulator_init(&pos_cfg, &pos_state,
-								 params->position_cl_i_term_rad_s);
+				if (!params->position_reg_state.initialized) {
+					(void)motor_position_regulator_init(
+						&pos_cfg, &params->position_reg_state,
+						params->position_cl_i_term_rad_s);
+				}
 				int pos_ret = motor_position_regulator_step(
-					&pos_cfg, &pos_state, position_error_rad,
+					&pos_cfg, &params->position_reg_state, position_error_rad,
 					profile_velocity_ff_rad_s, in->position_loop_dt_s,
 					&velocity_target);
 				if (pos_ret != 0) {
-					motor_position_regulator_reset(&pos_state, 0.0f);
+					motor_position_regulator_reset(&params->position_reg_state,
+									       0.0f);
 				}
-				params->position_cl_i_term_rad_s = pos_state.integrator_rad_s;
+				params->position_cl_i_term_rad_s =
+					params->position_reg_state.integrator_rad_s;
 				out->velocity_target_rad_s = velocity_target;
 			}
 
@@ -172,6 +173,8 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 			params->live.velocity_target_rad_s = 0.0f;
 			params->live.velocity_ref_rad_s = 0.0f;
 			traj_set_target_value(&params->traj_velocity, 0.0f);
+			motor_velocity_regulator_reset(&params->velocity_reg_state, 0.0f);
+			motor_position_regulator_reset(&params->position_reg_state, 0.0f);
 			motor_mpr_velocity_reset(&params->velocity_mpr_state,
 						 out->speed_mech_filtered_rad_s,
 						 out->iq_ref_a);
@@ -229,22 +232,24 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 					.integrator_limit_a = params->velocity_cl_iq_limit_A,
 					.output_limit_a = params->velocity_cl_iq_limit_A,
 				};
-				struct motor_velocity_regulator_state vel_state = {
-					.initialized = false,
-					.integrator_a = params->velocity_cl_i_term_A,
-				};
 				float32_t iq_cmd = 0.0f;
-				(void)motor_velocity_regulator_init(&vel_cfg, &vel_state,
-								 params->velocity_cl_i_term_A);
-				int vel_ret = motor_velocity_regulator_step(&vel_cfg, &vel_state,
+				if (!params->velocity_reg_state.initialized) {
+					(void)motor_velocity_regulator_init(
+						&vel_cfg, &params->velocity_reg_state,
+						params->velocity_cl_i_term_A);
+				}
+				int vel_ret = motor_velocity_regulator_step(&vel_cfg,
+									 &params->velocity_reg_state,
 									 speed_error_rad_s,
 									 in->velocity_loop_dt_s,
 									 &iq_cmd);
 				if (vel_ret != 0) {
-					motor_velocity_regulator_reset(&vel_state, 0.0f);
+					motor_velocity_regulator_reset(&params->velocity_reg_state,
+									       0.0f);
 					iq_cmd = 0.0f;
 				}
-				params->velocity_cl_i_term_A = vel_state.integrator_a;
+				params->velocity_cl_i_term_A =
+					params->velocity_reg_state.integrator_a;
 
 				out->id_ref_a = params->Id_setpoint_A;
 				iq_cmd_pre_dob_a = iq_cmd;

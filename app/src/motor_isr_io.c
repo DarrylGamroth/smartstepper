@@ -23,6 +23,9 @@
 #include "motor_state_utils.h"
 #include "config.h"
 #include "motor_encoder_pipeline.h"
+#include "motor/runtime/keepalive_policy.h"
+#include "motor/protection/interlocks.h"
+#include "motor/motion/motion_profile.h"
 
 LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
@@ -33,6 +36,53 @@ struct motor_adc_collect_stage {
 struct motor_adc_process_stage {
 	struct motor_control_pwm_output pwm_out;
 };
+
+static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *params)
+{
+	bool control_armed = atomic_get(&params->control_armed) != 0;
+	const struct smf_state *state = params->state_for_isr;
+	bool online_control_state = motor_state_ptr_is_online_control_state(state);
+	bool autonomous_mode_active =
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
+	bool profile_active = motion_profile_quintic_is_active(&params->position_profile);
+	bool autonomous_keepalive = motor_keepalive_policy_should_keepalive(
+		control_armed, autonomous_mode_active, params->profile_seq.running,
+		params->chopper_cal.active, profile_active);
+
+	if (autonomous_keepalive) {
+		uint32_t now_ms = k_uptime_get_32();
+
+		params->last_command_update_ms = now_ms;
+		params->command_timeout_latched = false;
+	}
+
+	if (params->command_timeout_ms == 0U) {
+		return;
+	}
+
+	uint32_t now_ms = k_uptime_get_32();
+	struct motor_timeout_interlock_input timeout_in = {
+		.online_control_state = online_control_state,
+		.control_armed = control_armed,
+		.autonomous_keepalive = autonomous_keepalive,
+		.command_timeout_ms = params->command_timeout_ms,
+		.now_ms = now_ms,
+		.last_command_update_ms = params->last_command_update_ms,
+	};
+	struct motor_timeout_interlock_output timeout_out = {0};
+	motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
+	if (!timeout_out.disarm_control) {
+		return;
+	}
+
+	atomic_set(&params->control_armed, 0);
+	if (!params->command_timeout_latched) {
+		params->command_timeout_latched = true;
+		params->command_timeout_count++;
+	}
+}
 
 static void motor_adc_stage_collect(struct motor_parameters *params,
 					 struct motor_adc_collect_stage *collect)
@@ -80,6 +130,8 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 				    const struct motor_adc_collect_stage *collect,
 				    struct motor_adc_process_stage *process)
 {
+	motor_adc_apply_keepalive_and_timeout(params);
+
 	/* Hardware-timer-driven position-sequence tick source.
 	 * Keep event posting out of encoder1_callback (direct ISR context).
 	 */

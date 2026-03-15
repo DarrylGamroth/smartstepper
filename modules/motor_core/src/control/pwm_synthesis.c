@@ -24,7 +24,6 @@ int motor_pwm_synthesis_step(const struct motor_pwm_synthesis_input *in,
 	if (in == NULL || out == NULL) {
 		return -EINVAL;
 	}
-#if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
 	if (!isfinite(in->va_v) || !isfinite(in->vb_v) || !isfinite(in->vbus_v) || in->vbus_v <= 0.0f) {
 		return -EINVAL;
 	}
@@ -34,15 +33,6 @@ int motor_pwm_synthesis_step(const struct motor_pwm_synthesis_input *in,
 		 in->braking_vbus_limit_v < 0.0f || in->braking_vbus_margin_inv <= 0.0f)) {
 		return -EINVAL;
 	}
-#else
-	if (in->vbus_v <= 0.0f) {
-		return -EINVAL;
-	}
-	if (in->braking_enabled &&
-	    (in->braking_vbus_limit_v < 0.0f || in->braking_vbus_margin_inv <= 0.0f)) {
-		return -EINVAL;
-	}
-#endif
 
 	float32_t vbus_inv = 1.0f / in->vbus_v;
 	out->ua_pu = in->va_v * vbus_inv;

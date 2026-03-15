@@ -9,12 +9,14 @@
 #include <errno.h>
 
 #include "config.h"
-#include "motor_control_quality.h"
+#include "motor/runtime/feedback_quality.h"
 #include "motor/filters/pi.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/control/mpr.h"
 #include "motor/control/dob.h"
+#include "motor/control/position_regulator.h"
+#include "motor/control/velocity_regulator.h"
 #include "motor/protection/interlocks.h"
 #include "motor/runtime/command_arbitration.h"
 
@@ -76,6 +78,8 @@ int motor_current_ref_apply_policy(struct motor_parameters *params,
 		params->live.velocity_ref_rad_s = 0.0f;
 		params->velocity_cl_i_term_A = 0.0f;
 		params->position_cl_i_term_rad_s = 0.0f;
+		motor_velocity_regulator_reset(&params->velocity_reg_state, 0.0f);
+		motor_position_regulator_reset(&params->position_reg_state, 0.0f);
 		traj_set_target_value(&params->traj_velocity, 0.0f);
 		traj_set_int_value(&params->traj_velocity, 0.0f);
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);

@@ -9,9 +9,7 @@
 #include <errno.h>
 #include <string.h>
 
-#include <zephyr/kernel.h>
 #include <zephyr/dsp/utils.h>
-#include <zephyr/smf.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 #include <dsp/controller_functions.h>
@@ -19,7 +17,6 @@
 #include "motor/runtime/motor_core_step.h"
 #include "motor_control_loop.h"
 #include "motor_control_api.h"
-#include "motor_states.h"
 #include "motor/math/math_constants.h"
 #include "config.h"
 #include "motor/filters/pi.h"
@@ -29,10 +26,8 @@
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/runtime/config_snapshot.h"
-#include "motor/runtime/keepalive_policy.h"
 #include "motor/estimation/rls_runtime.h"
 #include "motor/control/foc_voltage_pwm.h"
-#include "motor_state_utils.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor/control/dob.h"
 #include "motor/motion/motion_planner.h"
@@ -44,7 +39,7 @@
 #include "motor/telemetry/capture.h"
 #include "motor/runtime/outer_loop_runtime.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
-#include "motor_control_quality.h"
+#include "motor/runtime/feedback_quality.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/transforms.h"
@@ -85,21 +80,26 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 #define CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO 0.60f
 #define CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO 0.70f
 
-static inline bool motor_is_align_injection_state(const struct smf_state *state)
+static inline bool motor_rt_mode_active(uint32_t mode_flags, uint32_t flag)
 {
-	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_INJECT) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_INJECT);
+	return (mode_flags & flag) != 0U;
 }
 
-static inline bool motor_is_align_sample_state(const struct smf_state *state)
+static inline bool motor_is_align_injection_state(uint32_t mode_flags)
 {
-	return motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_NEG_SAMPLE);
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_INJECT) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_NEG_INJECT);
 }
 
-static inline bool motor_is_align_active_state(const struct smf_state *state)
+static inline bool motor_is_align_sample_state(uint32_t mode_flags)
 {
-	return motor_is_align_injection_state(state) || motor_is_align_sample_state(state);
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_NEG_SAMPLE);
+}
+
+static inline bool motor_is_align_active_state(uint32_t mode_flags)
+{
+	return motor_is_align_injection_state(mode_flags) || motor_is_align_sample_state(mode_flags);
 }
 
 static inline void motor_align_load_pos_accum(const struct motor_parameters *params,
@@ -281,8 +281,8 @@ static inline void motor_control_feedback_from_encoder(
 
 struct motor_control_step_ctx {
 	uint32_t config_epoch;
-	const struct smf_state *state;
 	atomic_val_t feature_flags;
+	uint32_t mode_flags;
 	bool feature_angle_gen;
 	bool feature_pwm_output;
 	bool feature_pi_control;
@@ -323,8 +323,8 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	struct motor_rt_config_snapshot cfg = {0};
 	bool cfg_valid = motor_config_snapshot_read(&cfg);
 	ctx->config_epoch = cfg.epoch;
-	ctx->state = cfg_valid ? cfg.state : params->state_for_isr;
 	ctx->feature_flags = cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
+	ctx->mode_flags = cfg_valid ? cfg.mode_flags : 0U;
 	ctx->feature_angle_gen = (ctx->feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
 	ctx->feature_pwm_output = (ctx->feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
 	ctx->feature_pi_control = (ctx->feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
@@ -334,7 +334,7 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
 	ctx->profile_sequence_running = cfg_valid ? cfg.profile_sequence_running :
 					      params->profile_seq.running;
-	ctx->online_control_state = motor_state_ptr_is_online_control_state(ctx->state);
+	ctx->online_control_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
 	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	ctx->velocity_loop_decimation =
@@ -369,14 +369,14 @@ static inline void motor_core_step_init_pwm_output(struct motor_control_pwm_outp
 }
 
 static inline void motor_core_step_init_commission_obs(struct motor_commission_observation *obs,
-						       const struct smf_state *state,
+						       uint32_t mode_flags,
 						       bool control_armed)
 {
 	*obs = (struct motor_commission_observation){
 		.control_loop_count = 0U,
-		.mode_velocity_closed = motor_state_ptr_is_mode(
-			state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED),
-		.mode_torque = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE),
+		.mode_velocity_closed = motor_rt_mode_active(
+			mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED),
+		.mode_torque = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE),
 		.control_armed = control_armed,
 		.encoder_fresh = false,
 		.encoder_warning = false,
@@ -395,56 +395,8 @@ static inline void motor_core_step_init_commission_obs(struct motor_commission_o
 	};
 }
 
-static inline bool motor_core_step_apply_keepalive_and_timeout(
-	struct motor_parameters *params,
-	const struct smf_state *state,
-	bool profile_sequence_running,
-	bool online_control_state,
-	bool *control_armed)
-{
-	uint32_t now_ms = 0U;
-	bool autonomous_mode_active =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
-
-	bool autonomous_keepalive = motor_keepalive_policy_should_keepalive(
-		*control_armed, autonomous_mode_active, profile_sequence_running,
-		params->chopper_cal.active, motion_profile_quintic_is_active(&params->position_profile));
-	if (autonomous_keepalive) {
-		now_ms = k_uptime_get_32();
-		params->last_command_update_ms = now_ms;
-		params->command_timeout_latched = false;
-	}
-
-	if (params->command_timeout_ms > 0U) {
-		now_ms = k_uptime_get_32();
-		struct motor_timeout_interlock_input timeout_in = {
-			.online_control_state = online_control_state,
-			.control_armed = *control_armed,
-			.autonomous_keepalive = autonomous_keepalive,
-			.command_timeout_ms = params->command_timeout_ms,
-			.now_ms = now_ms,
-			.last_command_update_ms = params->last_command_update_ms,
-		};
-		struct motor_timeout_interlock_output timeout_out = {0};
-		motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
-		if (timeout_out.disarm_control) {
-			*control_armed = false;
-			atomic_set(&params->control_armed, 0);
-			if (!params->command_timeout_latched) {
-				params->command_timeout_latched = true;
-				params->command_timeout_count++;
-			}
-		}
-	}
-
-	return autonomous_keepalive;
-}
-
 static int motor_core_step_encoder_stage(struct motor_parameters *params,
 					 struct motor_control_step_ctx *ctx,
-					 const struct smf_state *state,
 					 const struct motor_control_encoder_sample *encoder_sample,
 					 bool feature_angle_gen,
 					 struct motor_commission_observation *commission_obs,
@@ -473,13 +425,13 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 		return -EIO;
 	}
 
-	if (motor_is_align_sample_state(state) &&
+	if (motor_is_align_sample_state(ctx->mode_flags) &&
 	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
 	    enc_res->fresh &&
 	    !enc_res->frame_warning &&
 	    !enc_res->frame_error) {
 		float32_t align_mech_rad = enc_res->control_fb.observer_mech_rad;
-		if (motor_state_ptr_is_mode(state, MOTOR_STATE_ALIGN_POS_SAMPLE)) {
+		if (motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
 			struct motor_align_sample_accum acc = {0};
 			motor_align_load_pos_accum(params, &acc);
 			motor_align_accum_push(&acc, align_mech_rad);
@@ -503,16 +455,15 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 }
 
 static inline void motor_core_step_finalize(struct motor_parameters *params,
-					    const struct smf_state *state,
+					    uint32_t mode_flags,
 					    bool control_armed,
 					    struct motor_commission_observation *commission_obs)
 {
 	commission_obs->control_armed = control_armed;
-	commission_obs->mode_velocity_closed =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
-	commission_obs->mode_torque =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
-	commission_obs->fault_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ERROR);
+	commission_obs->mode_velocity_closed = motor_rt_mode_active(
+		mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED);
+	commission_obs->mode_torque = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
+	commission_obs->fault_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ERROR);
 	motor_runtime_fast_sync(params, control_armed);
 	motor_runtime_diag_sync(params);
 	motor_commission_update(params, commission_obs);
@@ -532,7 +483,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	struct motor_control_step_ctx ctx;
 	motor_control_step_ctx_init(&ctx, params);
 
-	const struct smf_state *state = ctx.state;
+	uint32_t mode_flags = ctx.mode_flags;
 	bool feature_angle_gen = ctx.feature_angle_gen;
 	bool feature_pwm_output = ctx.feature_pwm_output;
 	bool feature_pi_control = ctx.feature_pi_control;
@@ -543,7 +494,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	bool online_control_state = ctx.online_control_state;
 	bool control_armed = ctx.control_armed;
 	struct motor_commission_observation commission_obs;
-	motor_core_step_init_commission_obs(&commission_obs, state, control_armed);
+	motor_core_step_init_commission_obs(&commission_obs, mode_flags, control_armed);
 	motor_core_step_init_pwm_output(pwm_out);
 
 	/* Increment control loop counter */
@@ -580,12 +531,9 @@ void motor_core_step_fast(struct motor_parameters *params,
 	params->live.velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 
-	(void)motor_core_step_apply_keepalive_and_timeout(params, state, profile_sequence_running,
-							  online_control_state, &control_armed);
-
 	/* Read encoder if feature is enabled */
 	struct motor_encoder_stage_result enc_stage = {0};
-	int enc_ret = motor_core_step_encoder_stage(params, &ctx, state, encoder_sample,
+	int enc_ret = motor_core_step_encoder_stage(params, &ctx, encoder_sample,
 						    feature_angle_gen, &commission_obs, &enc_stage);
 	if (enc_ret == -EIO) {
 		motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
@@ -625,7 +573,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	/* Handle offset measurement (no control, just filtering) */
-	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS)) {
 		filter_fo_run(&params->filter_Ia, Ia_A);
 		filter_fo_run(&params->filter_Ib, Ib_A);
 		goto isr_done;
@@ -676,7 +624,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	/* R/L measurement: set current reference and accumulate V/I in rotating frame */
-	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS)) {
 		traj_run(&params->traj_Id);
 
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -693,7 +641,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	/* Rs EST: filter V/I in d-axis for DC resistance */
-	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST)) {
 		motor_rs_est_step_filter(&params->traj_Id,
 					 &params->filter_rs_est_V,
 					 &params->filter_rs_est_I,
@@ -702,7 +650,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	/* ALIGN states must source d-axis reference from traj_Id only. */
-	if (motor_is_align_active_state(state)) {
+	if (motor_is_align_active_state(mode_flags)) {
 		traj_run(&params->traj_Id);
 
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
@@ -710,9 +658,10 @@ void motor_core_step_fast(struct motor_parameters *params,
 	}
 
 	struct motor_outer_loop_inputs outer_inputs = {
-		.position_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION),
-		.velocity_active = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-				   motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION),
+		.position_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION),
+		.velocity_active =
+			motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED) ||
+			motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION),
 		.feature_angle_gen = feature_angle_gen,
 		.feature_velocity_traj = feature_velocity_traj,
 		.velocity_loop_decimation = velocity_loop_decimation,
@@ -764,7 +713,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	/* Invariant: ALIGN injection/sample references are trajectory-owned.
 	 * Force final refs from traj_Id after all other policy hooks.
 	 */
-	if (motor_is_align_active_state(state)) {
+	if (motor_is_align_active_state(mode_flags)) {
 		Id_ref_A = traj_get_int_value(&params->traj_Id);
 		Iq_ref_A = 0.0f;
 	}
@@ -782,7 +731,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	float32_t decoupling_speed_limit_rad_s =
 		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
 	float32_t flux_linkage_wb_abs = fabsf(params->flux_linkage_wb_active);
-	bool torque_mode_state = motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE);
+	bool torque_mode_state = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
 	bool decoupling_min_speed_reached =
 		fabsf(speed_mech_filtered_rad_s) >= CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S;
 	bool decoupling_flux_valid = isfinite(flux_linkage_wb_abs) &&
@@ -906,6 +855,7 @@ void motor_core_step_fast(struct motor_parameters *params,
 	commission_obs.saturation = voltage_saturated;
 
 isr_done:
-	motor_core_step_finalize(params, state, control_armed, &commission_obs);
+	ARG_UNUSED(profile_sequence_running);
+	motor_core_step_finalize(params, mode_flags, control_armed, &commission_obs);
 	return;
 }

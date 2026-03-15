@@ -64,12 +64,61 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 	params->feature_flags_next &= ~mask;
 }
 
+static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *params)
+{
+	uint32_t mode_flags = 0U;
+	const struct smf_state *state = (params != NULL) ? params->smf.current : NULL;
+
+	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
+		mode_flags |= MOTOR_RT_MODE_OFFSET_MEAS;
+	}
+	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
+		mode_flags |= MOTOR_RT_MODE_RS_EST;
+	}
+	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
+		mode_flags |= MOTOR_RT_MODE_ROVERL_MEAS;
+	}
+	if (state == &motor_states[MOTOR_STATE_ALIGN_POS_INJECT]) {
+		mode_flags |= MOTOR_RT_MODE_ALIGN_POS_INJECT;
+	}
+	if (state == &motor_states[MOTOR_STATE_ALIGN_POS_SAMPLE]) {
+		mode_flags |= MOTOR_RT_MODE_ALIGN_POS_SAMPLE;
+	}
+	if (state == &motor_states[MOTOR_STATE_ALIGN_NEG_INJECT]) {
+		mode_flags |= MOTOR_RT_MODE_ALIGN_NEG_INJECT;
+	}
+	if (state == &motor_states[MOTOR_STATE_ALIGN_NEG_SAMPLE]) {
+		mode_flags |= MOTOR_RT_MODE_ALIGN_NEG_SAMPLE;
+	}
+	if (motor_state_ptr_is_online_control_state(state)) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_CONTROL;
+	}
+	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN;
+	}
+	if (state == &motor_states[MOTOR_STATE_ONLINE_TORQUE]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_TORQUE;
+	}
+	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED;
+	}
+	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_POSITION;
+	}
+	if (state == &motor_states[MOTOR_STATE_ERROR]) {
+		mode_flags |= MOTOR_RT_MODE_ERROR;
+	}
+
+	return mode_flags;
+}
+
 static inline void motor_publish_isr_config_snapshot(struct motor_parameters *params)
 {
 	struct motor_rt_config_snapshot snapshot = {
 		.epoch = 0U,
 		.state = params->smf.current,
 		.feature_flags = params->feature_flags_next,
+		.mode_flags = motor_publish_isr_mode_flags(params),
 		.velocity_loop_decimation = params->velocity_loop_decimation,
 		.position_loop_decimation = params->position_loop_decimation,
 		.profile_sequence_running = params->profile_seq.running,
@@ -106,6 +155,8 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->position_loop_phase = 0U;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
+	motor_velocity_regulator_reset(&params->velocity_reg_state, 0.0f);
+	motor_position_regulator_reset(&params->position_reg_state, 0.0f);
 	traj_set_target_value(&params->traj_Id, 0.0f);
 	traj_set_int_value(&params->traj_Id, 0.0f);
 	traj_set_target_value(&params->traj_velocity, 0.0f);

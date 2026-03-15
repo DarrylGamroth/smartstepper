@@ -25,6 +25,8 @@
 #include "motor/runtime/runtime_diag.h"
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
+#include "motor/control/position_regulator.h"
+#include "motor/control/velocity_regulator.h"
 #include "motor/observers/feedback_quality.h"
 #include "motor/math/prbs.h"
 #include "motor/estimation/rls_motor_est.h"
@@ -357,9 +359,11 @@ struct motor_parameters {
 	float32_t velocity_cl_ki_A_per_rad;     /* Velocity I gain: speed error integral -> Iq reference */
 	float32_t velocity_cl_iq_limit_A;       /* Closed-loop velocity Iq limit */
 	float32_t velocity_cl_i_term_A;         /* Velocity PI integrator state */
+	struct motor_velocity_regulator_state velocity_reg_state; /* Persistent velocity PI state */
 	float32_t position_cl_kp_rad_s_per_rad; /* Position P gain: position error -> velocity target */
 	float32_t position_cl_ki_rad_s2_per_rad;/* Position I gain: position error integral -> velocity */
 	float32_t position_cl_i_term_rad_s;     /* Position PI integrator state */
+	struct motor_position_regulator_state position_reg_state; /* Persistent position PI state */
 	float32_t profile_max_velocity_rad_s;   /* Motion profile velocity limit */
 	float32_t profile_max_accel_rad_s2;     /* Motion profile acceleration limit */
 	struct motor_mpr_velocity_config velocity_mpr_cfg; /* Velocity MPR tuning */
