@@ -17,6 +17,7 @@
 #include "motor_states.h"
 #include "shell_parse.h"
 #include "config.h"
+#include "motor_commission_adapter.h"
 #include "motor/motion/traj.h"
 #include "motor/math/math_constants.h"
 #include "motor_torque.h"
@@ -179,6 +180,11 @@ static uint32_t motor_commission_prbs_next(uint32_t state)
 	return state;
 }
 
+static inline void motor_commission_ctx_from_global(struct motor_commission_runtime_ctx *ctx)
+{
+	motor_commission_runtime_ctx_init(ctx, g_motor_params);
+}
+
 static int motor_commission_auto_run_flux(const struct shell *sh,
 					  const struct motor_commission_flux_config *cfg)
 {
@@ -198,7 +204,9 @@ static int motor_commission_auto_run_flux(const struct shell *sh,
 		return ret;
 	}
 
-	ret = motor_commission_start_flux(g_motor_params, cfg);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	ret = motor_commission_start_flux(&commission_ctx, cfg);
 	if (ret != 0) {
 		return ret;
 	}
@@ -282,7 +290,9 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 		return ret;
 	}
 
-	ret = motor_commission_start_mech(g_motor_params, cfg);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	ret = motor_commission_start_mech(&commission_ctx, cfg);
 	if (ret != 0) {
 		return ret;
 	}
@@ -453,7 +463,9 @@ int cmd_motor_commission_clear(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	motor_commission_reset(g_motor_params);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	motor_commission_reset(&commission_ctx);
 	shell_print(sh, "Commission context cleared");
 	return 0;
 }
@@ -468,7 +480,9 @@ int cmd_motor_commission_abort(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	motor_commission_abort(g_motor_params, "aborted by user");
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	motor_commission_abort(&commission_ctx, "aborted by user");
 	shell_print(sh, "Commissioning aborted");
 	return 0;
 }
@@ -483,7 +497,9 @@ int cmd_motor_commission_apply(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	int ret = motor_commission_apply_results(g_motor_params);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	int ret = motor_commission_apply_results(&commission_ctx);
 	if (ret == -ENOENT) {
 		shell_error(sh, "No valid commissioning estimates to apply yet");
 		return ret;
@@ -534,7 +550,9 @@ int cmd_motor_commission_flux_run(const struct shell *sh, size_t argc, char **ar
 		return -EINVAL;
 	}
 
-	int ret = motor_commission_start_flux(g_motor_params, &cfg);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	int ret = motor_commission_start_flux(&commission_ctx, &cfg);
 	if (ret < 0) {
 		shell_error(sh, "Failed to start flux commissioning (err %d)", ret);
 		return ret;
@@ -575,7 +593,9 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 		return -EINVAL;
 	}
 
-	int ret = motor_commission_start_mech(g_motor_params, &cfg);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	int ret = motor_commission_start_mech(&commission_ctx, &cfg);
 	if (ret < 0) {
 		shell_error(sh, "Failed to start mechanical commissioning (err %d)", ret);
 		return ret;
@@ -638,7 +658,9 @@ int cmd_motor_commission_auto_apply(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	int ret = motor_commission_apply_staged_auto_tune(g_motor_params);
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	int ret = motor_commission_apply_staged_auto_tune(&commission_ctx);
 	if (ret == -ENOENT) {
 		shell_error(sh, "No staged auto-tune result to apply");
 		return ret;
@@ -674,7 +696,9 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
-	if (motor_commission_is_active(g_motor_params)) {
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	if (motor_commission_is_active(&commission_ctx)) {
 		shell_error(sh, "Commission capture is already active");
 		return -EBUSY;
 	}
@@ -691,7 +715,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		return -EFAULT;
 	}
 
-	motor_commission_reset(g_motor_params);
+	motor_commission_reset(&commission_ctx);
 
 	struct motor_commission_flux_config flux_cfg = {0};
 	struct motor_commission_mech_config mech_cfg = {0};
@@ -737,7 +761,9 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		g_motor_params->Id_setpoint_A = 0.0f;
 		g_motor_params->Iq_setpoint_A = 0.0f;
 		if (g_motor_params->commission.active) {
-			motor_commission_abort(g_motor_params, "auto flux failed");
+			struct motor_commission_runtime_ctx commission_ctx;
+			motor_commission_ctx_from_global(&commission_ctx);
+			motor_commission_abort(&commission_ctx, "auto flux failed");
 		}
 		g_motor_params->commission.auto_tune_last_error = ret;
 		shell_error(sh, "Auto commission failed during flux stage (err %d)", ret);
@@ -765,7 +791,9 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		g_motor_params->Id_setpoint_A = 0.0f;
 		g_motor_params->Iq_setpoint_A = 0.0f;
 		if (g_motor_params->commission.active) {
-			motor_commission_abort(g_motor_params, "auto mech failed");
+			struct motor_commission_runtime_ctx commission_ctx;
+			motor_commission_ctx_from_global(&commission_ctx);
+			motor_commission_abort(&commission_ctx, "auto mech failed");
 		}
 		g_motor_params->commission.auto_tune_last_error = ret;
 		shell_error(sh, "Auto commission failed during mechanical stage (err %d)", ret);
@@ -794,7 +822,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 			    (double)g_motor_params->commission.results.mapping_confidence);
 	}
 
-	ret = motor_commission_stage_auto_tune(g_motor_params, &tune_cfg);
+	ret = motor_commission_stage_auto_tune(&commission_ctx, &tune_cfg);
 	if (ret != 0) {
 		shell_error(sh, "Auto tune staging failed (err %d: %s)", ret,
 			    motor_commission_tune_error_to_string(ret));
@@ -815,7 +843,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->commission.auto_tune_staged.velocity_dob_iq_ff_limit_a);
 
 	if (apply_on_success) {
-		ret = motor_commission_apply_staged_auto_tune(g_motor_params);
+		ret = motor_commission_apply_staged_auto_tune(&commission_ctx);
 		if (ret != 0) {
 			shell_error(sh, "Auto commission completed but apply failed (err %d)", ret);
 			return ret;

@@ -36,6 +36,7 @@
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
 #include "motor/runtime/commission_runtime.h"
+#include "motor_commission_adapter.h"
 #include "motor_torque.h"
 #include "motor/runtime/config_snapshot.h"
 
@@ -665,7 +666,11 @@ static void motor_state_ctrl_init_entry(void *obj)
 	}
 	params->calibration.align_pos_mech_angle_rad = 0.0f;
 	params->calibration.align_neg_mech_angle_rad = 0.0f;
-	motor_commission_init(params);
+	{
+		struct motor_commission_runtime_ctx commission_ctx;
+		motor_commission_runtime_ctx_init(&commission_ctx, params);
+		motor_commission_init(&commission_ctx);
+	}
 
 	motor_velocity_plan_init(&params->traj_velocity,
 				 params->profile_max_velocity_rad_s,

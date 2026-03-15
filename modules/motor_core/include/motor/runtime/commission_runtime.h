@@ -12,9 +12,9 @@
 
 #include <zephyr/dsp/utils.h>
 
+#include "motor/control/dob.h"
+#include "motor/control/mpr.h"
 #include "motor/runtime/commission_tune.h"
-
-struct motor_parameters;
 
 #define MOTOR_COMMISSION_MAX_SAMPLES 512U
 
@@ -163,20 +163,57 @@ struct motor_commission_ctx {
 	char last_abort_reason[32];
 };
 
-void motor_commission_init(struct motor_parameters *params);
-void motor_commission_reset(struct motor_parameters *params);
-int motor_commission_start_flux(struct motor_parameters *params,
+struct motor_commission_runtime_ctx {
+	struct motor_commission_ctx *commission;
+	uint32_t *control_loop_count;
+	float32_t control_loop_frequency_hz;
+	float32_t motor_max_current_a;
+	uint16_t pole_pairs;
+	float32_t default_flux_linkage_wb;
+	float32_t *rs_measured_ohm;
+	float32_t *rls_ld_est_h;
+	float32_t *rls_lq_est_h;
+	float32_t *flux_linkage_wb_active;
+	float32_t *torque_gain_nm_per_a_active;
+	float32_t *inertia_kgm2_active;
+	float32_t *viscous_friction_nm_per_rad_s_active;
+	float32_t *coulomb_friction_nm_active;
+	float32_t *velocity_cl_kp_a_per_rad_s;
+	float32_t *velocity_cl_ki_a_per_rad;
+	float32_t *velocity_cl_iq_limit_a;
+	float32_t *velocity_cl_i_term_a;
+	float32_t *position_cl_kp_rad_s_per_rad;
+	float32_t *position_cl_ki_rad_s2_per_rad;
+	float32_t *position_cl_i_term_rad_s;
+	float32_t profile_max_velocity_rad_s;
+	float32_t profile_max_accel_rad_s2;
+	struct motor_mpr_velocity_config *velocity_mpr_cfg;
+	struct motor_mpr_velocity_state *velocity_mpr_state;
+	struct motor_mpr_position_config *position_mpr_cfg;
+	struct motor_mpr_position_state *position_mpr_state;
+	struct motor_dob_config *velocity_dob_cfg;
+	struct motor_dob_state *velocity_dob_state;
+	float32_t *live_velocity_rad_s;
+	float32_t *live_position_rad;
+	float32_t *live_velocity_dob_iq_ff_a;
+	float32_t *live_velocity_dob_disturbance_nm;
+	float32_t *live_velocity_dob_residual_rad_s;
+};
+
+void motor_commission_init(struct motor_commission_runtime_ctx *ctx);
+void motor_commission_reset(struct motor_commission_runtime_ctx *ctx);
+int motor_commission_start_flux(struct motor_commission_runtime_ctx *ctx,
 				const struct motor_commission_flux_config *cfg);
-int motor_commission_start_mech(struct motor_parameters *params,
+int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 				const struct motor_commission_mech_config *cfg);
-void motor_commission_abort(struct motor_parameters *params, const char *reason);
-int motor_commission_apply_results(struct motor_parameters *params);
-int motor_commission_stage_auto_tune(struct motor_parameters *params,
+void motor_commission_abort(struct motor_commission_runtime_ctx *ctx, const char *reason);
+int motor_commission_apply_results(struct motor_commission_runtime_ctx *ctx);
+int motor_commission_stage_auto_tune(struct motor_commission_runtime_ctx *ctx,
 				     const struct motor_commission_tune_config *cfg);
-int motor_commission_apply_staged_auto_tune(struct motor_parameters *params);
-void motor_commission_update(struct motor_parameters *params,
+int motor_commission_apply_staged_auto_tune(struct motor_commission_runtime_ctx *ctx);
+void motor_commission_update(struct motor_commission_runtime_ctx *ctx,
 			     const struct motor_commission_observation *obs);
-bool motor_commission_is_active(const struct motor_parameters *params);
+bool motor_commission_is_active(const struct motor_commission_runtime_ctx *ctx);
 const char *motor_commission_mode_to_string(uint8_t mode);
 const char *motor_commission_stage_to_string(uint8_t stage);
 
