@@ -1023,6 +1023,7 @@ static void motor_sm_thread(void *arg1, void *arg2, void *arg3)
 		LOG_ERR("Failed to initialize motor control API");
 		return;
 	}
+	config_init_runtime_adapters(&motor_params);
 	motor_config_snapshot_init();
 
 	/* Initialize state timer */

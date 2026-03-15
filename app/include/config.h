@@ -23,12 +23,16 @@
 #include "motor_states.h"
 #include "motor/runtime/runtime_state.h"
 #include "motor/runtime/runtime_diag.h"
+#include "motor/runtime/outer_loop_runtime.h"
+#include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
+#include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback_quality.h"
 #include "motor/math/prbs.h"
+#include "motor/estimation/rls_runtime.h"
 #include "motor/estimation/rls_motor_est.h"
 #include "motor/estimation/thermal_model.h"
 #include "motor/math/math_constants.h"
@@ -278,6 +282,14 @@ struct motor_live_telemetry_ctx {
 	uint32_t position_jitter_count;
 };
 
+struct motor_runtime_adapter_ctxs {
+	struct motor_outer_loop_runtime_ctx outer_loop;
+	struct motor_current_ref_policy_ctx current_ref_policy;
+	struct motor_rls_runtime_ctx rls;
+	struct motor_encoder_feedback_ctx encoder_feedback;
+	struct motor_commission_runtime_ctx commission;
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -423,6 +435,9 @@ struct motor_parameters {
 
 	/* Live telemetry snapshot (updated in ISR). */
 	struct motor_live_telemetry_ctx live;
+
+	/* Persistent runtime adapter contexts for fast-loop module calls. */
+	struct motor_runtime_adapter_ctxs rt_adapters;
 };
 
 /* Devicetree parameter extraction with unit conversion */
@@ -592,6 +607,7 @@ BUILD_ASSERT(sizeof(struct motor_rt_diag_state) <= 96U,
  * @param params Motor parameters structure containing filters
  */
 void config_init_filters(struct motor_parameters *params);
+void config_init_runtime_adapters(struct motor_parameters *params);
 
 /**
  * @brief Initialize PI controllers with devicetree parameters

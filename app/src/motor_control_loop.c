@@ -302,195 +302,56 @@ struct motor_encoder_stage_result {
 	bool frame_error;
 };
 
-static inline void motor_outer_loop_runtime_ctx_init(struct motor_outer_loop_runtime_ctx *ctx,
-						     struct motor_parameters *params)
+static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_runtime_ctx *ctx,
+							struct motor_parameters *params,
+							bool control_armed)
 {
-	*ctx = (struct motor_outer_loop_runtime_ctx){
-		.outer_loop_mode = params->outer_loop_mode,
-		.position_loop_phase = &params->position_loop_phase,
-		.velocity_loop_phase = &params->velocity_loop_phase,
-		.position_profile = &params->position_profile,
-		.control_armed = atomic_get(&params->control_armed) != 0,
-		.position_target_rad = &params->position_target_rad,
-		.profile_max_velocity_rad_s = params->profile_max_velocity_rad_s,
-		.profile_max_accel_rad_s2 = params->profile_max_accel_rad_s2,
-		.position_mpr_cfg = &params->position_mpr_cfg,
-		.position_mpr_state = &params->position_mpr_state,
-		.position_cl_kp_rad_s_per_rad = params->position_cl_kp_rad_s_per_rad,
-		.position_cl_ki_rad_s2_per_rad = params->position_cl_ki_rad_s2_per_rad,
-		.position_cl_i_term_rad_s = &params->position_cl_i_term_rad_s,
-		.position_reg_state = &params->position_reg_state,
-		.traj_velocity = &params->traj_velocity,
-		.angle_gen = &params->angle_gen,
-		.filter_velocity_notch = &params->filter_velocity_notch,
-		.position_quality_flags = params->live.position_quality_flags,
-		.live_velocity_target_rad_s = &params->live.velocity_target_rad_s,
-		.live_velocity_ref_rad_s = &params->live.velocity_ref_rad_s,
-		.velocity_reg_state = &params->velocity_reg_state,
-		.velocity_mpr_cfg = &params->velocity_mpr_cfg,
-		.velocity_mpr_state = &params->velocity_mpr_state,
-		.velocity_cl_i_term_a = &params->velocity_cl_i_term_A,
-		.velocity_cl_kp_a_per_rad_s = params->velocity_cl_kp_A_per_rad_s,
-		.velocity_cl_ki_a_per_rad = params->velocity_cl_ki_A_per_rad,
-		.velocity_cl_iq_limit_a = params->velocity_cl_iq_limit_A,
-		.id_setpoint_a = params->Id_setpoint_A,
-		.torque_gain_nm_per_a_active = params->torque_gain_nm_per_a_active,
-		.flux_linkage_wb_active = params->flux_linkage_wb_active,
-		.default_flux_linkage_wb = MOTOR_FLUX_LINKAGE_WB,
-		.pole_pairs = MOTOR_POLE_PAIRS,
-		.inertia_kgm2_active = params->inertia_kgm2_active,
-		.viscous_friction_nm_per_rad_s_active =
-			params->viscous_friction_nm_per_rad_s_active,
-		.coulomb_friction_nm_active = params->coulomb_friction_nm_active,
-		.velocity_dob_cfg = &params->velocity_dob_cfg,
-		.velocity_dob_state = &params->velocity_dob_state,
-		.live_velocity_dob_iq_ff_a = &params->live.velocity_dob_iq_ff_a,
-		.live_velocity_dob_disturbance_nm = &params->live.velocity_dob_disturbance_nm,
-		.live_velocity_dob_residual_rad_s = &params->live.velocity_dob_residual_rad_s,
-	};
+	ctx->outer_loop_mode = params->outer_loop_mode;
+	ctx->control_armed = control_armed;
+	ctx->profile_max_velocity_rad_s = params->profile_max_velocity_rad_s;
+	ctx->profile_max_accel_rad_s2 = params->profile_max_accel_rad_s2;
+	ctx->position_cl_kp_rad_s_per_rad = params->position_cl_kp_rad_s_per_rad;
+	ctx->position_cl_ki_rad_s2_per_rad = params->position_cl_ki_rad_s2_per_rad;
+	ctx->position_quality_flags = params->live.position_quality_flags;
+	ctx->velocity_cl_kp_a_per_rad_s = params->velocity_cl_kp_A_per_rad_s;
+	ctx->velocity_cl_ki_a_per_rad = params->velocity_cl_ki_A_per_rad;
+	ctx->velocity_cl_iq_limit_a = params->velocity_cl_iq_limit_A;
+	ctx->id_setpoint_a = params->Id_setpoint_A;
+	ctx->torque_gain_nm_per_a_active = params->torque_gain_nm_per_a_active;
+	ctx->flux_linkage_wb_active = params->flux_linkage_wb_active;
+	ctx->inertia_kgm2_active = params->inertia_kgm2_active;
+	ctx->viscous_friction_nm_per_rad_s_active =
+		params->viscous_friction_nm_per_rad_s_active;
+	ctx->coulomb_friction_nm_active = params->coulomb_friction_nm_active;
 }
 
-static inline void motor_current_ref_policy_ctx_init(struct motor_current_ref_policy_ctx *ctx,
-						     struct motor_parameters *params)
+static inline void motor_current_ref_policy_ctx_refresh(struct motor_current_ref_policy_ctx *ctx,
+							struct motor_parameters *params)
 {
-	*ctx = (struct motor_current_ref_policy_ctx){
-		.position_quality_flags = params->live.position_quality_flags,
-		.id_setpoint_a = &params->Id_setpoint_A,
-		.iq_setpoint_a = &params->Iq_setpoint_A,
-		.pi_id = &params->pi_Id,
-		.pi_iq = &params->pi_Iq,
-		.live_velocity_target_rad_s = &params->live.velocity_target_rad_s,
-		.live_velocity_ref_rad_s = &params->live.velocity_ref_rad_s,
-		.velocity_cl_i_term_a = &params->velocity_cl_i_term_A,
-		.position_cl_i_term_rad_s = &params->position_cl_i_term_rad_s,
-		.velocity_reg_state = &params->velocity_reg_state,
-		.position_reg_state = &params->position_reg_state,
-		.traj_velocity = &params->traj_velocity,
-		.angle_gen = &params->angle_gen,
-		.velocity_mpr_state = &params->velocity_mpr_state,
-		.position_mpr_state = &params->position_mpr_state,
-		.velocity_dob_state = &params->velocity_dob_state,
-		.live_velocity_dob_iq_ff_a = &params->live.velocity_dob_iq_ff_a,
-		.live_velocity_dob_disturbance_nm = &params->live.velocity_dob_disturbance_nm,
-		.live_velocity_dob_residual_rad_s = &params->live.velocity_dob_residual_rad_s,
-	};
+	ctx->position_quality_flags = params->live.position_quality_flags;
 }
 
-static inline void motor_rls_runtime_ctx_init(struct motor_rls_runtime_ctx *ctx,
-					      struct motor_parameters *params)
+static inline void motor_rls_runtime_ctx_refresh(struct motor_rls_runtime_ctx *ctx,
+						 struct motor_parameters *params)
 {
-	*ctx = (struct motor_rls_runtime_ctx){
-		.rls_feature_enabled =
-			atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION),
-		.control_loop_count = params->control_loop_count,
-		.control_loop_frequency_hz = CONTROL_LOOP_FREQUENCY_HZ,
-		.rls = {
-			.prbs_gen = &params->rls.prbs_gen,
-			.d = &params->rls.d,
-			.q = &params->rls.q,
-			.decimation = params->rls.decimation,
-			.stagger_offset = params->rls.stagger_offset,
-			.excitation_current_a = params->rls.excitation_current_a,
-			.ld_est_h = &params->rls.ld_est_h,
-			.lq_est_h = &params->rls.lq_est_h,
-			.id_prev_a = &params->rls.id_prev_a,
-			.iq_prev_a = &params->rls.iq_prev_a,
-			.d_prev_cycle = &params->rls.d_prev_cycle,
-			.q_prev_cycle = &params->rls.q_prev_cycle,
-			.d_prev_valid = &params->rls.d_prev_valid,
-			.q_prev_valid = &params->rls.q_prev_valid,
-			.min_current_a = params->rls.min_current_a,
-			.min_speed_rad_s = params->rls.min_speed_rad_s,
-			.max_residual_v = params->rls.max_residual_v,
-			.max_voltage_v = params->rls.max_voltage_v,
-		},
-		.observer = &params->observer,
-		.vd_v = params->Vd_V,
-		.vq_v = params->Vq_V,
-		.pi_id = &params->pi_Id,
-		.pi_iq = &params->pi_Iq,
-		.default_flux_linkage_wb = MOTOR_FLUX_LINKAGE_WB,
-		.rs_measured_ohm = &params->Rs_measured_ohm,
-		.thermal = {
-			.model = &params->thermal.model,
-			.decimation = params->thermal.decimation,
-			.rs_ref_ohm = params->thermal.rs_ref_ohm,
-			.rs_ref_temp_c = params->thermal.rs_ref_temp_c,
-			.rs_temp_coeff = params->thermal.rs_temp_coeff,
-			.t_rls_c = &params->thermal.t_rls_c,
-		},
-	};
+	ctx->rls_feature_enabled =
+		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION);
+	ctx->control_loop_count = params->control_loop_count;
+	ctx->vd_v = params->Vd_V;
+	ctx->vq_v = params->Vq_V;
 }
 
-static inline void motor_encoder_feedback_ctx_init(struct motor_encoder_feedback_ctx *ctx,
-						   struct motor_parameters *params)
+static inline void motor_encoder_feedback_ctx_refresh(struct motor_encoder_feedback_ctx *ctx,
+						      struct motor_parameters *params)
 {
-	*ctx = (struct motor_encoder_feedback_ctx){
-		.fault_counter = &params->encoder_fault_counter,
-		.warning_count = &params->encoder_warning_count,
-		.error_count = &params->encoder_error_count,
-		.sample_fresh = &params->live.encoder_sample_fresh,
-		.sample_warning = &params->live.encoder_sample_warning,
-		.sample_error = &params->live.encoder_sample_error,
-		.last_status = &params->live.encoder_last_status,
-		.encoder_direction_sign = params->encoder_direction_sign,
-		.angle_gen = &params->angle_gen,
-		.observer = &params->observer,
-		.observer_input_rad = &params->live.encoder_observer_input_rad,
-		.encoder_input_source = &params->live.encoder_input_source,
-		.encoder_raw_deg = &params->live.encoder_raw_deg,
-		.encoder_raw_rad = &params->live.encoder_raw_rad,
-		.position_stale_count = &params->live.position_stale_count,
-		.position_stale_events = &params->live.position_stale_events,
-		.position_glitch_count = &params->live.position_glitch_count,
-		.position_jitter_count = &params->live.position_jitter_count,
-		.position_quality_flags = &params->live.position_quality_flags,
-		.encoder_fault_threshold = ENCODER_FAULT_THRESHOLD,
-		.encoder_delay_samples = ENCODER_SPI_PIPELINE_DELAY_SAMPLES,
-		.pole_pairs = MOTOR_POLE_PAIRS,
-	};
+	ctx->encoder_direction_sign = params->encoder_direction_sign;
 }
 
-static inline void motor_commission_runtime_ctx_init(struct motor_commission_runtime_ctx *ctx,
-						     struct motor_parameters *params)
+static inline void motor_commission_runtime_ctx_refresh(struct motor_commission_runtime_ctx *ctx,
+							struct motor_parameters *params)
 {
-	*ctx = (struct motor_commission_runtime_ctx){
-		.commission = &params->commission,
-		.control_loop_count = &params->control_loop_count,
-		.control_loop_frequency_hz = CONTROL_LOOP_FREQUENCY_HZ,
-		.motor_max_current_a = MAX(MOTOR_MAX_CURRENT_A, 0.1f),
-		.pole_pairs = MOTOR_POLE_PAIRS,
-		.default_flux_linkage_wb = MOTOR_FLUX_LINKAGE_WB,
-		.rs_measured_ohm = &params->Rs_measured_ohm,
-		.rls_ld_est_h = &params->rls.ld_est_h,
-		.rls_lq_est_h = &params->rls.lq_est_h,
-		.flux_linkage_wb_active = &params->flux_linkage_wb_active,
-		.torque_gain_nm_per_a_active = &params->torque_gain_nm_per_a_active,
-		.inertia_kgm2_active = &params->inertia_kgm2_active,
-		.viscous_friction_nm_per_rad_s_active =
-			&params->viscous_friction_nm_per_rad_s_active,
-		.coulomb_friction_nm_active = &params->coulomb_friction_nm_active,
-		.velocity_cl_kp_a_per_rad_s = &params->velocity_cl_kp_A_per_rad_s,
-		.velocity_cl_ki_a_per_rad = &params->velocity_cl_ki_A_per_rad,
-		.velocity_cl_iq_limit_a = &params->velocity_cl_iq_limit_A,
-		.velocity_cl_i_term_a = &params->velocity_cl_i_term_A,
-		.position_cl_kp_rad_s_per_rad = &params->position_cl_kp_rad_s_per_rad,
-		.position_cl_ki_rad_s2_per_rad = &params->position_cl_ki_rad_s2_per_rad,
-		.position_cl_i_term_rad_s = &params->position_cl_i_term_rad_s,
-		.profile_max_velocity_rad_s = params->profile_max_velocity_rad_s,
-		.profile_max_accel_rad_s2 = params->profile_max_accel_rad_s2,
-		.velocity_mpr_cfg = &params->velocity_mpr_cfg,
-		.velocity_mpr_state = &params->velocity_mpr_state,
-		.position_mpr_cfg = &params->position_mpr_cfg,
-		.position_mpr_state = &params->position_mpr_state,
-		.velocity_dob_cfg = &params->velocity_dob_cfg,
-		.velocity_dob_state = &params->velocity_dob_state,
-		.live_velocity_rad_s = &params->live.velocity_rad_s,
-		.live_position_rad = &params->live.position_rad,
-		.live_velocity_dob_iq_ff_a = &params->live.velocity_dob_iq_ff_a,
-		.live_velocity_dob_disturbance_nm = &params->live.velocity_dob_disturbance_nm,
-		.live_velocity_dob_residual_rad_s = &params->live.velocity_dob_residual_rad_s,
-	};
+	ctx->profile_max_velocity_rad_s = params->profile_max_velocity_rad_s;
+	ctx->profile_max_accel_rad_s2 = params->profile_max_accel_rad_s2;
 }
 
 static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ctx,
@@ -578,7 +439,8 @@ static int motor_control_step_read_encoder(struct motor_parameters *params,
 					   struct motor_encoder_stage_result *enc_res)
 {
 	struct motor_encoder_feedback_ctx encoder_ctx;
-	motor_encoder_feedback_ctx_init(&encoder_ctx, params);
+	motor_encoder_feedback_ctx_refresh(&params->rt_adapters.encoder_feedback, params);
+	encoder_ctx = params->rt_adapters.encoder_feedback;
 	int enc_ret = motor_encoder_feedback_update(&encoder_ctx, encoder_sample, feature_angle_gen,
 						    &enc_res->feedback);
 	motor_control_feedback_from_encoder(&enc_res->feedback, &enc_res->control_fb);
@@ -635,10 +497,8 @@ static inline void motor_control_step_publish_encoder_sidework(
 
 	if (params->encoder_capture.enabled) {
 		struct motor_capture_feedback capture_fb = {0};
-		struct motor_encoder_feedback_ctx encoder_ctx;
-
-		motor_encoder_feedback_ctx_init(&encoder_ctx, params);
-		(void)motor_encoder_feedback_prepare_capture(&encoder_ctx, &enc_res->feedback,
+		(void)motor_encoder_feedback_prepare_capture(&params->rt_adapters.encoder_feedback,
+							     &enc_res->feedback,
 							     &capture_fb);
 		if (report != NULL) {
 			report->encoder_capture_valid = true;
@@ -659,8 +519,6 @@ static inline void motor_core_step_finalize(struct motor_parameters *params,
 					    bool control_armed,
 					    struct motor_commission_observation *commission_obs)
 {
-	struct motor_commission_runtime_ctx commission_ctx;
-
 	commission_obs->control_armed = control_armed;
 	commission_obs->mode_velocity_closed = motor_rt_mode_active(
 		mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED);
@@ -668,8 +526,8 @@ static inline void motor_core_step_finalize(struct motor_parameters *params,
 	commission_obs->fault_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ERROR);
 	motor_runtime_fast_sync(params, mode_flags, control_armed);
 	motor_runtime_diag_sync(params);
-	motor_commission_runtime_ctx_init(&commission_ctx, params);
-	motor_commission_update(&commission_ctx, commission_obs);
+	motor_commission_runtime_ctx_refresh(&params->rt_adapters.commission, params);
+	motor_commission_update(&params->rt_adapters.commission, commission_obs);
 }
 
 void motor_control_loop_step(struct motor_parameters *params,
@@ -886,9 +744,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.iq_ref_a = Iq_ref_A,
 	};
 	struct motor_outer_loop_outputs outer_outputs = {0};
-	struct motor_outer_loop_runtime_ctx outer_ctx;
-	motor_outer_loop_runtime_ctx_init(&outer_ctx, params);
-	(void)motor_outer_loop_runtime_step(&outer_ctx, &outer_inputs, &outer_outputs);
+	motor_outer_loop_runtime_ctx_refresh(&params->rt_adapters.outer_loop, params, control_armed);
+	(void)motor_outer_loop_runtime_step(&params->rt_adapters.outer_loop, &outer_inputs,
+					    &outer_outputs);
 	velocity_target_rad_s = outer_outputs.velocity_target_rad_s;
 	velocity_ref_rad_s = outer_outputs.velocity_ref_rad_s;
 	speed_mech_filtered_rad_s = outer_outputs.speed_mech_filtered_rad_s;
@@ -909,9 +767,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.iq_ref_a = Iq_ref_A,
 	};
 	struct motor_current_ref_policy_outputs ref_policy_outputs = {0};
-	struct motor_current_ref_policy_ctx ref_policy_ctx;
-	motor_current_ref_policy_ctx_init(&ref_policy_ctx, params);
-	(void)motor_current_ref_apply_policy(&ref_policy_ctx, &ref_policy_inputs,
+	motor_current_ref_policy_ctx_refresh(&params->rt_adapters.current_ref_policy, params);
+	(void)motor_current_ref_apply_policy(&params->rt_adapters.current_ref_policy, &ref_policy_inputs,
 					     &ref_policy_outputs);
 	velocity_target_rad_s = ref_policy_outputs.velocity_target_rad_s;
 	velocity_ref_rad_s = ref_policy_outputs.velocity_ref_rad_s;
@@ -919,9 +776,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 	Iq_ref_A = ref_policy_outputs.iq_ref_a;
 
 	struct motor_rls_runtime_state rls_runtime = {0};
-	struct motor_rls_runtime_ctx rls_ctx;
-	motor_rls_runtime_ctx_init(&rls_ctx, params);
-	Id_ref_A = motor_rls_prepare_id_reference(&rls_ctx, online_control_state, control_armed,
+	motor_rls_runtime_ctx_refresh(&params->rt_adapters.rls, params);
+	Id_ref_A = motor_rls_prepare_id_reference(&params->rt_adapters.rls, online_control_state,
+						 control_armed,
 						 fresh_encoder_sample, encoder_frame_error,
 						 encoder_input_source, Id_ref_A, &rls_runtime);
 
@@ -1034,8 +891,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	pwm_out->db_hb2_pu = Db_hb2_pu;
 	pwm_out->update_pwm = true;
 
-	motor_rls_runtime_ctx_init(&rls_ctx, params);
-	motor_rls_update_estimators(&rls_ctx, &rls_runtime, Id_A, Iq_A);
+	motor_rls_runtime_ctx_refresh(&params->rt_adapters.rls, params);
+	motor_rls_update_estimators(&params->rt_adapters.rls, &rls_runtime, Id_A, Iq_A);
 
 	/* Update telemetry snapshot (mechanical-domain feedback from observer path). */
 	params->live.position_rad = position_mech_rad;
