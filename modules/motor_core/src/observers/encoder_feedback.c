@@ -10,10 +10,7 @@
 #include <math.h>
 #include <string.h>
 
-#include "config.h"
 #include "motor/runtime/io.h"
-#include "motor/observers/angle_observer.h"
-#include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/observers/angle_path.h"
 #include "motor/observers/encoder_feedback_core.h"
@@ -21,30 +18,35 @@
 
 #define MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES 4U
 
-int motor_encoder_feedback_update(struct motor_parameters *params,
+enum {
+	MOTOR_ENCODER_INPUT_SRC_GENERATED = 0,
+	MOTOR_ENCODER_INPUT_SRC_ENCODER = 1,
+	MOTOR_ENCODER_INPUT_SRC_PROPAGATED = 2,
+};
+
+int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 				  const struct motor_control_encoder_sample *encoder_sample,
 				  bool feature_angle_gen,
 				  struct motor_encoder_feedback *feedback)
 {
-	if (params == NULL || feedback == NULL) {
+	if (ctx == NULL || feedback == NULL) {
 		return -EINVAL;
 	}
 
 	memset(feedback, 0, sizeof(*feedback));
-	feedback->input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
+	feedback->input_source = MOTOR_ENCODER_INPUT_SRC_PROPAGATED;
 
 	struct motor_encoder_feedback_core_state core_state = {
-		.fault_counter = params->encoder_fault_counter,
-		.warning_count = params->encoder_warning_count,
-		.error_count = params->encoder_error_count,
-		.sample_fresh = params->live.encoder_sample_fresh,
-		.sample_warning = params->live.encoder_sample_warning,
-		.sample_error = params->live.encoder_sample_error,
-		.last_status = params->live.encoder_last_status,
+		.fault_counter = *ctx->fault_counter,
+		.warning_count = *ctx->warning_count,
+		.error_count = *ctx->error_count,
+		.sample_fresh = *ctx->sample_fresh,
+		.sample_warning = *ctx->sample_warning,
+		.sample_error = *ctx->sample_error,
+		.last_status = *ctx->last_status,
 	};
 
-	float32_t encoder_direction_sign =
-		(params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
+	float32_t encoder_direction_sign = (ctx->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
 
 	bool raw_sample_present = (encoder_sample != NULL);
 	bool raw_sample_enabled = raw_sample_present ? encoder_sample->enabled : false;
@@ -66,7 +68,7 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	feedback->angle_control_deg = raw_angle_deg * encoder_direction_sign;
 
 	if (feedback->sample_available && (feedback->fresh || feedback->warning || feedback->error)) {
-		params->live.encoder_last_status = feedback->status;
+		*ctx->last_status = feedback->status;
 	}
 
 	struct motor_encoder_feedback_core_input core_in = {
@@ -78,22 +80,22 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		.error = feedback->error,
 		.io_fault = feedback->io_fault,
 		.status = feedback->status,
-		.fault_threshold = ENCODER_FAULT_THRESHOLD,
+		.fault_threshold = ctx->encoder_fault_threshold,
 	};
 	bool threshold_exceeded = motor_encoder_feedback_update_state(&core_in, &core_state);
-	params->encoder_fault_counter = core_state.fault_counter;
-	params->encoder_warning_count = core_state.warning_count;
-	params->encoder_error_count = core_state.error_count;
-	params->live.encoder_sample_fresh = core_state.sample_fresh;
-	params->live.encoder_sample_warning = core_state.sample_warning;
-	params->live.encoder_sample_error = core_state.sample_error;
-	params->live.encoder_last_status = core_state.last_status;
+	*ctx->fault_counter = core_state.fault_counter;
+	*ctx->warning_count = core_state.warning_count;
+	*ctx->error_count = core_state.error_count;
+	*ctx->sample_fresh = core_state.sample_fresh;
+	*ctx->sample_warning = core_state.sample_warning;
+	*ctx->sample_error = core_state.sample_error;
+	*ctx->last_status = core_state.last_status;
 
 	if (threshold_exceeded) {
 		return -EIO;
 	}
 
-	float32_t generated_angle_rad = angle_gen_get_angle(&params->angle_gen);
+	float32_t generated_angle_rad = angle_gen_get_angle(ctx->angle_gen);
 	struct motor_angle_path_input path_in = {
 		.feature_angle_gen = feature_angle_gen,
 		.sample_enabled = raw_sample_enabled,
@@ -103,42 +105,42 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 		.sample_angle_deg = raw_angle_deg,
 		.encoder_direction_sign = encoder_direction_sign,
 		.generated_mech_rad = generated_angle_rad,
-		.encoder_delay_samples = ENCODER_SPI_PIPELINE_DELAY_SAMPLES,
+		.encoder_delay_samples = ctx->encoder_delay_samples,
 	};
 	struct motor_angle_path_output path_out = {0};
-	int path_ret = motor_angle_path_step(&params->observer, &path_in, &path_out);
+	int path_ret = motor_angle_path_step(ctx->observer, &path_in, &path_out);
 	if (path_ret != 0) {
 		return path_ret;
 	}
 
 	feedback->input_source = path_out.control.input_source;
-	params->live.encoder_observer_input_rad = path_out.observer_input_rad;
-	params->live.encoder_input_source = feedback->input_source;
+	*ctx->observer_input_rad = path_out.observer_input_rad;
+	*ctx->encoder_input_source = feedback->input_source;
 	feedback->observer_input_rad = path_out.observer_input_rad;
 	feedback->observer_mech_rad = path_out.observer_mech_rad;
 	feedback->observer_elec_rad = path_out.observer_elec_rad;
 	feedback->control = path_out.control;
 
-	if (feedback->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) {
-		params->live.encoder_raw_deg = feedback->angle_sensor_deg;
-		params->live.encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
+	if (feedback->input_source == MOTOR_ENCODER_INPUT_SRC_ENCODER) {
+		*ctx->encoder_raw_deg = feedback->angle_sensor_deg;
+		*ctx->encoder_raw_rad = feedback->angle_sensor_deg * (PI_F32 / 180.0f);
 	}
 
 	uint8_t quality_flags = feedback->control.quality_flags;
 	bool sample_fresh = (quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
 
 	if (sample_fresh) {
-		params->live.position_stale_count = 0U;
-	} else if (params->live.position_stale_count < UINT16_MAX) {
-		params->live.position_stale_count++;
-		if (params->live.position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
-			params->live.position_stale_events++;
+		*ctx->position_stale_count = 0U;
+	} else if (*ctx->position_stale_count < UINT16_MAX) {
+		(*ctx->position_stale_count)++;
+		if (*ctx->position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
+			(*ctx->position_stale_events)++;
 		}
 	}
 
-	params->live.position_quality_flags = quality_flags;
-	params->live.position_glitch_count = 0U;
-	params->live.position_jitter_count = 0U;
+	*ctx->position_quality_flags = quality_flags;
+	*ctx->position_glitch_count = 0U;
+	*ctx->position_jitter_count = 0U;
 
 	feedback->position_mech_rad = feedback->control.position_mech_rad;
 	feedback->speed_mech_rad_s = feedback->control.speed_mech_rad_s;
@@ -148,18 +150,18 @@ int motor_encoder_feedback_update(struct motor_parameters *params,
 	return 0;
 }
 
-int motor_encoder_feedback_prepare_capture(const struct motor_parameters *params,
+int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_ctx *ctx,
 					   const struct motor_encoder_feedback *feedback,
 					   struct motor_capture_feedback *capture)
 {
-	if (params == NULL || feedback == NULL || capture == NULL) {
+	if (ctx == NULL || feedback == NULL || capture == NULL) {
 		return -EINVAL;
 	}
 
 	memset(capture, 0, sizeof(*capture));
 
-	float32_t generated_mech_rad = angle_gen_get_angle(&params->angle_gen);
-	float32_t observer_mech_offset_rad = params->observer.mech_angle_offset_rad;
+	float32_t generated_mech_rad = angle_gen_get_angle(ctx->angle_gen);
+	float32_t observer_mech_offset_rad = ctx->observer->mech_angle_offset_rad;
 
 	capture->angle_rad = feedback->sample_available ?
 				     (feedback->angle_control_deg * (PI_F32 / 180.0f)) :
@@ -172,9 +174,9 @@ int motor_encoder_feedback_prepare_capture(const struct motor_parameters *params
 	capture->generated_mech_rad = wrap_rad_2pi(generated_mech_rad);
 	capture->generated_elec_rad =
 		wrap_rad_2pi((capture->generated_mech_rad + observer_mech_offset_rad) *
-			     (float32_t)MOTOR_POLE_PAIRS);
+			     (float32_t)ctx->pole_pairs);
 	capture->input_source = feedback->sample_available ?
-				MOTOR_ANGLE_INPUT_SRC_ENCODER :
+				MOTOR_ENCODER_INPUT_SRC_ENCODER :
 				feedback->input_source;
 
 	if (feedback->sample_available && feedback->fresh &&
