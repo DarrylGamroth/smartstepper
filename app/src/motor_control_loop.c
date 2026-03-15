@@ -267,8 +267,6 @@ static inline void motor_control_feedback_from_encoder(
 }
 
 struct motor_control_step_ctx {
-	uint32_t config_epoch;
-	atomic_val_t feature_flags;
 	uint32_t mode_flags;
 	bool feature_angle_gen;
 	bool feature_pwm_output;
@@ -278,7 +276,6 @@ struct motor_control_step_ctx {
 	bool feature_braking;
 	bool online_control_state;
 	bool control_armed;
-	float32_t dt_s;
 	uint32_t velocity_loop_decimation;
 	uint32_t position_loop_decimation;
 	float32_t velocity_loop_dt_s;
@@ -400,19 +397,19 @@ static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ct
 	memset(ctx, 0, sizeof(*ctx));
 	struct motor_rt_config_snapshot cfg = {0};
 	bool cfg_valid = motor_config_snapshot_read(&cfg);
-	ctx->config_epoch = cfg.epoch;
-	ctx->feature_flags = cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
+	atomic_val_t feature_flags =
+		cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
+
 	ctx->mode_flags = cfg_valid ? cfg.mode_flags : params->rt_fast.mode_flags_shadow;
-	ctx->feature_angle_gen = (ctx->feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
-	ctx->feature_pwm_output = (ctx->feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
-	ctx->feature_pi_control = (ctx->feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
-	ctx->feature_velocity_traj = (ctx->feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0;
+	ctx->feature_angle_gen = (feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
+	ctx->feature_pwm_output = (feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
+	ctx->feature_pi_control = (feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
+	ctx->feature_velocity_traj = (feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0;
 	ctx->feature_use_commanded_currents =
-		(ctx->feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
-	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
+		(feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
+	ctx->feature_braking = (feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
 	ctx->online_control_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
-	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
 	ctx->velocity_loop_decimation =
 		CLAMP(cfg_valid ? cfg.velocity_loop_decimation : params->velocity_loop_decimation,
 		      OUTER_LOOP_DECIMATION_MIN,
@@ -421,8 +418,10 @@ static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ct
 		CLAMP(cfg_valid ? cfg.position_loop_decimation : params->position_loop_decimation,
 		      OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
-	ctx->velocity_loop_dt_s = ctx->dt_s * (float32_t)ctx->velocity_loop_decimation;
-	ctx->position_loop_dt_s = ctx->dt_s * (float32_t)ctx->position_loop_decimation;
+	ctx->velocity_loop_dt_s =
+		(1.0f / CONTROL_LOOP_FREQUENCY_HZ) * (float32_t)ctx->velocity_loop_decimation;
+	ctx->position_loop_dt_s =
+		(1.0f / CONTROL_LOOP_FREQUENCY_HZ) * (float32_t)ctx->position_loop_decimation;
 	ctx->velocity_target_rad_s = params->live.velocity_target_rad_s;
 	ctx->velocity_ref_rad_s = params->live.velocity_ref_rad_s;
 	ctx->position_mech_rad = params->live.position_rad;
@@ -431,7 +430,7 @@ static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ct
 	ctx->speed_mech_filtered_rad_s = params->live.velocity_filtered_rad_s;
 }
 
-static inline void motor_core_step_init_pwm_output(struct motor_control_pwm_output *pwm_out)
+static inline void motor_control_step_init_pwm_output(struct motor_control_pwm_output *pwm_out)
 {
 	if (pwm_out == NULL) {
 		return;
@@ -444,9 +443,8 @@ static inline void motor_core_step_init_pwm_output(struct motor_control_pwm_outp
 	pwm_out->db_hb2_pu = 0.0f;
 }
 
-static inline void motor_core_step_init_commission_obs(struct motor_commission_observation *obs,
-						       uint32_t mode_flags,
-						       bool control_armed)
+static inline void motor_control_step_init_commission_obs(
+	struct motor_commission_observation *obs, uint32_t mode_flags, bool control_armed)
 {
 	*obs = (struct motor_commission_observation){
 		.control_loop_count = 0U,
@@ -554,10 +552,10 @@ static inline void motor_control_step_publish_encoder_sidework(
 	}
 }
 
-static inline void motor_core_step_finalize(struct motor_parameters *params,
-					    uint32_t mode_flags,
-					    bool control_armed,
-					    struct motor_commission_observation *commission_obs)
+static inline void motor_control_step_finalize(struct motor_parameters *params,
+					       uint32_t mode_flags,
+					       bool control_armed,
+					       struct motor_commission_observation *commission_obs)
 {
 	commission_obs->control_armed = control_armed;
 	commission_obs->mode_velocity_closed = motor_rt_mode_active(
@@ -934,8 +932,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 	bool feature_pi_control = ctx.feature_pi_control;
 	bool control_armed = ctx.control_armed;
 	struct motor_commission_observation commission_obs;
-	motor_core_step_init_commission_obs(&commission_obs, mode_flags, control_armed);
-	motor_core_step_init_pwm_output(pwm_out);
+	motor_control_step_init_commission_obs(&commission_obs, mode_flags, control_armed);
+	motor_control_step_init_pwm_output(pwm_out);
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
@@ -998,6 +996,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 					 &commission_obs);
 
 isr_done:
-	motor_core_step_finalize(params, mode_flags, control_armed, &commission_obs);
+	motor_control_step_finalize(params, mode_flags, control_armed, &commission_obs);
 	return;
 }
