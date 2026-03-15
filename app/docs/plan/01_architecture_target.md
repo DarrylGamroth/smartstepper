@@ -26,7 +26,7 @@
 4. `motion`: angle generation, trajectories, motion profile planning.
 5. `control`: position/velocity regulation, command arbitration, interlocks, current loop, decoupling, pwm synthesis.
 6. `estimation`: online/system estimators and identification helpers.
-7. `runtime`: coherent config snapshots, fast-state containers, process pipeline entry, keepalive policy.
+7. `runtime`: coherent config snapshots, fast-state containers, and reusable runtime helpers consumed by the app-owned fast loop.
 
 ## ISR Stage Contract
 
@@ -46,18 +46,20 @@
 - inputs: collect + process frames, timing counters.
 - outputs: live telemetry mirror, optional ISR diag capture, optional SPSC enqueue.
 
-## Core API Target
+## Fast-Loop Integration Target
 
 ```c
-int motor_core_step_fast(const struct motor_rt_cfg_snapshot *cfg,
-                         struct motor_rt_fast_state *fast,
-                         const struct motor_collect_frame *in,
-                         struct motor_process_frame *out);
+void motor_control_loop_step(struct motor_parameters *params,
+                             const q31_t *values,
+                             uint8_t count,
+                             const struct motor_control_encoder_sample *encoder_sample,
+                             struct motor_control_pwm_output *pwm_out,
+                             struct motor_control_step_report *report);
 ```
 
 Rules:
 
-1. Allowed side effects: updates to `fast` state and explicit output structs.
-2. Disallowed side effects: queue operations, kernel calls, blocking I/O, logs.
-3. Fast-step call graph policy: no queue APIs and no kernel queue primitives in
-   the process path; enforce with runtime unit boundary checks.
+1. `app/src/motor_control_loop.c` owns fast-loop orchestration.
+2. `motor_core` provides the reusable runtime/control/observer modules called by that orchestration layer.
+3. Disallowed side effects in the process path: queue operations, kernel calls, blocking I/O, logs.
+4. Fast-step call graph policy: no queue APIs and no kernel queue primitives in the process path; enforce with runtime unit boundary checks.

@@ -7,7 +7,7 @@ objective: Introduce compile-time options for RAM/section placement of selected 
 touch_files:
   - app/include/config.h
   - modules/motor_core/include/motor/runtime/placement.h
-  - modules/motor_core/src/runtime/motor_core_step.c
+  - app/src/motor_control_loop.c
   - app/prj.conf
 do_not_touch:
   - state-machine flow logic

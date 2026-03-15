@@ -339,21 +339,21 @@ Acceptance:
 1. Closed-loop torque/velocity behavior unchanged.
 2. No ISR-time regression; reduced local stack in control step.
 
-## Phase 7: Compose `motor_core_step_fast(...)` Pipeline (G)
+## Phase 7: Compose App-Owned Process Pipeline (G)
 
-1. Add one orchestrator API in `motor_core` that sequences modules A-F.
-2. Keep app-owned side effects (state transitions and non-realtime event handling) outside core.
+1. Compose the process stage in `app/src/motor_control_loop.c` over extracted `motor_core` modules A-F.
+2. Keep app-owned side effects (state transitions and non-realtime event handling) outside `motor_core`.
 3. Use compact stage-local structs instead of one large cross-stage context.
 
 Deliverables:
-1. `motor_core_step_fast(...)` and associated contracts.
+1. `motor_control_loop_step(...)` and associated process-stage contracts.
 2. App control loop reduced to orchestration and mode/config boundary handling.
-3. `motor_core_step_fast(...)` contract explicitly marks side-effect boundaries:
+3. Process-stage contract explicitly marks side-effect boundaries:
    - allowed: algorithm state updates
    - disallowed: queue ops, logging, kernel calls, blocking I/O
 
 Acceptance:
-1. `app/src/motor_control_loop.c` becomes thin orchestration.
+1. `app/src/motor_control_loop.c` becomes the sole top-level fast-loop orchestrator.
 2. Full unit suite + HIL smoke pass.
 
 ## Phase 8: Coherent Snapshot and Concurrency Hardening
@@ -413,16 +413,18 @@ void adc_callback(...) {
 }
 ```
 
-## `motor_core_step_fast(...)` End-State (Conceptual)
+## Process-Stage End-State (Conceptual)
 
 ```c
-int motor_core_step_fast(const struct motor_rt_cfg_snapshot *cfg,
-                         struct motor_rt_fast_state *fast,
-                         const struct motor_collect_frame *in,
-                         struct motor_process_frame *out);
+void motor_control_loop_step(struct motor_parameters *params,
+                             const q31_t *values,
+                             uint8_t count,
+                             const struct motor_control_encoder_sample *encoder_sample,
+                             struct motor_control_pwm_output *pwm_out,
+                             struct motor_control_step_report *report);
 ```
 
-`motor_core_step_fast(...)` only implements the `Process` stage.
+`motor_control_loop_step(...)` owns the `Process` stage and composes reusable `motor_core` modules without a monolithic top-level runtime entrypoint inside the library.
 
 ## Verification Plan Per Phase
 

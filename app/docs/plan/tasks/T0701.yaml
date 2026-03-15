@@ -1,21 +1,20 @@
 id: T0701
 phase: P07
-status: pending
-title: Implement motor_core_step_fast process-stage entrypoint
-objective: Compose extracted modules behind a single fast-path process API for ISR use
+status: done
+title: Compose app-owned process-stage entrypoint
+objective: Compose extracted modules behind the app-owned fast-path process stage in `motor_control_loop.c`
 
 touch_files:
-  - modules/motor_core/include/motor/runtime/motor_core_step.h
-  - modules/motor_core/src/runtime/motor_core_step.c
   - app/src/motor_control_loop.c
+  - tests/unit/runtime/CMakeLists.txt
 do_not_touch:
   - direct ADC/encoder interrupt handlers
 constraints:
   - no queue/logging/kernel calls inside fast step
 validation:
-  - "rg -n 'motor_core_step_fast' modules/motor_core/include/motor/runtime modules/motor_core/src/runtime app/src/motor_control_loop.c"
-  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2_mt6835 -j4'"
+  - "rg -n 'motor_control_loop_step|motor_core_step_fast' app/src/motor_control_loop.c tests/unit/runtime/CMakeLists.txt"
+  - "podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'"
 done_when:
-  - process stage executes through motor_core_step_fast only
-  - app control loop is reduced to orchestration and glue
-commit_message: "refactor(runtime): compose fast process step API"
+  - app control loop is the sole top-level process-stage entrypoint
+  - `motor_core` exposes reusable submodules rather than a monolithic fast-step API
+commit_message: "refactor(runtime): compose app-owned process stage"

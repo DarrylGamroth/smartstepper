@@ -1,5 +1,10 @@
 # motor_*.c Migration Plan (`app/src` -> `modules/motor_core`)
 
+Historical note:
+- Early execution phases below refer to `modules/motor_core/src/runtime/motor_core_step.c` as an intermediate integration point.
+- That top-level runtime entrypoint was removed in commit `328a82b`.
+- Current fast-loop orchestration lives in `app/src/motor_control_loop.c`.
+
 ## Objective
 
 Move reusable control/runtime logic out of `app/src/motor_*.c` into `modules/motor_core` while keeping Zephyr/board/state-machine glue in app.

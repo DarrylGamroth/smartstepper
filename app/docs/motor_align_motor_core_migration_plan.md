@@ -3,6 +3,10 @@
 Date: 2026-03-04  
 Scope: Move ALIGN algorithms from app state-machine implementation into `modules/motor_core`, while preserving real-time behavior and simplifying app-side calibration states.
 
+Historical note:
+- References below to `modules/motor_core/src/runtime/motor_core_step.c` describe the intermediate ISR process-stage location before the final runtime boundary cut.
+- Current ALIGN sample accumulation integration is in `app/src/motor_control_loop.c`.
+
 ## Objective
 
 1. Relocate alignment math/logic into reusable `motor_core` modules.
@@ -22,7 +26,7 @@ Scope: Move ALIGN algorithms from app state-machine implementation into `modules
 ## Current Baseline (Before Refactor)
 
 1. ALIGN state sequencing and algorithm details live in `app/src/motor_states_calibration.c`.
-2. ALIGN sample accumulation currently occurs from ISR path in `modules/motor_core/src/runtime/motor_core_step.c`.
+2. ALIGN sample accumulation currently occurs from the app-owned fast-loop process stage in `app/src/motor_control_loop.c`.
 3. Dual-polarity algorithm computes circular means and offset validation in app layer.
 4. `traj_Id` is already used for ALIGN injection target ramping in app code.
 
@@ -167,7 +171,7 @@ Acceptance:
 1. `modules/motor_core/include/motor/calibration/align.h` (new)
 2. `modules/motor_core/src/calibration/align.c` (new)
 3. `modules/motor_core/CMakeLists.txt`
-4. `modules/motor_core/src/runtime/motor_core_step.c`
+4. `app/src/motor_control_loop.c`
 5. `app/src/motor_states_calibration.c`
 6. `app/include/motor_states_calibration.h` (only if API touch needed)
 7. `tests/unit/*` (new alignment tests)
