@@ -20,10 +20,10 @@
 #include "motor/motion/motion_planner.h"
 #include "motor/control/mpr.h"
 #include "motor/control/dob.h"
+#include "motor/control/torque.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
 #include "motor/motion/outer_loop_sched.h"
-#include "motor_torque.h"
 #include "motor/runtime/feedback_quality.h"
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_parameters *params)
@@ -186,7 +186,11 @@ int motor_outer_loop_runtime_step(struct motor_parameters *params,
 			bool use_mpr = motor_outer_loop_use_mpr(params);
 			bool mpr_applied = false;
 			float32_t iq_cmd_pre_dob_a = 0.0f;
-			float32_t torque_gain_nm_per_a = motor_torque_gain_resolve_active(params);
+			float32_t torque_gain_nm_per_a = motor_torque_gain_resolve(
+				params->torque_gain_nm_per_a_active,
+				params->flux_linkage_wb_active,
+				MOTOR_FLUX_LINKAGE_WB,
+				MOTOR_POLE_PAIRS);
 
 			if (use_mpr) {
 				struct motor_mpr_velocity_model mpr_model = {

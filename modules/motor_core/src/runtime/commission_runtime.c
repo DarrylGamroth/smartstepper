@@ -12,7 +12,7 @@
 #include "motor/runtime/commission_runtime.h"
 #include "config.h"
 #include "motor/estimation/commission_estimators.h"
-#include "motor_torque.h"
+#include "motor/control/torque.h"
 
 #define MOTOR_COMMISSION_DERIV_ALPHA 0.2f
 #define MOTOR_COMMISSION_FLAG_SATURATED BIT(0)
@@ -281,9 +281,13 @@ static void motor_commission_estimate_mech(struct motor_parameters *params)
 	struct motor_commission_results *res = &ctx->results;
 	struct motor_mech_id_state estimator;
 	struct motor_mech_id_result estimate;
-	float32_t kt = motor_torque_gain_resolve_active(params);
+	float32_t kt = motor_torque_gain_resolve(params->torque_gain_nm_per_a_active,
+						 params->flux_linkage_wb_active,
+						 MOTOR_FLUX_LINKAGE_WB,
+						 MOTOR_POLE_PAIRS);
 	if (res->psi_f_valid) {
-		float32_t derived_kt = motor_torque_gain_from_flux(res->psi_f_wb);
+		float32_t derived_kt =
+			motor_torque_gain_from_flux_pole_pairs(res->psi_f_wb, MOTOR_POLE_PAIRS);
 		if (isfinite(derived_kt) && derived_kt > 0.0f) {
 			kt = derived_kt;
 		}
@@ -601,7 +605,8 @@ int motor_commission_apply_results(struct motor_parameters *params)
 
 	if (results->psi_f_valid) {
 		params->flux_linkage_wb_active = results->psi_f_wb;
-		float32_t derived_kt = motor_torque_gain_from_flux(results->psi_f_wb);
+		float32_t derived_kt = motor_torque_gain_from_flux_pole_pairs(
+			results->psi_f_wb, MOTOR_POLE_PAIRS);
 		if (isfinite(derived_kt) && derived_kt > MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
 			params->torque_gain_nm_per_a_active = derived_kt;
 		}
@@ -615,7 +620,11 @@ int motor_commission_apply_results(struct motor_parameters *params)
 
 	if (!isfinite(params->torque_gain_nm_per_a_active) ||
 	    params->torque_gain_nm_per_a_active <= MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
-		params->torque_gain_nm_per_a_active = motor_torque_gain_resolve_active(params);
+		params->torque_gain_nm_per_a_active = motor_torque_gain_resolve(
+			params->torque_gain_nm_per_a_active,
+			params->flux_linkage_wb_active,
+			MOTOR_FLUX_LINKAGE_WB,
+			MOTOR_POLE_PAIRS);
 	}
 
 	return 0;

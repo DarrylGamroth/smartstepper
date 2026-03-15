@@ -10,8 +10,8 @@
 #include <math.h>
 #include <string.h>
 
-#include "motor_control_loop.h"
 #include "config.h"
+#include "motor/runtime/io.h"
 #include "motor/observers/angle_observer.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
