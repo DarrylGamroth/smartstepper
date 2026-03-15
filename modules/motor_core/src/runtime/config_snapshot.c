@@ -11,12 +11,14 @@
 static struct motor_rt_config_snapshot g_cfg_slots[2];
 static atomic_t g_cfg_active_slot;
 static atomic_t g_cfg_epoch;
+static atomic_t g_cfg_published;
 
 void motor_config_snapshot_init(void)
 {
 	memset(g_cfg_slots, 0, sizeof(g_cfg_slots));
 	atomic_set(&g_cfg_active_slot, 0);
 	atomic_set(&g_cfg_epoch, 0);
+	atomic_set(&g_cfg_published, 0);
 }
 
 void motor_config_snapshot_publish(const struct motor_rt_config_snapshot *snapshot)
@@ -34,11 +36,16 @@ void motor_config_snapshot_publish(const struct motor_rt_config_snapshot *snapsh
 
 	/* Publish complete snapshot atomically by flipping active slot index. */
 	atomic_set(&g_cfg_active_slot, (atomic_val_t)publish_slot);
+	atomic_set(&g_cfg_published, 1);
 }
 
 bool motor_config_snapshot_read(struct motor_rt_config_snapshot *snapshot_out)
 {
 	if (snapshot_out == NULL) {
+		return false;
+	}
+
+	if (atomic_get(&g_cfg_published) == 0) {
 		return false;
 	}
 

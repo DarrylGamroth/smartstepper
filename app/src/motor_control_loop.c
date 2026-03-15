@@ -202,11 +202,14 @@ static inline void motor_step_report_post_error(struct motor_control_step_report
 	report->error_code = error_code;
 }
 
-static inline void motor_runtime_fast_sync(struct motor_parameters *params, bool control_armed)
+static inline void motor_runtime_fast_sync(struct motor_parameters *params,
+					   uint32_t mode_flags,
+					   bool control_armed)
 {
 	params->rt_fast.control_loop_count = params->control_loop_count;
 	params->rt_fast.rls_d_prev_cycle = params->rls.d_prev_cycle;
 	params->rt_fast.rls_q_prev_cycle = params->rls.q_prev_cycle;
+	params->rt_fast.mode_flags_shadow = mode_flags;
 	params->rt_fast.rls_d_prev_valid = params->rls.d_prev_valid;
 	params->rt_fast.rls_q_prev_valid = params->rls.q_prev_valid;
 	params->rt_fast.Id_setpoint_A = params->Id_setpoint_A;
@@ -273,7 +276,6 @@ struct motor_control_step_ctx {
 	bool feature_velocity_traj;
 	bool feature_use_commanded_currents;
 	bool feature_braking;
-	bool profile_sequence_running;
 	bool online_control_state;
 	bool control_armed;
 	float32_t dt_s;
@@ -287,10 +289,10 @@ struct motor_control_step_ctx {
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
-	struct motor_encoder_feedback encoder_fb;
 };
 
 struct motor_encoder_stage_result {
+	struct motor_encoder_feedback feedback;
 	struct motor_control_feedback control_fb;
 	uint8_t input_source;
 	float32_t angle_control_deg;
@@ -491,7 +493,7 @@ static inline void motor_commission_runtime_ctx_init(struct motor_commission_run
 	};
 }
 
-static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ctx,
+static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ctx,
 					       const struct motor_parameters *params)
 {
 	memset(ctx, 0, sizeof(*ctx));
@@ -499,7 +501,7 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	bool cfg_valid = motor_config_snapshot_read(&cfg);
 	ctx->config_epoch = cfg.epoch;
 	ctx->feature_flags = cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
-	ctx->mode_flags = cfg_valid ? cfg.mode_flags : 0U;
+	ctx->mode_flags = cfg_valid ? cfg.mode_flags : params->rt_fast.mode_flags_shadow;
 	ctx->feature_angle_gen = (ctx->feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
 	ctx->feature_pwm_output = (ctx->feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
 	ctx->feature_pi_control = (ctx->feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
@@ -507,8 +509,6 @@ static inline void motor_control_step_ctx_init(struct motor_control_step_ctx *ct
 	ctx->feature_use_commanded_currents =
 		(ctx->feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0;
 	ctx->feature_braking = (ctx->feature_flags & BIT(MOTOR_FEATURE_BRAKING)) != 0;
-	ctx->profile_sequence_running = cfg_valid ? cfg.profile_sequence_running :
-					      params->profile_seq.running;
 	ctx->online_control_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
 	ctx->dt_s = 1.0f / CONTROL_LOOP_FREQUENCY_HZ;
@@ -570,20 +570,18 @@ static inline void motor_core_step_init_commission_obs(struct motor_commission_o
 	};
 }
 
-static int motor_core_step_encoder_stage(struct motor_parameters *params,
-					 struct motor_control_step_ctx *ctx,
-					 const struct motor_control_encoder_sample *encoder_sample,
-					 bool feature_angle_gen,
-					 struct motor_commission_observation *commission_obs,
-					 struct motor_encoder_stage_result *enc_res,
-					 struct motor_control_step_report *report)
+static int motor_control_step_read_encoder(struct motor_parameters *params,
+					   uint32_t mode_flags,
+					   const struct motor_control_encoder_sample *encoder_sample,
+					   bool feature_angle_gen,
+					   struct motor_commission_observation *commission_obs,
+					   struct motor_encoder_stage_result *enc_res)
 {
-	struct motor_capture_feedback capture_fb = {0};
 	struct motor_encoder_feedback_ctx encoder_ctx;
 	motor_encoder_feedback_ctx_init(&encoder_ctx, params);
 	int enc_ret = motor_encoder_feedback_update(&encoder_ctx, encoder_sample, feature_angle_gen,
-						    &ctx->encoder_fb);
-	motor_control_feedback_from_encoder(&ctx->encoder_fb, &enc_res->control_fb);
+						    &enc_res->feedback);
+	motor_control_feedback_from_encoder(&enc_res->feedback, &enc_res->control_fb);
 
 	enc_res->input_source = enc_res->control_fb.input_source;
 	enc_res->angle_control_deg = enc_res->control_fb.angle_control_deg;
@@ -592,6 +590,10 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 	enc_res->frame_warning = enc_res->control_fb.warning;
 	enc_res->frame_error = enc_res->control_fb.error;
 
+	if (enc_ret == -EIO) {
+		return -EIO;
+	}
+
 	if (enc_res->control_fb.sample_enabled) {
 		commission_obs->encoder_fresh = enc_res->fresh;
 		commission_obs->encoder_warning = enc_res->frame_warning;
@@ -599,17 +601,13 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 		commission_obs->encoder_status = enc_res->frame_status;
 	}
 
-	if (enc_ret == -EIO) {
-		return -EIO;
-	}
-
-	if (motor_is_align_sample_state(ctx->mode_flags) &&
+	if (motor_is_align_sample_state(mode_flags) &&
 	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
 	    enc_res->fresh &&
 	    !enc_res->frame_warning &&
 	    !enc_res->frame_error) {
 		float32_t align_mech_rad = enc_res->control_fb.observer_mech_rad;
-		if (motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
+		if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
 			struct motor_align_sample_accum acc = {0};
 			motor_align_load_pos_accum(params, &acc);
 			motor_align_accum_push(&acc, align_mech_rad);
@@ -622,22 +620,38 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 		}
 	}
 
+	return 0;
+}
+
+static inline void motor_control_step_publish_encoder_sidework(
+	struct motor_parameters *params,
+	const struct motor_control_encoder_sample *encoder_sample,
+	const struct motor_encoder_stage_result *enc_res,
+	struct motor_control_step_report *report)
+{
+	if (enc_res == NULL) {
+		return;
+	}
+
 	if (params->encoder_capture.enabled) {
-		(void)motor_encoder_feedback_prepare_capture(&encoder_ctx, &ctx->encoder_fb,
+		struct motor_capture_feedback capture_fb = {0};
+		struct motor_encoder_feedback_ctx encoder_ctx;
+
+		motor_encoder_feedback_ctx_init(&encoder_ctx, params);
+		(void)motor_encoder_feedback_prepare_capture(&encoder_ctx, &enc_res->feedback,
 							     &capture_fb);
 		if (report != NULL) {
 			report->encoder_capture_valid = true;
 			report->encoder_capture = capture_fb;
 		}
 	}
+
 	if (report != NULL && params->encoder_raw_trace.enabled && encoder_sample != NULL) {
 		report->encoder_raw_trace_valid = true;
 		report->encoder_sample = *encoder_sample;
 		report->encoder_feedback = enc_res->control_fb;
 		report->position_quality_flags = params->live.position_quality_flags;
 	}
-
-	return 0;
 }
 
 static inline void motor_core_step_finalize(struct motor_parameters *params,
@@ -652,7 +666,7 @@ static inline void motor_core_step_finalize(struct motor_parameters *params,
 		mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED);
 	commission_obs->mode_torque = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
 	commission_obs->fault_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ERROR);
-	motor_runtime_fast_sync(params, control_armed);
+	motor_runtime_fast_sync(params, mode_flags, control_armed);
 	motor_runtime_diag_sync(params);
 	motor_commission_runtime_ctx_init(&commission_ctx, params);
 	motor_commission_update(&commission_ctx, commission_obs);
@@ -675,7 +689,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	struct motor_control_step_ctx ctx;
-	motor_control_step_ctx_init(&ctx, params);
+	motor_control_step_cfg_init(&ctx, params);
 
 	uint32_t mode_flags = ctx.mode_flags;
 	bool feature_angle_gen = ctx.feature_angle_gen;
@@ -684,7 +698,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	bool feature_velocity_traj = ctx.feature_velocity_traj;
 	bool feature_use_commanded_currents = ctx.feature_use_commanded_currents;
 	bool feature_braking = ctx.feature_braking;
-	bool profile_sequence_running = ctx.profile_sequence_running;
 	bool online_control_state = ctx.online_control_state;
 	bool control_armed = ctx.control_armed;
 	struct motor_commission_observation commission_obs;
@@ -693,7 +706,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Increment control loop counter */
 	params->control_loop_count++;
-	motor_runtime_fast_sync(params, control_armed);
 	commission_obs.control_loop_count = params->control_loop_count;
 
 	float32_t angle_control_degrees = 0.0f;
@@ -727,13 +739,14 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	/* Read encoder if feature is enabled */
 	struct motor_encoder_stage_result enc_stage = {0};
-	int enc_ret = motor_core_step_encoder_stage(params, &ctx, encoder_sample,
-						    feature_angle_gen, &commission_obs, &enc_stage,
-						    report);
+	int enc_ret = motor_control_step_read_encoder(params, mode_flags, encoder_sample,
+						      feature_angle_gen, &commission_obs,
+						      &enc_stage);
 	if (enc_ret == -EIO) {
 		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}
+	motor_control_step_publish_encoder_sidework(params, encoder_sample, &enc_stage, report);
 	encoder_input_source = enc_stage.input_source;
 	angle_control_degrees = enc_stage.angle_control_deg;
 	bool fresh_encoder_sample = enc_stage.fresh;
@@ -1058,7 +1071,6 @@ void motor_control_loop_step(struct motor_parameters *params,
 	commission_obs.saturation = voltage_saturated;
 
 isr_done:
-	ARG_UNUSED(profile_sequence_running);
 	motor_core_step_finalize(params, mode_flags, control_armed, &commission_obs);
 	return;
 }
