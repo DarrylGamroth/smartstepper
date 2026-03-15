@@ -31,7 +31,6 @@
 #include "motor/motion/motion_planner.h"
 #include "motor/calibration/align.h"
 #include "motor/calibration/rl_ident.h"
-#include "motor_torque.h"
 #include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback.h"
 #include "motor/telemetry/capture.h"
