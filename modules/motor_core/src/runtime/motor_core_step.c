@@ -15,8 +15,6 @@
 #include <dsp/controller_functions.h>
 
 #include "motor/runtime/motor_core_step.h"
-#include "motor_control_loop.h"
-#include "motor_control_api.h"
 #include "motor/math/math_constants.h"
 #include "config.h"
 #include "motor/filters/pi.h"
@@ -43,7 +41,6 @@
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/transforms.h"
-#include "motor_control_telemetry.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -150,72 +147,60 @@ static inline void motor_align_store_neg_accum(struct motor_parameters *params,
 	params->calibration.align_neg_sample_count = acc->count;
 }
 
-static inline void motor_fault_snapshot_try_store(struct motor_parameters *params,
-						  float32_t encoder_angle_deg,
-						  float32_t observer_input_rad,
-						  float32_t elec_angle_rad,
-						  float32_t observer_elec_speed_rad_s,
-						  float32_t id_ref_a,
-						  float32_t iq_ref_a,
-						  float32_t id_a,
-						  float32_t iq_a,
-						  float32_t ia_a,
-						  float32_t ib_a,
-						  float32_t vd_v,
-						  float32_t vq_v,
-						  uint8_t input_source,
-						  bool sample_fresh,
-						  bool sample_warning,
-						  bool sample_error,
-						  uint8_t status,
-						  uint8_t position_quality_flags)
+static inline void motor_fault_snapshot_prepare(struct motor_control_step_report *report,
+						float32_t encoder_angle_deg,
+						float32_t observer_input_rad,
+						float32_t elec_angle_rad,
+						float32_t observer_elec_speed_rad_s,
+						float32_t id_ref_a,
+						float32_t iq_ref_a,
+						float32_t id_a,
+						float32_t iq_a,
+						float32_t ia_a,
+						float32_t ib_a,
+						float32_t vd_v,
+						float32_t vq_v,
+						uint8_t input_source,
+						bool sample_fresh,
+						bool sample_warning,
+						bool sample_error,
+						uint8_t status,
+						uint8_t position_quality_flags)
 {
-	if (params == NULL) {
+	if (report == NULL) {
 		return;
 	}
 
-	uint16_t idx = params->fault_snapshot.write_idx;
-	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot.samples[idx];
-
-	sample->control_loop_count = params->rt_fast.control_loop_count;
-	sample->encoder_angle_deg = encoder_angle_deg;
-	sample->observer_input_rad = observer_input_rad;
-	sample->elec_angle_rad = elec_angle_rad;
-	sample->observer_elec_speed_rad_s = observer_elec_speed_rad_s;
-	sample->Id_ref_A = id_ref_a;
-	sample->Iq_ref_A = iq_ref_a;
-	sample->Id_A = id_a;
-	sample->Iq_A = iq_a;
-	sample->Ia_A = ia_a;
-	sample->Ib_A = ib_a;
-	sample->Vd_V = vd_v;
-	sample->Vq_V = vq_v;
-	sample->input_source = input_source;
-	sample->sample_fresh = sample_fresh ? 1U : 0U;
-	sample->sample_warning = sample_warning ? 1U : 0U;
-	sample->sample_error = sample_error ? 1U : 0U;
-	sample->status = status;
-	sample->position_quality_flags = position_quality_flags;
-
-	params->fault_snapshot.write_idx =
-		(uint16_t)((idx + 1U) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
-	if (params->fault_snapshot.count < MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES) {
-		params->fault_snapshot.count++;
-	} else {
-		params->fault_snapshot.overrun_count++;
-	}
+	report->fault_snapshot.valid = true;
+	report->fault_snapshot.encoder_angle_deg = encoder_angle_deg;
+	report->fault_snapshot.observer_input_rad = observer_input_rad;
+	report->fault_snapshot.elec_angle_rad = elec_angle_rad;
+	report->fault_snapshot.observer_elec_speed_rad_s = observer_elec_speed_rad_s;
+	report->fault_snapshot.id_ref_a = id_ref_a;
+	report->fault_snapshot.iq_ref_a = iq_ref_a;
+	report->fault_snapshot.id_a = id_a;
+	report->fault_snapshot.iq_a = iq_a;
+	report->fault_snapshot.ia_a = ia_a;
+	report->fault_snapshot.ib_a = ib_a;
+	report->fault_snapshot.vd_v = vd_v;
+	report->fault_snapshot.vq_v = vq_v;
+	report->fault_snapshot.input_source = input_source;
+	report->fault_snapshot.sample_fresh = sample_fresh ? 1U : 0U;
+	report->fault_snapshot.sample_warning = sample_warning ? 1U : 0U;
+	report->fault_snapshot.sample_error = sample_error ? 1U : 0U;
+	report->fault_snapshot.status = status;
+	report->fault_snapshot.position_quality_flags = position_quality_flags;
 }
 
-static inline void motor_post_error_with_snapshot(struct motor_parameters *params,
-						  uint32_t error_code)
+static inline void motor_step_report_post_error(struct motor_control_step_report *report,
+						uint32_t error_code)
 {
-	if (params != NULL) {
-		params->fault_snapshot.latched = 1U;
-		params->fault_snapshot.latch_error_code = error_code;
-		params->fault_snapshot.latch_loop = params->rt_fast.control_loop_count;
+	if (report == NULL || report->error_pending) {
+		return;
 	}
 
-	motor_api_post_error(error_code);
+	report->error_pending = true;
+	report->error_code = error_code;
 }
 
 static inline void motor_runtime_fast_sync(struct motor_parameters *params, bool control_armed)
@@ -400,7 +385,8 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 					 const struct motor_control_encoder_sample *encoder_sample,
 					 bool feature_angle_gen,
 					 struct motor_commission_observation *commission_obs,
-					 struct motor_encoder_stage_result *enc_res)
+					 struct motor_encoder_stage_result *enc_res,
+					 struct motor_control_step_report *report)
 {
 	struct motor_capture_feedback capture_fb = {0};
 	int enc_ret = motor_encoder_feedback_update(params, encoder_sample, feature_angle_gen,
@@ -446,10 +432,17 @@ static int motor_core_step_encoder_stage(struct motor_parameters *params,
 
 	if (params->encoder_capture.enabled) {
 		(void)motor_encoder_feedback_prepare_capture(params, &ctx->encoder_fb, &capture_fb);
-		motor_control_telemetry_store_encoder_capture(params, &capture_fb);
+		if (report != NULL) {
+			report->encoder_capture_valid = true;
+			report->encoder_capture = capture_fb;
+		}
 	}
-	motor_control_telemetry_store_encoder_raw_trace(params, encoder_sample, &enc_res->control_fb,
-							params->live.position_quality_flags);
+	if (report != NULL && params->encoder_raw_trace.enabled && encoder_sample != NULL) {
+		report->encoder_raw_trace_valid = true;
+		report->encoder_sample = *encoder_sample;
+		report->encoder_feedback = enc_res->control_fb;
+		report->position_quality_flags = params->live.position_quality_flags;
+	}
 
 	return 0;
 }
@@ -470,14 +463,19 @@ static inline void motor_core_step_finalize(struct motor_parameters *params,
 }
 
 void motor_core_step_fast(struct motor_parameters *params,
-			     const q31_t *values,
-			     uint8_t count,
-			     const struct motor_control_encoder_sample *encoder_sample,
-			     struct motor_control_pwm_output *pwm_out)
+			  const q31_t *values,
+			  uint8_t count,
+			  const struct motor_control_encoder_sample *encoder_sample,
+			  struct motor_control_pwm_output *pwm_out,
+			  struct motor_control_step_report *report)
 {
 	ARG_UNUSED(count);
 	if (params == NULL || values == NULL || pwm_out == NULL) {
 		return;
+	}
+
+	if (report != NULL) {
+		memset(report, 0, sizeof(*report));
 	}
 
 	struct motor_control_step_ctx ctx;
@@ -534,9 +532,10 @@ void motor_core_step_fast(struct motor_parameters *params,
 	/* Read encoder if feature is enabled */
 	struct motor_encoder_stage_result enc_stage = {0};
 	int enc_ret = motor_core_step_encoder_stage(params, &ctx, encoder_sample,
-						    feature_angle_gen, &commission_obs, &enc_stage);
+						    feature_angle_gen, &commission_obs, &enc_stage,
+						    report);
 	if (enc_ret == -EIO) {
-		motor_post_error_with_snapshot(params, ERROR_ENCODER_FAULT);
+		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}
 	encoder_input_source = enc_stage.input_source;
@@ -562,13 +561,13 @@ void motor_core_step_fast(struct motor_parameters *params,
 
 	/* Validate bus voltage before reciprocal to avoid Inf/NaN propagation. */
 	if (Vbus_V < VBUS_MIN_VALID_V) {
-		motor_post_error_with_snapshot(params, ERROR_HARDWARE_BREAK);
+		motor_step_report_post_error(report, ERROR_HARDWARE_BREAK);
 		goto isr_done;
 	}
 
 	/* Fault detection: Check for overvoltage */
 	if (Vbus_V > VBUS_MAX_V) {
-		motor_post_error_with_snapshot(params, ERROR_OVERVOLTAGE);
+		motor_step_report_post_error(report, ERROR_OVERVOLTAGE);
 		goto isr_done;
 	}
 
@@ -592,29 +591,29 @@ void motor_core_step_fast(struct motor_parameters *params,
 		goto isr_done;
 	}
 
-	motor_fault_snapshot_try_store(params,
-				      angle_control_degrees,
-				      params->live.encoder_observer_input_rad,
-				      park_angle_rad,
-				      angle_observer_get_elec_speed(&params->observer),
-				      Id_ref_A,
-				      Iq_ref_A,
-				      Id_A,
-				      Iq_A,
-				      Ia_A,
-				      Ib_A,
-				      params->Vd_V,
-				      params->Vq_V,
-				      encoder_input_source,
-				      fresh_encoder_sample,
-				      encoder_frame_warning,
-				      encoder_frame_error,
-				      encoder_frame_status,
-				      params->live.position_quality_flags);
+	motor_fault_snapshot_prepare(report,
+				     angle_control_degrees,
+				     params->live.encoder_observer_input_rad,
+				     park_angle_rad,
+				     angle_observer_get_elec_speed(&params->observer),
+				     Id_ref_A,
+				     Iq_ref_A,
+				     Id_A,
+				     Iq_A,
+				     Ia_A,
+				     Ib_A,
+				     params->Vd_V,
+				     params->Vq_V,
+				     encoder_input_source,
+				     fresh_encoder_sample,
+				     encoder_frame_warning,
+				     encoder_frame_error,
+				     encoder_frame_status,
+				     params->live.position_quality_flags);
 
 	/* Fault detection: Check for overcurrent after offset removal */
 	if (fabsf(Ia_A) > OVERCURRENT_THRESHOLD_A || fabsf(Ib_A) > OVERCURRENT_THRESHOLD_A) {
-		motor_post_error_with_snapshot(params, ERROR_OVERCURRENT);
+		motor_step_report_post_error(report, ERROR_OVERCURRENT);
 		goto isr_done;
 	}
 

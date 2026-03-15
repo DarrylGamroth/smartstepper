@@ -68,3 +68,5 @@ Stack notes:
 Notes:
   - encoder faults=<u32>, warn=<u32>, error=<u32>
 ```
+
+| 2026-03-14 | n/a | done | n/a | Moved fast-loop telemetry/error publication out of `modules/motor_core/src/runtime/motor_core_step.c` into `app/src/motor_isr_io.c` via `struct motor_control_step_report`; added app-owned fault snapshot store helper; removed `motor_control_api.h` and `motor_control_telemetry.h` from the `motor_core` fast path. Validation: `podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'`; `./tests/run_unit_tests.sh` (26/26 configs, 203/203 cases passed). |

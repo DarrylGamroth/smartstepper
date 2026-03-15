@@ -132,3 +132,43 @@ void motor_control_telemetry_store_encoder_raw_trace(
 		params->encoder_raw_trace.overrun_count++;
 	}
 }
+
+void motor_control_telemetry_store_fault_snapshot(
+	struct motor_parameters *params,
+	const struct motor_control_fault_snapshot *snapshot)
+{
+	if (params == NULL || snapshot == NULL || !snapshot->valid) {
+		return;
+	}
+
+	uint16_t idx = params->fault_snapshot.write_idx;
+	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot.samples[idx];
+
+	sample->control_loop_count = params->rt_fast.control_loop_count;
+	sample->encoder_angle_deg = snapshot->encoder_angle_deg;
+	sample->observer_input_rad = snapshot->observer_input_rad;
+	sample->elec_angle_rad = snapshot->elec_angle_rad;
+	sample->observer_elec_speed_rad_s = snapshot->observer_elec_speed_rad_s;
+	sample->Id_ref_A = snapshot->id_ref_a;
+	sample->Iq_ref_A = snapshot->iq_ref_a;
+	sample->Id_A = snapshot->id_a;
+	sample->Iq_A = snapshot->iq_a;
+	sample->Ia_A = snapshot->ia_a;
+	sample->Ib_A = snapshot->ib_a;
+	sample->Vd_V = snapshot->vd_v;
+	sample->Vq_V = snapshot->vq_v;
+	sample->input_source = snapshot->input_source;
+	sample->sample_fresh = snapshot->sample_fresh;
+	sample->sample_warning = snapshot->sample_warning;
+	sample->sample_error = snapshot->sample_error;
+	sample->status = snapshot->status;
+	sample->position_quality_flags = snapshot->position_quality_flags;
+
+	params->fault_snapshot.write_idx =
+		(uint16_t)((idx + 1U) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
+	if (params->fault_snapshot.count < MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES) {
+		params->fault_snapshot.count++;
+	} else {
+		params->fault_snapshot.overrun_count++;
+	}
+}

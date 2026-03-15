@@ -26,6 +26,7 @@
 #include "motor/runtime/keepalive_policy.h"
 #include "motor/protection/interlocks.h"
 #include "motor/motion/motion_profile.h"
+#include "motor_control_telemetry.h"
 
 LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
@@ -35,7 +36,32 @@ struct motor_adc_collect_stage {
 
 struct motor_adc_process_stage {
 	struct motor_control_pwm_output pwm_out;
+	struct motor_control_step_report step_report;
 };
+
+static void motor_adc_publish_step_report(struct motor_parameters *params,
+					  const struct motor_adc_process_stage *process)
+{
+	const struct motor_control_step_report *report = &process->step_report;
+
+	if (report->encoder_capture_valid) {
+		motor_control_telemetry_store_encoder_capture(params, &report->encoder_capture);
+	}
+	if (report->encoder_raw_trace_valid) {
+		motor_control_telemetry_store_encoder_raw_trace(
+			params, &report->encoder_sample, &report->encoder_feedback,
+			report->position_quality_flags);
+	}
+	if (report->fault_snapshot.valid) {
+		motor_control_telemetry_store_fault_snapshot(params, &report->fault_snapshot);
+	}
+	if (report->error_pending) {
+		params->fault_snapshot.latched = 1U;
+		params->fault_snapshot.latch_error_code = report->error_code;
+		params->fault_snapshot.latch_loop = params->rt_fast.control_loop_count;
+		motor_api_post_error(report->error_code);
+	}
+}
 
 static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *params)
 {
@@ -166,7 +192,10 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 				values,
 				count,
 				&collect->encoder_sample,
-				&process->pwm_out);
+				&process->pwm_out,
+				&process->step_report);
+
+	motor_adc_publish_step_report(params, process);
 }
 
 static void motor_adc_stage_apply(const struct motor_adc_process_stage *process)

@@ -26,4 +26,8 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	const struct motor_control_feedback *control_fb,
 	uint8_t position_quality_flags);
 
+void motor_control_telemetry_store_fault_snapshot(
+	struct motor_parameters *params,
+	const struct motor_control_fault_snapshot *snapshot);
+
 #endif /* MOTOR_CONTROL_TELEMETRY_H_ */
