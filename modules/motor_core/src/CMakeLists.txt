@@ -45,7 +45,6 @@ add_library(motor_core_commission STATIC
 motor_core_configure_target(motor_core_commission)
 
 add_library(motor_core_rt STATIC
-	runtime/motor_core_step.c
 	runtime/commission_runtime.c
 	runtime/outer_loop_runtime.c
 	runtime/current_ref_policy_runtime.c
