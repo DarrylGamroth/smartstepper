@@ -33,10 +33,9 @@ static int motor_post_mode_change(enum motor_state target_mode)
 		.type = MOTOR_EVENT_MODE_CHANGE,
 		.target_mode = target_mode,
 	};
-	extern struct k_msgq motor_event_queue;
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event(&evt);
 
-	return (ret == 0) ? 0 : -ENOMEM;
+	return ret;
 }
 
 static const char *motor_commission_expected_mode_to_string(uint8_t expected_mode)

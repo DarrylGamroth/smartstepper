@@ -144,8 +144,7 @@ static int motor_profile_seq_post_tick_event(struct motor_parameters *params, bo
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
 	};
-	extern struct k_msgq motor_event_queue;
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event(&evt);
 	if (ret != 0) {
 		if (params) {
 			params->profile_seq.event_drop_count++;

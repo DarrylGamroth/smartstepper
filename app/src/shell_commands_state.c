@@ -627,11 +627,10 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 		.target_mode = target_state,
 	};
 
-	extern struct k_msgq motor_event_queue;
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event(&evt);
 	if (ret != 0) {
 		shell_error(sh, "Failed to post mode change event: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 
 	shell_print(sh, "Mode change to %s requested", mode_name);

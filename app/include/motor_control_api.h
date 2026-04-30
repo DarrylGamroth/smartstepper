@@ -24,9 +24,6 @@ struct motor_parameters;
  * serialized through the state machine thread to avoid race conditions.
  */
 
-/* Motor event queue - exposed for main loop access */
-extern struct k_msgq motor_event_queue;
-
 /**
  * @brief Queue a motor event from ISR context without kernel queue calls.
  *
@@ -36,6 +33,18 @@ extern struct k_msgq motor_event_queue;
  * @return 0 on success, -ENOSPC if ring full, -EINVAL if evt is NULL
  */
 int motor_api_enqueue_event_from_isr(const struct motor_event *evt);
+
+/**
+ * @brief Queue a motor event to the state-machine thread.
+ *
+ * Shell/protocol code should use this helper instead of touching
+ * motor_event_queue directly. If called from interrupt context, the event is
+ * routed through the ISR-safe SPSC ring.
+ *
+ * @param evt Event to enqueue
+ * @return 0 on success, -ENOMEM/-ENOSPC if the queue/ring is full, -EINVAL if evt is NULL
+ */
+int motor_api_post_event(const struct motor_event *evt);
 
 /**
  * @brief Initialize motor control API

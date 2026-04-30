@@ -18,6 +18,7 @@ LOG_MODULE_REGISTER(motor_api, CONFIG_APP_LOG_LEVEL);
 
 /* Global motor parameters pointer (set during init) */
 static struct motor_parameters *g_motor_params = NULL;
+extern struct k_msgq motor_event_queue;
 
 /* Cached event for peek/consume pattern */
 static struct motor_event cached_event;
@@ -269,17 +270,53 @@ int motor_control_api_init(struct motor_parameters *params)
 	return 0;
 }
 
+static int motor_api_post_event_back(const struct motor_event *evt)
+{
+	if (evt == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_is_in_isr()) {
+		return motor_api_enqueue_event_from_isr(evt);
+	}
+
+	int ret = k_msgq_put(&motor_event_queue, evt, K_NO_WAIT);
+	return (ret == 0) ? 0 : -ENOMEM;
+}
+
+static int motor_api_post_event_front(const struct motor_event *evt)
+{
+	if (evt == NULL) {
+		return -EINVAL;
+	}
+
+	/* Direct ISR callbacks cannot use kernel message queues. The state
+	 * thread drains the ISR ring before the normal message queue, preserving
+	 * priority relative to shell/protocol events.
+	 */
+	if (k_is_in_isr()) {
+		return motor_api_enqueue_event_from_isr(evt);
+	}
+
+	int ret = k_msgq_put_front(&motor_event_queue, evt);
+	return (ret == 0) ? 0 : -ENOMEM;
+}
+
+int motor_api_post_event(const struct motor_event *evt)
+{
+	return motor_api_post_event_back(evt);
+}
+
 int motor_api_request_offline(void)
 {
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_OFFLINE,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post OFFLINE request: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("OFFLINE request posted");
@@ -292,11 +329,10 @@ int motor_api_request_idle(void)
 		.type = MOTOR_EVENT_IDLE,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post IDLE request: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("IDLE request posted");
@@ -309,11 +345,10 @@ int motor_api_request_online(void)
 		.type = MOTOR_EVENT_ONLINE,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post ONLINE request: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("ONLINE request posted");
@@ -326,11 +361,10 @@ int motor_api_request_calibrate(void)
 		.type = MOTOR_EVENT_CALIBRATE_REQUEST,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post calibrate request: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("Calibrate request posted");
@@ -343,11 +377,10 @@ int motor_api_request_commission(void)
 		.type = MOTOR_EVENT_COMMISSION_REQUEST,
 	};
 
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post commission request: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 
 	LOG_DBG("Commission request posted");
@@ -376,11 +409,10 @@ int motor_api_update_param(const char *name, float value)
 	evt.param_update.param_id = param_id;
 	evt.param_update.value = value;
 	
-	/* Non-blocking post to queue */
-	ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post parameter update: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("Parameter update posted: %s=%.6f", name, (double)value);
@@ -467,11 +499,10 @@ int motor_api_clear_error(void)
 		.type = MOTOR_EVENT_CLEAR_ERROR,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
+	int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post error clear: queue full");
-		return -ENOMEM;
+		return ret;
 	}
 	
 	LOG_DBG("Error clear posted");
@@ -485,11 +516,12 @@ int motor_api_emergency_stop(void)
 		.error_code = ERROR_EMERGENCY_STOP,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put_front(&motor_event_queue, &evt);
+	int ret = motor_api_post_event_front(&evt);
 	if (ret != 0) {
-		LOG_ERR("Failed to post error event: queue full");
-		return -ENOMEM;
+		if (!k_is_in_isr()) {
+			LOG_ERR("Failed to post error event: queue full");
+		}
+		return ret;
 	}
 	
 	return ret;
@@ -502,11 +534,12 @@ int motor_api_post_error(uint32_t error_code)
 		.error_code = error_code,
 	};
 	
-	/* Non-blocking post to queue */
-	int ret = k_msgq_put_front(&motor_event_queue, &evt);
+	int ret = motor_api_post_event_front(&evt);
 	if (ret != 0) {
-		LOG_ERR("Failed to post error event: queue full");
-		return -ENOMEM;
+		if (!k_is_in_isr()) {
+			LOG_ERR("Failed to post error event: queue full");
+		}
+		return ret;
 	}
 	
 	return ret;

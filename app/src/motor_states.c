@@ -249,11 +249,8 @@ static void state_timer_expiry(struct k_timer *timer)
 		.type = MOTOR_EVENT_TIMEOUT,
 	};
 
-	/* Post timeout event to state machine queue */
-	int ret = k_msgq_put(&motor_event_queue, &evt, K_NO_WAIT);
-	if (ret != 0) {
-		LOG_ERR("Failed to post timeout event: queue full");
-	}
+	/* Timer expiry may run in interrupt context; use the ISR-safe ring. */
+	(void)motor_api_enqueue_event_from_isr(&evt);
 }
 
 /* State machine thread stack and data */
