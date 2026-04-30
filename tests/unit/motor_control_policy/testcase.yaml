@@ -1,0 +1,9 @@
+tests:
+  chopper.motor_control_policy.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+    integration_platforms:
+      - native_sim
+    harness: ztest
