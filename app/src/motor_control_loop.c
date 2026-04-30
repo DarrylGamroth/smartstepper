@@ -37,6 +37,7 @@
 #include "motor/runtime/outer_loop_runtime.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor/runtime/feedback_quality.h"
+#include "motor/runtime/control_refs.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/transforms.h"
@@ -318,27 +319,6 @@ struct motor_control_measurements {
 	bool encoder_frame_error;
 };
 
-struct motor_control_references {
-	float32_t id_ref_a;
-	float32_t iq_ref_a;
-	float32_t velocity_target_rad_s;
-	float32_t velocity_ref_rad_s;
-};
-
-struct motor_control_foc_result {
-	float32_t vd_v;
-	float32_t vq_v;
-	float32_t va_v;
-	float32_t vb_v;
-	float32_t max_voltage_magnitude_v;
-	float32_t inv_park_angle_rad;
-	float32_t da_hb1_pu;
-	float32_t da_hb2_pu;
-	float32_t db_hb1_pu;
-	float32_t db_hb2_pu;
-	bool voltage_saturated;
-};
-
 static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_runtime_ctx *ctx,
 							struct motor_parameters *params,
 							bool control_armed)
@@ -588,10 +568,34 @@ static inline void motor_control_measurements_from_encoder(
 	meas->speed_mech_filtered_rad_s = enc_stage->control_fb.speed_mech_filtered_rad_s;
 }
 
+static inline void motor_feedback_ref_from_measurements(
+	struct motor_feedback_ref *feedback_ref,
+	const struct motor_control_measurements *meas)
+{
+	if (feedback_ref == NULL || meas == NULL) {
+		return;
+	}
+
+	feedback_ref->source = (meas->encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) ?
+				       MOTOR_FEEDBACK_ENCODER :
+				       MOTOR_FEEDBACK_GENERATED_MODEL;
+	feedback_ref->input_source = meas->encoder_input_source;
+	feedback_ref->status = meas->encoder_frame_status;
+	feedback_ref->fresh = meas->fresh_encoder_sample;
+	feedback_ref->warning = meas->encoder_frame_warning;
+	feedback_ref->error = meas->encoder_frame_error;
+	feedback_ref->angle_control_deg = meas->angle_control_degrees;
+	feedback_ref->position_rad = meas->position_mech_rad;
+	feedback_ref->velocity_rad_s = meas->speed_mech_rad_s;
+	feedback_ref->acceleration_rad_s2 = meas->accel_mech_rad_s2;
+	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
+}
+
 static bool motor_control_step_measure_stage(struct motor_parameters *params,
 					     uint32_t mode_flags,
 					     const q31_t *values,
-					     const struct motor_control_references *refs,
+					     const struct motor_current_ref *current_ref,
+					     struct motor_current_ref *current_meas_ref,
 					     struct motor_control_measurements *meas,
 					     struct motor_commission_observation *commission_obs,
 					     struct motor_control_step_report *report)
@@ -625,6 +629,8 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 				  &meas->iq_a) != 0) {
 		return true;
 	}
+	current_meas_ref->id_meas_a = meas->id_a;
+	current_meas_ref->iq_meas_a = meas->iq_a;
 
 	if (params->fault_snapshot.enabled) {
 		motor_fault_snapshot_prepare(report,
@@ -632,8 +638,8 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 					     params->live.encoder_observer_input_rad,
 					     meas->park_angle_rad,
 					     angle_observer_get_elec_speed(&params->observer),
-					     refs->id_ref_a,
-					     refs->iq_ref_a,
+					     current_ref->id_ref_a,
+					     current_ref->iq_ref_a,
 					     meas->id_a,
 					     meas->iq_a,
 					     meas->ia_a,
@@ -660,15 +666,17 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 static void motor_control_step_reference_stage(struct motor_parameters *params,
 					       const struct motor_control_step_ctx *ctx,
 					       struct motor_control_measurements *meas,
-					       struct motor_control_references *refs,
+					       struct motor_motion_ref *motion_ref,
+					       struct motor_feedback_ref *feedback_ref,
+					       struct motor_current_ref *current_ref,
 					       struct motor_rls_runtime_state *rls_runtime)
 {
 	uint32_t mode_flags = ctx->mode_flags;
 
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS)) {
 		traj_run(&params->traj_Id);
-		refs->id_ref_a = traj_get_int_value(&params->traj_Id);
-		refs->iq_ref_a = 0.0f;
+		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->iq_ref_a = 0.0f;
 
 		if (traj_is_at_target(&params->traj_Id)) {
 			motor_roverl_accumulate_scalars(&params->roverl_accumulator_Vd_Id,
@@ -682,14 +690,14 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		motor_rs_est_step_filter(&params->traj_Id,
 					 &params->filter_rs_est_V,
 					 &params->filter_rs_est_I,
-					 params->Vd_V, meas->id_a, &refs->id_ref_a);
-		refs->iq_ref_a = 0.0f;
+					 params->Vd_V, meas->id_a, &current_ref->id_ref_a);
+		current_ref->iq_ref_a = 0.0f;
 	}
 
 	if (motor_is_align_active_state(mode_flags)) {
 		traj_run(&params->traj_Id);
-		refs->id_ref_a = traj_get_int_value(&params->traj_Id);
-		refs->iq_ref_a = 0.0f;
+		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->iq_ref_a = 0.0f;
 	}
 
 	struct motor_outer_loop_inputs outer_inputs = {
@@ -703,14 +711,14 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		.position_loop_decimation = ctx->position_loop_decimation,
 		.velocity_loop_dt_s = ctx->velocity_loop_dt_s,
 		.position_loop_dt_s = ctx->position_loop_dt_s,
-		.position_mech_rad = meas->position_mech_rad,
-		.speed_mech_rad_s = meas->speed_mech_rad_s,
-		.id_meas_a = meas->id_a,
-		.iq_meas_a = meas->iq_a,
-		.velocity_target_rad_s = refs->velocity_target_rad_s,
-		.velocity_ref_rad_s = refs->velocity_ref_rad_s,
-		.id_ref_a = refs->id_ref_a,
-		.iq_ref_a = refs->iq_ref_a,
+		.position_mech_rad = feedback_ref->position_rad,
+		.speed_mech_rad_s = feedback_ref->velocity_rad_s,
+		.id_meas_a = current_ref->id_meas_a,
+		.iq_meas_a = current_ref->iq_meas_a,
+		.velocity_target_rad_s = motion_ref->velocity_target_rad_s,
+		.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s,
+		.id_ref_a = current_ref->id_ref_a,
+		.iq_ref_a = current_ref->iq_ref_a,
 	};
 	struct motor_outer_loop_outputs outer_outputs = {0};
 
@@ -718,11 +726,12 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 						 ctx->control_armed);
 	(void)motor_outer_loop_runtime_step(&params->rt_adapters.outer_loop, &outer_inputs,
 					    &outer_outputs);
-	refs->velocity_target_rad_s = outer_outputs.velocity_target_rad_s;
-	refs->velocity_ref_rad_s = outer_outputs.velocity_ref_rad_s;
+	motion_ref->velocity_target_rad_s = outer_outputs.velocity_target_rad_s;
+	motion_ref->velocity_ref_rad_s = outer_outputs.velocity_ref_rad_s;
 	meas->speed_mech_filtered_rad_s = outer_outputs.speed_mech_filtered_rad_s;
-	refs->id_ref_a = outer_outputs.id_ref_a;
-	refs->iq_ref_a = outer_outputs.iq_ref_a;
+	feedback_ref->velocity_filtered_rad_s = outer_outputs.speed_mech_filtered_rad_s;
+	current_ref->id_ref_a = outer_outputs.id_ref_a;
+	current_ref->iq_ref_a = outer_outputs.iq_ref_a;
 
 	struct motor_current_ref_policy_inputs ref_policy_inputs = {
 		.online_control_state = ctx->online_control_state,
@@ -730,35 +739,36 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		.feature_use_commanded_currents = ctx->feature_use_commanded_currents,
 		.control_armed = ctx->control_armed,
 		.speed_mech_filtered_rad_s = meas->speed_mech_filtered_rad_s,
-		.id_meas_a = meas->id_a,
-		.iq_meas_a = meas->iq_a,
-		.velocity_target_rad_s = refs->velocity_target_rad_s,
-		.velocity_ref_rad_s = refs->velocity_ref_rad_s,
-		.id_ref_a = refs->id_ref_a,
-		.iq_ref_a = refs->iq_ref_a,
+		.id_meas_a = current_ref->id_meas_a,
+		.iq_meas_a = current_ref->iq_meas_a,
+		.velocity_target_rad_s = motion_ref->velocity_target_rad_s,
+		.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s,
+		.id_ref_a = current_ref->id_ref_a,
+		.iq_ref_a = current_ref->iq_ref_a,
 	};
 	struct motor_current_ref_policy_outputs ref_policy_outputs = {0};
 
 	motor_current_ref_policy_ctx_refresh(&params->rt_adapters.current_ref_policy, params);
 	(void)motor_current_ref_apply_policy(&params->rt_adapters.current_ref_policy,
 					     &ref_policy_inputs, &ref_policy_outputs);
-	refs->velocity_target_rad_s = ref_policy_outputs.velocity_target_rad_s;
-	refs->velocity_ref_rad_s = ref_policy_outputs.velocity_ref_rad_s;
-	refs->id_ref_a = ref_policy_outputs.id_ref_a;
-	refs->iq_ref_a = ref_policy_outputs.iq_ref_a;
+	motion_ref->velocity_target_rad_s = ref_policy_outputs.velocity_target_rad_s;
+	motion_ref->velocity_ref_rad_s = ref_policy_outputs.velocity_ref_rad_s;
+	current_ref->id_ref_a = ref_policy_outputs.id_ref_a;
+	current_ref->iq_ref_a = ref_policy_outputs.iq_ref_a;
 
 	motor_rls_runtime_ctx_refresh(&params->rt_adapters.rls, params);
-	refs->id_ref_a = motor_rls_prepare_id_reference(&params->rt_adapters.rls,
-							ctx->online_control_state,
-							ctx->control_armed,
-							meas->fresh_encoder_sample,
-							meas->encoder_frame_error,
-							meas->encoder_input_source,
-							refs->id_ref_a, rls_runtime);
+	current_ref->id_ref_a = motor_rls_prepare_id_reference(&params->rt_adapters.rls,
+							       ctx->online_control_state,
+							       ctx->control_armed,
+							       feedback_ref->fresh,
+							       feedback_ref->error,
+							       feedback_ref->input_source,
+							       current_ref->id_ref_a,
+							       rls_runtime);
 
 	if (motor_is_align_active_state(mode_flags)) {
-		refs->id_ref_a = traj_get_int_value(&params->traj_Id);
-		refs->iq_ref_a = 0.0f;
+		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->iq_ref_a = 0.0f;
 	}
 
 	if (ctx->feature_angle_gen) {
@@ -769,24 +779,34 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 static bool motor_control_step_foc_stage(struct motor_parameters *params,
 					 const struct motor_control_step_ctx *ctx,
 					 const struct motor_control_measurements *meas,
-					 const struct motor_control_references *refs,
-					 struct motor_control_foc_result *foc_res,
+					 const struct motor_motion_ref *motion_ref,
+					 const struct motor_feedback_ref *feedback_ref,
+					 struct motor_angle_ref *angle_ref,
+					 const struct motor_current_ref *current_ref,
+					 struct motor_commutation_ref *commutation_ref,
 					 struct motor_control_pwm_output *pwm_out)
 {
-	foc_res->inv_park_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
+	ARG_UNUSED(motion_ref);
 
-	float32_t observer_elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
+	angle_ref->electrical_angle_rad = angle_observer_get_elec_angle(&params->observer);
+	angle_ref->predicted_electrical_angle_rad =
+		angle_observer_get_elec_angle_pred(&params->observer);
+	angle_ref->electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
+	angle_ref->source = ctx->feature_angle_gen ? MOTOR_ANGLE_SOURCE_GENERATED :
+						 MOTOR_ANGLE_SOURCE_PROPAGATED;
+
 	float32_t decoupling_speed_limit_rad_s =
 		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
 	float32_t flux_linkage_wb_abs = fabsf(params->flux_linkage_wb_active);
 	bool torque_mode_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
 	bool decoupling_min_speed_reached =
-		fabsf(meas->speed_mech_filtered_rad_s) >= CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S;
+		fabsf(feedback_ref->velocity_filtered_rad_s) >=
+		CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S;
 	bool decoupling_flux_valid = isfinite(flux_linkage_wb_abs) &&
 				     (flux_linkage_wb_abs >= CURRENT_DECOUPLING_MIN_FLUX_WB) &&
 				     (flux_linkage_wb_abs <= CURRENT_DECOUPLING_MAX_FLUX_WB);
-	bool decoupling_speed_valid = isfinite(observer_elec_speed_rad_s) &&
-				      (fabsf(observer_elec_speed_rad_s) <=
+	bool decoupling_speed_valid = isfinite(angle_ref->electrical_speed_rad_s) &&
+				      (fabsf(angle_ref->electrical_speed_rad_s) <=
 				       decoupling_speed_limit_rad_s);
 	bool decoupling_feedback_valid = ctx->feature_angle_gen ||
 					 motor_velocity_feedback_is_valid(params->live.position_quality_flags);
@@ -802,11 +822,12 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 	};
 	bool dq_decoupling_enabled = motor_dq_decoupling_is_enabled(&decoupling_enable_in);
 	float32_t decoupling_speed_rad_s =
-		decoupling_speed_valid ? observer_elec_speed_rad_s : 0.0f;
+		decoupling_speed_valid ? angle_ref->electrical_speed_rad_s : 0.0f;
 
 #if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
-	if (!isfinite(foc_res->inv_park_angle_rad) || !isfinite(refs->id_ref_a) ||
-	    !isfinite(refs->iq_ref_a) || !isfinite(meas->id_a) || !isfinite(meas->iq_a) ||
+	if (!isfinite(angle_ref->predicted_electrical_angle_rad) ||
+	    !isfinite(current_ref->id_ref_a) || !isfinite(current_ref->iq_ref_a) ||
+	    !isfinite(current_ref->id_meas_a) || !isfinite(current_ref->iq_meas_a) ||
 	    !isfinite(meas->vbus_v) || !isfinite(params->max_modulation_index) ||
 	    params->max_modulation_index <= 0.0f) {
 		return true;
@@ -814,13 +835,13 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 #endif
 
 	struct motor_foc_voltage_pwm_inputs foc_inputs = {
-		.id_ref_a = refs->id_ref_a,
-		.iq_ref_a = refs->iq_ref_a,
-		.id_a = meas->id_a,
-		.iq_a = meas->iq_a,
+		.id_ref_a = current_ref->id_ref_a,
+		.iq_ref_a = current_ref->iq_ref_a,
+		.id_a = current_ref->id_meas_a,
+		.iq_a = current_ref->iq_meas_a,
 		.vbus_v = meas->vbus_v,
 		.max_modulation_index = params->max_modulation_index,
-		.inv_park_angle_rad = foc_res->inv_park_angle_rad,
+		.inv_park_angle_rad = angle_ref->predicted_electrical_angle_rad,
 		.dq_decoupling_enabled = dq_decoupling_enabled,
 		.electrical_speed_rad_s = decoupling_speed_rad_s,
 		.ld_h = params->rls.ld_est_h,
@@ -829,7 +850,7 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 		.dq_decoupling_flux_headroom_ratio = CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO,
 		.dq_decoupling_ff_limit_ratio = CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO,
 		.braking_enabled = ctx->feature_braking,
-		.braking_iq_ref_a = refs->iq_ref_a,
+		.braking_iq_ref_a = current_ref->iq_ref_a,
 		.braking_speed_rad_s = meas->speed_mech_rad_s,
 		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
 		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
@@ -841,25 +862,26 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 		return true;
 	}
 
-	foc_res->vd_v = foc_outputs.vd_v;
-	foc_res->vq_v = foc_outputs.vq_v;
-	foc_res->va_v = foc_outputs.va_v;
-	foc_res->vb_v = foc_outputs.vb_v;
-	foc_res->da_hb1_pu = foc_outputs.da_hb1_pu;
-	foc_res->da_hb2_pu = foc_outputs.da_hb2_pu;
-	foc_res->db_hb1_pu = foc_outputs.db_hb1_pu;
-	foc_res->db_hb2_pu = foc_outputs.db_hb2_pu;
-	foc_res->max_voltage_magnitude_v = foc_outputs.max_voltage_magnitude_v;
+	commutation_ref->vd_v = foc_outputs.vd_v;
+	commutation_ref->vq_v = foc_outputs.vq_v;
+	commutation_ref->va_v = foc_outputs.va_v;
+	commutation_ref->vb_v = foc_outputs.vb_v;
+	commutation_ref->da_hb1_pu = foc_outputs.da_hb1_pu;
+	commutation_ref->da_hb2_pu = foc_outputs.da_hb2_pu;
+	commutation_ref->db_hb1_pu = foc_outputs.db_hb1_pu;
+	commutation_ref->db_hb2_pu = foc_outputs.db_hb2_pu;
+	commutation_ref->max_voltage_magnitude_v = foc_outputs.max_voltage_magnitude_v;
 
-	float32_t voltage_norm_sq = foc_res->vd_v * foc_res->vd_v + foc_res->vq_v * foc_res->vq_v;
-	float32_t voltage_limit = 0.98f * foc_res->max_voltage_magnitude_v;
-	foc_res->voltage_saturated = foc_res->max_voltage_magnitude_v > 0.0f &&
+	float32_t voltage_norm_sq = commutation_ref->vd_v * commutation_ref->vd_v +
+				    commutation_ref->vq_v * commutation_ref->vq_v;
+	float32_t voltage_limit = 0.98f * commutation_ref->max_voltage_magnitude_v;
+	commutation_ref->voltage_saturated = commutation_ref->max_voltage_magnitude_v > 0.0f &&
 					 voltage_norm_sq >= (voltage_limit * voltage_limit);
 
-	pwm_out->da_hb1_pu = foc_res->da_hb1_pu;
-	pwm_out->da_hb2_pu = foc_res->da_hb2_pu;
-	pwm_out->db_hb1_pu = foc_res->db_hb1_pu;
-	pwm_out->db_hb2_pu = foc_res->db_hb2_pu;
+	pwm_out->da_hb1_pu = commutation_ref->da_hb1_pu;
+	pwm_out->da_hb2_pu = commutation_ref->da_hb2_pu;
+	pwm_out->db_hb1_pu = commutation_ref->db_hb1_pu;
+	pwm_out->db_hb2_pu = commutation_ref->db_hb2_pu;
 	pwm_out->update_pwm = true;
 
 	return false;
@@ -868,45 +890,48 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 static inline void motor_control_step_publish_stage(
 	struct motor_parameters *params,
 	const struct motor_control_measurements *meas,
-	const struct motor_control_references *refs,
-	const struct motor_control_foc_result *foc_res,
+	const struct motor_motion_ref *motion_ref,
+	const struct motor_feedback_ref *feedback_ref,
+	const struct motor_angle_ref *angle_ref,
+	const struct motor_current_ref *current_ref,
+	const struct motor_commutation_ref *commutation_ref,
 	const struct motor_rls_runtime_state *rls_runtime,
 	struct motor_commission_observation *commission_obs)
 {
 	motor_rls_runtime_ctx_refresh(&params->rt_adapters.rls, params);
 	motor_rls_update_estimators(&params->rt_adapters.rls, rls_runtime, meas->id_a, meas->iq_a);
 
-	params->live.position_rad = meas->position_mech_rad;
-	params->live.position_unwrapped_rad = meas->position_mech_rad;
+	params->live.position_rad = feedback_ref->position_rad;
+	params->live.position_unwrapped_rad = feedback_ref->position_rad;
 	params->live.position_innovation_rad = 0.0f;
-	params->live.velocity_rad_s = meas->speed_mech_rad_s;
-	params->live.acceleration_rad_s2 = meas->accel_mech_rad_s2;
-	params->live.velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
-	params->live.velocity_target_rad_s = refs->velocity_target_rad_s;
-	params->live.velocity_ref_rad_s = refs->velocity_ref_rad_s;
+	params->live.velocity_rad_s = feedback_ref->velocity_rad_s;
+	params->live.acceleration_rad_s2 = feedback_ref->acceleration_rad_s2;
+	params->live.velocity_filtered_rad_s = feedback_ref->velocity_filtered_rad_s;
+	params->live.velocity_target_rad_s = motion_ref->velocity_target_rad_s;
+	params->live.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;
 
-	params->live.Id_ref_A = refs->id_ref_a;
-	params->live.Iq_ref_A = refs->iq_ref_a;
-	params->live.Id_A = meas->id_a;
-	params->live.Iq_A = meas->iq_a;
+	params->live.Id_ref_A = current_ref->id_ref_a;
+	params->live.Iq_ref_A = current_ref->iq_ref_a;
+	params->live.Id_A = current_ref->id_meas_a;
+	params->live.Iq_A = current_ref->iq_meas_a;
 	params->live.Ia_A = meas->ia_a;
 	params->live.Ib_A = meas->ib_a;
-	params->Vd_V = foc_res->vd_v;
-	params->Vq_V = foc_res->vq_v;
-	params->live.Va_V = foc_res->va_v;
-	params->live.Vb_V = foc_res->vb_v;
-	params->max_voltage_magnitude_V = foc_res->max_voltage_magnitude_v;
-	params->live.elec_angle_rad = foc_res->inv_park_angle_rad;
+	params->Vd_V = commutation_ref->vd_v;
+	params->Vq_V = commutation_ref->vq_v;
+	params->live.Va_V = commutation_ref->va_v;
+	params->live.Vb_V = commutation_ref->vb_v;
+	params->max_voltage_magnitude_V = commutation_ref->max_voltage_magnitude_v;
+	params->live.elec_angle_rad = angle_ref->predicted_electrical_angle_rad;
 	params->live.dc_bus_voltage_V = meas->vbus_v;
 
 	commission_obs->data_valid = true;
-	commission_obs->id_a = meas->id_a;
-	commission_obs->iq_a = meas->iq_a;
-	commission_obs->vd_v = foc_res->vd_v;
-	commission_obs->vq_v = foc_res->vq_v;
+	commission_obs->id_a = current_ref->id_meas_a;
+	commission_obs->iq_a = current_ref->iq_meas_a;
+	commission_obs->vd_v = commutation_ref->vd_v;
+	commission_obs->vq_v = commutation_ref->vq_v;
 	commission_obs->mech_speed_rad_s = params->live.velocity_rad_s;
-	commission_obs->elec_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
-	commission_obs->saturation = foc_res->voltage_saturated;
+	commission_obs->elec_speed_rad_s = angle_ref->electrical_speed_rad_s;
+	commission_obs->saturation = commutation_ref->voltage_saturated;
 }
 
 void motor_control_loop_step(struct motor_parameters *params,
@@ -948,12 +973,34 @@ void motor_control_loop_step(struct motor_parameters *params,
 		.speed_mech_filtered_rad_s = ctx.speed_mech_filtered_rad_s,
 		.encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED,
 	};
-	struct motor_control_references refs = {
-		.id_ref_a = params->live.Id_ref_A,
-		.iq_ref_a = params->live.Iq_ref_A,
+	struct motor_motion_ref motion_ref = {
+		.position_rad = ctx.position_mech_rad,
 		.velocity_target_rad_s = ctx.velocity_target_rad_s,
 		.velocity_ref_rad_s = ctx.velocity_ref_rad_s,
+		.velocity_rad_s = ctx.speed_mech_rad_s,
+		.acceleration_rad_s2 = ctx.accel_mech_rad_s2,
 	};
+	struct motor_feedback_ref feedback_ref = {
+		.source = MOTOR_FEEDBACK_GENERATED_MODEL,
+		.input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED,
+		.position_rad = ctx.position_mech_rad,
+		.velocity_rad_s = ctx.speed_mech_rad_s,
+		.acceleration_rad_s2 = ctx.accel_mech_rad_s2,
+		.velocity_filtered_rad_s = ctx.speed_mech_filtered_rad_s,
+	};
+	struct motor_actuator_ref actuator_ref = {
+		.kind = MOTOR_ACTUATOR_FOC_CURRENT,
+		.enabled = feature_pi_control,
+	};
+	struct motor_angle_ref angle_ref = {
+		.source = feature_angle_gen ? MOTOR_ANGLE_SOURCE_GENERATED :
+					      MOTOR_ANGLE_SOURCE_PROPAGATED,
+	};
+	struct motor_current_ref current_ref = {
+		.id_ref_a = params->live.Id_ref_A,
+		.iq_ref_a = params->live.Iq_ref_A,
+	};
+	struct motor_commutation_ref commutation_ref = {0};
 
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
@@ -970,13 +1017,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 	motor_control_step_publish_encoder_sidework(params, encoder_sample, &enc_stage, report);
 	motor_control_measurements_from_encoder(&meas, &enc_stage);
+	motor_feedback_ref_from_measurements(&feedback_ref, &meas);
 
 	/* Skip control if PWM output not enabled */
 	if (!feature_pwm_output) {
 		goto isr_done;
 	}
 
-	if (motor_control_step_measure_stage(params, mode_flags, values, &refs, &meas,
+	if (motor_control_step_measure_stage(params, mode_flags, values, &current_ref, &current_ref,
+					     &meas,
 					     &commission_obs, report)) {
 		goto isr_done;
 	}
@@ -987,15 +1036,20 @@ void motor_control_loop_step(struct motor_parameters *params,
 	}
 
 	struct motor_rls_runtime_state rls_runtime = {0};
-	motor_control_step_reference_stage(params, &ctx, &meas, &refs, &rls_runtime);
+	motor_control_step_reference_stage(params, &ctx, &meas, &motion_ref, &feedback_ref,
+					   &current_ref, &rls_runtime);
 
-	struct motor_control_foc_result foc_res = {0};
-	if (motor_control_step_foc_stage(params, &ctx, &meas, &refs, &foc_res, pwm_out)) {
+	if (!actuator_ref.enabled) {
 		goto isr_done;
 	}
 
-	motor_control_step_publish_stage(params, &meas, &refs, &foc_res, &rls_runtime,
-					 &commission_obs);
+	if (motor_control_step_foc_stage(params, &ctx, &meas, &motion_ref, &feedback_ref,
+					 &angle_ref, &current_ref, &commutation_ref, pwm_out)) {
+		goto isr_done;
+	}
+
+	motor_control_step_publish_stage(params, &meas, &motion_ref, &feedback_ref, &angle_ref,
+					 &current_ref, &commutation_ref, &rls_runtime, &commission_obs);
 
 isr_done:
 	motor_control_step_finalize(params, mode_flags, control_armed, &commission_obs);

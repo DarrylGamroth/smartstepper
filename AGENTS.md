@@ -24,7 +24,7 @@ matches the intent of the VS Code tasks in `../.vscode/tasks.json`.
 Fast incremental rebuild of the currently configured west build:
 
 ```bash
-podman exec wonderful_goldberg bash -lc 'west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
 ```
 
 Use the incremental rebuild for code-only changes when the build directory is

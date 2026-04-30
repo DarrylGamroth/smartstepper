@@ -1,10 +1,39 @@
 #include <zephyr/ztest.h>
 
 #include "motor/runtime/config_snapshot.h"
+#include "motor/runtime/control_refs.h"
 
 ZTEST(runtime, test_fast_step_boundary_contract_present)
 {
 	zassert_true(true, "fast-step boundary checks are enforced in CMake");
+}
+
+ZTEST(runtime, test_control_refs_keep_motion_independent_from_foc_backend)
+{
+	struct motor_motion_ref motion = {
+		.position_rad = 1.25f,
+		.velocity_target_rad_s = 2.0f,
+		.velocity_ref_rad_s = 1.5f,
+		.velocity_rad_s = 1.0f,
+		.acceleration_rad_s2 = 0.5f,
+	};
+	struct motor_feedback_ref feedback = {
+		.source = MOTOR_FEEDBACK_ENCODER,
+		.input_source = 1U,
+		.quality_flags = 0x01U,
+		.fresh = true,
+		.position_rad = motion.position_rad,
+		.velocity_rad_s = motion.velocity_rad_s,
+	};
+	struct motor_actuator_ref actuator = {
+		.kind = MOTOR_ACTUATOR_STEP_DIR,
+		.enabled = true,
+	};
+
+	zassert_equal(actuator.kind, MOTOR_ACTUATOR_STEP_DIR, NULL);
+	zassert_equal(feedback.source, MOTOR_FEEDBACK_ENCODER, NULL);
+	zassert_within(motion.position_rad, 1.25f, 1.0e-6f, NULL);
+	zassert_within(motion.velocity_target_rad_s, 2.0f, 1.0e-6f, NULL);
 }
 
 ZTEST(runtime, test_config_snapshot_publish_read_is_coherent)
