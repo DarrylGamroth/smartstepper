@@ -5,14 +5,14 @@ This file captures the known-good build and test commands for this workspace.
 ## Environment
 
 - Host repo path: `/home/dgamroth/workspaces/zephyr-workspace/chopper`
-- Podman container name: `priceless_wiles`
+- Podman container name: `wonderful_goldberg`
 - Container workspace mount: `/workspace/chopper`
 - Zephyr workspace root in container: `/workspace`
 
 If the container is not running:
 
 ```bash
-podman start priceless_wiles
+podman start wonderful_goldberg
 ```
 
 ## Firmware Build (smartstepper_v2)
@@ -20,13 +20,13 @@ podman start priceless_wiles
 Incremental build (fast path):
 
 ```bash
-podman exec priceless_wiles bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'
+podman exec wonderful_goldberg bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'
 ```
 
 Clean reconfigure + build (MT6835 profile overlay enabled):
 
 ```bash
-podman exec priceless_wiles bash -lc '\
+podman exec wonderful_goldberg bash -lc '\
   west build -p always \
     -b smartstepper_v2/stm32h743xx \
     /workspace/chopper/app \
@@ -38,7 +38,7 @@ podman exec priceless_wiles bash -lc '\
 Clean reconfigure + build with debug logging enabled (`debug.conf`):
 
 ```bash
-podman exec priceless_wiles bash -lc '\
+podman exec wonderful_goldberg bash -lc '\
   west build -p always \
     -b smartstepper_v2/stm32h743xx \
     /workspace/chopper/app \
@@ -65,13 +65,13 @@ Run all unit tests (recommended wrapper):
 Run all unit tests directly in container:
 
 ```bash
-podman exec priceless_wiles bash -lc 'cd /workspace/chopper && west twister -T tests/unit -p native_sim --inline-logs -v'
+podman exec wonderful_goldberg bash -lc 'cd /workspace/chopper && west twister -T tests/unit -p native_sim --inline-logs -v'
 ```
 
 Run one unit test suite (example):
 
 ```bash
-./tests/run_unit_tests.sh priceless_wiles -s chopper.motion_profile.unit
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motion_profile.unit
 ```
 
 ## Serial Shell
@@ -103,7 +103,7 @@ tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 - Preferred command:
 
 ```bash
-podman exec priceless_wiles bash -lc 'west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
 ```
 
 - You are allowed to control and test the real motor through the serial shell interface listed above.
@@ -125,7 +125,7 @@ podman exec priceless_wiles bash -lc 'west flash -d /workspace/build/chopper/sma
 ## Notes
 
 - `tests/run_unit_tests.sh` defaults:
-  - container: `priceless_wiles`
+  - container: `wonderful_goldberg`
   - test root: `tests/unit`
   - platform: `native_sim`
 - The wrapper passes extra args through to `west twister`, so use twister flags after the optional container argument.

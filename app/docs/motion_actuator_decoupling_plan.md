@@ -63,6 +63,29 @@ The current coupling is mostly semantic and structural:
 4. `Id/Iq` and commutation-specific concepts appear too early in the motion/control pipeline.
 5. tests cannot easily exercise the pipeline without `motor_parameters`, SMF-derived mode flags, and app feature flags.
 
+## Implementation Readiness Gate
+
+Begin implementation with a behavior-preserving Phase 1 only. This first slice proves the policy model without changing the ISR behavior or shell workflow.
+
+First slice:
+
+1. add policy/data definitions,
+2. add backend capability definitions,
+3. add a pure policy-derive helper,
+4. add unit tests for the existing modes,
+5. do not alter `motor_control_loop.c` behavior,
+6. do not add `profile_open` yet.
+
+Phase 1 is complete only when:
+
+1. the firmware still builds,
+2. unit tests pass,
+3. `velocity_open` maps to generated-angle/current-regulated FOC policy,
+4. closed-loop modes map to encoder-required policies,
+5. invalid backend/current/feedback combinations are rejected by tests.
+
+After Phase 1, later phases can refactor the fast loop around the new refs with a known-good policy layer underneath.
+
 ## Target Pipeline
 
 The fast loop should become an explicit pipeline:
@@ -485,7 +508,7 @@ System orchestration:
 
 ## Phase 1: Add Explicit Policy Types
 
-Create app/runtime policy definitions and derive policy from existing mode flags.
+Create policy definitions and derive policy from existing mode flags without changing runtime behavior.
 
 Scope:
 
@@ -494,15 +517,19 @@ Scope:
 3. add `motor_feedback_source`,
 4. add backend capability definitions,
 5. add a pure policy-derive helper,
-6. keep current behavior unchanged,
-7. keep existing feature flags as compatibility inputs.
+6. add status/string helpers if useful for tests and later shell output,
+7. keep current behavior unchanged,
+8. keep existing feature flags as compatibility inputs,
+9. do not modify current-loop, FOC, or profile execution behavior.
 
 Acceptance:
 
 1. `velocity_open`, `torque`, `velocity_closed`, and `position` map to expected policies,
 2. invalid policy/backend pairings are rejected by tests,
 3. no shell-visible behavior changes,
-4. unit tests cover policy derivation.
+4. unit tests cover policy derivation,
+5. firmware build passes,
+6. full unit suite passes.
 
 ## Phase 2: Introduce Data-Flow Structs In The Fast Loop
 
