@@ -10,6 +10,7 @@
 #include <zephyr/ztest.h>
 
 #include "motor/motion/motion_planner.h"
+#include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
 
 ZTEST(motor_motion_modules, test_velocity_plan_limits_delta)
@@ -184,6 +185,59 @@ ZTEST(motor_motion_modules, test_position_move_resolve_zeroes_ff_on_completion_s
 					   &velocity_ff), NULL);
 	zassert_false(motion_profile_quintic_is_active(&profile), NULL);
 	zassert_within(velocity_ff, 0.0f, 1e-6f, NULL);
+}
+
+ZTEST(motor_motion_modules, test_profile_sequence_can_drive_generated_angle)
+{
+	const float32_t points[] = {0.5f, -0.25f};
+	struct motion_profile_quintic profile = {0};
+	angle_gen_t angle_gen = {0};
+	uint16_t idx = 0U;
+	float32_t target_wrapped = 0.0f;
+	bool complete = false;
+
+	motion_profile_quintic_init(&profile, 0.001f);
+	angle_gen_init(&angle_gen, 0.001f);
+	angle_gen_set_angle(&angle_gen, 0.0f);
+
+	zassert_ok(motor_position_sequence_take_next(points, 2U, false, &idx, &target_wrapped,
+						    &complete), NULL);
+	zassert_false(complete, NULL);
+	zassert_ok(motor_position_move_plan_sequence_segment(&profile,
+					   angle_gen_get_angle(&angle_gen),
+					   0.0f,
+					   target_wrapped,
+					   0.0f,
+					   0.05f,
+					   100.0f,
+					   10000.0f), NULL);
+
+	while (motion_profile_quintic_is_active(&profile)) {
+		motion_profile_quintic_step(&profile);
+		angle_gen_set_angle(&angle_gen, motion_profile_quintic_get_position(&profile));
+	}
+
+	zassert_within(angle_gen_get_angle(&angle_gen), 0.5f, 1e-5f, NULL);
+	zassert_ok(motor_position_sequence_take_next(points, 2U, false, &idx, &target_wrapped,
+						    &complete), NULL);
+	zassert_true(complete, NULL);
+	zassert_ok(motor_position_move_plan_sequence_segment(&profile,
+					   angle_gen_get_angle(&angle_gen),
+					   0.0f,
+					   target_wrapped,
+					   0.0f,
+					   0.05f,
+					   100.0f,
+					   10000.0f), NULL);
+
+	while (motion_profile_quintic_is_active(&profile)) {
+		motion_profile_quintic_step(&profile);
+		angle_gen_set_angle(&angle_gen, motion_profile_quintic_get_position(&profile));
+	}
+
+	zassert_within(wrap_rad_pi(angle_gen_get_angle(&angle_gen) - (-0.25f)), 0.0f, 1e-5f,
+		       NULL);
+	zassert_equal(idx, 2U, NULL);
 }
 
 ZTEST_SUITE(motor_motion_modules, NULL, NULL, NULL, NULL, NULL);
