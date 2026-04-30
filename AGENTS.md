@@ -17,35 +17,43 @@ podman start wonderful_goldberg
 
 ## Firmware Build (smartstepper_v2)
 
-Incremental build (fast path):
+Use `west build` for firmware validation, matching the VS Code tasks in
+`../.vscode/tasks.json`. Do not validate firmware with direct `cmake --build`
+unless explicitly requested.
 
-```bash
-podman exec wonderful_goldberg bash -lc 'cmake --build /workspace/build/chopper/smartstepper_v2 -j4'
-```
-
-Clean reconfigure + build (MT6835 profile overlay enabled):
-
-```bash
-podman exec wonderful_goldberg bash -lc '\
-  west build -p always \
-    -b smartstepper_v2/stm32h743xx \
-    /workspace/chopper/app \
-    -d /workspace/build/chopper/smartstepper_v2 \
-    -S serial-shell -S serial-console -- \
-    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"'
-```
-
-Clean reconfigure + build with debug logging enabled (`debug.conf`):
+Clean reconfigure + build (AEAT-9955 serial shell, matches
+`West build Serial Shell AEAT-9955 (app)`):
 
 ```bash
 podman exec wonderful_goldberg bash -lc '\
-  west build -p always \
-    -b smartstepper_v2/stm32h743xx \
-    /workspace/chopper/app \
-    -d /workspace/build/chopper/smartstepper_v2 \
-    -S serial-shell -S serial-console -- \
-    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay" \
-    -DEXTRA_CONF_FILE=debug.conf'
+  cd /workspace && \
+  BOARD=smartstepper_v2/stm32h743xx \
+  EXTRA_CONF_FILE="debug.conf;logging.conf" \
+  SNIPPET="serial-shell;serial-console;" \
+  DTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
+  west build -p \
+    --build-dir /workspace/build/chopper/smartstepper_v2 \
+    /workspace/chopper/app'
+```
+
+Clean reconfigure + build (MT6835 serial shell):
+
+```bash
+podman exec wonderful_goldberg bash -lc '\
+  cd /workspace && \
+  BOARD=smartstepper_v2/stm32h743xx \
+  EXTRA_CONF_FILE="debug.conf;logging.conf" \
+  SNIPPET="serial-shell;serial-console;" \
+  DTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay" \
+  west build -p \
+    --build-dir /workspace/build/chopper/smartstepper_v2 \
+    /workspace/chopper/app'
+```
+
+Incremental rebuild of an already configured west build:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'west build --build-dir /workspace/build/chopper/smartstepper_v2'
 ```
 
 Overlay note:
