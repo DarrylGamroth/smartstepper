@@ -12,8 +12,6 @@
 #include <zephyr/dsp/types.h>
 
 #include "motor/filters/pi.h"
-#include "motor/motion/traj.h"
-#include "motor/motion/angle_gen.h"
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
 #include "motor/control/position_regulator.h"
@@ -31,8 +29,6 @@ struct motor_current_ref_policy_ctx {
 	float32_t *position_cl_i_term_rad_s;
 	struct motor_velocity_regulator_state *velocity_reg_state;
 	struct motor_position_regulator_state *position_reg_state;
-	struct traj_f32 *traj_velocity;
-	angle_gen_t *angle_gen;
 	struct motor_mpr_velocity_state *velocity_mpr_state;
 	struct motor_mpr_position_state *position_mpr_state;
 	struct motor_dob_state *velocity_dob_state;
@@ -60,6 +56,8 @@ struct motor_current_ref_policy_outputs {
 	float32_t velocity_ref_rad_s;
 	float32_t id_ref_a;
 	float32_t iq_ref_a;
+	bool reset_current_pi;
+	bool disarmed_interlock_active;
 };
 
 int motor_current_ref_apply_policy(struct motor_current_ref_policy_ctx *ctx,

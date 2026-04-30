@@ -14,7 +14,6 @@
 
 #include "motor/filters/filter_so.h"
 #include "motor/motion/traj.h"
-#include "motor/motion/angle_gen.h"
 #include "motor/motion/motion_profile.h"
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
@@ -37,7 +36,6 @@ struct motor_outer_loop_runtime_ctx {
 	float32_t *position_cl_i_term_rad_s;
 	struct motor_position_regulator_state *position_reg_state;
 	struct traj_f32 *traj_velocity;
-	angle_gen_t *angle_gen;
 	struct filter_so_f32 *filter_velocity_notch;
 	uint8_t position_quality_flags;
 	float32_t *live_velocity_target_rad_s;
@@ -67,7 +65,6 @@ struct motor_outer_loop_runtime_ctx {
 struct motor_outer_loop_inputs {
 	bool position_active;
 	bool velocity_active;
-	bool feature_angle_gen;
 	bool feature_velocity_traj;
 	uint32_t velocity_loop_decimation;
 	uint32_t position_loop_decimation;

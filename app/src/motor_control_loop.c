@@ -705,7 +705,6 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		.velocity_active =
 			motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED) ||
 			motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION),
-		.feature_angle_gen = ctx->feature_angle_gen,
 		.feature_velocity_traj = ctx->feature_velocity_traj,
 		.velocity_loop_decimation = ctx->velocity_loop_decimation,
 		.position_loop_decimation = ctx->position_loop_decimation,
@@ -755,6 +754,16 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 	motion_ref->velocity_ref_rad_s = ref_policy_outputs.velocity_ref_rad_s;
 	current_ref->id_ref_a = ref_policy_outputs.id_ref_a;
 	current_ref->iq_ref_a = ref_policy_outputs.iq_ref_a;
+
+	if (ref_policy_outputs.disarmed_interlock_active) {
+		traj_set_target_value(&params->traj_velocity, 0.0f);
+		traj_set_int_value(&params->traj_velocity, 0.0f);
+		angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	}
+
+	if (ctx->feature_angle_gen) {
+		angle_gen_set_velocity(&params->angle_gen, motion_ref->velocity_ref_rad_s);
+	}
 
 	motor_rls_runtime_ctx_refresh(&params->rt_adapters.rls, params);
 	current_ref->id_ref_a = motor_rls_prepare_id_reference(&params->rt_adapters.rls,

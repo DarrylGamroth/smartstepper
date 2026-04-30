@@ -132,11 +132,6 @@ int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,
 		motor_velocity_plan_step(ctx->traj_velocity,
 					 &out->velocity_target_rad_s,
 					 &out->velocity_ref_rad_s);
-
-		/* Open-loop commutation uses the trajectory directly. */
-		if (in->feature_angle_gen) {
-			angle_gen_set_velocity(ctx->angle_gen, out->velocity_ref_rad_s);
-		}
 	}
 
 	/* Closed-loop velocity and position share the same inner velocity->Iq stage. */
