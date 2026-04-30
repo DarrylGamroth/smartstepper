@@ -17,43 +17,58 @@ podman start wonderful_goldberg
 
 ## Firmware Build (smartstepper_v2)
 
-Use `west build` for firmware validation, matching the VS Code tasks in
-`../.vscode/tasks.json`. Do not validate firmware with direct `cmake --build`
-unless explicitly requested.
+Use `west build` for firmware validation. Prefer explicit west arguments so the
+board, snippets, overlays, and config files are visible in the command. This
+matches the intent of the VS Code tasks in `../.vscode/tasks.json`.
 
-Clean reconfigure + build (AEAT-9955 serial shell, matches
+Fast incremental rebuild of the currently configured west build:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Use the incremental rebuild for code-only changes when the build directory is
+already configured for the desired motor overlay. Reconfigure when changing
+overlays, snippets, Kconfig fragments, board, or generated devicetree inputs.
+
+Reconfigure + build (AEAT-9955 serial shell, matches
 `West build Serial Shell AEAT-9955 (app)`):
 
 ```bash
 podman exec wonderful_goldberg bash -lc '\
-  cd /workspace && \
-  BOARD=smartstepper_v2/stm32h743xx \
-  EXTRA_CONF_FILE="debug.conf;logging.conf" \
-  SNIPPET="serial-shell;serial-console;" \
-  DTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
-  west build -p \
-    --build-dir /workspace/build/chopper/smartstepper_v2 \
-    /workspace/chopper/app'
+  west build \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
+    -DEXTRA_CONF_FILE="debug.conf;logging.conf"'
 ```
 
-Clean reconfigure + build (MT6835 serial shell):
+Reconfigure + build (MT6835 serial shell):
 
 ```bash
 podman exec wonderful_goldberg bash -lc '\
-  cd /workspace && \
-  BOARD=smartstepper_v2/stm32h743xx \
-  EXTRA_CONF_FILE="debug.conf;logging.conf" \
-  SNIPPET="serial-shell;serial-console;" \
-  DTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay" \
-  west build -p \
-    --build-dir /workspace/build/chopper/smartstepper_v2 \
-    /workspace/chopper/app'
+  west build \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay" \
+    -DEXTRA_CONF_FILE="debug.conf;logging.conf"'
 ```
 
-Incremental rebuild of an already configured west build:
+Pristine reconfigure is only needed if CMake cache/config state is stale:
 
 ```bash
-podman exec wonderful_goldberg bash -lc 'west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc '\
+  west build -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2 \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
+    -DEXTRA_CONF_FILE="debug.conf;logging.conf"'
 ```
 
 Overlay note:
