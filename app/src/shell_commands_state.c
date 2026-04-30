@@ -19,6 +19,7 @@
 #include "motor_states.h"
 #include "motor_state_utils.h"
 #include "motor/runtime/keepalive_policy.h"
+#include "motor/runtime/control_policy.h"
 #include "motor_hardware.h"
 #include "motor_encoder_pipeline.h"
 #include "config.h"
@@ -75,6 +76,90 @@ static const char *motor_calibration_mode_to_string(uint8_t mode)
 	default:
 		return "unknown";
 	}
+}
+
+static enum motor_control_policy_mode motor_shell_policy_mode_from_state(int state)
+{
+	switch (state) {
+	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
+	case MOTOR_STATE_ONLINE_PROFILE_OPEN:
+		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
+	case MOTOR_STATE_ONLINE_TORQUE:
+		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
+	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED:
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
+	case MOTOR_STATE_ONLINE_POSITION:
+		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	case MOTOR_STATE_CALIBRATION:
+	case MOTOR_STATE_OFFSET_MEAS:
+	case MOTOR_STATE_RS_EST:
+	case MOTOR_STATE_ROVERL_MEAS:
+	case MOTOR_STATE_ALIGN:
+	case MOTOR_STATE_ALIGN_POS_INJECT:
+	case MOTOR_STATE_ALIGN_POS_SAMPLE:
+	case MOTOR_STATE_ALIGN_NEG_INJECT:
+	case MOTOR_STATE_ALIGN_NEG_SAMPLE:
+		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
+	default:
+		return MOTOR_CONTROL_POLICY_MODE_DISABLED;
+	}
+}
+
+static int motor_shell_derive_control_policy(struct motor_parameters *params,
+					     struct motor_control_policy *policy)
+{
+	if (params == NULL || policy == NULL) {
+		return -EINVAL;
+	}
+
+	atomic_val_t flags = atomic_get(&params->feature_flags);
+	struct motor_control_policy_input input = {
+		.mode = motor_shell_policy_mode_from_state(motor_api_get_state()),
+		.features = {
+			.encoder_read_enabled =
+				(flags & BIT(MOTOR_FEATURE_ENCODER_READ)) != 0,
+			.angle_gen_enabled =
+				(flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0,
+			.velocity_traj_enabled =
+				(flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0,
+			.commanded_currents_enabled =
+				(flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0,
+			.current_loop_enabled =
+				(flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0,
+		},
+		.profile_sequence_active = params->profile_seq.running,
+	};
+
+	return motor_control_policy_derive(&input, policy);
+}
+
+static void motor_shell_print_control_policy(const struct shell *sh,
+					     const struct motor_control_policy *policy)
+{
+	struct motor_actuator_caps caps = motor_actuator_caps_for_kind(policy->actuator_kind);
+	bool valid = motor_control_policy_is_valid(policy, &caps);
+
+	shell_print(sh, "Control Policy:");
+	shell_print(sh, "  Motion source:    %s",
+		    motor_motion_source_to_string(policy->motion_source));
+	shell_print(sh, "  Feedback source:  %s",
+		    motor_feedback_source_to_string(policy->feedback_source));
+	shell_print(sh, "  Angle source:     %s",
+		    motor_angle_source_to_string(policy->angle_source));
+	shell_print(sh, "  Current source:   %s",
+		    motor_current_source_to_string(policy->current_source));
+	shell_print(sh, "  Actuator/backend: %s",
+		    motor_actuator_kind_to_string(policy->actuator_kind));
+	shell_print(sh, "  Encoder read:     %s",
+		    policy->encoder_read_enabled ? "ENABLED" : "DISABLED");
+	shell_print(sh, "  Encoder required: %s",
+		    policy->encoder_required_for_control ? "YES" : "NO");
+	shell_print(sh, "  Current loop:     %s",
+		    policy->current_loop_enabled ? "ENABLED" : "DISABLED");
+	shell_print(sh, "  Generated drive:  %s",
+		    policy->generated_angle_position_driven ? "position" : "velocity/none");
+	shell_print(sh, "  Policy valid:     %s", valid ? "YES" : "NO");
 }
 
 #define MOTOR_ENCODER_COMPARE_REF_GENERATED 0U
@@ -463,6 +548,13 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
 	shell_print(sh, "  Enc dir sign: %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
+	struct motor_control_policy policy = {0};
+	if (motor_shell_derive_control_policy(g_motor_params, &policy) == 0) {
+		motor_shell_print_control_policy(sh, &policy);
+	} else {
+		shell_print(sh, "Control Policy:");
+		shell_print(sh, "  Policy valid:     NO");
+	}
 	if (g_motor_params->calibration.running || motor_state_is_align_phase(state)) {
 		shell_print(sh, "  Align phase:  %s", state_str);
 		shell_print(sh,
@@ -483,6 +575,30 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 				     (180.0f / PI_F32)));
 	}
 	
+	return 0;
+}
+
+/* motor state policy */
+int cmd_motor_state_policy(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	int state = motor_api_get_state();
+	struct motor_control_policy policy = {0};
+	int ret = motor_shell_derive_control_policy(g_motor_params, &policy);
+	if (ret != 0) {
+		shell_error(sh, "Failed to derive control policy (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "State: %s (%d)", motor_state_to_string(state), state);
+	motor_shell_print_control_policy(sh, &policy);
 	return 0;
 }
 

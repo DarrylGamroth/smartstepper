@@ -1578,6 +1578,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(commission, NULL, "Run full commissioning (offset + R/L + Rs + align)", cmd_motor_state_commission),
 	SHELL_CMD(clear_error, NULL, "Clear error state", cmd_motor_state_clear_error),
 	SHELL_CMD(status, NULL, "Show motor status", cmd_motor_state_status),
+	SHELL_CMD(policy, NULL, "Show active control policy", cmd_motor_state_policy),
 	SHELL_CMD(mode, &sub_motor_state_mode, "Switch control mode", NULL),
 	SHELL_SUBCMD_SET_END
 );
