@@ -40,6 +40,13 @@ static inline uint32_t motor_profile_period_ms_to_ticks(uint32_t period_ms)
 	return (ticks == 0U) ? 1U : ticks;
 }
 
+static inline bool motor_profile_seq_mode_active(const struct motor_parameters *params)
+{
+	return params != NULL &&
+	       (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ||
+		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN));
+}
+
 static const char *motor_profile_seq_trigger_source_to_string(uint8_t source)
 {
 	switch (source) {
@@ -291,7 +298,7 @@ static void motor_profile_seq_external_capture_callback(const struct device *dev
 
 	if (!params->profile_seq.running ||
 	    atomic_get(&params->control_armed) == 0 ||
-	    !motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+	    !motor_profile_seq_mode_active(params)) {
 		return;
 	}
 
@@ -783,8 +790,8 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
-		shell_error(sh, "Sequence start requires ONLINE_POSITION mode.");
+	if (!motor_profile_seq_mode_active(g_motor_params)) {
+		shell_error(sh, "Sequence start requires ONLINE_POSITION or ONLINE_PROFILE_OPEN mode.");
 		return -EACCES;
 	}
 
@@ -903,10 +910,7 @@ int cmd_motor_profile_seq_status(const struct shell *sh, size_t argc, char **arg
 
 	shell_print(sh, "Profile Sequence:");
 	shell_print(sh, "  Running:      %s", g_motor_params->profile_seq.running ? "YES" : "NO");
-	shell_print(sh, "  Mode:         %s",
-		    motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ?
-			    "ONLINE_POSITION" :
-			    motor_state_to_string(motor_api_get_state()));
+	shell_print(sh, "  Mode:         %s", motor_state_to_string(motor_api_get_state()));
 	shell_print(sh, "  Armed:        %s", motor_control_is_armed(g_motor_params) ? "YES" : "NO");
 	shell_print(sh, "  Loop:         %s", g_motor_params->profile_seq.loop ? "YES" : "NO");
 	shell_print(sh, "  Count:        %u / %u", g_motor_params->profile_seq.count,

@@ -663,6 +663,45 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 	return false;
 }
 
+static inline void motor_control_step_profile_open_motion(struct motor_parameters *params,
+							  bool advance,
+							  struct motor_motion_ref *motion_ref,
+							  struct motor_feedback_ref *feedback_ref)
+{
+	if (params == NULL || motion_ref == NULL || feedback_ref == NULL) {
+		return;
+	}
+
+	if (advance && motion_profile_quintic_is_active(&params->position_profile)) {
+		motion_profile_quintic_step(&params->position_profile);
+	}
+
+	if (!params->position_profile.valid) {
+		return;
+	}
+
+	float32_t position_rad = motion_profile_quintic_get_position(&params->position_profile);
+	float32_t velocity_rad_s = motion_profile_quintic_is_active(&params->position_profile) ?
+					   motion_profile_quintic_get_velocity(&params->position_profile) :
+					   0.0f;
+	float32_t accel_rad_s2 = motion_profile_quintic_is_active(&params->position_profile) ?
+					 motion_profile_quintic_get_accel(&params->position_profile) :
+					 0.0f;
+
+	angle_gen_set_angle(&params->angle_gen, position_rad);
+	angle_gen_set_velocity(&params->angle_gen, velocity_rad_s);
+	motion_ref->position_rad = position_rad;
+	motion_ref->velocity_target_rad_s = velocity_rad_s;
+	motion_ref->velocity_ref_rad_s = velocity_rad_s;
+	motion_ref->velocity_rad_s = velocity_rad_s;
+	motion_ref->acceleration_rad_s2 = accel_rad_s2;
+	feedback_ref->position_rad = position_rad;
+	feedback_ref->velocity_rad_s = velocity_rad_s;
+	feedback_ref->acceleration_rad_s2 = accel_rad_s2;
+	feedback_ref->velocity_filtered_rad_s = velocity_rad_s;
+	params->position_target_rad = wrap_rad_2pi(position_rad);
+}
+
 static void motor_control_step_reference_stage(struct motor_parameters *params,
 					       const struct motor_control_step_ctx *ctx,
 					       struct motor_control_measurements *meas,
@@ -698,6 +737,17 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		traj_run(&params->traj_Id);
 		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
+	}
+
+	bool profile_open_active =
+		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_PROFILE_OPEN);
+	if (profile_open_active) {
+		motor_control_step_profile_open_motion(params, ctx->control_armed, motion_ref,
+						       feedback_ref);
+		meas->position_mech_rad = feedback_ref->position_rad;
+		meas->speed_mech_rad_s = feedback_ref->velocity_rad_s;
+		meas->accel_mech_rad_s2 = feedback_ref->acceleration_rad_s2;
+		meas->speed_mech_filtered_rad_s = feedback_ref->velocity_filtered_rad_s;
 	}
 
 	struct motor_outer_loop_inputs outer_inputs = {
@@ -780,7 +830,7 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 		current_ref->iq_ref_a = 0.0f;
 	}
 
-	if (ctx->feature_angle_gen) {
+	if (ctx->feature_angle_gen && !profile_open_active) {
 		angle_gen_run(&params->angle_gen);
 	}
 }

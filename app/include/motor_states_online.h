@@ -21,6 +21,10 @@ void motor_state_online_velocity_open_entry(void *obj);
 enum smf_state_result motor_state_online_velocity_open_run(void *obj);
 void motor_state_online_velocity_open_exit(void *obj);
 
+void motor_state_online_profile_open_entry(void *obj);
+enum smf_state_result motor_state_online_profile_open_run(void *obj);
+void motor_state_online_profile_open_exit(void *obj);
+
 void motor_state_online_velocity_closed_entry(void *obj);
 enum smf_state_result motor_state_online_velocity_closed_run(void *obj);
 void motor_state_online_velocity_closed_exit(void *obj);

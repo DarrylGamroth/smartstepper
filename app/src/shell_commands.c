@@ -669,6 +669,7 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 
 	const struct smf_state *mode = g_motor_params->state_for_isr;
 	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_PROFILE_OPEN) &&
 	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) &&
 	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_POSITION)) {
 		shell_print(sh, "Velocity controller: INACTIVE");
@@ -1562,6 +1563,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state_mode,
 	SHELL_CMD(torque, NULL, "Torque (Id/Iq) control mode", cmd_motor_state_mode_torque),
 	SHELL_CMD(velocity_open, NULL, "Open-loop velocity control mode", cmd_motor_state_mode_velocity_open),
+	SHELL_CMD(profile_open, NULL, "Open-loop generated-angle profile mode", cmd_motor_state_mode_profile_open),
 	SHELL_CMD(velocity_closed, NULL, "Closed-loop velocity control mode", cmd_motor_state_mode_velocity_closed),
 	SHELL_CMD(position, NULL, "Closed-loop position control mode", cmd_motor_state_mode_position),
 	SHELL_SUBCMD_SET_END

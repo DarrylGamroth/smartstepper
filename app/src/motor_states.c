@@ -97,6 +97,9 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]) {
 		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN;
 	}
+	if (state == &motor_states[MOTOR_STATE_ONLINE_PROFILE_OPEN]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_PROFILE_OPEN;
+	}
 	if (state == &motor_states[MOTOR_STATE_ONLINE_TORQUE]) {
 		mode_flags |= MOTOR_RT_MODE_ONLINE_TORQUE;
 	}
@@ -349,6 +352,11 @@ const struct smf_state motor_states[] = {
 								motor_state_online_velocity_open_exit,
 								&motor_states[MOTOR_STATE_ONLINE],
 								NULL),
+	[MOTOR_STATE_ONLINE_PROFILE_OPEN] = SMF_CREATE_STATE(motor_state_online_profile_open_entry,
+							      motor_state_online_profile_open_run,
+							      motor_state_online_profile_open_exit,
+							      &motor_states[MOTOR_STATE_ONLINE],
+							      NULL),
 	[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] = SMF_CREATE_STATE(motor_state_online_velocity_closed_entry,
 								  motor_state_online_velocity_closed_run,
 								  motor_state_online_velocity_closed_exit,
@@ -401,6 +409,7 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_ONLINE:       return "ONLINE";
 	case MOTOR_STATE_ONLINE_TORQUE:          return "ONLINE_TORQUE";
 	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:   return "ONLINE_VELOCITY_OPEN";
+	case MOTOR_STATE_ONLINE_PROFILE_OPEN:    return "ONLINE_PROFILE_OPEN";
 	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED: return "ONLINE_VELOCITY_CLOSED";
 	case MOTOR_STATE_ONLINE_POSITION:        return "ONLINE_POSITION";
 	case MOTOR_STATE_ERROR:        return "ERROR";

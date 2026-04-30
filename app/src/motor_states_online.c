@@ -68,6 +68,62 @@ static int motor_position_plan_sequence_move(struct motor_parameters *params, fl
 	return 0;
 }
 
+static enum smf_state_result motor_profile_sequence_run(struct motor_parameters *params)
+{
+	if (params == NULL) {
+		return SMF_EVENT_PROPAGATE;
+	}
+
+	switch (params->event.type) {
+	case MOTOR_EVENT_PROFILE_SEQ_TICK: {
+		if (!params->profile_seq.running) {
+			return SMF_EVENT_HANDLED;
+		}
+		if (atomic_get(&params->control_armed) == 0) {
+			return SMF_EVENT_HANDLED;
+		}
+
+		float32_t target_wrapped_rad = 0.0f;
+		bool complete_after_take = false;
+		int ret = motor_position_sequence_take_next(params->profile_seq.points_rad,
+							    params->profile_seq.count,
+							    params->profile_seq.loop,
+							    &params->profile_seq.next_idx,
+							    &target_wrapped_rad,
+							    &complete_after_take);
+		if (ret == -ENOENT) {
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
+		}
+		if (ret != 0) {
+			LOG_ERR("Profile sequence index update failed (%d), stopping", ret);
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
+		}
+
+		ret = motor_position_plan_sequence_move(params, target_wrapped_rad);
+		if (ret != 0) {
+			LOG_ERR("Profile sequence move planning failed (%d), stopping", ret);
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
+			return SMF_EVENT_HANDLED;
+		}
+
+		if (complete_after_take) {
+			params->profile_seq.running = false;
+			params->profile_seq.tick_counter = 0U;
+			LOG_INF("Profile sequence completed");
+		}
+		return SMF_EVENT_HANDLED;
+	}
+
+	default:
+		return SMF_EVENT_PROPAGATE;
+	}
+}
+
 void motor_state_online_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
@@ -270,6 +326,72 @@ void motor_state_online_velocity_open_exit(void *obj)
 				      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 }
 
+/* Substate: ONLINE_PROFILE_OPEN - Open-loop generated-angle profile control */
+void motor_state_online_profile_open_entry(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+	float32_t mech_angle_rad = params->live.position_rad;
+
+	LOG_INF("Entering ONLINE_PROFILE_OPEN substate");
+
+	/* Open-loop profile control drives generated mechanical position directly.
+	 * Encoder reads remain disabled; capture telemetry can still request samples.
+	 */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+						      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+
+	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	angle_gen_set_angle(&params->angle_gen, mech_angle_rad);
+	motion_profile_quintic_cancel(&params->position_profile, mech_angle_rad);
+	params->position_target_rad = wrap_rad_2pi(mech_angle_rad);
+
+	params->velocity_cl_i_term_A = 0.0f;
+	params->position_cl_i_term_rad_s = 0.0f;
+	params->velocity_loop_phase = 0U;
+	params->position_loop_phase = 0U;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state, 0.0f);
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
+
+	LOG_INF("Open-loop profile mode initialized at %.2f deg",
+		(double)(mech_angle_rad * 180.0f / PI_F32));
+}
+
+enum smf_state_result motor_state_online_profile_open_run(void *obj)
+{
+	return motor_profile_sequence_run((struct motor_parameters *)obj);
+}
+
+void motor_state_online_profile_open_exit(void *obj)
+{
+	struct motor_parameters *params = (struct motor_parameters *)obj;
+	float32_t hold_rad = angle_gen_get_angle(&params->angle_gen);
+
+	LOG_INF("Exiting ONLINE_PROFILE_OPEN substate");
+
+	angle_gen_set_velocity(&params->angle_gen, 0.0f);
+	motion_profile_quintic_cancel(&params->position_profile, hold_rad);
+	params->live.velocity_target_rad_s = 0.0f;
+	params->live.velocity_ref_rad_s = 0.0f;
+	params->profile_seq.running = false;
+	params->profile_seq.tick_counter = 0U;
+	params->velocity_cl_i_term_A = 0.0f;
+	params->position_cl_i_term_rad_s = 0.0f;
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
+	motor_dob_reset(&params->velocity_dob_state, 0.0f);
+	params->live.velocity_dob_iq_ff_a = 0.0f;
+	params->live.velocity_dob_disturbance_nm = 0.0f;
+	params->live.velocity_dob_residual_rad_s = 0.0f;
+
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+}
+
 /* Substate: ONLINE_VELOCITY_CLOSED - Closed-loop velocity control */
 void motor_state_online_velocity_closed_entry(void *obj)
 {
@@ -368,56 +490,7 @@ void motor_state_online_position_entry(void *obj)
 
 enum smf_state_result motor_state_online_position_run(void *obj)
 {
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	switch (params->event.type) {
-	case MOTOR_EVENT_PROFILE_SEQ_TICK: {
-		if (!params->profile_seq.running) {
-			return SMF_EVENT_HANDLED;
-		}
-		if (atomic_get(&params->control_armed) == 0) {
-			return SMF_EVENT_HANDLED;
-		}
-
-		float32_t target_wrapped_rad = 0.0f;
-		bool complete_after_take = false;
-		int ret = motor_position_sequence_take_next(params->profile_seq.points_rad,
-							    params->profile_seq.count,
-							    params->profile_seq.loop,
-							    &params->profile_seq.next_idx,
-							    &target_wrapped_rad,
-							    &complete_after_take);
-		if (ret == -ENOENT) {
-			params->profile_seq.running = false;
-			params->profile_seq.tick_counter = 0U;
-			return SMF_EVENT_HANDLED;
-		}
-		if (ret != 0) {
-			LOG_ERR("Profile sequence index update failed (%d), stopping", ret);
-			params->profile_seq.running = false;
-			params->profile_seq.tick_counter = 0U;
-			return SMF_EVENT_HANDLED;
-		}
-
-		ret = motor_position_plan_sequence_move(params, target_wrapped_rad);
-		if (ret != 0) {
-			LOG_ERR("Profile sequence move planning failed (%d), stopping", ret);
-			params->profile_seq.running = false;
-			params->profile_seq.tick_counter = 0U;
-			return SMF_EVENT_HANDLED;
-		}
-
-		if (complete_after_take) {
-			params->profile_seq.running = false;
-			params->profile_seq.tick_counter = 0U;
-			LOG_INF("Profile sequence completed");
-		}
-		return SMF_EVENT_HANDLED;
-	}
-
-	default:
-		return SMF_EVENT_PROPAGATE;
-	}
+	return motor_profile_sequence_run((struct motor_parameters *)obj);
 }
 
 void motor_state_online_position_exit(void *obj)

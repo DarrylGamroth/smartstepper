@@ -434,6 +434,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
@@ -537,6 +538,14 @@ int cmd_motor_state_mode_velocity_open(const struct shell *sh, size_t argc, char
 	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_OPEN, "velocity_open");
 }
 
+/* motor state mode profile_open */
+int cmd_motor_state_mode_profile_open(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_PROFILE_OPEN, "profile_open");
+}
+
 /* motor state mode velocity_closed */
 int cmd_motor_state_mode_velocity_closed(const struct shell *sh, size_t argc, char **argv)
 {
@@ -617,6 +626,7 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
 	bool autonomous_keepalive =
