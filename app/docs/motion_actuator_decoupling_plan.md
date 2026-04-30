@@ -86,6 +86,42 @@ Phase 1 is complete only when:
 
 After Phase 1, later phases can refactor the fast loop around the new refs with a known-good policy layer underneath.
 
+## Implementation Status
+
+Status as of 2026-04-30:
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 1: Policy types | Complete | `motor_control_policy` and backend capability validation are implemented and unit-tested. |
+| Phase 2: Fast-loop data-flow refs | Complete | The fast loop now passes explicit motion, feedback, actuator, angle, current, and commutation refs internally. |
+| Phase 3: Motion/current-source split | Complete | Generated-angle velocity is driven from `motor_motion_ref`; current arbitration no longer owns angle-generator trajectory state. |
+| Phase 4: `profile_open` | Complete | `ONLINE_PROFILE_OPEN` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
+| Phase 5: Shell/status cleanup | Complete | `motor state policy` and `motor state status` expose motion source, feedback source, angle source, current source, backend kind, and encoder dependency. |
+| Phase 6: Simulation/unit tests | Partially complete | Pure policy and motion tests cover profile-open encoder independence and generated-angle profile sequencing. Broader pipeline simulation remains future work. |
+| Phase 7: HIL validation | Not started | Hardware validation should wait for the pre-Phase 7 cleanup gate below. |
+
+Implemented commits:
+
+1. `c43910b refactor(motion): introduce fast loop control refs`
+2. `51c5fef refactor(motion): split trajectory from generated angle drive`
+3. `dc1385b feat(motion): add profile open mode`
+4. `a82d270 feat(motion): expose active control policy`
+5. `4a29096 test(motion): expand decoupled policy coverage`
+
+Validation evidence is recorded in `app/docs/plan/execution_log.md`.
+
+## Pre-Phase 7 Cleanup Gate
+
+Before HIL validation, clean up the remaining real-time/API concerns found during review:
+
+1. Replace any ISR path that calls `motor_api_post_error()` or `k_msgq_put_front()` with the ISR-safe event ring or a dedicated fault latch.
+2. Keep shell/event operations out of direct ISR context; normal shell/API commands should continue to flow through state-machine events.
+3. Decide whether `motor_control_loop_step()` remains an app orchestrator over `struct motor_parameters` or gets a smaller `motor_rt_control_ctx` API before adding more backends.
+4. Move MPR/DOB initialization and full config validation out of hot `step()` calls where practical; the ISR should run validated modules.
+5. Cap or precompute MPR horizon work for MCU use so an aggressive runtime setting cannot consume the 20 kHz ISR budget.
+
+Phase 7 should validate behavior, not discover avoidable ISR/API boundary problems.
+
 ## Target Pipeline
 
 The fast loop should become an explicit pipeline:
