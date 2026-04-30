@@ -267,7 +267,13 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->input_source = encoder_fb->control.input_source;
 }
 
-struct motor_control_step_ctx {
+/*
+ * Compact, per-ISR snapshot of the state/config fields needed by the fast
+ * control stages. The broad app-owned motor_parameters object still owns the
+ * backing storage, but stage logic should consume this context where possible
+ * instead of repeatedly reaching through the full application object.
+ */
+struct motor_rt_control_ctx {
 	uint32_t mode_flags;
 	bool feature_angle_gen;
 	bool feature_pwm_output;
@@ -371,8 +377,8 @@ static inline void motor_commission_runtime_ctx_refresh(struct motor_commission_
 	ctx->profile_max_accel_rad_s2 = params->profile_max_accel_rad_s2;
 }
 
-static inline void motor_control_step_cfg_init(struct motor_control_step_ctx *ctx,
-					       const struct motor_parameters *params)
+static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
+					     const struct motor_parameters *params)
 {
 	memset(ctx, 0, sizeof(*ctx));
 	struct motor_rt_config_snapshot cfg = {0};
@@ -703,7 +709,7 @@ static inline void motor_control_step_profile_open_motion(struct motor_parameter
 }
 
 static void motor_control_step_reference_stage(struct motor_parameters *params,
-					       const struct motor_control_step_ctx *ctx,
+					       const struct motor_rt_control_ctx *ctx,
 					       struct motor_control_measurements *meas,
 					       struct motor_motion_ref *motion_ref,
 					       struct motor_feedback_ref *feedback_ref,
@@ -836,7 +842,7 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 }
 
 static bool motor_control_step_foc_stage(struct motor_parameters *params,
-					 const struct motor_control_step_ctx *ctx,
+					 const struct motor_rt_control_ctx *ctx,
 					 const struct motor_control_measurements *meas,
 					 const struct motor_motion_ref *motion_ref,
 					 const struct motor_feedback_ref *feedback_ref,
@@ -1009,8 +1015,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 		memset(report, 0, sizeof(*report));
 	}
 
-	struct motor_control_step_ctx ctx;
-	motor_control_step_cfg_init(&ctx, params);
+	struct motor_rt_control_ctx ctx;
+	motor_rt_control_ctx_init(&ctx, params);
 
 	uint32_t mode_flags = ctx.mode_flags;
 	bool feature_angle_gen = ctx.feature_angle_gen;
