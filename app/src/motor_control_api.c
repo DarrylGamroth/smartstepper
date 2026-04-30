@@ -729,6 +729,8 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		params->velocity_mpr_cfg.dt_s =
 			(float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ;
 		params->velocity_dob_cfg.dt_s = params->velocity_mpr_cfg.dt_s;
+		motor_mpr_velocity_invalidate(&params->velocity_mpr_state);
+		motor_dob_invalidate(&params->velocity_dob_state);
 		LOG_DBG("Updated velocity_loop_decimation = %u", decimation);
 		break;
 	}
@@ -746,6 +748,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			(float32_t)decimation / CONTROL_LOOP_FREQUENCY_HZ;
 		params->position_mpr_cfg.max_delta_velocity_rad_s =
 			params->profile_max_accel_rad_s2 * params->position_mpr_cfg.dt_s;
+		motor_mpr_position_invalidate(&params->position_mpr_state);
 		LOG_DBG("Updated position_loop_decimation = %u", decimation);
 		break;
 	}
@@ -759,6 +762,9 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 					 params->live.Iq_ref_A);
 		motor_mpr_position_reset(&params->position_mpr_state, params->live.velocity_ref_rad_s);
 		motor_dob_reset(&params->velocity_dob_state, params->live.velocity_rad_s);
+		motor_mpr_velocity_invalidate(&params->velocity_mpr_state);
+		motor_mpr_position_invalidate(&params->position_mpr_state);
+		motor_dob_invalidate(&params->velocity_dob_state);
 		LOG_DBG("Updated outer_loop_mode = %u", params->outer_loop_mode);
 		break;
 	case PARAM_ID_VELOCITY_MPR_Q_SPEED:
@@ -778,8 +784,9 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		LOG_DBG("Updated velocity_mpr_r_delta_iq = %.6f", (double)value);
 		break;
 	case PARAM_ID_VELOCITY_MPR_HORIZON:
-		if (value <= 0.0f || value > 256.0f) {
-			LOG_ERR("Rejected velocity_mpr_horizon outside (0,256]");
+		if (value <= 0.0f || value > (float32_t)MOTOR_MPR_HORIZON_MAX) {
+			LOG_ERR("Rejected velocity_mpr_horizon outside (0,%u]",
+				MOTOR_MPR_HORIZON_MAX);
 			break;
 		}
 		params->velocity_mpr_cfg.horizon = (uint16_t)(value + 0.5f);
@@ -809,6 +816,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->velocity_dob_cfg.enabled = (value >= 0.5f);
 		motor_dob_reset(&params->velocity_dob_state, params->live.velocity_rad_s);
+		motor_dob_invalidate(&params->velocity_dob_state);
 		LOG_DBG("Updated velocity_dob_enable = %u", params->velocity_dob_cfg.enabled ? 1U : 0U);
 		break;
 	case PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S:
@@ -862,11 +870,13 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		LOG_DBG("Updated position_mpr_r_delta_velocity = %.6f", (double)value);
 		break;
 	case PARAM_ID_POSITION_MPR_HORIZON:
-		if (value <= 0.0f || value > 256.0f) {
-			LOG_ERR("Rejected position_mpr_horizon outside (0,256]");
+		if (value <= 0.0f || value > (float32_t)MOTOR_MPR_HORIZON_MAX) {
+			LOG_ERR("Rejected position_mpr_horizon outside (0,%u]",
+				MOTOR_MPR_HORIZON_MAX);
 			break;
 		}
 		params->position_mpr_cfg.horizon = (uint16_t)(value + 0.5f);
+		motor_mpr_position_invalidate(&params->position_mpr_state);
 		LOG_DBG("Updated position_mpr_horizon = %u", params->position_mpr_cfg.horizon);
 		break;
 	case PARAM_ID_POSITION_MPR_MAX_DELTA_VELOCITY_RAD_S:
@@ -906,6 +916,8 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			break;
 		}
 		params->torque_gain_nm_per_a_active = value;
+		motor_mpr_velocity_invalidate(&params->velocity_mpr_state);
+		motor_dob_invalidate(&params->velocity_dob_state);
 		if (!isfinite(params->velocity_dob_cfg.torque_limit_nm) ||
 		    params->velocity_dob_cfg.torque_limit_nm <= 0.0f) {
 			params->velocity_dob_cfg.torque_limit_nm =

@@ -80,12 +80,21 @@ int motor_dob_init(const struct motor_dob_config *cfg,
 void motor_dob_reset(struct motor_dob_state *state,
 		    float32_t omega_initial_rad_s);
 
+void motor_dob_invalidate(struct motor_dob_state *state);
+
 int motor_dob_step(const struct motor_dob_config *cfg,
 	  const struct motor_dob_model *model,
 	  struct motor_dob_state *state,
 	  float32_t omega_meas_rad_s,
 	  float32_t iq_cmd_a,
 	  float32_t *iq_ff_a_out);
+
+int motor_dob_step_fast(const struct motor_dob_config *cfg,
+			const struct motor_dob_model *model,
+			struct motor_dob_state *state,
+			float32_t omega_meas_rad_s,
+			float32_t iq_cmd_a,
+			float32_t *iq_ff_a_out);
 
 #ifdef __cplusplus
 }

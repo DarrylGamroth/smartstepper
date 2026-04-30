@@ -31,4 +31,8 @@ int motor_current_loop_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 			    const struct motor_current_loop_input *in,
 			    struct motor_current_loop_output *out);
 
+int motor_current_loop_step_fast(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
+				 const struct motor_current_loop_input *in,
+				 struct motor_current_loop_output *out);
+
 #endif /* MOTOR_CURRENT_LOOP_H_ */

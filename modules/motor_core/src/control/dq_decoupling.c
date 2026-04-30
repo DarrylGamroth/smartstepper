@@ -51,6 +51,24 @@ int motor_dq_decoupling_feedforward_step(const struct motor_dq_decoupling_feedfo
 		return -EINVAL;
 	}
 
+	return motor_dq_decoupling_feedforward_step_fast(in, out);
+}
+
+int motor_dq_decoupling_feedforward_step_fast(
+	const struct motor_dq_decoupling_feedforward_input *in,
+	struct motor_dq_decoupling_feedforward_output *out)
+{
+	if (in == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	out->vd_ff_v = 0.0f;
+	out->vq_ff_v = 0.0f;
+
+	if (!in->enabled) {
+		return 0;
+	}
+
 	float32_t omega_elec = in->electrical_speed_rad_s;
 	float32_t ld_h = fmaxf(in->ld_h, 0.0f);
 	float32_t lq_h = fmaxf(in->lq_h, 0.0f);

@@ -20,6 +20,13 @@ int motor_current_loop_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		return -EINVAL;
 	}
 
+	return motor_current_loop_step_fast(pi_id, pi_iq, in, out);
+}
+
+int motor_current_loop_step_fast(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
+				 const struct motor_current_loop_input *in,
+				 struct motor_current_loop_output *out)
+{
 	pi_set_min_max(pi_id, -in->max_voltage_magnitude_v, in->max_voltage_magnitude_v);
 	pi_run_series(pi_id, in->id_ref_a, in->id_a, in->vd_ff_v, &out->vd_v);
 

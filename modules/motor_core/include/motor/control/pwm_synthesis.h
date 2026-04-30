@@ -36,4 +36,7 @@ struct motor_pwm_synthesis_output {
 int motor_pwm_synthesis_step(const struct motor_pwm_synthesis_input *in,
 			     struct motor_pwm_synthesis_output *out);
 
+int motor_pwm_synthesis_step_fast(const struct motor_pwm_synthesis_input *in,
+				  struct motor_pwm_synthesis_output *out);
+
 #endif /* MOTOR_PWM_SYNTHESIS_H_ */

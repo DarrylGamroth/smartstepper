@@ -31,6 +31,28 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	    in->max_modulation_index > 1.0f) {
 		return -EINVAL;
 	}
+	if (in->dq_decoupling_enabled &&
+	    (!isfinite(in->electrical_speed_rad_s) || !isfinite(in->ld_h) ||
+	     !isfinite(in->lq_h) || !isfinite(in->flux_linkage_wb))) {
+		return -EINVAL;
+	}
+	if (in->braking_enabled &&
+	    (!isfinite(in->braking_iq_ref_a) || !isfinite(in->braking_speed_rad_s) ||
+	     !isfinite(in->braking_vbus_limit_v) || !isfinite(in->braking_vbus_margin_inv) ||
+	     in->braking_vbus_limit_v < 0.0f || in->braking_vbus_margin_inv <= 0.0f)) {
+		return -EINVAL;
+	}
+
+	return motor_foc_voltage_pwm_step_fast(pi_id, pi_iq, in, out);
+}
+
+int motor_foc_voltage_pwm_step_fast(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
+				    const struct motor_foc_voltage_pwm_inputs *in,
+				    struct motor_foc_voltage_pwm_outputs *out)
+{
+	if (pi_id == NULL || pi_iq == NULL || in == NULL || out == NULL) {
+		return -EINVAL;
+	}
 
 	float32_t max_voltage_magnitude_v = in->max_modulation_index * in->vbus_v;
 	if (max_voltage_magnitude_v <= 0.0f) {
@@ -50,7 +72,8 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		.ff_limit_ratio = in->dq_decoupling_ff_limit_ratio,
 	};
 	struct motor_dq_decoupling_feedforward_output decoupling_out = {0};
-	int decoupling_ret = motor_dq_decoupling_feedforward_step(&decoupling_in, &decoupling_out);
+	int decoupling_ret =
+		motor_dq_decoupling_feedforward_step_fast(&decoupling_in, &decoupling_out);
 	if (decoupling_ret != 0) {
 		return decoupling_ret;
 	}
@@ -70,7 +93,7 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 	};
 	struct motor_current_loop_output current_loop_out = {0};
 	int current_loop_ret =
-		motor_current_loop_step(pi_id, pi_iq, &current_loop_in, &current_loop_out);
+		motor_current_loop_step_fast(pi_id, pi_iq, &current_loop_in, &current_loop_out);
 	if (current_loop_ret != 0) {
 		return current_loop_ret;
 	}
@@ -95,7 +118,7 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 		.braking_vbus_margin_inv = in->braking_vbus_margin_inv,
 	};
 	struct motor_pwm_synthesis_output pwm_out = {0};
-	int pwm_ret = motor_pwm_synthesis_step(&pwm_in, &pwm_out);
+	int pwm_ret = motor_pwm_synthesis_step_fast(&pwm_in, &pwm_out);
 	if (pwm_ret != 0) {
 		return pwm_ret;
 	}

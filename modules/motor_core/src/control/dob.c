@@ -117,6 +117,15 @@ void motor_dob_reset(struct motor_dob_state *state,
 	state->residual_rad_s = 0.0f;
 }
 
+void motor_dob_invalidate(struct motor_dob_state *state)
+{
+	if (state == NULL) {
+		return;
+	}
+
+	state->initialized = false;
+}
+
 int motor_dob_step(const struct motor_dob_config *cfg,
 	  const struct motor_dob_model *model,
 	  struct motor_dob_state *state,
@@ -127,12 +136,25 @@ int motor_dob_step(const struct motor_dob_config *cfg,
 	if (cfg == NULL || model == NULL || state == NULL || iq_ff_a_out == NULL) {
 		return -EINVAL;
 	}
-	/* Hot-path structural guards: caller/config path owns full finite validation. */
-	if (cfg->dt_s <= 0.0f || cfg->torque_limit_nm <= 0.0f ||
-	    model->inertia_kgm2 <= 0.0f || model->torque_constant_nm_per_a <= 0.0f) {
+	if (motor_dob_validate(cfg, model) != 0) {
 		return -EINVAL;
 	}
 	if (!isfinite(omega_meas_rad_s) || !isfinite(iq_cmd_a)) {
+		return -EINVAL;
+	}
+
+	return motor_dob_step_fast(cfg, model, state, omega_meas_rad_s, iq_cmd_a,
+				   iq_ff_a_out);
+}
+
+int motor_dob_step_fast(const struct motor_dob_config *cfg,
+			const struct motor_dob_model *model,
+			struct motor_dob_state *state,
+			float32_t omega_meas_rad_s,
+			float32_t iq_cmd_a,
+			float32_t *iq_ff_a_out)
+{
+	if (cfg == NULL || model == NULL || state == NULL || iq_ff_a_out == NULL) {
 		return -EINVAL;
 	}
 

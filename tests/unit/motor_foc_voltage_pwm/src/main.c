@@ -253,4 +253,39 @@ ZTEST(motor_foc_voltage_pwm, test_pwm_outputs_stay_bounded_under_extreme_pi_driv
 	zassert_true(out.db_hb2_pu >= 0.0f && out.db_hb2_pu <= 1.0f, NULL);
 }
 
+ZTEST(motor_foc_voltage_pwm, test_fast_path_matches_validated_step)
+{
+	struct pi_f32 pi_d_slow;
+	struct pi_f32 pi_q_slow;
+	struct pi_f32 pi_d_fast;
+	struct pi_f32 pi_q_fast;
+	struct motor_foc_voltage_pwm_inputs in = make_base_inputs();
+	struct motor_foc_voltage_pwm_outputs slow = {0};
+	struct motor_foc_voltage_pwm_outputs fast = {0};
+
+	init_zero_pi(&pi_d_slow);
+	init_zero_pi(&pi_q_slow);
+	init_zero_pi(&pi_d_fast);
+	init_zero_pi(&pi_q_fast);
+
+	in.id_ref_a = 0.6f;
+	in.iq_ref_a = 0.4f;
+	in.id_a = 0.2f;
+	in.iq_a = -0.1f;
+	in.inv_park_angle_rad = 0.7f;
+	in.dq_decoupling_enabled = true;
+	in.electrical_speed_rad_s = 120.0f;
+	in.ld_h = 0.001f;
+	in.lq_h = 0.0015f;
+	in.flux_linkage_wb = 0.025f;
+
+	zassert_ok(motor_foc_voltage_pwm_step(&pi_d_slow, &pi_q_slow, &in, &slow), NULL);
+	zassert_ok(motor_foc_voltage_pwm_step_fast(&pi_d_fast, &pi_q_fast, &in, &fast), NULL);
+
+	zassert_within(fast.vd_v, slow.vd_v, 1e-6f, NULL);
+	zassert_within(fast.vq_v, slow.vq_v, 1e-6f, NULL);
+	zassert_within(fast.da_hb1_pu, slow.da_hb1_pu, 1e-6f, NULL);
+	zassert_within(fast.db_hb1_pu, slow.db_hb1_pu, 1e-6f, NULL);
+}
+
 ZTEST_SUITE(motor_foc_voltage_pwm, NULL, NULL, NULL, NULL, NULL);

@@ -38,6 +38,8 @@ extern "C" {
  * - reset() clears dynamic state only; it does not configure/discretize the model.
  */
 
+#define MOTOR_MPR_HORIZON_MAX 64U
+
 /**
  * @brief Mechanical speed plant parameters for velocity MPR.
  */
@@ -98,6 +100,10 @@ struct motor_mpr_position_state {
 	bool initialized;
 	float32_t velocity_cmd_rad_s;
 	float32_t last_position_error_rad;
+	uint16_t horizon;
+	float32_t dt_s;
+	float32_t horizon_sum_c;
+	float32_t horizon_sum_c2;
 };
 
 int motor_mpr_velocity_validate(const struct motor_mpr_velocity_config *cfg,
@@ -113,12 +119,21 @@ void motor_mpr_velocity_reset(struct motor_mpr_velocity_state *state,
 			      float32_t omega_initial_rad_s,
 			      float32_t iq_initial_a);
 
+void motor_mpr_velocity_invalidate(struct motor_mpr_velocity_state *state);
+
 int motor_mpr_velocity_step(const struct motor_mpr_velocity_config *cfg,
 			    const struct motor_mpr_velocity_model *model,
 			    struct motor_mpr_velocity_state *state,
 			    float32_t omega_meas_rad_s,
 			    float32_t omega_ref_rad_s,
 			    float32_t *iq_cmd_a_out);
+
+int motor_mpr_velocity_step_fast(const struct motor_mpr_velocity_config *cfg,
+				 const struct motor_mpr_velocity_model *model,
+				 struct motor_mpr_velocity_state *state,
+				 float32_t omega_meas_rad_s,
+				 float32_t omega_ref_rad_s,
+				 float32_t *iq_cmd_a_out);
 
 int motor_mpr_position_validate(const struct motor_mpr_position_config *cfg);
 
@@ -129,11 +144,19 @@ int motor_mpr_position_init(const struct motor_mpr_position_config *cfg,
 void motor_mpr_position_reset(struct motor_mpr_position_state *state,
 			      float32_t velocity_initial_rad_s);
 
+void motor_mpr_position_invalidate(struct motor_mpr_position_state *state);
+
 int motor_mpr_position_step(const struct motor_mpr_position_config *cfg,
 			    struct motor_mpr_position_state *state,
 			    float32_t position_error_rad,
 			    float32_t velocity_ff_rad_s,
 			    float32_t *velocity_cmd_rad_s_out);
+
+int motor_mpr_position_step_fast(const struct motor_mpr_position_config *cfg,
+				 struct motor_mpr_position_state *state,
+				 float32_t position_error_rad,
+				 float32_t velocity_ff_rad_s,
+				 float32_t *velocity_cmd_rad_s_out);
 
 #ifdef __cplusplus
 }

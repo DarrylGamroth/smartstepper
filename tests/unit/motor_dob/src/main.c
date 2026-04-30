@@ -141,6 +141,33 @@ ZTEST(motor_dob, test_step_rejects_non_finite_inputs)
 	zassert_equal(motor_dob_step(&cfg, &model, &state, 0.0f, INFINITY, &iq_ff), -EINVAL, NULL);
 }
 
+ZTEST(motor_dob, test_invalidate_forces_explicit_reinit)
+{
+	const struct motor_dob_config cfg = {
+		.enabled = true,
+		.dt_s = 0.001f,
+		.observer_gain_nm_per_rad_s = 0.05f,
+		.torque_limit_nm = 1.0f,
+		.iq_ff_limit_a = 1.0f,
+	};
+	const struct motor_dob_model model = {
+		.inertia_kgm2 = 0.001f,
+		.viscous_friction_nm_per_rad_s = 0.002f,
+		.coulomb_friction_nm = 0.0f,
+		.torque_constant_nm_per_a = 0.1f,
+	};
+	struct motor_dob_state state = {0};
+	float32_t iq_ff = 0.0f;
+
+	zassert_ok(motor_dob_init(&cfg, &model, &state, 0.0f), NULL);
+	motor_dob_invalidate(&state);
+	zassert_false(state.initialized, NULL);
+	zassert_equal(motor_dob_step_fast(&cfg, &model, &state, 0.0f, 0.0f, &iq_ff),
+		      -EINVAL, NULL);
+	zassert_ok(motor_dob_init(&cfg, &model, &state, 0.0f), NULL);
+	zassert_ok(motor_dob_step_fast(&cfg, &model, &state, 0.0f, 0.0f, &iq_ff), NULL);
+}
+
 ZTEST(motor_dob, test_dob_reduces_steady_state_error_under_constant_load)
 {
 	const struct motor_dob_model model = {

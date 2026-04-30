@@ -75,6 +75,9 @@ ZTEST(motor_mpr, test_velocity_validate_rejects_invalid_inputs)
 	cfg.horizon = 0U;
 	zassert_equal(motor_mpr_velocity_validate(&cfg, &model), -EINVAL, NULL);
 	cfg.horizon = 8U;
+	cfg.horizon = MOTOR_MPR_HORIZON_MAX + 1U;
+	zassert_equal(motor_mpr_velocity_validate(&cfg, &model), -EINVAL, NULL);
+	cfg.horizon = 8U;
 	cfg.q_speed = 0.0f;
 	zassert_equal(motor_mpr_velocity_validate(&cfg, &model), -EINVAL, NULL);
 	cfg.q_speed = 1.0f;
@@ -275,6 +278,9 @@ ZTEST(motor_mpr, test_position_validate_rejects_invalid_inputs)
 	cfg.horizon = 0U;
 	zassert_equal(motor_mpr_position_validate(&cfg), -EINVAL, NULL);
 	cfg.horizon = 16U;
+	cfg.horizon = MOTOR_MPR_HORIZON_MAX + 1U;
+	zassert_equal(motor_mpr_position_validate(&cfg), -EINVAL, NULL);
+	cfg.horizon = 16U;
 	cfg.q_position = 0.0f;
 	cfg.q_velocity_ff = 0.0f;
 	zassert_equal(motor_mpr_position_validate(&cfg), -EINVAL, NULL);
@@ -300,6 +306,8 @@ ZTEST(motor_mpr, test_position_step_respects_limits_and_delta)
 	struct motor_mpr_position_state state = {0};
 	float32_t vel_cmd = 0.0f;
 	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
+	zassert_true(state.horizon_sum_c > 0.0f, NULL);
+	zassert_true(state.horizon_sum_c2 > 0.0f, NULL);
 
 	for (int i = 0; i < 200; i++) {
 		float32_t prev = state.velocity_cmd_rad_s;
@@ -308,6 +316,31 @@ ZTEST(motor_mpr, test_position_step_respects_limits_and_delta)
 		zassert_true(fabsf(vel_cmd) <= cfg.velocity_limit_rad_s + EPS, NULL);
 		zassert_true(fabsf(vel_cmd - prev) <= cfg.max_delta_velocity_rad_s + EPS, NULL);
 	}
+}
+
+ZTEST(motor_mpr, test_position_step_requires_reinit_after_horizon_change)
+{
+	struct motor_mpr_position_config cfg = {
+		.dt_s = 0.001f,
+		.horizon = 8U,
+		.q_position = 1.0f,
+		.q_velocity_ff = 1.0f,
+		.r_delta_velocity = 0.2f,
+		.velocity_limit_rad_s = 10.0f,
+		.max_delta_velocity_rad_s = 0.5f,
+	};
+	struct motor_mpr_position_state state = {0};
+	float32_t vel_cmd = 0.0f;
+
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
+	cfg.horizon = 9U;
+	zassert_equal(motor_mpr_position_step(&cfg, &state, 1.0f, 0.0f, &vel_cmd),
+		      -EINVAL, NULL);
+
+	motor_mpr_position_invalidate(&state);
+	zassert_false(state.initialized, NULL);
+	zassert_ok(motor_mpr_position_init(&cfg, &state, 0.0f), NULL);
+	zassert_ok(motor_mpr_position_step_fast(&cfg, &state, 1.0f, 0.0f, &vel_cmd), NULL);
 }
 
 ZTEST(motor_mpr, test_position_reduces_error_in_closed_loop)

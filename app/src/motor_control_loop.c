@@ -916,8 +916,8 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 	};
 	struct motor_foc_voltage_pwm_outputs foc_outputs = {0};
 
-	if (motor_foc_voltage_pwm_step(&params->pi_Id, &params->pi_Iq, &foc_inputs,
-				       &foc_outputs) != 0) {
+	if (motor_foc_voltage_pwm_step_fast(&params->pi_Id, &params->pi_Iq, &foc_inputs,
+					    &foc_outputs) != 0) {
 		return true;
 	}
 

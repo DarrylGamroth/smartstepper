@@ -45,4 +45,8 @@ struct motor_dq_decoupling_feedforward_output {
 int motor_dq_decoupling_feedforward_step(const struct motor_dq_decoupling_feedforward_input *in,
 					 struct motor_dq_decoupling_feedforward_output *out);
 
+int motor_dq_decoupling_feedforward_step_fast(
+	const struct motor_dq_decoupling_feedforward_input *in,
+	struct motor_dq_decoupling_feedforward_output *out);
+
 #endif /* MOTOR_DQ_DECOUPLING_H_ */

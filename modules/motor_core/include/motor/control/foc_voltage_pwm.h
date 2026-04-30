@@ -79,6 +79,16 @@ int motor_foc_voltage_pwm_step(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 			       const struct motor_foc_voltage_pwm_inputs *in,
 			       struct motor_foc_voltage_pwm_outputs *out);
 
+/**
+ * @brief Fast current-control/PWM step for ISR use after config/input validation.
+ *
+ * Callers must provide non-NULL pointers and finite, valid runtime inputs. Use
+ * motor_foc_voltage_pwm_step() for defensive validation in tests or non-ISR code.
+ */
+int motor_foc_voltage_pwm_step_fast(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
+				    const struct motor_foc_voltage_pwm_inputs *in,
+				    struct motor_foc_voltage_pwm_outputs *out);
+
 #ifdef __cplusplus
 }
 #endif

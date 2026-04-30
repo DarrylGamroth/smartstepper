@@ -80,11 +80,12 @@ int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,
 								      ctx->position_mpr_state,
 								      out->velocity_target_rad_s);
 				}
-				int mpr_ret = motor_mpr_position_step(ctx->position_mpr_cfg,
-								      ctx->position_mpr_state,
-								      position_error_rad,
-								      profile_velocity_ff_rad_s,
-								      &out->velocity_target_rad_s);
+				int mpr_ret = motor_mpr_position_step_fast(
+					ctx->position_mpr_cfg,
+					ctx->position_mpr_state,
+					position_error_rad,
+					profile_velocity_ff_rad_s,
+					&out->velocity_target_rad_s);
 				if (mpr_ret != 0) {
 					out->velocity_target_rad_s = clampf(profile_velocity_ff_rad_s,
 									    -ctx->profile_max_velocity_rad_s,
@@ -191,11 +192,12 @@ int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,
 								      out->speed_mech_filtered_rad_s,
 								      out->iq_ref_a);
 				}
-				int mpr_ret = motor_mpr_velocity_step(ctx->velocity_mpr_cfg, &mpr_model,
-								      ctx->velocity_mpr_state,
-								      out->speed_mech_filtered_rad_s,
-								      out->velocity_ref_rad_s,
-								      &iq_cmd_mpr_a);
+				int mpr_ret = motor_mpr_velocity_step_fast(
+					ctx->velocity_mpr_cfg, &mpr_model,
+					ctx->velocity_mpr_state,
+					out->speed_mech_filtered_rad_s,
+					out->velocity_ref_rad_s,
+					&iq_cmd_mpr_a);
 				if (mpr_ret == 0) {
 					out->id_ref_a = ctx->id_setpoint_a;
 					iq_cmd_pre_dob_a = clampf(iq_cmd_mpr_a,
@@ -273,11 +275,12 @@ int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,
 
 				if (dob_ready) {
 					float32_t iq_dob_ff_a = 0.0f;
-					int dob_ret = motor_dob_step(&dob_cfg, &dob_model,
-								     ctx->velocity_dob_state,
-								     out->speed_mech_filtered_rad_s,
-								     iq_cmd_pre_dob_a,
-								     &iq_dob_ff_a);
+					int dob_ret = motor_dob_step_fast(
+						&dob_cfg, &dob_model,
+						ctx->velocity_dob_state,
+						out->speed_mech_filtered_rad_s,
+						iq_cmd_pre_dob_a,
+						&iq_dob_ff_a);
 					if (dob_ret == 0) {
 						*ctx->live_velocity_dob_iq_ff_a = iq_dob_ff_a;
 						*ctx->live_velocity_dob_disturbance_nm =

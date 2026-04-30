@@ -34,6 +34,16 @@ int motor_pwm_synthesis_step(const struct motor_pwm_synthesis_input *in,
 		return -EINVAL;
 	}
 
+	return motor_pwm_synthesis_step_fast(in, out);
+}
+
+int motor_pwm_synthesis_step_fast(const struct motor_pwm_synthesis_input *in,
+				  struct motor_pwm_synthesis_output *out)
+{
+	if (in == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
 	float32_t vbus_inv = 1.0f / in->vbus_v;
 	out->ua_pu = in->va_v * vbus_inv;
 	out->ub_pu = in->vb_v * vbus_inv;
