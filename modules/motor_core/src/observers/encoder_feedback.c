@@ -179,8 +179,7 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 				MOTOR_ENCODER_INPUT_SRC_ENCODER :
 				feedback->input_source;
 
-	if (feedback->sample_available && feedback->fresh &&
-	    !feedback->warning && !feedback->error) {
+	if (feedback->sample_available && feedback->fresh && !feedback->error) {
 		capture->encoder_mech_rad = capture->observer_mech_rad;
 		capture->encoder_elec_rad = capture->observer_elec_rad;
 		capture->mech_error_rad =

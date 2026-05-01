@@ -508,7 +508,6 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	if (motor_is_align_sample_state(mode_flags) &&
 	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
 	    enc_res->fresh &&
-	    !enc_res->frame_warning &&
 	    !enc_res->frame_error) {
 		float32_t align_mech_rad = enc_res->control_fb.observer_mech_rad;
 		if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
@@ -644,7 +643,6 @@ static inline bool motor_encoder_required_feedback_valid(
 	if (feedback_ref->source == MOTOR_FEEDBACK_ENCODER &&
 	    feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
 	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U &&
-	    !feedback_ref->warning &&
 	    !feedback_ref->error) {
 		return true;
 	}

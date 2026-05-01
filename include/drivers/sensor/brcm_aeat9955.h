@@ -189,7 +189,12 @@ static inline int aeat9955_decode_position(const uint8_t *raw_buf, uint32_t *pos
 		*parity_error = frame_parity_error;
 	}
 
-	if (status_bit_error || frame_parity_error) {
+	/*
+	 * The AEAT position-frame status bit reports device-side alarm state
+	 * such as magnet warnings. Keep that visible to diagnostics, but do not
+	 * reject the angle sample unless the SPI frame parity check fails.
+	 */
+	if (frame_parity_error) {
 		return -EIO;
 	}
 
@@ -202,11 +207,11 @@ static inline int aeat9955_decode_position(const uint8_t *raw_buf, uint32_t *pos
  * @param buffer Pointer to `struct aeat9955_sample`
  * @param angle_deg Output: decoded angle in degrees, centered [-180, 180)
  * @param status Output: raw frame status bits (parity/error)
- * @param warning Output: warning flag (always false for AEAT position frame)
- * @param error Output: true on parity or status frame errors
+ * @param warning Output: warning flag from AEAT position-frame device status bit
+ * @param error Output: true on parity frame error
  * @param status_error_out Output: device status error bit
  * @param parity_error_out Output: frame parity error
- * @return 0 on success, -EIO on frame check failure
+ * @return 0 on success, -EIO on parity frame check failure
  */
 static inline int aeat9955_decode_sample_f32(const uint8_t *buffer, float *angle_deg, uint8_t *status,
 					     bool *warning, bool *error, bool *status_error_out,
@@ -226,11 +231,10 @@ static inline int aeat9955_decode_sample_f32(const uint8_t *buffer, float *angle
 		*status = sample->raw[0] & AEAT9955_FRAME_STATUS_MASK;
 	}
 	if (warning != NULL) {
-		/* No separate warning bit in SPI4-16 fast position frame. */
-		*warning = false;
+		*warning = status_error;
 	}
 	if (error != NULL) {
-		*error = status_error || parity_error;
+		*error = parity_error;
 	}
 	if (status_error_out != NULL) {
 		*status_error_out = status_error;

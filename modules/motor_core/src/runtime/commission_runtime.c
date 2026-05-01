@@ -782,7 +782,7 @@ void motor_commission_update(struct motor_commission_runtime_ctx *ctx,
 		commission->reject_fault++;
 		return;
 	}
-	if (!obs->encoder_fresh || obs->encoder_warning || obs->encoder_error) {
+	if (!obs->encoder_fresh || obs->encoder_error) {
 		commission->rejected_samples++;
 		commission->reject_encoder++;
 		return;

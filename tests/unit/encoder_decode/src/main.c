@@ -158,7 +158,7 @@ ZTEST(encoder_decode, test_aeat9955_valid_frame_reports_no_error)
 	zassert_equal(status, sample.raw[0] & AEAT9955_FRAME_STATUS_MASK, NULL);
 }
 
-ZTEST(encoder_decode, test_aeat9955_status_error_sets_error_path)
+ZTEST(encoder_decode, test_aeat9955_status_error_sets_warning_path)
 {
 	struct aeat9955_sample sample;
 	float angle_deg = 0.0f;
@@ -170,10 +170,11 @@ ZTEST(encoder_decode, test_aeat9955_status_error_sets_error_path)
 
 	aeat9955_build_frame(&sample, AEAT9955_MAX_COUNT / 2U, true, false);
 
-	zassert_equal(aeat9955_decode_sample_f32((const uint8_t *)&sample, &angle_deg, &status,
-						 &warning, &error, &status_error, &parity_error),
-		      -EIO, NULL);
-	zassert_true(error, NULL);
+	zassert_ok(aeat9955_decode_sample_f32((const uint8_t *)&sample, &angle_deg, &status,
+					      &warning, &error, &status_error, &parity_error),
+		   NULL);
+	zassert_true(warning, NULL);
+	zassert_false(error, NULL);
 	zassert_true(status_error, NULL);
 	zassert_false(parity_error, NULL);
 	zassert_equal(status & AEAT9955_POS_STATUS_ERROR_BIT, AEAT9955_POS_STATUS_ERROR_BIT, NULL);
