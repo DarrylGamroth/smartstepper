@@ -37,6 +37,7 @@
 #include "motor/runtime/outer_loop_runtime.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor/runtime/feedback_quality.h"
+#include "motor/runtime/actuator_adapter.h"
 #include "motor/runtime/control_refs.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"

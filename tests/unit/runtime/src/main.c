@@ -3,6 +3,7 @@
 #include <zephyr/ztest.h>
 
 #include "motor/runtime/config_snapshot.h"
+#include "motor/runtime/actuator_adapter.h"
 #include "motor/runtime/control_policy.h"
 #include "motor/runtime/control_refs.h"
 

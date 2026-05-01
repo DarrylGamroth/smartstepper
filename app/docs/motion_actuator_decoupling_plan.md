@@ -172,6 +172,18 @@ publish telemetry/report
 
 `motor_core` should provide pure modules used by those steps. App code should decide which modules are active.
 
+The target external boundary is intentionally compatible with backends that are not ours:
+
+1. a third-party FOC implementation can consume `motor_motion_ref`, `motor_feedback_ref`,
+   and `motor_servo_ref` directly, then apply its own current/voltage/PWM path,
+2. the Zephyr Stepper API can consume `motor_motion_ref` directly or use a thin adapter
+   from `motor_servo_ref`/`motor_actuator_ref` to stepper position/velocity commands,
+3. our current FOC path is one app-selected backend, not the shape of the motion layer.
+
+Keep base reference types in `motor/runtime/control_refs.h`. Keep optional backend
+translation helpers in `motor/runtime/actuator_adapter.h` so external users can ignore
+our adapter layer when integrating a different actuator implementation.
+
 Feedback is a separate pipeline input, not the same thing as commutation angle:
 
 ```text
