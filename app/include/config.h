@@ -36,6 +36,7 @@
 #include "motor/estimation/rls_motor_est.h"
 #include "motor/estimation/thermal_model.h"
 #include "motor/math/math_constants.h"
+#include "motor_rt_control_context.h"
 
 #define MOTOR_PROFILE_SEQUENCE_MAX_POINTS 64U
 #define CHOPPER_CAL_MAX_SLOTS MOTOR_PROFILE_SEQUENCE_MAX_POINTS
@@ -441,6 +442,9 @@ struct motor_parameters {
 
 	/* Persistent runtime adapter contexts for fast-loop module calls. */
 	struct motor_runtime_adapter_ctxs rt_adapters;
+
+	/* Persistent ISR scratch/context for the real-time control loop. */
+	struct motor_rt_control_ctx rt_control;
 };
 
 /* Devicetree parameter extraction with unit conversion */
