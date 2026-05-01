@@ -200,6 +200,26 @@ ZTEST(runtime, test_config_snapshot_publish_read_is_coherent)
 		.profile_sequence_trigger_channel = 7U,
 		.profile_sequence_period_ticks = 123U,
 		.profile_sequence_period_ms = 40U,
+		.control_policy_valid = true,
+		.control_policy_input = {
+			.mode = MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED,
+			.features = {
+				.encoder_read_enabled = true,
+				.angle_gen_enabled = false,
+				.velocity_traj_enabled = true,
+				.commanded_currents_enabled = false,
+				.current_loop_enabled = true,
+			},
+			.profile_sequence_active = false,
+		},
+		.control_policy = {
+			.motion_source = MOTOR_MOTION_SOURCE_VELOCITY_TRAJ,
+			.feedback_source = MOTOR_FEEDBACK_ENCODER,
+			.angle_source = MOTOR_ANGLE_SOURCE_ENCODER,
+			.current_source = MOTOR_CURRENT_SOURCE_VELOCITY_LOOP,
+			.actuator_kind = MOTOR_ACTUATOR_FOC_CURRENT,
+			.generated_angle_mode = MOTOR_GENERATED_ANGLE_NONE,
+		},
 	};
 	struct motor_rt_config_snapshot out = {0};
 
@@ -214,6 +234,10 @@ ZTEST(runtime, test_config_snapshot_publish_read_is_coherent)
 	zassert_equal(out.profile_sequence_running, in.profile_sequence_running, "running mismatch");
 	zassert_equal(out.profile_sequence_trigger_source, in.profile_sequence_trigger_source, "trigger source mismatch");
 	zassert_equal(out.profile_sequence_period_ticks, in.profile_sequence_period_ticks, "period ticks mismatch");
+	zassert_true(out.control_policy_valid, "policy validity mismatch");
+	zassert_equal(out.control_policy_input.mode, in.control_policy_input.mode, "policy mode mismatch");
+	zassert_equal(out.control_policy.angle_source, in.control_policy.angle_source, "angle source mismatch");
+	zassert_equal(out.control_policy.actuator_kind, in.control_policy.actuator_kind, "actuator kind mismatch");
 	zassert_true(out.epoch > 0U, "epoch not tagged");
 }
 

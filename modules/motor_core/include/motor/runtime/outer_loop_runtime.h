@@ -22,8 +22,6 @@
 
 struct motor_outer_loop_runtime_ctx {
 	uint8_t outer_loop_mode;
-	uint32_t *position_loop_phase;
-	uint32_t *velocity_loop_phase;
 	struct motion_profile_quintic *position_profile;
 	bool control_armed;
 	float32_t *position_target_rad;
@@ -66,8 +64,8 @@ struct motor_outer_loop_inputs {
 	bool position_active;
 	bool velocity_active;
 	bool feature_velocity_traj;
-	uint32_t velocity_loop_decimation;
-	uint32_t position_loop_decimation;
+	bool velocity_loop_update;
+	bool position_loop_update;
 	float32_t velocity_loop_dt_s;
 	float32_t position_loop_dt_s;
 	float32_t position_mech_rad;

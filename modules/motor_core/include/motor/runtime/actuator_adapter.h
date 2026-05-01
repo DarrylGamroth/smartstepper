@@ -26,11 +26,18 @@ static inline void motor_actuator_ref_clear(struct motor_actuator_ref *ref,
 		return;
 	}
 
-	*ref = (struct motor_actuator_ref){
-		.kind = kind,
-		.effort_kind = MOTOR_ACTUATOR_EFFORT_NONE,
-		.enabled = false,
-	};
+	ref->kind = kind;
+	ref->effort_kind = MOTOR_ACTUATOR_EFFORT_NONE;
+	ref->enabled = false;
+	ref->position_rad = 0.0f;
+	ref->velocity_rad_s = 0.0f;
+	ref->acceleration_rad_s2 = 0.0f;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_actuator_ref_set_foc_current(struct motor_actuator_ref *ref,
@@ -45,16 +52,18 @@ static inline void motor_actuator_ref_set_foc_current(struct motor_actuator_ref 
 		return;
 	}
 
-	*ref = (struct motor_actuator_ref){
-		.kind = MOTOR_ACTUATOR_FOC_CURRENT,
-		.effort_kind = MOTOR_ACTUATOR_EFFORT_CURRENT_DQ,
-		.enabled = enabled,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.id_ref_a = id_ref_a,
-		.iq_ref_a = iq_ref_a,
-	};
+	ref->kind = MOTOR_ACTUATOR_FOC_CURRENT;
+	ref->effort_kind = MOTOR_ACTUATOR_EFFORT_CURRENT_DQ;
+	ref->enabled = enabled;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = id_ref_a;
+	ref->iq_ref_a = iq_ref_a;
 }
 
 static inline void motor_actuator_ref_set_brushed_current(struct motor_actuator_ref *ref,
@@ -68,15 +77,18 @@ static inline void motor_actuator_ref_set_brushed_current(struct motor_actuator_
 		return;
 	}
 
-	*ref = (struct motor_actuator_ref){
-		.kind = MOTOR_ACTUATOR_BRUSHED_CURRENT,
-		.effort_kind = MOTOR_ACTUATOR_EFFORT_CURRENT_SCALAR,
-		.enabled = enabled,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.current_a = current_a,
-	};
+	ref->kind = MOTOR_ACTUATOR_BRUSHED_CURRENT;
+	ref->effort_kind = MOTOR_ACTUATOR_EFFORT_CURRENT_SCALAR;
+	ref->enabled = enabled;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = current_a;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_actuator_ref_set_brushed_voltage(struct motor_actuator_ref *ref,
@@ -90,15 +102,18 @@ static inline void motor_actuator_ref_set_brushed_voltage(struct motor_actuator_
 		return;
 	}
 
-	*ref = (struct motor_actuator_ref){
-		.kind = MOTOR_ACTUATOR_BRUSHED_VOLTAGE,
-		.effort_kind = MOTOR_ACTUATOR_EFFORT_VOLTAGE_SCALAR,
-		.enabled = enabled,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.voltage_v = voltage_v,
-	};
+	ref->kind = MOTOR_ACTUATOR_BRUSHED_VOLTAGE;
+	ref->effort_kind = MOTOR_ACTUATOR_EFFORT_VOLTAGE_SCALAR;
+	ref->enabled = enabled;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = voltage_v;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_actuator_ref_set_step_dir(struct motor_actuator_ref *ref,
@@ -111,14 +126,18 @@ static inline void motor_actuator_ref_set_step_dir(struct motor_actuator_ref *re
 		return;
 	}
 
-	*ref = (struct motor_actuator_ref){
-		.kind = MOTOR_ACTUATOR_STEP_DIR,
-		.effort_kind = MOTOR_ACTUATOR_EFFORT_STEP_DIR,
-		.enabled = enabled,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-	};
+	ref->kind = MOTOR_ACTUATOR_STEP_DIR;
+	ref->effort_kind = MOTOR_ACTUATOR_EFFORT_STEP_DIR;
+	ref->enabled = enabled;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline int motor_actuator_ref_from_servo(const struct motor_control_policy *policy,
@@ -129,14 +148,15 @@ static inline int motor_actuator_ref_from_servo(const struct motor_control_polic
 		return -EINVAL;
 	}
 
-	motor_actuator_ref_clear(actuator, policy->actuator_kind);
 	if (!servo->enabled) {
+		motor_actuator_ref_clear(actuator, policy->actuator_kind);
 		return 0;
 	}
 
 	switch (policy->actuator_kind) {
 	case MOTOR_ACTUATOR_FOC_CURRENT:
 		if (servo->effort_kind != MOTOR_SERVO_EFFORT_CURRENT_DQ) {
+			motor_actuator_ref_clear(actuator, policy->actuator_kind);
 			return -ENOTSUP;
 		}
 		motor_actuator_ref_set_foc_current(actuator, true,
@@ -148,6 +168,7 @@ static inline int motor_actuator_ref_from_servo(const struct motor_control_polic
 		return 0;
 	case MOTOR_ACTUATOR_BRUSHED_CURRENT:
 		if (servo->effort_kind != MOTOR_SERVO_EFFORT_CURRENT) {
+			motor_actuator_ref_clear(actuator, policy->actuator_kind);
 			return -ENOTSUP;
 		}
 		motor_actuator_ref_set_brushed_current(actuator, true,
@@ -158,6 +179,7 @@ static inline int motor_actuator_ref_from_servo(const struct motor_control_polic
 		return 0;
 	case MOTOR_ACTUATOR_BRUSHED_VOLTAGE:
 		if (servo->effort_kind != MOTOR_SERVO_EFFORT_VOLTAGE) {
+			motor_actuator_ref_clear(actuator, policy->actuator_kind);
 			return -ENOTSUP;
 		}
 		motor_actuator_ref_set_brushed_voltage(actuator, true,
@@ -173,6 +195,7 @@ static inline int motor_actuator_ref_from_servo(const struct motor_control_polic
 						servo->acceleration_rad_s2);
 		return 0;
 	default:
+		motor_actuator_ref_clear(actuator, policy->actuator_kind);
 		return -ENOTSUP;
 	}
 }

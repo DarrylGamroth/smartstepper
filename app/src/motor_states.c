@@ -116,13 +116,46 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 	return mode_flags;
 }
 
+static inline enum motor_control_policy_mode
+motor_publish_control_policy_mode_from_rt_flags(uint32_t mode_flags)
+{
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_PROFILE_OPEN) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_TORQUE) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	}
+	if ((mode_flags & (MOTOR_RT_MODE_OFFSET_MEAS |
+			   MOTOR_RT_MODE_RS_EST |
+			   MOTOR_RT_MODE_ROVERL_MEAS |
+			   MOTOR_RT_MODE_ALIGN_POS_INJECT |
+			   MOTOR_RT_MODE_ALIGN_POS_SAMPLE |
+			   MOTOR_RT_MODE_ALIGN_NEG_INJECT |
+			   MOTOR_RT_MODE_ALIGN_NEG_SAMPLE)) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
+	}
+
+	return MOTOR_CONTROL_POLICY_MODE_DISABLED;
+}
+
 static inline void motor_publish_isr_config_snapshot(struct motor_parameters *params)
 {
+	atomic_val_t feature_flags = params->feature_flags_next;
+	uint32_t mode_flags = motor_publish_isr_mode_flags(params);
 	struct motor_rt_config_snapshot snapshot = {
 		.epoch = 0U,
 		.state = params->smf.current,
-		.feature_flags = params->feature_flags_next,
-		.mode_flags = motor_publish_isr_mode_flags(params),
+		.feature_flags = feature_flags,
+		.mode_flags = mode_flags,
 		.velocity_loop_decimation = params->velocity_loop_decimation,
 		.position_loop_decimation = params->position_loop_decimation,
 		.profile_sequence_running = params->profile_seq.running,
@@ -133,6 +166,26 @@ static inline void motor_publish_isr_config_snapshot(struct motor_parameters *pa
 		.profile_sequence_period_ticks = params->profile_seq.period_ticks,
 		.profile_sequence_period_ms = params->profile_seq.period_ms,
 	};
+
+	snapshot.control_policy_input = (struct motor_control_policy_input){
+		.mode = motor_publish_control_policy_mode_from_rt_flags(mode_flags),
+		.features = {
+			.encoder_read_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_ENCODER_READ)) != 0,
+			.angle_gen_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0,
+			.velocity_traj_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_VELOCITY_TRAJ)) != 0,
+			.commanded_currents_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS)) != 0,
+			.current_loop_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0,
+		},
+		.profile_sequence_active = params->profile_seq.running,
+	};
+	snapshot.control_policy_valid =
+		motor_control_policy_derive(&snapshot.control_policy_input,
+					    &snapshot.control_policy) == 0;
 
 	/* Keep legacy published fields in sync during transition. */
 	params->state_for_isr = snapshot.state;

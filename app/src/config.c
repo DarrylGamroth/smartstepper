@@ -92,8 +92,6 @@ void config_init_runtime_adapters(struct motor_parameters *params)
 
 	params->rt_adapters.outer_loop = (struct motor_outer_loop_runtime_ctx){
 		.outer_loop_mode = params->outer_loop_mode,
-		.position_loop_phase = &params->position_loop_phase,
-		.velocity_loop_phase = &params->velocity_loop_phase,
 		.position_profile = &params->position_profile,
 		.control_armed = false,
 		.position_target_rad = &params->position_target_rad,

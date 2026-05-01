@@ -99,7 +99,17 @@ static inline void motor_servo_ref_clear(struct motor_servo_ref *ref)
 		return;
 	}
 
-	*ref = (struct motor_servo_ref){0};
+	ref->enabled = false;
+	ref->effort_kind = MOTOR_SERVO_EFFORT_NONE;
+	ref->position_rad = 0.0f;
+	ref->velocity_rad_s = 0.0f;
+	ref->acceleration_rad_s2 = 0.0f;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_servo_ref_set_motion(struct motor_servo_ref *ref,
@@ -112,13 +122,17 @@ static inline void motor_servo_ref_set_motion(struct motor_servo_ref *ref,
 		return;
 	}
 
-	*ref = (struct motor_servo_ref){
-		.enabled = enabled,
-		.effort_kind = MOTOR_SERVO_EFFORT_NONE,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-	};
+	ref->enabled = enabled;
+	ref->effort_kind = MOTOR_SERVO_EFFORT_NONE;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_servo_ref_set_dq_current(struct motor_servo_ref *ref,
@@ -133,15 +147,17 @@ static inline void motor_servo_ref_set_dq_current(struct motor_servo_ref *ref,
 		return;
 	}
 
-	*ref = (struct motor_servo_ref){
-		.enabled = enabled,
-		.effort_kind = MOTOR_SERVO_EFFORT_CURRENT_DQ,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.id_ref_a = id_ref_a,
-		.iq_ref_a = iq_ref_a,
-	};
+	ref->enabled = enabled;
+	ref->effort_kind = MOTOR_SERVO_EFFORT_CURRENT_DQ;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = id_ref_a;
+	ref->iq_ref_a = iq_ref_a;
 }
 
 static inline void motor_servo_ref_set_current(struct motor_servo_ref *ref,
@@ -155,14 +171,17 @@ static inline void motor_servo_ref_set_current(struct motor_servo_ref *ref,
 		return;
 	}
 
-	*ref = (struct motor_servo_ref){
-		.enabled = enabled,
-		.effort_kind = MOTOR_SERVO_EFFORT_CURRENT,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.current_a = current_a,
-	};
+	ref->enabled = enabled;
+	ref->effort_kind = MOTOR_SERVO_EFFORT_CURRENT;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = current_a;
+	ref->voltage_v = 0.0f;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 static inline void motor_servo_ref_set_voltage(struct motor_servo_ref *ref,
@@ -176,14 +195,17 @@ static inline void motor_servo_ref_set_voltage(struct motor_servo_ref *ref,
 		return;
 	}
 
-	*ref = (struct motor_servo_ref){
-		.enabled = enabled,
-		.effort_kind = MOTOR_SERVO_EFFORT_VOLTAGE,
-		.position_rad = position_rad,
-		.velocity_rad_s = velocity_rad_s,
-		.acceleration_rad_s2 = acceleration_rad_s2,
-		.voltage_v = voltage_v,
-	};
+	ref->enabled = enabled;
+	ref->effort_kind = MOTOR_SERVO_EFFORT_VOLTAGE;
+	ref->position_rad = position_rad;
+	ref->velocity_rad_s = velocity_rad_s;
+	ref->acceleration_rad_s2 = acceleration_rad_s2;
+	ref->torque_nm = 0.0f;
+	ref->current_a = 0.0f;
+	ref->voltage_v = voltage_v;
+	ref->normalized_effort = 0.0f;
+	ref->id_ref_a = 0.0f;
+	ref->iq_ref_a = 0.0f;
 }
 
 struct motor_angle_ref {

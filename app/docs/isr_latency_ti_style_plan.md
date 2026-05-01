@@ -247,3 +247,22 @@ Expected state before resuming:
 3. Do not change public shell command semantics unless required for feature gating visibility.
 4. Do not remove existing tests; update them to cover the new smaller modules.
 5. Do not optimize by hiding errors; catastrophic guardrails remain required.
+
+## Phase 8: Remove Per-ISR Init Scaffolding
+
+Purpose: make the current persistent ISR context behave like TI-style control blocks: init/config happens outside the ISR, and the ISR only refreshes live inputs and overwrites the fields it owns.
+
+Tasks:
+
+1. Replace broad per-tick `*_init` helpers with smaller `*_refresh`/`*_prepare` helpers that only update fields consumed during the current tick.
+2. Do not clear large control refs every ISR. Each producer stage must overwrite the fields it owns before consumers read them.
+3. Rename vague encoder "sidework" terminology to explicit report/telemetry staging terminology.
+4. Move position/velocity loop decimation decisions out of `motor_outer_loop_runtime_step()` and into the ISR orchestration boundary.
+5. Derive `motor_control_policy` when publishing the ISR config snapshot, then copy the derived policy in the ISR instead of recalculating it every tick.
+
+Acceptance:
+
+1. No `motor_rt_control_ctx_init()`, `motor_control_step_init_pwm_output()`, or broad commission-observation zeroing is used in `motor_control_loop_step()`.
+2. `motor_outer_loop_runtime_step()` executes exactly when called with explicit `position_loop_update` and `velocity_loop_update` booleans.
+3. Encoder report staging uses clear naming.
+4. Focused runtime/scheduler tests and firmware build pass.

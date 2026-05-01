@@ -15,7 +15,6 @@
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor/control/torque.h"
-#include "motor/motion/outer_loop_sched.h"
 #include "motor/runtime/feedback_quality.h"
 
 #define MOTOR_OUTER_LOOP_NOINLINE __attribute__((noinline))
@@ -38,29 +37,6 @@ static void motor_outer_loop_outputs_init(const struct motor_outer_loop_inputs *
 	out->speed_mech_filtered_rad_s = in->speed_mech_rad_s;
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
-}
-
-static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_schedule_step(struct motor_outer_loop_runtime_ctx *ctx,
-					   const struct motor_outer_loop_inputs *in,
-					   bool *position_loop_update,
-					   bool *velocity_loop_update)
-{
-	struct motor_outer_loop_sched_input sched_in = {
-		.position_active = in->position_active,
-		.velocity_active = in->velocity_active,
-		.position_decimation = in->position_loop_decimation,
-		.velocity_decimation = in->velocity_loop_decimation,
-	};
-	struct motor_outer_loop_sched_state sched_state = {
-		.position_phase = *ctx->position_loop_phase,
-		.velocity_phase = *ctx->velocity_loop_phase,
-	};
-	struct motor_outer_loop_sched_output sched_out = {0};
-	motor_outer_loop_sched_step(&sched_in, &sched_state, &sched_out);
-	*ctx->position_loop_phase = sched_state.position_phase;
-	*ctx->velocity_loop_phase = sched_state.velocity_phase;
-	*position_loop_update = sched_out.position_update;
-	*velocity_loop_update = sched_out.velocity_update;
 }
 
 static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_position_step(struct motor_outer_loop_runtime_ctx *ctx,
@@ -399,12 +375,9 @@ int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,
 	}
 
 	motor_outer_loop_outputs_init(in, out);
-	bool position_loop_update = false;
-	bool velocity_loop_update = false;
-	motor_outer_loop_schedule_step(ctx, in, &position_loop_update, &velocity_loop_update);
-	motor_outer_loop_position_step(ctx, in, out, position_loop_update);
+	motor_outer_loop_position_step(ctx, in, out, in->position_loop_update);
 	motor_outer_loop_velocity_plan_step(ctx, in, out);
-	motor_outer_loop_velocity_step(ctx, in, out, velocity_loop_update);
+	motor_outer_loop_velocity_step(ctx, in, out, in->velocity_loop_update);
 
 	return 0;
 }

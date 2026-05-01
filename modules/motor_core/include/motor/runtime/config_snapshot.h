@@ -14,6 +14,8 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
+#include "motor/runtime/control_policy.h"
+
 struct motor_rt_config_snapshot {
 	uint32_t epoch;
 	const struct smf_state *state;
@@ -28,6 +30,9 @@ struct motor_rt_config_snapshot {
 	uint8_t profile_sequence_trigger_channel;
 	uint32_t profile_sequence_period_ticks;
 	uint32_t profile_sequence_period_ms;
+	bool control_policy_valid;
+	struct motor_control_policy_input control_policy_input;
+	struct motor_control_policy control_policy;
 };
 
 enum motor_rt_mode_flag {
