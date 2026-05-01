@@ -27,13 +27,46 @@ ZTEST(runtime, test_control_refs_keep_motion_independent_from_foc_backend)
 	};
 	struct motor_actuator_ref actuator = {
 		.kind = MOTOR_ACTUATOR_STEP_DIR,
+		.effort_kind = MOTOR_ACTUATOR_EFFORT_STEP_DIR,
 		.enabled = true,
+		.position_rad = motion.position_rad,
+		.velocity_rad_s = motion.velocity_rad_s,
 	};
 
 	zassert_equal(actuator.kind, MOTOR_ACTUATOR_STEP_DIR, NULL);
+	zassert_equal(actuator.effort_kind, MOTOR_ACTUATOR_EFFORT_STEP_DIR, NULL);
 	zassert_equal(feedback.source, MOTOR_FEEDBACK_ENCODER, NULL);
 	zassert_within(motion.position_rad, 1.25f, 1.0e-6f, NULL);
 	zassert_within(motion.velocity_target_rad_s, 2.0f, 1.0e-6f, NULL);
+}
+
+ZTEST(runtime, test_foc_actuator_ref_carries_dq_current_without_motion_coupling)
+{
+	struct motor_actuator_ref actuator = {0};
+
+	motor_actuator_ref_set_foc_current(&actuator,
+					   true,
+					   1.0f,
+					   2.0f,
+					   3.0f,
+					   0.1f,
+					   0.2f);
+
+	zassert_equal(actuator.kind, MOTOR_ACTUATOR_FOC_CURRENT, NULL);
+	zassert_equal(actuator.effort_kind, MOTOR_ACTUATOR_EFFORT_CURRENT_DQ, NULL);
+	zassert_true(actuator.enabled, NULL);
+	zassert_within(actuator.position_rad, 1.0f, 1.0e-6f, NULL);
+	zassert_within(actuator.velocity_rad_s, 2.0f, 1.0e-6f, NULL);
+	zassert_within(actuator.acceleration_rad_s2, 3.0f, 1.0e-6f, NULL);
+	zassert_within(actuator.id_ref_a, 0.1f, 1.0e-6f, NULL);
+	zassert_within(actuator.iq_ref_a, 0.2f, 1.0e-6f, NULL);
+
+	motor_actuator_ref_clear(&actuator, MOTOR_ACTUATOR_BRUSHED_CURRENT);
+	zassert_equal(actuator.kind, MOTOR_ACTUATOR_BRUSHED_CURRENT, NULL);
+	zassert_equal(actuator.effort_kind, MOTOR_ACTUATOR_EFFORT_NONE, NULL);
+	zassert_false(actuator.enabled, NULL);
+	zassert_within(actuator.id_ref_a, 0.0f, 1.0e-6f, NULL);
+	zassert_within(actuator.iq_ref_a, 0.0f, 1.0e-6f, NULL);
 }
 
 ZTEST(runtime, test_config_snapshot_publish_read_is_coherent)

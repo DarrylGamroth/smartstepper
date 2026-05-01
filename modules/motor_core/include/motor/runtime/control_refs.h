@@ -42,10 +42,67 @@ struct motor_feedback_ref {
 	float32_t velocity_filtered_rad_s;
 };
 
+enum motor_actuator_effort_kind {
+	MOTOR_ACTUATOR_EFFORT_NONE = 0,
+	MOTOR_ACTUATOR_EFFORT_CURRENT_DQ,
+	MOTOR_ACTUATOR_EFFORT_CURRENT_SCALAR,
+	MOTOR_ACTUATOR_EFFORT_VOLTAGE_SCALAR,
+	MOTOR_ACTUATOR_EFFORT_NORMALIZED,
+	MOTOR_ACTUATOR_EFFORT_STEP_DIR,
+};
+
 struct motor_actuator_ref {
 	enum motor_actuator_kind kind;
+	enum motor_actuator_effort_kind effort_kind;
 	bool enabled;
+	float32_t position_rad;
+	float32_t velocity_rad_s;
+	float32_t acceleration_rad_s2;
+	float32_t torque_nm;
+	float32_t current_a;
+	float32_t voltage_v;
+	float32_t normalized_effort;
+	float32_t id_ref_a;
+	float32_t iq_ref_a;
 };
+
+static inline void motor_actuator_ref_clear(struct motor_actuator_ref *ref,
+					    enum motor_actuator_kind kind)
+{
+	if (ref == NULL) {
+		return;
+	}
+
+	*ref = (struct motor_actuator_ref){
+		.kind = kind,
+		.effort_kind = MOTOR_ACTUATOR_EFFORT_NONE,
+		.enabled = false,
+	};
+}
+
+static inline void motor_actuator_ref_set_foc_current(struct motor_actuator_ref *ref,
+						      bool enabled,
+						      float32_t position_rad,
+						      float32_t velocity_rad_s,
+						      float32_t acceleration_rad_s2,
+						      float32_t id_ref_a,
+						      float32_t iq_ref_a)
+{
+	if (ref == NULL) {
+		return;
+	}
+
+	*ref = (struct motor_actuator_ref){
+		.kind = MOTOR_ACTUATOR_FOC_CURRENT,
+		.effort_kind = MOTOR_ACTUATOR_EFFORT_CURRENT_DQ,
+		.enabled = enabled,
+		.position_rad = position_rad,
+		.velocity_rad_s = velocity_rad_s,
+		.acceleration_rad_s2 = acceleration_rad_s2,
+		.id_ref_a = id_ref_a,
+		.iq_ref_a = iq_ref_a,
+	};
+}
 
 struct motor_angle_ref {
 	enum motor_angle_source source;

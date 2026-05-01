@@ -102,6 +102,34 @@ static inline bool motor_is_align_active_state(uint32_t mode_flags)
 	return motor_is_align_injection_state(mode_flags) || motor_is_align_sample_state(mode_flags);
 }
 
+static inline enum motor_control_policy_mode
+motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
+{
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN)) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_PROFILE_OPEN)) {
+		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE)) {
+		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED)) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION)) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS) ||
+	    motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
+	    motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
+	    motor_is_align_active_state(mode_flags)) {
+		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
+	}
+
+	return MOTOR_CONTROL_POLICY_MODE_DISABLED;
+}
+
 static inline void motor_align_load_pos_accum(const struct motor_parameters *params,
 					      struct motor_align_sample_accum *acc)
 {
@@ -364,6 +392,26 @@ static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
 	ctx->accel_mech_rad_s2 = params->live.acceleration_rad_s2;
 	ctx->speed_mech_filtered_rad_s = params->live.velocity_filtered_rad_s;
 
+	ctx->policy_input = (struct motor_control_policy_input){
+		.mode = motor_control_policy_mode_from_rt_flags(ctx->mode_flags),
+		.features = {
+			.encoder_read_enabled =
+				(feature_flags & BIT(MOTOR_FEATURE_ENCODER_READ)) != 0,
+			.angle_gen_enabled = ctx->feature_angle_gen,
+			.velocity_traj_enabled = ctx->feature_velocity_traj,
+			.commanded_currents_enabled = ctx->feature_use_commanded_currents,
+			.current_loop_enabled = ctx->feature_pi_control,
+		},
+		.profile_sequence_active = cfg_valid ? cfg->profile_sequence_running :
+							params->profile_seq.running,
+	};
+	if (motor_control_policy_derive(&ctx->policy_input, &ctx->policy) != 0) {
+		ctx->policy_input = (struct motor_control_policy_input){
+			.mode = MOTOR_CONTROL_POLICY_MODE_DISABLED,
+		};
+		(void)motor_control_policy_derive(&ctx->policy_input, &ctx->policy);
+	}
+
 	ctx->meas = (struct motor_control_measurements){
 		.position_mech_rad = ctx->position_mech_rad,
 		.speed_mech_rad_s = ctx->speed_mech_rad_s,
@@ -394,6 +442,7 @@ static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
 		.id_ref_a = params->live.Id_ref_A,
 		.iq_ref_a = params->live.Iq_ref_A,
 	};
+	motor_actuator_ref_clear(&ctx->actuator_ref, ctx->policy.actuator_kind);
 	ctx->commutation_ref = (struct motor_commutation_ref){0};
 	ctx->enc_stage = (struct motor_encoder_stage_result){0};
 	ctx->rls_runtime = (struct motor_rls_runtime_state){0};
@@ -828,11 +877,45 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	}
 }
 
+static inline void motor_control_step_build_actuator_ref(
+	const struct motor_rt_control_ctx *ctx,
+	const struct motor_motion_ref *motion_ref,
+	const struct motor_current_ref *current_ref,
+	struct motor_actuator_ref *actuator_ref)
+{
+	if (actuator_ref == NULL) {
+		return;
+	}
+
+	if (ctx == NULL || motion_ref == NULL || current_ref == NULL ||
+	    !ctx->feature_pi_control) {
+		motor_actuator_ref_clear(actuator_ref, ctx != NULL ? ctx->policy.actuator_kind :
+							      MOTOR_ACTUATOR_FOC_CURRENT);
+		return;
+	}
+
+	switch (ctx->policy.actuator_kind) {
+	case MOTOR_ACTUATOR_FOC_CURRENT:
+		motor_actuator_ref_set_foc_current(actuator_ref,
+						    true,
+						    motion_ref->position_rad,
+						    motion_ref->velocity_ref_rad_s,
+						    motion_ref->acceleration_rad_s2,
+						    current_ref->id_ref_a,
+						    current_ref->iq_ref_a);
+		break;
+	default:
+		motor_actuator_ref_clear(actuator_ref, ctx->policy.actuator_kind);
+		break;
+	}
+}
+
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_parameters *params,
 					 const struct motor_rt_control_ctx *ctx,
 					 const struct motor_control_measurements *meas,
 					 const struct motor_motion_ref *motion_ref,
 					 const struct motor_feedback_ref *feedback_ref,
+					 const struct motor_actuator_ref *actuator_ref,
 					 struct motor_angle_ref *angle_ref,
 					 const struct motor_current_ref *current_ref,
 					 struct motor_commutation_ref *commutation_ref,
@@ -878,7 +961,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 
 #if defined(CONFIG_MOTOR_ISR_SANITY_CHECKS) && (CONFIG_MOTOR_ISR_SANITY_CHECKS == 1)
 	if (!isfinite(angle_ref->predicted_electrical_angle_rad) ||
-	    !isfinite(current_ref->id_ref_a) || !isfinite(current_ref->iq_ref_a) ||
+	    !isfinite(actuator_ref->id_ref_a) || !isfinite(actuator_ref->iq_ref_a) ||
 	    !isfinite(current_ref->id_meas_a) || !isfinite(current_ref->iq_meas_a) ||
 	    !isfinite(meas->vbus_v) || !isfinite(params->max_modulation_index) ||
 	    params->max_modulation_index <= 0.0f) {
@@ -912,8 +995,8 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	float32_t vq_limit_v = 0.0f;
 	if (motor_current_loop_step_fast_values(&params->pi_Id,
 						&params->pi_Iq,
-						current_ref->id_ref_a,
-						current_ref->iq_ref_a,
+						actuator_ref->id_ref_a,
+						actuator_ref->iq_ref_a,
 						current_ref->id_meas_a,
 						current_ref->iq_meas_a,
 						max_voltage_magnitude_v,
@@ -941,7 +1024,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 						 commutation_ref->vb_v,
 						 meas->vbus_v,
 						 ctx->feature_braking,
-						 current_ref->iq_ref_a,
+						 actuator_ref->iq_ref_a,
 						 meas->speed_mech_rad_s,
 						 VBUS_REGEN_LIMIT_V,
 						 VBUS_VOLTAGE_MARGIN_INV,
@@ -976,6 +1059,35 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	pwm_out->update_pwm = true;
 
 	return false;
+}
+
+static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_actuator_stage(
+	struct motor_parameters *params,
+	const struct motor_rt_control_ctx *ctx,
+	const struct motor_control_measurements *meas,
+	const struct motor_motion_ref *motion_ref,
+	const struct motor_feedback_ref *feedback_ref,
+	const struct motor_actuator_ref *actuator_ref,
+	struct motor_angle_ref *angle_ref,
+	const struct motor_current_ref *current_ref,
+	struct motor_commutation_ref *commutation_ref,
+	struct motor_control_pwm_output *pwm_out)
+{
+	if (actuator_ref == NULL || !actuator_ref->enabled) {
+		return false;
+	}
+
+	switch (actuator_ref->kind) {
+	case MOTOR_ACTUATOR_FOC_CURRENT:
+		if (actuator_ref->effort_kind != MOTOR_ACTUATOR_EFFORT_CURRENT_DQ) {
+			return true;
+		}
+		return motor_control_step_foc_stage(params, ctx, meas, motion_ref, feedback_ref,
+						    actuator_ref, angle_ref, current_ref,
+						    commutation_ref, pwm_out);
+	default:
+		return true;
+	}
 }
 
 static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
@@ -1059,11 +1171,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 	struct motor_control_measurements *meas = &ctx->meas;
 	struct motor_motion_ref *motion_ref = &ctx->motion_ref;
 	struct motor_feedback_ref *feedback_ref = &ctx->feedback_ref;
+	struct motor_actuator_ref *actuator_ref = &ctx->actuator_ref;
 	struct motor_angle_ref *angle_ref = &ctx->angle_ref;
 	struct motor_current_ref *current_ref = &ctx->current_ref;
 	struct motor_commutation_ref *commutation_ref = &ctx->commutation_ref;
 	struct motor_rls_runtime_state *rls_runtime = &ctx->rls_runtime;
-	bool actuator_enabled = feature_pi_control;
 
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = params->velocity_dob_state.disturbance_nm;
@@ -1099,13 +1211,15 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_control_step_reference_stage(params, ctx, meas, motion_ref, feedback_ref,
 					   current_ref, rls_runtime);
+	motor_control_step_build_actuator_ref(ctx, motion_ref, current_ref, actuator_ref);
 
-	if (!actuator_enabled) {
+	if (!actuator_ref->enabled) {
 		goto isr_done;
 	}
 
-	if (motor_control_step_foc_stage(params, ctx, meas, motion_ref, feedback_ref,
-					 angle_ref, current_ref, commutation_ref, pwm_out)) {
+	if (motor_control_step_actuator_stage(params, ctx, meas, motion_ref, feedback_ref,
+					      actuator_ref, angle_ref, current_ref,
+					      commutation_ref, pwm_out)) {
 		goto isr_done;
 	}
 

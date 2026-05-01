@@ -100,6 +100,16 @@ Status as of 2026-04-30:
 | Phase 6: Simulation/unit tests | Partially complete | Pure policy and motion tests cover profile-open encoder independence and generated-angle profile sequencing. Broader pipeline simulation remains future work. |
 | Phase 7: HIL validation | Ready to start | The pre-Phase 7 ISR/API cleanup gate is complete; HIL remains the next validation step. |
 
+Additional status:
+
+1. A behavior-preserving actuator backend seam is now in place. The fast loop builds a
+   `motor_actuator_ref` from the selected policy and current references, then dispatches
+   through an actuator stage.
+2. The only implemented runtime backend remains `MOTOR_ACTUATOR_FOC_CURRENT`; brushed and
+   step/direction backends are still architectural targets.
+3. The FOC backend now consumes the actuator command's D/Q current fields instead of being
+   called directly from the top-level ISR path.
+
 Implemented commits:
 
 1. `c43910b refactor(motion): introduce fast loop control refs`
@@ -141,6 +151,7 @@ The fast loop should become an explicit pipeline:
 policy_derive()       -> motor_control_policy
 motion_step()         -> motor_motion_ref
 servo_step()          -> motor_actuator_ref
+backend_dispatch()    -> selected actuator backend
 backend_step()        -> motor_backend_ref / motor_pwm_ref / step-dir command
 telemetry_publish()   -> optional debug/live state
 ```
@@ -152,7 +163,7 @@ collect ADC/encoder
 derive policy from state + config snapshot
 run motion source
 derive actuator effort from motion/feedback
-run selected motor backend
+dispatch and run selected motor backend
 publish telemetry/report
 ```
 
