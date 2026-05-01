@@ -158,7 +158,7 @@ static void motor_shell_print_control_policy(const struct shell *sh,
 	shell_print(sh, "  Current loop:     %s",
 		    policy->current_loop_enabled ? "ENABLED" : "DISABLED");
 	shell_print(sh, "  Generated drive:  %s",
-		    policy->generated_angle_position_driven ? "position" : "velocity/none");
+		    motor_generated_angle_mode_to_string(policy->generated_angle_mode));
 	shell_print(sh, "  Policy valid:     %s", valid ? "YES" : "NO");
 }
 

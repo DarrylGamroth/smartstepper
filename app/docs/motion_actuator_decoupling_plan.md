@@ -97,18 +97,21 @@ Status as of 2026-04-30:
 | Phase 3: Motion/current-source split | Complete | Generated-angle velocity is driven from `motor_motion_ref`; current arbitration no longer owns angle-generator trajectory state. |
 | Phase 4: `profile_open` | Complete | `ONLINE_PROFILE_OPEN` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
 | Phase 5: Shell/status cleanup | Complete | `motor state policy` and `motor state status` expose motion source, feedback source, angle source, current source, backend kind, and encoder dependency. |
-| Phase 6: Simulation/unit tests | Partially complete | Pure policy and motion tests cover profile-open encoder independence and generated-angle profile sequencing. Broader pipeline simulation remains future work. |
+| Phase 6: Simulation/unit tests | Mostly complete | Pure policy, motion, and servo-to-actuator adapter tests cover profile-open encoder independence, generated-angle profile sequencing, disarm effort clearing, backend domain rejection, and simulated FOC/brushed/step-dir adapter mapping. |
 | Phase 7: HIL validation | Ready to start | The pre-Phase 7 ISR/API cleanup gate is complete; HIL remains the next validation step. |
 
 Additional status:
 
 1. A behavior-preserving actuator backend seam is now in place. The fast loop builds a
-   `motor_actuator_ref` from the selected policy and current references, then dispatches
-   through an actuator stage.
+   generic `motor_servo_ref`, adapts it to `motor_actuator_ref` using the selected policy,
+   then dispatches through an actuator stage.
 2. The only implemented runtime backend remains `MOTOR_ACTUATOR_FOC_CURRENT`; brushed and
    step/direction backends are still architectural targets.
 3. The FOC backend now consumes the actuator command's D/Q current fields instead of being
    called directly from the top-level ISR path.
+4. Generated-angle operation is represented explicitly by `motor_generated_angle_mode`
+   instead of overloading `feature_angle_gen` with velocity-driven vs position-driven
+   semantics.
 
 Implemented commits:
 
@@ -150,7 +153,7 @@ The fast loop should become an explicit pipeline:
 ```text
 policy_derive()       -> motor_control_policy
 motion_step()         -> motor_motion_ref
-servo_step()          -> motor_actuator_ref
+servo_step()          -> motor_servo_ref
 backend_dispatch()    -> selected actuator backend
 backend_step()        -> motor_backend_ref / motor_pwm_ref / step-dir command
 telemetry_publish()   -> optional debug/live state
@@ -176,6 +179,13 @@ feedback_step()       -> motor_feedback_ref
 ```
 
 Closed-loop servo modules consume feedback. FOC backends may also consume feedback-derived angle. Open-loop generated-angle backends can ignore encoder feedback for control while still publishing it for telemetry.
+
+Servo effort is represented by `motor_servo_ref`. Backend adapters convert this generic
+effort into backend-specific actuator commands:
+
+```text
+motor_servo_ref       -> motor_actuator_ref
+```
 
 FOC-specific systems can refine the backend step internally:
 
@@ -734,9 +744,16 @@ Simulation-style tests:
 1. run a profile-open two-point sequence and verify generated angle follows the profile,
 2. run the same profile with encoder disabled and verify no encoder fault gates commutation,
 3. run closed-loop position policy and verify encoder invalidity gates control as expected,
-4. verify disarm zeros current without corrupting profile state.
-5. verify motion reference tests do not depend on FOC-specific fields.
+4. verify disarm zeros current without corrupting profile state,
+5. verify motion reference tests do not depend on FOC-specific fields,
 6. feed the same motion reference into simulated FOC, brushed, and step/direction backend adapters.
+
+Status:
+
+1. Items 1, 2, 4, 5, and 6 are covered by unit tests.
+2. Item 3 is still best validated with HIL or a fuller app-level simulator because the
+   actual encoder invalidity gate is coupled to `motor_control_loop_step()` state and
+   feedback quality snapshots.
 
 ## Phase 7: HIL Validation
 

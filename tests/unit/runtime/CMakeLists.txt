@@ -29,5 +29,6 @@ endforeach()
 
 target_sources(app PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/config_snapshot.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/control_policy.c
 	src/main.c
 )

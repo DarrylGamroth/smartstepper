@@ -39,6 +39,12 @@ enum motor_angle_source {
 	MOTOR_ANGLE_SOURCE_PROPAGATED,
 };
 
+enum motor_generated_angle_mode {
+	MOTOR_GENERATED_ANGLE_NONE = 0,
+	MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN,
+	MOTOR_GENERATED_ANGLE_POSITION_DRIVEN,
+};
+
 enum motor_feedback_source {
 	MOTOR_FEEDBACK_NONE = 0,
 	MOTOR_FEEDBACK_ENCODER,
@@ -79,6 +85,7 @@ struct motor_control_policy {
 	enum motor_motion_source motion_source;
 	enum motor_feedback_source feedback_source;
 	enum motor_angle_source angle_source;
+	enum motor_generated_angle_mode generated_angle_mode;
 	enum motor_current_source current_source;
 	enum motor_actuator_kind actuator_kind;
 	bool encoder_read_enabled;
@@ -110,6 +117,7 @@ bool motor_control_policy_is_valid(const struct motor_control_policy *policy,
 const char *motor_motion_source_to_string(enum motor_motion_source source);
 const char *motor_feedback_source_to_string(enum motor_feedback_source source);
 const char *motor_angle_source_to_string(enum motor_angle_source source);
+const char *motor_generated_angle_mode_to_string(enum motor_generated_angle_mode mode);
 const char *motor_current_source_to_string(enum motor_current_source source);
 const char *motor_actuator_kind_to_string(enum motor_actuator_kind kind);
 

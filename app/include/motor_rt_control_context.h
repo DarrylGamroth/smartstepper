@@ -85,6 +85,7 @@ struct motor_rt_control_ctx {
 	struct motor_control_measurements meas;
 	struct motor_motion_ref motion_ref;
 	struct motor_feedback_ref feedback_ref;
+	struct motor_servo_ref servo_ref;
 	struct motor_actuator_ref actuator_ref;
 	struct motor_angle_ref angle_ref;
 	struct motor_current_ref current_ref;

@@ -43,6 +43,7 @@ ZTEST(motor_control_policy, test_velocity_open_maps_to_generated_angle_foc_curre
 	zassert_equal(policy.motion_source, MOTOR_MOTION_SOURCE_VELOCITY_TRAJ, NULL);
 	zassert_equal(policy.feedback_source, MOTOR_FEEDBACK_GENERATED_MODEL, NULL);
 	zassert_equal(policy.angle_source, MOTOR_ANGLE_SOURCE_GENERATED, NULL);
+	zassert_equal(policy.generated_angle_mode, MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN, NULL);
 	zassert_equal(policy.current_source, MOTOR_CURRENT_SOURCE_COMMANDED, NULL);
 	zassert_equal(policy.actuator_kind, MOTOR_ACTUATOR_FOC_CURRENT, NULL);
 	zassert_false(policy.encoder_required_for_control, NULL);
@@ -64,6 +65,7 @@ ZTEST(motor_control_policy, test_profile_open_maps_to_position_driven_generated_
 	zassert_equal(policy.motion_source, MOTOR_MOTION_SOURCE_PROFILE_SEQUENCE, NULL);
 	zassert_equal(policy.feedback_source, MOTOR_FEEDBACK_GENERATED_MODEL, NULL);
 	zassert_equal(policy.angle_source, MOTOR_ANGLE_SOURCE_GENERATED, NULL);
+	zassert_equal(policy.generated_angle_mode, MOTOR_GENERATED_ANGLE_POSITION_DRIVEN, NULL);
 	zassert_equal(policy.current_source, MOTOR_CURRENT_SOURCE_COMMANDED, NULL);
 	zassert_false(policy.encoder_required_for_control, NULL);
 	zassert_true(policy.generated_angle_position_driven, NULL);
@@ -84,6 +86,7 @@ ZTEST(motor_control_policy, test_profile_open_does_not_require_encoder_when_enco
 	zassert_equal(policy.motion_source, MOTOR_MOTION_SOURCE_PROFILE, NULL);
 	zassert_equal(policy.feedback_source, MOTOR_FEEDBACK_GENERATED_MODEL, NULL);
 	zassert_equal(policy.angle_source, MOTOR_ANGLE_SOURCE_GENERATED, NULL);
+	zassert_equal(policy.generated_angle_mode, MOTOR_GENERATED_ANGLE_POSITION_DRIVEN, NULL);
 	zassert_false(policy.encoder_read_enabled, NULL);
 	zassert_false(policy.encoder_required_for_control, NULL);
 	zassert_true(policy.generated_angle_position_driven, NULL);
@@ -102,6 +105,7 @@ ZTEST(motor_control_policy, test_torque_maps_to_encoder_required_commanded_curre
 	zassert_equal(policy.motion_source, MOTOR_MOTION_SOURCE_HOLD, NULL);
 	zassert_equal(policy.feedback_source, MOTOR_FEEDBACK_ENCODER, NULL);
 	zassert_equal(policy.angle_source, MOTOR_ANGLE_SOURCE_ENCODER, NULL);
+	zassert_equal(policy.generated_angle_mode, MOTOR_GENERATED_ANGLE_NONE, NULL);
 	zassert_equal(policy.current_source, MOTOR_CURRENT_SOURCE_COMMANDED, NULL);
 	zassert_true(policy.encoder_required_for_control, NULL);
 	expect_policy_valid(&policy);
@@ -206,6 +210,8 @@ ZTEST(motor_control_policy, test_string_helpers_cover_public_enums)
 			  "generated_model", NULL);
 	zassert_str_equal(motor_angle_source_to_string(MOTOR_ANGLE_SOURCE_PROPAGATED),
 			  "propagated", NULL);
+	zassert_str_equal(motor_generated_angle_mode_to_string(MOTOR_GENERATED_ANGLE_POSITION_DRIVEN),
+			  "position", NULL);
 	zassert_str_equal(motor_current_source_to_string(MOTOR_CURRENT_SOURCE_POSITION_LOOP),
 			  "position_loop", NULL);
 	zassert_str_equal(motor_actuator_kind_to_string(MOTOR_ACTUATOR_STEP_DIR),

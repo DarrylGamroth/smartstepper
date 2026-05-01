@@ -15,6 +15,7 @@ static void motor_control_policy_set_disabled(struct motor_control_policy *polic
 		.motion_source = MOTOR_MOTION_SOURCE_HOLD,
 		.feedback_source = MOTOR_FEEDBACK_NONE,
 		.angle_source = MOTOR_ANGLE_SOURCE_NONE,
+		.generated_angle_mode = MOTOR_GENERATED_ANGLE_NONE,
 		.current_source = MOTOR_CURRENT_SOURCE_ZERO,
 		.actuator_kind = MOTOR_ACTUATOR_FOC_CURRENT,
 		.encoder_read_enabled = false,
@@ -42,6 +43,7 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 		policy->motion_source = MOTOR_MOTION_SOURCE_VELOCITY_TRAJ;
 		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_MODEL;
 		policy->angle_source = MOTOR_ANGLE_SOURCE_GENERATED;
+		policy->generated_angle_mode = MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN;
 		policy->current_source = MOTOR_CURRENT_SOURCE_COMMANDED;
 		policy->encoder_read_enabled = in->features.encoder_read_enabled;
 		policy->encoder_required_for_control = false;
@@ -53,6 +55,7 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 					       MOTOR_MOTION_SOURCE_PROFILE;
 		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_MODEL;
 		policy->angle_source = MOTOR_ANGLE_SOURCE_GENERATED;
+		policy->generated_angle_mode = MOTOR_GENERATED_ANGLE_POSITION_DRIVEN;
 		policy->current_source = MOTOR_CURRENT_SOURCE_COMMANDED;
 		policy->encoder_required_for_control = false;
 		policy->generated_angle_position_driven = true;
@@ -105,6 +108,9 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 		policy->angle_source = in->features.angle_gen_enabled ?
 					       MOTOR_ANGLE_SOURCE_GENERATED :
 					       MOTOR_ANGLE_SOURCE_ENCODER;
+		policy->generated_angle_mode = in->features.angle_gen_enabled ?
+						       MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN :
+						       MOTOR_GENERATED_ANGLE_NONE;
 		policy->current_source = MOTOR_CURRENT_SOURCE_CALIBRATION;
 		policy->encoder_required_for_control = false;
 		break;
@@ -237,6 +243,16 @@ const char *motor_angle_source_to_string(enum motor_angle_source source)
 	case MOTOR_ANGLE_SOURCE_GENERATED: return "generated";
 	case MOTOR_ANGLE_SOURCE_ENCODER: return "encoder";
 	case MOTOR_ANGLE_SOURCE_PROPAGATED: return "propagated";
+	default: return "unknown";
+	}
+}
+
+const char *motor_generated_angle_mode_to_string(enum motor_generated_angle_mode mode)
+{
+	switch (mode) {
+	case MOTOR_GENERATED_ANGLE_NONE: return "none";
+	case MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN: return "velocity";
+	case MOTOR_GENERATED_ANGLE_POSITION_DRIVEN: return "position";
 	default: return "unknown";
 	}
 }

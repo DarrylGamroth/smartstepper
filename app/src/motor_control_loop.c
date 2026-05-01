@@ -435,13 +435,13 @@ static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
 		.velocity_filtered_rad_s = ctx->speed_mech_filtered_rad_s,
 	};
 	ctx->angle_ref = (struct motor_angle_ref){
-		.source = ctx->feature_angle_gen ? MOTOR_ANGLE_SOURCE_GENERATED :
-						    MOTOR_ANGLE_SOURCE_PROPAGATED,
+		.source = ctx->policy.angle_source,
 	};
 	ctx->current_ref = (struct motor_current_ref){
 		.id_ref_a = params->live.Id_ref_A,
 		.iq_ref_a = params->live.Iq_ref_A,
 	};
+	motor_servo_ref_clear(&ctx->servo_ref);
 	motor_actuator_ref_clear(&ctx->actuator_ref, ctx->policy.actuator_kind);
 	ctx->commutation_ref = (struct motor_commutation_ref){0};
 	ctx->enc_stage = (struct motor_encoder_stage_result){0};
@@ -780,9 +780,9 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		current_ref->iq_ref_a = 0.0f;
 	}
 
-	bool profile_open_active =
-		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_PROFILE_OPEN);
-	if (profile_open_active) {
+	bool generated_angle_position_driven =
+		ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_POSITION_DRIVEN;
+	if (generated_angle_position_driven) {
 		motor_control_step_profile_open_motion(params, ctx->control_armed, motion_ref,
 						       feedback_ref);
 		meas->position_mech_rad = feedback_ref->position_rad;
@@ -853,7 +853,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	}
 
-	if (ctx->feature_angle_gen) {
+	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN) {
 		angle_gen_set_velocity(&params->angle_gen, motion_ref->velocity_ref_rad_s);
 	}
 
@@ -872,42 +872,42 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		current_ref->iq_ref_a = 0.0f;
 	}
 
-	if (ctx->feature_angle_gen && !profile_open_active) {
+	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN) {
 		angle_gen_run(&params->angle_gen);
 	}
 }
 
-static inline void motor_control_step_build_actuator_ref(
+static inline void motor_control_step_build_servo_ref(
 	const struct motor_rt_control_ctx *ctx,
 	const struct motor_motion_ref *motion_ref,
 	const struct motor_current_ref *current_ref,
-	struct motor_actuator_ref *actuator_ref)
+	struct motor_servo_ref *servo_ref)
 {
-	if (actuator_ref == NULL) {
+	if (servo_ref == NULL) {
 		return;
 	}
 
 	if (ctx == NULL || motion_ref == NULL || current_ref == NULL ||
 	    !ctx->feature_pi_control) {
-		motor_actuator_ref_clear(actuator_ref, ctx != NULL ? ctx->policy.actuator_kind :
-							      MOTOR_ACTUATOR_FOC_CURRENT);
+		motor_servo_ref_clear(servo_ref);
 		return;
 	}
 
-	switch (ctx->policy.actuator_kind) {
-	case MOTOR_ACTUATOR_FOC_CURRENT:
-		motor_actuator_ref_set_foc_current(actuator_ref,
-						    true,
-						    motion_ref->position_rad,
-						    motion_ref->velocity_ref_rad_s,
-						    motion_ref->acceleration_rad_s2,
-						    current_ref->id_ref_a,
-						    current_ref->iq_ref_a);
-		break;
-	default:
-		motor_actuator_ref_clear(actuator_ref, ctx->policy.actuator_kind);
-		break;
-	}
+	motor_servo_ref_set_dq_current(servo_ref,
+				       true,
+				       motion_ref->position_rad,
+				       motion_ref->velocity_ref_rad_s,
+				       motion_ref->acceleration_rad_s2,
+				       current_ref->id_ref_a,
+				       current_ref->iq_ref_a);
+}
+
+static inline int motor_control_step_build_actuator_ref(
+	const struct motor_control_policy *policy,
+	const struct motor_servo_ref *servo_ref,
+	struct motor_actuator_ref *actuator_ref)
+{
+	return motor_actuator_ref_from_servo(policy, servo_ref, actuator_ref);
 }
 
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_parameters *params,
@@ -927,8 +927,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	angle_ref->predicted_electrical_angle_rad =
 		angle_observer_get_elec_angle_pred(&params->observer);
 	angle_ref->electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
-	angle_ref->source = ctx->feature_angle_gen ? MOTOR_ANGLE_SOURCE_GENERATED :
-						 MOTOR_ANGLE_SOURCE_PROPAGATED;
+	angle_ref->source = ctx->policy.angle_source;
 
 	float32_t decoupling_speed_limit_rad_s =
 		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
@@ -943,7 +942,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	bool decoupling_speed_valid = isfinite(angle_ref->electrical_speed_rad_s) &&
 				      (fabsf(angle_ref->electrical_speed_rad_s) <=
 				       decoupling_speed_limit_rad_s);
-	bool decoupling_feedback_valid = ctx->feature_angle_gen ||
+	bool decoupling_feedback_valid = ctx->policy.angle_source == MOTOR_ANGLE_SOURCE_GENERATED ||
 					 motor_velocity_feedback_is_valid(params->live.position_quality_flags);
 	struct motor_dq_decoupling_enable_input decoupling_enable_in = {
 		.feature_enabled = CURRENT_DECOUPLING_ENABLED,
@@ -1157,7 +1156,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	motor_rt_control_ctx_init(ctx, params);
 
 	uint32_t mode_flags = ctx->mode_flags;
-	bool feature_angle_gen = ctx->feature_angle_gen;
+	bool generated_angle_active = ctx->policy.angle_source == MOTOR_ANGLE_SOURCE_GENERATED;
 	bool feature_pwm_output = ctx->feature_pwm_output;
 	bool feature_pi_control = ctx->feature_pi_control;
 	bool control_armed = ctx->control_armed;
@@ -1171,6 +1170,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	struct motor_control_measurements *meas = &ctx->meas;
 	struct motor_motion_ref *motion_ref = &ctx->motion_ref;
 	struct motor_feedback_ref *feedback_ref = &ctx->feedback_ref;
+	struct motor_servo_ref *servo_ref = &ctx->servo_ref;
 	struct motor_actuator_ref *actuator_ref = &ctx->actuator_ref;
 	struct motor_angle_ref *angle_ref = &ctx->angle_ref;
 	struct motor_current_ref *current_ref = &ctx->current_ref;
@@ -1184,7 +1184,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	/* Read encoder if feature is enabled */
 	struct motor_encoder_stage_result *enc_stage = &ctx->enc_stage;
 	int enc_ret = motor_control_step_read_encoder(params, mode_flags, encoder_sample,
-						      feature_angle_gen, commission_obs,
+						      generated_angle_active, commission_obs,
 						      enc_stage);
 	if (enc_ret == -EIO) {
 		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
@@ -1211,7 +1211,10 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_control_step_reference_stage(params, ctx, meas, motion_ref, feedback_ref,
 					   current_ref, rls_runtime);
-	motor_control_step_build_actuator_ref(ctx, motion_ref, current_ref, actuator_ref);
+	motor_control_step_build_servo_ref(ctx, motion_ref, current_ref, servo_ref);
+	if (motor_control_step_build_actuator_ref(&ctx->policy, servo_ref, actuator_ref) != 0) {
+		goto isr_done;
+	}
 
 	if (!actuator_ref->enabled) {
 		goto isr_done;
