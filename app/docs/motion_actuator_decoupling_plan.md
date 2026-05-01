@@ -98,7 +98,7 @@ Status as of 2026-04-30:
 | Phase 4: `profile_open` | Complete | `ONLINE_PROFILE_OPEN` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
 | Phase 5: Shell/status cleanup | Complete | `motor state policy` and `motor state status` expose motion source, feedback source, angle source, current source, backend kind, and encoder dependency. |
 | Phase 6: Simulation/unit tests | Partially complete | Pure policy and motion tests cover profile-open encoder independence and generated-angle profile sequencing. Broader pipeline simulation remains future work. |
-| Phase 7: HIL validation | Not started | Hardware validation should wait for the pre-Phase 7 cleanup gate below. |
+| Phase 7: HIL validation | Ready to start | The pre-Phase 7 ISR/API cleanup gate is complete; HIL remains the next validation step. |
 
 Implemented commits:
 
@@ -107,10 +107,19 @@ Implemented commits:
 3. `dc1385b feat(motion): add profile open mode`
 4. `a82d270 feat(motion): expose active control policy`
 5. `4a29096 test(motion): expand decoupled policy coverage`
+6. `3390000 perf(motor): move ISR scratch into persistent context`
+7. `d7e2f64 perf(motor): flatten ISR FOC backend path`
+8. `c04d0f7 perf(motor): split outer-loop ISR runtime stages`
+9. `cc28cff perf(motor): remove ISR encoder context copy`
+10. `910892b perf(motor): gate optional ISR features`
+11. `cea69ce test(motor): document ISR measurement gates`
 
 Validation evidence is recorded in `app/docs/plan/execution_log.md`.
 
 ## Pre-Phase 7 Cleanup Gate
+
+Status: complete. Detailed evidence and repeatable commands are in
+`app/docs/isr_measurement_workflow.md` and `app/docs/plan/execution_log.md`.
 
 Before HIL validation, clean up the remaining real-time/API concerns found during review:
 
