@@ -15,6 +15,7 @@
 #include "motor/estimation/rls_runtime.h"
 #include "motor/observers/encoder_feedback.h"
 #include "motor/runtime/commission_runtime.h"
+#include "motor/runtime/config_snapshot.h"
 #include "motor/runtime/control_refs.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor/runtime/outer_loop_runtime.h"
@@ -87,6 +88,7 @@ struct motor_rt_control_ctx {
 	struct motor_encoder_stage_result enc_stage;
 	struct motor_rls_runtime_state rls_runtime;
 	struct motor_commission_observation commission_obs;
+	struct motor_rt_config_snapshot cfg_snapshot;
 	struct motor_outer_loop_inputs outer_inputs;
 	struct motor_outer_loop_outputs outer_outputs;
 	struct motor_current_ref_policy_inputs ref_policy_inputs;

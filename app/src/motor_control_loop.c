@@ -329,12 +329,13 @@ static inline void motor_commission_runtime_ctx_refresh(struct motor_commission_
 static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
 					     const struct motor_parameters *params)
 {
-	struct motor_rt_config_snapshot cfg = {0};
-	bool cfg_valid = motor_config_snapshot_read(&cfg);
+	struct motor_rt_config_snapshot *cfg = &ctx->cfg_snapshot;
+	*cfg = (struct motor_rt_config_snapshot){0};
+	bool cfg_valid = motor_config_snapshot_read(cfg);
 	atomic_val_t feature_flags =
-		cfg_valid ? cfg.feature_flags : atomic_get(&params->feature_flags);
+		cfg_valid ? cfg->feature_flags : atomic_get(&params->feature_flags);
 
-	ctx->mode_flags = cfg_valid ? cfg.mode_flags : params->rt_fast.mode_flags_shadow;
+	ctx->mode_flags = cfg_valid ? cfg->mode_flags : params->rt_fast.mode_flags_shadow;
 	ctx->feature_angle_gen = (feature_flags & BIT(MOTOR_FEATURE_ANGLE_GEN)) != 0;
 	ctx->feature_pwm_output = (feature_flags & BIT(MOTOR_FEATURE_PWM_OUTPUT)) != 0;
 	ctx->feature_pi_control = (feature_flags & BIT(MOTOR_FEATURE_PI_CONTROL)) != 0;
@@ -345,11 +346,11 @@ static inline void motor_rt_control_ctx_init(struct motor_rt_control_ctx *ctx,
 	ctx->online_control_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL);
 	ctx->control_armed = atomic_get(&params->control_armed) != 0;
 	ctx->velocity_loop_decimation =
-		CLAMP(cfg_valid ? cfg.velocity_loop_decimation : params->velocity_loop_decimation,
+		CLAMP(cfg_valid ? cfg->velocity_loop_decimation : params->velocity_loop_decimation,
 		      OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
 	ctx->position_loop_decimation =
-		CLAMP(cfg_valid ? cfg.position_loop_decimation : params->position_loop_decimation,
+		CLAMP(cfg_valid ? cfg->position_loop_decimation : params->position_loop_decimation,
 		      OUTER_LOOP_DECIMATION_MIN,
 		      OUTER_LOOP_DECIMATION_MAX);
 	ctx->velocity_loop_dt_s =

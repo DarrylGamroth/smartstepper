@@ -10,7 +10,17 @@ target_include_directories(app PRIVATE
 set(MOTOR_CORE_STEP_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/src/motor_control_loop.c)
 file(READ ${MOTOR_CORE_STEP_SRC} MOTOR_CORE_STEP_TEXT)
 
-foreach(FORBIDDEN_TOKEN "k_msgq_" "k_fifo_" "k_work_" "k_sem_" "LOG_" "printk(")
+foreach(FORBIDDEN_TOKEN
+    "k_msgq_"
+    "k_fifo_"
+    "k_work_"
+    "k_sem_"
+    "LOG_"
+    "printk("
+    "malloc("
+    "free("
+    "k_malloc("
+    "k_free(")
   string(FIND "${MOTOR_CORE_STEP_TEXT}" "${FORBIDDEN_TOKEN}" TOKEN_POS)
   if (NOT TOKEN_POS EQUAL -1)
     message(FATAL_ERROR "motor_control_loop.c violates fast-step side-effect boundary: found '${FORBIDDEN_TOKEN}'")
