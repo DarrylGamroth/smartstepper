@@ -98,7 +98,7 @@ Status as of 2026-04-30:
 | Phase 4: `profile_open` | Complete | `ONLINE_PROFILE_OPEN` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
 | Phase 5: Shell/status cleanup | Complete | `motor state policy` and `motor state status` expose motion source, feedback source, angle source, current source, backend kind, and encoder dependency. |
 | Phase 6: Simulation/unit tests | Mostly complete | Pure policy, motion, and servo-to-actuator adapter tests cover profile-open encoder independence, generated-angle profile sequencing, disarm effort clearing, backend domain rejection, and simulated FOC/brushed/step-dir adapter mapping. |
-| Phase 7: HIL validation | Ready to start | The pre-Phase 7 ISR/API cleanup gate is complete; HIL remains the next validation step. |
+| Phase 7: HIL validation | Complete | Real target validation passed for velocity-open smoke and profile-open timer-triggered sequence with generated angle and encoder not required. |
 
 Additional status:
 
@@ -127,7 +127,7 @@ Implemented commits:
 10. `910892b perf(motor): gate optional ISR features`
 11. `cea69ce test(motor): document ISR measurement gates`
 
-Validation evidence is recorded in `app/docs/plan/execution_log.md`.
+Validation evidence is recorded in `app/docs/plan/execution_log.md`, including Phase 7 HIL results from 2026-05-01.
 
 ## Pre-Phase 7 Cleanup Gate
 
