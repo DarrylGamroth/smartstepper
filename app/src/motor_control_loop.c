@@ -438,10 +438,10 @@ static int motor_control_step_read_encoder(struct motor_parameters *params,
 					   struct motor_commission_observation *commission_obs,
 					   struct motor_encoder_stage_result *enc_res)
 {
-	struct motor_encoder_feedback_ctx encoder_ctx;
 	motor_encoder_feedback_ctx_refresh(&params->rt_adapters.encoder_feedback, params);
-	encoder_ctx = params->rt_adapters.encoder_feedback;
-	int enc_ret = motor_encoder_feedback_update(&encoder_ctx, encoder_sample, feature_angle_gen,
+	int enc_ret = motor_encoder_feedback_update(&params->rt_adapters.encoder_feedback,
+						    encoder_sample,
+						    feature_angle_gen,
 						    &enc_res->feedback);
 	motor_control_feedback_from_encoder(&enc_res->feedback, &enc_res->control_fb);
 
