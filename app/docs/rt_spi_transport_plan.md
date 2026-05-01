@@ -1,10 +1,10 @@
-# Fixed-Frame Encoder SPI Engine Plan
+# Real-time SPI Engine Plan
 
 ## Goal
 
 Create a deterministic, ISR-safe SPI acquisition path for motor encoders without depending on Zephyr's generic SPI API or RTIO in the control loop.
 
-The driver must be reusable across absolute SPI encoders, not AEAT-9955-specific. The transport layer should move fixed-length command/response frames. Encoder-specific layers should own command bytes, decode, parity/CRC/status checks, and latency semantics.
+The driver must be reusable across absolute SPI encoders, not AEAT-9955-specific. The transport layer should move short command/response transfers using static buffers and a single in-flight request. Encoder-specific layers should own command bytes, decode, parity/CRC/status checks, and latency semantics.
 
 Primary targets:
 
@@ -38,8 +38,8 @@ fast encoder frontend
   - future encoder frontends
         |
         v
-fixed-frame SPI engine
-  - request fixed TX/RX frame
+real-time SPI transport
+  - request short TX/RX transfer
   - owns CS timing
   - owns SPI ISR
   - stores latest raw frame or SPSC trace entry
@@ -51,7 +51,10 @@ STM32 backend
   - F4 non-FIFO backend
 ```
 
-The fixed-frame SPI engine is not a Zephyr SPI driver and does not implement the Zephyr SPI API.
+The real-time SPI transport is a custom Zephyr device API, not an implementation of
+Zephyr's `spi_driver_api`. It deliberately exposes a tiny RTIO-style lifecycle:
+`request()` starts a short, statically buffered transfer from ISR context and
+`collect()` consumes the completed result later.
 
 It should still use Zephyr conventions where useful:
 
@@ -62,7 +65,7 @@ It should still use Zephyr conventions where useful:
 ## Non-Goals
 
 - Do not replace the Zephyr sensor drivers immediately.
-- Do not implement generic `spi_transceive()`.
+- Do not implement Zephyr's generic `spi_driver_api`.
 - Do not support arbitrary scatter/gather buffers.
 - Do not support concurrent clients.
 - Do not support dynamic frame allocation.
@@ -74,26 +77,25 @@ It should still use Zephyr conventions where useful:
 Proposed core API:
 
 ```c
-struct encoder_spi_frame {
+struct rt_spi_transfer {
 	const uint8_t *tx;
-	uint8_t *rx;
 	uint8_t len;
 };
 
-struct encoder_spi_sample {
+struct rt_spi_result {
 	uint32_t timestamp_cycles;
-	uint8_t raw[ENCODER_SPI_MAX_FRAME_BYTES];
+	uint8_t raw[RT_SPI_MAX_FRAME_BYTES];
 	uint8_t len;
 	uint16_t flags;
 };
 
-int encoder_spi_engine_init(const struct device *dev);
-int encoder_spi_engine_request(const struct device *dev,
-			       const struct encoder_spi_frame *frame);
-int encoder_spi_engine_collect(const struct device *dev,
-			       struct encoder_spi_sample *sample);
-void encoder_spi_engine_get_stats(const struct device *dev,
-				  struct encoder_spi_stats *stats);
+int rt_spi_init(const struct device *dev);
+int rt_spi_request(const struct device *dev,
+		   const struct rt_spi_transfer *transfer);
+int rt_spi_collect(const struct device *dev,
+		   struct rt_spi_result *result);
+void rt_spi_get_stats(const struct device *dev,
+				  struct rt_spi_stats *stats);
 ```
 
 Expected behavior:
@@ -145,7 +147,7 @@ H7 backend behavior:
 
 1. `request()` verifies idle state.
 2. Assert CS.
-3. Configure transfer size for fixed frame length.
+3. Configure transfer size for requested frame length.
 4. Enable RX/TX/EOT/error interrupts.
 5. Fill TX FIFO with command/dummy bytes.
 6. ISR drains RX FIFO and feeds TX FIFO until complete.
@@ -179,7 +181,7 @@ H7 non-FIFO backend behavior:
 
 1. `request()` verifies idle state.
 2. Assert CS.
-3. Configure transfer size for fixed request length.
+3. Configure transfer size for requested frame length.
 4. Enable RX/TX/EOT/error interrupts.
 5. ISR writes one byte/word as TX space becomes available.
 6. ISR reads one byte/word as RX data becomes available.
@@ -216,7 +218,7 @@ F4-specific notes:
 Add a binding such as:
 
 ```yaml
-compatible: "rubus,stm32-fixed-frame-spi"
+compatible: "rubus,stm32-rt-spi"
 ```
 
 Candidate properties:
@@ -246,8 +248,8 @@ handling. Hardware-vs-GPIO CS is board wiring and belongs in devicetree.
 Encoder frontend nodes should reference the engine:
 
 ```dts
-encoder_spi0: encoder-spi@... {
-	compatible = "rubus,stm32-fixed-frame-spi";
+rtspi0: rt-spi@... {
+	compatible = "rubus,stm32-rt-spi";
 	cs-gpios = <&gpiox y GPIO_ACTIVE_LOW>;
 	spi-frequency = <1000000>;
 	max-frame-len = <8>;
@@ -256,7 +258,7 @@ encoder_spi0: encoder-spi@... {
 
 encoder1: encoder@0 {
 	compatible = "brcm,aeat-9955-fast";
-	transport = <&encoder_spi0>;
+	transport = <&rtspi0>;
 	encoder-direction-sign = <(-1)>;
 };
 ```
@@ -275,10 +277,10 @@ Add fast path into the motor encoder pipeline:
 
 ```text
 timer/direct encoder trigger ISR
-  -> encoder_spi_engine_request()
+  -> rt_spi_request()
 
 ADC/control ISR
-  -> encoder_spi_engine_collect()
+  -> rt_spi_collect()
   -> encoder frontend decode
   -> angle_observer_update()
 ```
@@ -375,12 +377,12 @@ Implementation constraint from this audit:
   - `cs-gpios` on the SPI node means software NSS plus GPIO CS.
   - `st,soft-nss` means software NSS without CS assertion.
   - neither means hardware NSS output.
-- For the initial H7 validation path, `fifo-enable` on the fixed-frame transport enables the H7 FIFO backend.
+- For the initial H7 validation path, `fifo-enable` on the low-latency transport enables the H7 FIFO backend.
 - The existing sensor driver remains present for shell/property access; the fast transport must not call Zephyr SPI APIs from ISR context.
 
 ### Phase 1: Transport Interface Skeleton
 
-- Add fixed-frame engine headers.
+- Add low-latency SPI transport headers.
 - Add common state machine:
   - idle,
   - active,
@@ -477,7 +479,7 @@ Validation:
 
 - Select encoder source by devicetree/Kconfig:
   - RTIO sensor path,
-  - fixed-frame fast path.
+  - real-time SPI fast path.
 - Keep control loop input type unchanged.
 - Ensure angle observer owns wrap/offset/latency compensation.
 - Ensure control ISR sees bounded stale/fault behavior.
@@ -520,7 +522,7 @@ Validation:
 
 The work is complete when:
 
-- H7 fixed-frame engine runs at the required trigger rate without hard faults.
+- H7 low-latency SPI transport runs at the required trigger rate without hard faults.
 - AEAT parity/status errors are counted and do not corrupt transport state.
 - MT6835 CRC/status errors are counted and do not corrupt transport state.
 - Control ISR uses no Zephyr blocking/kernel queue APIs for encoder acquisition.
@@ -530,7 +532,7 @@ The work is complete when:
 
 ## Open Decisions
 
-- Whether to put the transport under `drivers/encoder_spi/`, `drivers/misc/`, or `app/src/`.
+- Whether to put the transport under `drivers/rt_spi/`, `drivers/misc/`, or `app/src/`.
 - Whether to expose it as a Zephyr device with a custom API or plain app-level singleton.
 - Whether H7 and F4 should be separate source files selected by devicetree compatible, or one source with SoC conditionals.
 - Whether CS should be normal GPIO only, or optionally hardware NSS after timing is verified.
@@ -541,13 +543,13 @@ The work is complete when:
 Start with a custom Zephyr device using a private API:
 
 ```text
-drivers/encoder_spi/
-  encoder_spi.h
-  encoder_spi_stm32_h7.c
-  encoder_spi_stm32_f4.c
+drivers/rt_spi/
+  rt_spi.h
+  rt_spi_stm32_h7.c
+  rt_spi_stm32_f4.c
   Kconfig
   CMakeLists.txt
-dts/bindings/encoder_spi/rubus,stm32-fixed-frame-spi.yaml
+dts/bindings/rt_spi/rubus,stm32-rt-spi.yaml
 ```
 
 Then add encoder frontends outside the transport:

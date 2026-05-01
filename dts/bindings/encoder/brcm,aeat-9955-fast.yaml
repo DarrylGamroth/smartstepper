@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+description: AEAT-9955 encoder frontend using the low-latency SPI transport
+
+compatible: "brcm,aeat-9955-fast"
+
+include: base.yaml
+
+properties:
+  spi-max-frequency:
+    type: int
+    required: true
+    description: Maximum SPI clock rate requested for the real-time transport.
+
+  transport:
+    type: phandle
+    required: true
+    description: Real-time SPI transport device used for position transfers.
+
+  pipeline-delay-samples:
+    type: int
+    default: 1
+    description: Protocol/sample delay to account for in angle-observer configuration.

@@ -34,6 +34,8 @@ extern "C" {
 #define AEAT9955_POS_STATUS_ERROR_BIT  0x40U /**< Device error bit in response byte 0 */
 #define AEAT9955_FRAME_STATUS_MASK \
 	(AEAT9955_POS_STATUS_PARITY_BIT | AEAT9955_POS_STATUS_ERROR_BIT)
+#define AEAT9955_CMD_READ_SPI16 0x40U /**< SPI4-16 read command base */
+#define AEAT9955_REG_POS        0x3FU /**< Position register for fast angle read */
 
 /**
  * @brief AEAT9955 Q31 sensor reading
@@ -141,6 +143,13 @@ struct aeat9955_sample {
 	uint8_t tx[3];  /**< Per-submission SPI command frame used by RTIO */
 	uint8_t raw[3]; /**< Raw 3-byte SPI frame from encoder */
 };
+
+static inline void aeat9955_prepare_position_frame(uint8_t tx[3])
+{
+	tx[0] = AEAT9955_CMD_READ_SPI16 | ((~POPCOUNT(AEAT9955_REG_POS) & 1U) << 7);
+	tx[1] = AEAT9955_REG_POS;
+	tx[2] = 0x00U;
+}
 
 /**
  * @brief Get the sensor decoder API for AEAT9955

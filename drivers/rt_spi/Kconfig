@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig RT_SPI
+	bool "Real-time SPI transport"
+	depends on DT_HAS_RUBUS_STM32_RT_SPI_ENABLED
+	default y
+	select PINCTRL
+	help
+	  Enables the custom low-latency SPI transport used for deterministic
+	  high-rate SPI transfers from ISR context with static buffers and a
+	  single in-flight transaction.
+
+if RT_SPI
+
+config RT_SPI_MAX_FRAME_BYTES
+	int "Maximum real-time SPI transfer length"
+	default 8
+	range 1 32
+	help
+	  Maximum transfer length copied by the transport. Runtime requests can
+	  use shorter transfers up to this configured limit and the instance
+	  max-frame-len devicetree property.
+
+config RT_SPI_INIT_PRIORITY
+	int "Real-time SPI init priority"
+	default 85
+	help
+	  Device init priority. Keep this after the normal STM32 SPI driver so
+	  legacy sensor shell paths initialize first, then the fast path installs
+	  its deterministic configuration.
+
+config RT_SPI_STM32_H7_FIFO
+	bool "STM32H7 FIFO backend"
+	default y if SOC_SERIES_STM32H7X
+	depends on SOC_SERIES_STM32H7X
+	help
+	  Use the STM32H7 SPI FIFO interrupt backend.
+
+endif # RT_SPI

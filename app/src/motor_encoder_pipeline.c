@@ -8,14 +8,38 @@
 #include <errno.h>
 #include <string.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 
 #include "motor/math/math_constants.h"
 
 /* Include encoder-specific headers based on devicetree */
-#if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
+#include <drivers/rt_spi.h>
+#include <drivers/sensor/brcm_aeat9955.h>
+#define MOTOR_ENCODER_PIPELINE_FAST_AEAT 1
+#define encoder_decode_sample_f32 aeat9955_decode_sample_f32
+#define MOTOR_RT_SPI_NODE DT_PHANDLE(DT_ALIAS(encoder1), transport)
+
+static const struct device *const motor_rt_spi_dev = DEVICE_DT_GET(MOTOR_RT_SPI_NODE);
+
+static inline void encoder_inject_status_fault(uint8_t *buffer)
+{
+	struct aeat9955_sample *sample = (struct aeat9955_sample *)buffer;
+
+	/* AEAT has no warning-only status path in fast frame; force status error bit. */
+	sample->raw[0] |= AEAT9955_POS_STATUS_ERROR_BIT;
+}
+
+static inline void encoder_inject_frame_fault(uint8_t *buffer)
+{
+	struct aeat9955_sample *sample = (struct aeat9955_sample *)buffer;
+
+	/* Break parity check by toggling parity/status bit. */
+	sample->raw[0] ^= AEAT9955_POS_STATUS_PARITY_BIT;
+}
+#elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#include <zephyr/drivers/sensor.h>
 #include <drivers/sensor/brcm_aeat9955.h>
 #define encoder_decode_sample_f32 aeat9955_decode_sample_f32
 
@@ -35,6 +59,7 @@ static inline void encoder_inject_frame_fault(uint8_t *buffer)
 	sample->raw[0] ^= AEAT9955_POS_STATUS_PARITY_BIT;
 }
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
+#include <zephyr/drivers/sensor.h>
 #include <drivers/sensor/magntek_mt6835.h>
 #define encoder_decode_sample_f32 mt6835_decode_sample_f32
 
@@ -59,8 +84,10 @@ static inline void encoder_inject_frame_fault(uint8_t *buffer)
 #error "Unsupported encoder type for encoder1 alias"
 #endif
 
+#ifndef MOTOR_ENCODER_PIPELINE_FAST_AEAT
 SENSOR_DT_READ_IODEV(motor_encoder_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(motor_encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
+#endif
 static atomic_t motor_encoder_pipeline_enabled;
 static atomic_t motor_encoder_read_in_flight_count;
 static atomic_t motor_encoder_request_ok_count;
@@ -175,26 +202,104 @@ int motor_encoder_pipeline_request_sample(void)
 		return -EALREADY;
 	}
 
+#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+	uint8_t tx[3];
+	aeat9955_prepare_position_frame(tx);
+	const struct rt_spi_transfer frame = {
+		.tx = tx,
+		.len = sizeof(tx),
+	};
+
+	int ret = rt_spi_request(motor_rt_spi_dev, &frame);
+	if (ret == -EBUSY) {
+		atomic_inc(&motor_encoder_request_busy_count);
+		return -EALREADY;
+	}
+	if (ret != 0) {
+		atomic_inc(&motor_encoder_request_error_count);
+		return ret;
+	}
+#else
 	int ret = sensor_read_async_mempool(&motor_encoder_iodev, &motor_encoder_rtio_ctx, NULL);
 	if (ret != 0) {
 		atomic_inc(&motor_encoder_request_error_count);
 		return ret;
 	}
+#endif
 
 	atomic_inc(&motor_encoder_read_in_flight_count);
 	atomic_inc(&motor_encoder_request_ok_count);
 	return 0;
 }
 
-int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
+static int motor_encoder_pipeline_decode_buffer(uint8_t *buf, struct motor_encoder_sample *sample)
 {
-	struct motor_encoder_sample scratch = {0};
-	if (sample == NULL) {
-		sample = &scratch;
+	enum motor_encoder_test_inject_mode inject_mode =
+		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
+	if (inject_mode != MOTOR_ENCODER_TEST_INJECT_NONE) {
+		if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
+			encoder_inject_status_fault(buf);
+		} else if (inject_mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
+			encoder_inject_frame_fault(buf);
+		}
 	}
 
-	memset(sample, 0, sizeof(*sample));
+	int decode_ret = encoder_decode_sample_f32(buf, &sample->angle_deg, &sample->status,
+					    &sample->warning, &sample->error,
+					    &sample->frame_status_error, &sample->frame_parity_error);
+	if (decode_ret == 0) {
+		sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
+	}
 
+	if (sample->frame_status_error) {
+		/* Count all encoder status-flag assertions, including warning-only cases. */
+		atomic_inc(&motor_encoder_collect_frame_status_error_count);
+	}
+
+	if (decode_ret != 0 || sample->error) {
+		atomic_inc(&motor_encoder_collect_error_count);
+		atomic_inc(&motor_encoder_collect_frame_error_count);
+		if (sample->frame_parity_error) {
+			atomic_inc(&motor_encoder_collect_frame_parity_error_count);
+		}
+		return -EIO;
+	}
+
+	sample->fresh = true;
+	atomic_inc(&motor_encoder_collect_ok_count);
+	return 0;
+}
+
+#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *sample)
+{
+	struct rt_spi_result spi_sample = {0};
+	int ret = rt_spi_collect(motor_rt_spi_dev, &spi_sample);
+
+	if (ret == -EAGAIN) {
+		atomic_inc(&motor_encoder_collect_pending_count);
+		return -EAGAIN;
+	}
+	if (ret == -ENODATA) {
+		atomic_inc(&motor_encoder_collect_empty_count);
+		return -ENODATA;
+	}
+
+	motor_encoder_inflight_decrement();
+	if (ret != 0 || (spi_sample.flags & RT_SPI_RESULT_ERROR) != 0U) {
+		atomic_inc(&motor_encoder_collect_error_count);
+		atomic_inc(&motor_encoder_collect_transport_error_count);
+		return -EIO;
+	}
+
+	struct aeat9955_sample aeat_sample = {0};
+	memcpy(aeat_sample.raw, spi_sample.raw, MIN(sizeof(aeat_sample.raw), spi_sample.len));
+
+	return motor_encoder_pipeline_decode_buffer((uint8_t *)&aeat_sample, sample);
+}
+#else
+static int motor_encoder_pipeline_collect_rtio(struct motor_encoder_sample *sample)
+{
 	struct rtio_cqe *cqe = rtio_cqe_consume(&motor_encoder_rtio_ctx);
 	if (cqe == NULL) {
 		/* Distinguish pending transfer from missing source trigger. */
@@ -234,38 +339,25 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 		return -EIO;
 	}
 
-	enum motor_encoder_test_inject_mode inject_mode =
-		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
-	if (inject_mode != MOTOR_ENCODER_TEST_INJECT_NONE) {
-		if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
-			encoder_inject_status_fault(buf);
-		} else if (inject_mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
-			encoder_inject_frame_fault(buf);
-		}
-	}
-
-	int decode_ret = encoder_decode_sample_f32(buf, &sample->angle_deg, &sample->status,
-					    &sample->warning, &sample->error,
-					    &sample->frame_status_error, &sample->frame_parity_error);
-	if (decode_ret == 0) {
-		sample->angle_rad = sample->angle_deg * (PI_F32 / 180.0f);
-	}
+	int decode_ret = motor_encoder_pipeline_decode_buffer(buf, sample);
 	rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
-	if (sample->frame_status_error) {
-		/* Count all encoder status-flag assertions, including warning-only cases. */
-		atomic_inc(&motor_encoder_collect_frame_status_error_count);
+
+	return decode_ret;
+}
+#endif
+
+int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
+{
+	struct motor_encoder_sample scratch = {0};
+	if (sample == NULL) {
+		sample = &scratch;
 	}
 
-	if (decode_ret != 0 || sample->error) {
-		atomic_inc(&motor_encoder_collect_error_count);
-		atomic_inc(&motor_encoder_collect_frame_error_count);
-		if (sample->frame_parity_error) {
-			atomic_inc(&motor_encoder_collect_frame_parity_error_count);
-		}
-		return -EIO;
-	}
+	memset(sample, 0, sizeof(*sample));
 
-	sample->fresh = true;
-	atomic_inc(&motor_encoder_collect_ok_count);
-	return 0;
+#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+	return motor_encoder_pipeline_collect_fast(sample);
+#else
+	return motor_encoder_pipeline_collect_rtio(sample);
+#endif
 }

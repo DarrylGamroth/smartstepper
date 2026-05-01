@@ -348,6 +348,7 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 	params->position_target_rad = wrap_rad_2pi(params->live.position_rad);
 }
 
+#if IS_ENABLED(CONFIG_ENCODER_MAGNET_CHECK_ON_ARM) || MOTOR_ENCODER_IS_AEAT9955
 static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, bool *mlo_out)
 {
 #if !MOTOR_ENCODER_IS_AEAT9955
@@ -395,6 +396,7 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 	return 0;
 #endif
 }
+#endif
 
 static void motor_encoder_capture_reset(struct motor_parameters *params, bool clear_samples)
 {
@@ -1075,7 +1077,7 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 		inject_label = "frame";
 	}
 
-	shell_print(sh, "Encoder RTIO pipeline:");
+	shell_print(sh, "Encoder pipeline:");
 	shell_print(sh, "  State:    %s, %s",
 		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
 		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
@@ -1102,7 +1104,7 @@ int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char *
 	ARG_UNUSED(argv);
 
 	motor_encoder_pipeline_reset_stats();
-	shell_print(sh, "Encoder RTIO pipeline counters reset");
+	shell_print(sh, "Encoder pipeline counters reset");
 	return 0;
 }
 

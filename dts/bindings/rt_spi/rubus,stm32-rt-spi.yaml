@@ -1,0 +1,46 @@
+# Copyright (c) 2026 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+description: STM32 low-latency ISR-safe SPI transport
+
+compatible: "rubus,stm32-rt-spi"
+
+include: base.yaml
+
+properties:
+  controller:
+    type: phandle
+    required: true
+    description: STM32 SPI controller node owned by this real-time transport.
+
+  spi-max-frequency:
+    type: int
+    required: true
+    description: Maximum SPI clock rate in Hz.
+
+  max-frame-len:
+    type: int
+    required: true
+    description: Maximum transfer length in bytes accepted by this instance.
+
+  spi-cpol:
+    type: boolean
+    description: Use CPOL=1. Default is CPOL=0.
+
+  spi-cpha:
+    type: boolean
+    description: Use CPHA=1. Default is CPHA=0.
+
+  fifo-enable:
+    type: boolean
+    description: Enable STM32H7 FIFO servicing for this transport.
+
+  mssi-clock:
+    type: int
+    default: 0
+    description: STM32H7 master SS idleness setting.
+
+  midi-clock:
+    type: int
+    default: 0
+    description: STM32H7 master inter-data idleness setting.

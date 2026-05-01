@@ -13,8 +13,9 @@
 
 / {
 	aliases {
-		/* Use AEAT-9955 sensor for control-loop encoder input. */
+		/* Use AEAT-9955 fast frontend for control-loop encoder input. */
 		encoder1 = &aeat9955;
+		rtspi0 = &rtspi3;
 	};
 
 	user_parameters: user_parameters {
@@ -60,16 +61,41 @@
 		/* 120% of 0.67 A current limit. */
 		overcurrent-threshold-ma = <800>;
 	};
+
 };
 
 &spi3 {
-	fifo-enable;
-	status = "okay";
+	/*
+	 * The low-latency SPI transport owns SPI3 for the control-loop encoder path.
+	 * Keep the upstream Zephyr SPI driver disabled for this profile so it does
+	 * not register the same SPI3 IRQ.
+	 */
+	status = "disabled";
 
-	aeat9955: aeat9955@0 {
-		compatible = "brcm,aeat-9955";
-		reg = <0>;
-		spi-max-frequency = <DT_FREQ_M(4)>;
-		status = "okay";
+	rtspi3_container: rt-spi-container@1 {
+		/*
+		 * Keep the active fast-path nodes below a non-SPI bus child so
+		 * Zephyr's generic SPI shell does not try to instantiate them as
+		 * normal SPI devices against the disabled SPI3 parent.
+		 */
+		reg = <1>;
+		status = "disabled";
+
+		aeat9955: aeat9955 {
+			compatible = "brcm,aeat-9955-fast";
+			spi-max-frequency = <DT_FREQ_M(4)>;
+			transport = <&rtspi3>;
+			pipeline-delay-samples = <1>;
+			status = "okay";
+		};
+
+		rtspi3: rt-spi {
+			compatible = "rubus,stm32-rt-spi";
+			controller = <&spi3>;
+			spi-max-frequency = <DT_FREQ_M(4)>;
+			max-frame-len = <8>;
+			fifo-enable;
+			status = "okay";
+		};
 	};
 };

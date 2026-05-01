@@ -35,7 +35,7 @@ int motor_hardware_init_gpio(void);
  * 
  * Validates readiness of:
  * - PWM timers (pwm1, pwm3, pwm8)
- * - Encoder (encoder1)
+ * - Encoder or fast-path encoder transport (encoder1)
  * - ADC (adc1)
  * 
  * @return 0 if all devices ready, negative error code otherwise
