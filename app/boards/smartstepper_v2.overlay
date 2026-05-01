@@ -83,18 +83,6 @@
 	status = "okay";
 };
 
-&spi3 {
-	fifo-enable;
-	status = "okay";
-
-	aeat9955: aeat9955@0 {
-		compatible = "brcm,aeat-9955";
-		reg = <0>;
-		spi-max-frequency = <DT_FREQ_M(4)>;
-		status = "okay";
-	};
-};
-
 // Timer 2 is used for input capture of clock generator and photo-interrupter
 &timers2 {
 	compatible = "rubus,stm32-timers";

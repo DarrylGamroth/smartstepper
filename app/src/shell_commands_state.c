@@ -164,6 +164,7 @@ static void motor_shell_print_control_policy(const struct shell *sh,
 
 #define MOTOR_ENCODER_COMPARE_REF_GENERATED 0U
 #define MOTOR_ENCODER_COMPARE_REF_OBSERVER 1U
+#define MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS 32U
 
 static bool motor_encoder_compare_ref_parse(const char *arg, uint8_t *ref_mode)
 {
@@ -208,6 +209,127 @@ static inline int32_t motor_encoder_q31_from_rad(float32_t angle_rad)
 	}
 
 	return (int32_t)lrintf(scaled);
+}
+
+static uint16_t motor_encoder_ring_oldest(uint16_t write_idx, uint16_t count,
+					  uint16_t capacity)
+{
+	return (uint16_t)((write_idx + capacity - count) % capacity);
+}
+
+static uint16_t motor_encoder_ring_index(uint16_t oldest_idx, uint16_t offset,
+					 uint16_t capacity)
+{
+	return (uint16_t)((oldest_idx + offset) % capacity);
+}
+
+static bool motor_encoder_raw_trace_sample_clean(
+	const struct motor_encoder_raw_trace_sample *sample)
+{
+	return sample != NULL &&
+	       sample->sample_fresh &&
+	       !sample->sample_warning &&
+	       !sample->sample_error &&
+	       !sample->sample_io_fault;
+}
+
+static bool motor_encoder_capture_sample_clean(
+	const struct motor_encoder_capture_sample *sample)
+{
+	return sample != NULL &&
+	       sample->sample_fresh &&
+	       !sample->sample_warning &&
+	       !sample->sample_error;
+}
+
+static int motor_encoder_parse_dump_window(const struct shell *sh,
+					   size_t argc,
+					   char **argv,
+					   uint16_t stored,
+					   uint16_t capacity,
+					   uint16_t write_idx,
+					   uint16_t *start_idx,
+					   uint16_t *count_out)
+{
+	if (argc < 1U || argc > 3U) {
+		shell_error(sh, "Usage: dump [count] | dump <offset> <count>");
+		return -EINVAL;
+	}
+	if (stored == 0U) {
+		*start_idx = 0U;
+		*count_out = 0U;
+		return 0;
+	}
+
+	uint32_t offset = 0U;
+	uint32_t requested = MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS;
+	uint16_t oldest_idx = motor_encoder_ring_oldest(write_idx, stored, capacity);
+
+	if (argc == 2U) {
+		if (!shell_parse_u32(argv[1], &requested) || requested == 0U) {
+			shell_error(sh, "count must be in [1, %u]",
+				    MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
+			return -EINVAL;
+		}
+		if (requested > MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS) {
+			shell_error(sh, "count must be <= %u; use dump <offset> <count> chunks",
+				    MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
+			return -EINVAL;
+		}
+
+		uint16_t count = (uint16_t)MIN(requested, stored);
+		offset = stored - count;
+		*start_idx = motor_encoder_ring_index(oldest_idx, (uint16_t)offset, capacity);
+		*count_out = count;
+		return 0;
+	}
+
+	if (argc == 3U) {
+		if (!shell_parse_u32(argv[1], &offset) ||
+		    !shell_parse_u32(argv[2], &requested) ||
+		    requested == 0U) {
+			shell_error(sh, "offset/count must be unsigned integers, count > 0");
+			return -EINVAL;
+		}
+		if (offset >= stored) {
+			shell_error(sh, "offset must be < stored (%u)", stored);
+			return -EINVAL;
+		}
+		if (requested > MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS) {
+			shell_error(sh, "count must be <= %u",
+				    MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
+			return -EINVAL;
+		}
+
+		uint32_t available = stored - offset;
+		uint16_t count = (uint16_t)MIN(requested, available);
+		*start_idx = motor_encoder_ring_index(oldest_idx, (uint16_t)offset, capacity);
+		*count_out = count;
+		return 0;
+	}
+
+	uint16_t count = (uint16_t)MIN(MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS, stored);
+	offset = stored - count;
+	*start_idx = motor_encoder_ring_index(oldest_idx, (uint16_t)offset, capacity);
+	*count_out = count;
+	return 0;
+}
+
+static float32_t motor_encoder_avg_velocity_hz(float32_t delta_rad,
+					       uint32_t first_loop,
+					       uint32_t last_loop)
+{
+	if (last_loop <= first_loop) {
+		return 0.0f;
+	}
+
+	float32_t dt_s = (float32_t)(last_loop - first_loop) /
+			 (float32_t)CONTROL_LOOP_FREQUENCY_HZ;
+	if (dt_s <= 0.0f) {
+		return 0.0f;
+	}
+
+	return delta_rad / (2.0f * PI_F32 * dt_s);
 }
 
 static inline void motor_zero_control_targets(struct motor_parameters *params)
@@ -1338,26 +1460,15 @@ int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **a
 	return 0;
 }
 
-/* motor encoder trace dump [count] */
-int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **argv)
+/* motor encoder trace summary */
+int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 1U && argc != 2U) {
-		shell_error(sh, "Usage: motor encoder trace dump [count]");
-		return -EINVAL;
-	}
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
-	}
-
-	uint32_t requested = 32U;
-	if (argc == 2U) {
-		if (!shell_parse_u32(argv[1], &requested) || requested == 0U ||
-		    requested > MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES) {
-			shell_error(sh, "count must be in [1, %u]",
-				    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
-			return -EINVAL;
-		}
 	}
 
 	uint16_t stored = g_motor_params->encoder_raw_trace.count;
@@ -1366,16 +1477,127 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 		return 0;
 	}
 
-	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->encoder_raw_trace.write_idx +
-				     MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - count) %
-				    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	uint16_t oldest_idx = motor_encoder_ring_oldest(g_motor_params->encoder_raw_trace.write_idx,
+							stored,
+							MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	const struct motor_encoder_raw_trace_sample *first = NULL;
+	const struct motor_encoder_raw_trace_sample *prev = NULL;
+	const struct motor_encoder_raw_trace_sample *last = NULL;
+	float32_t raw_delta_rad = 0.0f;
+	float32_t ctrl_delta_rad = 0.0f;
+	float32_t min_raw_deg = 0.0f;
+	float32_t max_raw_deg = 0.0f;
+	uint32_t clean_count = 0U;
+	uint32_t fresh_count = 0U;
+	uint32_t warn_count = 0U;
+	uint32_t err_count = 0U;
+	uint32_t io_count = 0U;
+	uint32_t enabled_count = 0U;
+	uint8_t status_or = 0U;
+	uint8_t status_and = 0xFFU;
+
+	for (uint16_t i = 0U; i < stored; i++) {
+		uint16_t idx = motor_encoder_ring_index(oldest_idx, i,
+							MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+		const struct motor_encoder_raw_trace_sample *sample =
+			&g_motor_params->encoder_raw_trace.samples[idx];
+
+		fresh_count += sample->sample_fresh ? 1U : 0U;
+		warn_count += sample->sample_warning ? 1U : 0U;
+		err_count += sample->sample_error ? 1U : 0U;
+		io_count += sample->sample_io_fault ? 1U : 0U;
+		enabled_count += sample->sample_enabled ? 1U : 0U;
+		status_or |= sample->status;
+		status_and &= sample->status;
+
+		if (!motor_encoder_raw_trace_sample_clean(sample)) {
+			continue;
+		}
+
+		if (first == NULL) {
+			first = sample;
+			min_raw_deg = sample->raw_angle_deg;
+			max_raw_deg = sample->raw_angle_deg;
+		} else {
+			raw_delta_rad += wrap_rad_pi(sample->raw_angle_rad - prev->raw_angle_rad);
+			ctrl_delta_rad += wrap_rad_pi(sample->control_angle_rad -
+						      prev->control_angle_rad);
+			min_raw_deg = MIN(min_raw_deg, sample->raw_angle_deg);
+			max_raw_deg = MAX(max_raw_deg, sample->raw_angle_deg);
+		}
+		clean_count++;
+		prev = sample;
+		last = sample;
+	}
+
+	shell_print(sh, "Encoder raw trace summary:");
+	shell_print(sh, "  Stored:       %u / %u", stored, MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
+	shell_print(sh, "  Decimation:   %u", g_motor_params->encoder_raw_trace.decimation);
+	shell_print(sh, "  Overrun:      %u", g_motor_params->encoder_raw_trace.overrun_count);
+	if (clean_count > 0U) {
+		shell_print(sh, "  Clean span:   %u -> %u (%u ticks, %u samples)",
+			    first->control_loop_count, last->control_loop_count,
+			    last->control_loop_count - first->control_loop_count,
+			    clean_count);
+		shell_print(sh, "  Raw first/last: %.3f -> %.3f deg",
+			    (double)first->raw_angle_deg, (double)last->raw_angle_deg);
+		shell_print(sh, "  Raw delta:    %.3f deg, avg %.4f Hz",
+			    (double)(raw_delta_rad * 180.0f / PI_F32),
+			    (double)motor_encoder_avg_velocity_hz(raw_delta_rad,
+								  first->control_loop_count,
+								  last->control_loop_count));
+		shell_print(sh, "  Ctrl delta:   %.3f deg, avg %.4f Hz",
+			    (double)(ctrl_delta_rad * 180.0f / PI_F32),
+			    (double)motor_encoder_avg_velocity_hz(ctrl_delta_rad,
+								  first->control_loop_count,
+								  last->control_loop_count));
+		shell_print(sh, "  Raw min/max:  %.3f / %.3f deg",
+			    (double)min_raw_deg, (double)max_raw_deg);
+	} else {
+		shell_print(sh, "  Clean span:   none");
+	}
+	shell_print(sh, "  Counts:       clean=%u fresh=%u enabled=%u warn=%u err=%u io=%u",
+		    clean_count, fresh_count, enabled_count, warn_count, err_count, io_count);
+	shell_print(sh, "  Status bits:  or=0x%02X and=0x%02X first=0x%02X last=0x%02X",
+		    status_or, status_and,
+		    g_motor_params->encoder_raw_trace.samples[oldest_idx].status,
+		    g_motor_params->encoder_raw_trace.samples[
+			    motor_encoder_ring_index(oldest_idx, stored - 1U,
+						     MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES)].status);
+	return 0;
+}
+
+/* motor encoder trace dump [count] | dump <offset> <count> */
+int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint16_t stored = g_motor_params->encoder_raw_trace.count;
+	if (stored == 0U) {
+		shell_print(sh, "No raw trace samples");
+		return 0;
+	}
+
+	uint16_t start = 0U;
+	uint16_t count = 0U;
+	int ret = motor_encoder_parse_dump_window(sh, argc, argv, stored,
+						  MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES,
+						  g_motor_params->encoder_raw_trace.write_idx,
+						  &start, &count);
+	if (ret < 0) {
+		return ret;
+	}
 
 	if (g_motor_params->encoder_raw_trace.enabled) {
 		shell_warn(sh,
 			   "Raw trace is still running; dump may include concurrently updated samples.");
 	}
 
+	shell_print(sh, "Raw trace dump: stored=%u count=%u max_chunk=%u",
+		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
 		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad obs_in_rad q fresh warn err io status enabled");
 	for (uint16_t i = 0U; i < count; i++) {
@@ -1456,26 +1678,15 @@ int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
-/* motor encoder capture dump [count] */
-int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **argv)
+/* motor encoder capture summary */
+int cmd_motor_encoder_capture_summary(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 1U && argc != 2U) {
-		shell_error(sh, "Usage: motor encoder capture dump [count]");
-		return -EINVAL;
-	}
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
-	}
-
-	uint32_t requested = 32U;
-	if (argc == 2U) {
-		if (!shell_parse_u32(argv[1], &requested) || requested == 0U ||
-		    requested > MOTOR_ENCODER_CAPTURE_MAX_SAMPLES) {
-			shell_error(sh, "count must be in [1, %u]",
-				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
-			return -EINVAL;
-		}
 	}
 
 	uint16_t stored = g_motor_params->encoder_capture.count;
@@ -1484,16 +1695,135 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 		return 0;
 	}
 
-	uint16_t count = (uint16_t)MIN(requested, stored);
-	uint16_t start = (uint16_t)((g_motor_params->encoder_capture.write_idx +
-				     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES - count) %
-				    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	uint16_t oldest_idx = motor_encoder_ring_oldest(g_motor_params->encoder_capture.write_idx,
+							stored,
+							MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	const struct motor_encoder_capture_sample *first = NULL;
+	const struct motor_encoder_capture_sample *prev = NULL;
+	const struct motor_encoder_capture_sample *last = NULL;
+	float32_t angle_delta_rad = 0.0f;
+	float32_t encoder_delta_rad = 0.0f;
+	float32_t generated_delta_rad = 0.0f;
+	float32_t min_angle_deg = 0.0f;
+	float32_t max_angle_deg = 0.0f;
+	uint32_t clean_count = 0U;
+	uint32_t fresh_count = 0U;
+	uint32_t warn_count = 0U;
+	uint32_t err_count = 0U;
+	uint32_t enabled_count = 0U;
+	uint32_t compare_count = 0U;
+	uint8_t status_or = 0U;
+	uint8_t status_and = 0xFFU;
+
+	for (uint16_t i = 0U; i < stored; i++) {
+		uint16_t idx = motor_encoder_ring_index(oldest_idx, i,
+							MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+		const struct motor_encoder_capture_sample *sample =
+			&g_motor_params->encoder_capture.samples[idx];
+
+		fresh_count += sample->sample_fresh ? 1U : 0U;
+		warn_count += sample->sample_warning ? 1U : 0U;
+		err_count += sample->sample_error ? 1U : 0U;
+		enabled_count += sample->sample_enabled ? 1U : 0U;
+		compare_count += sample->compare_valid ? 1U : 0U;
+		status_or |= sample->status;
+		status_and &= sample->status;
+
+		if (!motor_encoder_capture_sample_clean(sample)) {
+			continue;
+		}
+
+		if (first == NULL) {
+			first = sample;
+			min_angle_deg = sample->angle_deg;
+			max_angle_deg = sample->angle_deg;
+		} else {
+			angle_delta_rad += wrap_rad_pi(sample->angle_rad - prev->angle_rad);
+			encoder_delta_rad += wrap_rad_pi(sample->encoder_mech_rad -
+							 prev->encoder_mech_rad);
+			generated_delta_rad += wrap_rad_pi(sample->generated_mech_rad -
+							   prev->generated_mech_rad);
+			min_angle_deg = MIN(min_angle_deg, sample->angle_deg);
+			max_angle_deg = MAX(max_angle_deg, sample->angle_deg);
+		}
+		clean_count++;
+		prev = sample;
+		last = sample;
+	}
+
+	shell_print(sh, "Encoder capture summary:");
+	shell_print(sh, "  Stored:       %u / %u", stored, MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
+	shell_print(sh, "  Decimation:   %u", g_motor_params->encoder_capture.decimation);
+	shell_print(sh, "  Overrun:      %u", g_motor_params->encoder_capture.overrun_count);
+	if (clean_count > 0U) {
+		shell_print(sh, "  Clean span:   %u -> %u (%u ticks, %u samples)",
+			    first->control_loop_count, last->control_loop_count,
+			    last->control_loop_count - first->control_loop_count,
+			    clean_count);
+		shell_print(sh, "  Angle first/last: %.3f -> %.3f deg",
+			    (double)first->angle_deg, (double)last->angle_deg);
+		shell_print(sh, "  Angle delta:  %.3f deg, avg %.4f Hz",
+			    (double)(angle_delta_rad * 180.0f / PI_F32),
+			    (double)motor_encoder_avg_velocity_hz(angle_delta_rad,
+								  first->control_loop_count,
+								  last->control_loop_count));
+		shell_print(sh, "  Enc delta:    %.3f deg, avg %.4f Hz",
+			    (double)(encoder_delta_rad * 180.0f / PI_F32),
+			    (double)motor_encoder_avg_velocity_hz(encoder_delta_rad,
+								  first->control_loop_count,
+								  last->control_loop_count));
+		shell_print(sh, "  Gen delta:    %.3f deg, avg %.4f Hz",
+			    (double)(generated_delta_rad * 180.0f / PI_F32),
+			    (double)motor_encoder_avg_velocity_hz(generated_delta_rad,
+								  first->control_loop_count,
+								  last->control_loop_count));
+		shell_print(sh, "  Angle min/max: %.3f / %.3f deg",
+			    (double)min_angle_deg, (double)max_angle_deg);
+	} else {
+		shell_print(sh, "  Clean span:   none");
+	}
+	shell_print(sh, "  Counts:       clean=%u fresh=%u enabled=%u warn=%u err=%u compare=%u",
+		    clean_count, fresh_count, enabled_count, warn_count, err_count, compare_count);
+	shell_print(sh, "  Status bits:  or=0x%02X and=0x%02X first=0x%02X last=0x%02X",
+		    status_or, status_and,
+		    g_motor_params->encoder_capture.samples[oldest_idx].status,
+		    g_motor_params->encoder_capture.samples[
+			    motor_encoder_ring_index(oldest_idx, stored - 1U,
+						     MOTOR_ENCODER_CAPTURE_MAX_SAMPLES)].status);
+	return 0;
+}
+
+/* motor encoder capture dump [count] | dump <offset> <count> */
+int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint16_t stored = g_motor_params->encoder_capture.count;
+	if (stored == 0U) {
+		shell_print(sh, "No captured encoder samples");
+		return 0;
+	}
+
+	uint16_t start = 0U;
+	uint16_t count = 0U;
+	int ret = motor_encoder_parse_dump_window(sh, argc, argv, stored,
+						  MOTOR_ENCODER_CAPTURE_MAX_SAMPLES,
+						  g_motor_params->encoder_capture.write_idx,
+						  &start, &count);
+	if (ret < 0) {
+		return ret;
+	}
 
 	if (g_motor_params->encoder_capture.enabled) {
 		shell_warn(sh,
 			   "Capture is still running; dump may include concurrently updated samples.");
 	}
 
+	shell_print(sh, "Capture dump: stored=%u count=%u max_chunk=%u",
+		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
 		    "idx loop source deg rad norm q31 fresh warn err status enabled");
 	for (uint16_t i = 0U; i < count; i++) {

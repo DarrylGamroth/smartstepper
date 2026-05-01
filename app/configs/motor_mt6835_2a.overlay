@@ -68,8 +68,3 @@
 		overcurrent-threshold-ma = <1800>;
 	};
 };
-
-/* Disable AEAT path for this profile to avoid unused sensor init/noise. */
-&aeat9955 {
-	status = "disabled";
-};

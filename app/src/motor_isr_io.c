@@ -127,7 +127,9 @@ static void motor_adc_stage_collect(struct motor_parameters *params,
 	bool encoder_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
 	bool encoder_capture_enabled = params->encoder_capture.enabled;
-	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
+	bool encoder_raw_trace_enabled = params->encoder_raw_trace.enabled;
+	bool encoder_sampling_enabled =
+		encoder_enabled || encoder_capture_enabled || encoder_raw_trace_enabled;
 
 	/* Publish policy then always collect once to drain any completed CQE/buffer,
 	 * even if encoder reads were just disabled this cycle.
@@ -299,7 +301,9 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	bool encoder_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
 	bool encoder_capture_enabled = params->encoder_capture.enabled;
-	bool encoder_sampling_enabled = encoder_enabled || encoder_capture_enabled;
+	bool encoder_raw_trace_enabled = params->encoder_raw_trace.enabled;
+	bool encoder_sampling_enabled =
+		encoder_enabled || encoder_capture_enabled || encoder_raw_trace_enabled;
 
 	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
 	if (encoder_sampling_enabled) {
