@@ -47,9 +47,9 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state offline
+motor state prepare
 motor arm
-motor state mode velocity_open
+motor state mode velocity_generated
 motor current id 0
 motor current iq 0.15
 motor velocity target 5
@@ -66,9 +66,9 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state offline
+motor state prepare
 motor arm
-motor state mode velocity_open
+motor state mode velocity_generated
 motor current id 0
 motor current iq 0.15
 motor velocity target 5

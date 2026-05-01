@@ -161,9 +161,9 @@ Acceptance:
 
 ## HIL smoke checks
 
-1. `motor state offline`
+1. `motor state prepare`
 2. Verify ALIGN completes and transitions without hard fault.
-3. `motor state mode velocity_open`, `motor current iq 0.15`, `motor velocity target 5`
+3. `motor state mode velocity_generated`, `motor current iq 0.15`, `motor velocity target 5`
 4. Confirm no regression in movement startup after ALIGN.
 
 ## Files Expected to Change
@@ -191,4 +191,4 @@ Acceptance:
 2. Dual-polarity accumulation path uses `arm_sin_cos_f32`.
 3. ALIGN injection is trajectory-ramped via `traj_Id`.
 4. App ALIGN code is reduced to state sequencing/policy.
-5. Build + unit tests pass; HIL ALIGN and velocity_open smoke pass.
+5. Build + unit tests pass; HIL ALIGN and velocity_generated smoke pass.

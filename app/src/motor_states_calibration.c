@@ -78,14 +78,14 @@ static inline bool motor_calibration_start_timer_or_fault(struct motor_parameter
 
 static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
 {
-	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
 
 	if (params != NULL) {
 		mode = (enum motor_state)params->calibration.requested_online_mode;
 	}
 
 	if (!motor_state_is_online_submode(mode)) {
-		mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+		mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
 	}
 
 	return mode;
@@ -228,7 +228,7 @@ void motor_state_roverl_meas_entry(void *obj)
 
 	LOG_INF("Entering ROVERL_MEAS state");
 
-	/* Additional ROVERL_MEAS requirements (PWM output is provided by OFFLINE). */
+	/* Additional ROVERL_MEAS requirements (PWM output is provided by PREPARE_ONLINE). */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 				     BIT(MOTOR_FEATURE_PI_CONTROL));
 
@@ -332,7 +332,7 @@ void motor_state_rs_est_entry(void *obj)
 
 	LOG_INF("Entering RS_EST state");
 
-	/* Additional RS_EST requirements (PWM output is provided by OFFLINE). */
+	/* Additional RS_EST requirements (PWM output is provided by PREPARE_ONLINE). */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 				     BIT(MOTOR_FEATURE_PI_CONTROL));
 

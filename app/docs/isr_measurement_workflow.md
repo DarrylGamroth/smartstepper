@@ -95,9 +95,9 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state offline
+motor state prepare
 motor arm
-motor state mode velocity_open
+motor state mode velocity_generated
 motor current id 0
 motor current iq 0.15
 motor velocity target 5
@@ -117,9 +117,9 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state offline
+motor state prepare
 motor arm
-motor state mode profile_open
+motor state mode position_generated
 motor state online
 sensor get aeat9955@0
 motor profile seq clear
@@ -137,7 +137,7 @@ motor safety timeout 1000
 ```
 
 Use this check when the AEAT-9955 is useful as coarse telemetry but not trusted
-for commutation. In `profile_open`, generated angle/current drive the motor and
+for commutation. In `position_generated`, generated angle/current drive the motor and
 the encoder is not a control dependency. The `sensor get aeat9955@0` readings
 before and after the move should show gross position change without placing the
 AEAT-9955 in the real-time commutation path.
@@ -149,9 +149,9 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state offline
+motor state prepare
 motor arm
-motor state mode torque
+motor state mode current_encoder
 motor current id 0
 motor current iq 0.05
 motor info live

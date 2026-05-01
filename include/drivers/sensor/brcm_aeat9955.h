@@ -138,6 +138,7 @@ struct aeat9955_sample_header {
  */
 struct aeat9955_sample {
 	struct aeat9955_sample_header header;
+	uint8_t tx[3];  /**< Per-submission SPI command frame used by RTIO */
 	uint8_t raw[3]; /**< Raw 3-byte SPI frame from encoder */
 };
 

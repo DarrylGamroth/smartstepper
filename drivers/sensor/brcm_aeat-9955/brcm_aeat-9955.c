@@ -871,19 +871,26 @@ static int aeat9955_attr_get(const struct device *dev, enum sensor_channel chan,
 static void aeat9955_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res,
 				     void *arg0)
 {
-	ARG_UNUSED(res);
+	ARG_UNUSED(sqe);
 
 	struct rtio_iodev_sqe *iodev_sqe = (struct rtio_iodev_sqe *)arg0;
-	struct rtio_cqe *cqe;
-	int err = 0;
+	int err = res;
 
-	do {
-		cqe = rtio_cqe_consume(ctx);
-		if (cqe != NULL) {
+	/*
+	 * This callback is chained behind exactly one internal SPI transceive
+	 * SQE. Consume only that CQE. Draining the whole private RTIO completion
+	 * queue can steal completions from a later encoder submission when the
+	 * control loop allows more than one read in flight.
+	 */
+	struct rtio_cqe *cqe = rtio_cqe_consume(ctx);
+	if (cqe != NULL) {
+		if (cqe->result != 0) {
 			err = cqe->result;
-			rtio_cqe_release(ctx, cqe);
 		}
-	} while (cqe != NULL);
+		rtio_cqe_release(ctx, cqe);
+	} else if (err == 0) {
+		err = -EIO;
+	}
 
 	if (err) {
 		rtio_iodev_sqe_err(iodev_sqe, err);
@@ -939,13 +946,11 @@ static void aeat9955_submit_one_shot(const struct device *dev, struct rtio_iodev
 	struct rtio_sqe *txrx_sqe = sqes[0];
 	struct rtio_sqe *complete_sqe = sqes[1];
 
-	static uint8_t __aligned(32) tx_buf[] = {
-		AEAT9955_CMD_READ_SPI16 | (1U << 7),
-		AEAT9955_REG_POS,
-		0x00,
-	};
+	sample->tx[0] = AEAT9955_CMD_READ_SPI16 | ((~POPCOUNT(AEAT9955_REG_POS) & 1U) << 7);
+	sample->tx[1] = AEAT9955_REG_POS;
+	sample->tx[2] = 0x00;
 
-	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, tx_buf, sample->raw,
+	rtio_sqe_prep_transceive(txrx_sqe, data->iodev, RTIO_PRIO_HIGH, sample->tx, sample->raw,
 				 sizeof(sample->raw), NULL);
 	txrx_sqe->flags |= RTIO_SQE_CHAINED;
 

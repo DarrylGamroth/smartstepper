@@ -39,9 +39,9 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 	switch (in->mode) {
 	case MOTOR_CONTROL_POLICY_MODE_DISABLED:
 		break;
-	case MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN:
+	case MOTOR_CONTROL_POLICY_MODE_VELOCITY_GENERATED:
 		policy->motion_source = MOTOR_MOTION_SOURCE_VELOCITY_TRAJ;
-		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_MODEL;
+		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_REFERENCE;
 		policy->angle_source = MOTOR_ANGLE_SOURCE_GENERATED;
 		policy->generated_angle_mode = MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN;
 		policy->current_source = MOTOR_CURRENT_SOURCE_COMMANDED;
@@ -49,41 +49,35 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 		policy->encoder_required_for_control = false;
 		policy->generated_angle_position_driven = false;
 		break;
-	case MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN:
+	case MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED:
 		policy->motion_source = in->profile_sequence_active ?
 					       MOTOR_MOTION_SOURCE_PROFILE_SEQUENCE :
 					       MOTOR_MOTION_SOURCE_PROFILE;
-		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_MODEL;
+		policy->feedback_source = MOTOR_FEEDBACK_GENERATED_REFERENCE;
 		policy->angle_source = MOTOR_ANGLE_SOURCE_GENERATED;
 		policy->generated_angle_mode = MOTOR_GENERATED_ANGLE_POSITION_DRIVEN;
 		policy->current_source = MOTOR_CURRENT_SOURCE_COMMANDED;
 		policy->encoder_required_for_control = false;
 		policy->generated_angle_position_driven = true;
 		break;
-	case MOTOR_CONTROL_POLICY_MODE_TORQUE:
+	case MOTOR_CONTROL_POLICY_MODE_CURRENT_ENCODER:
 		policy->motion_source = MOTOR_MOTION_SOURCE_HOLD;
 		policy->feedback_source = MOTOR_FEEDBACK_ENCODER;
-		policy->angle_source = in->features.encoder_read_enabled ?
-					       MOTOR_ANGLE_SOURCE_ENCODER :
-					       MOTOR_ANGLE_SOURCE_PROPAGATED;
+		policy->angle_source = MOTOR_ANGLE_SOURCE_ENCODER;
 		policy->current_source = MOTOR_CURRENT_SOURCE_COMMANDED;
 		policy->encoder_required_for_control = true;
 		break;
-	case MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED:
+	case MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER:
 		policy->motion_source = MOTOR_MOTION_SOURCE_VELOCITY_TRAJ;
 		policy->feedback_source = MOTOR_FEEDBACK_ENCODER;
-		policy->angle_source = in->features.encoder_read_enabled ?
-					       MOTOR_ANGLE_SOURCE_ENCODER :
-					       MOTOR_ANGLE_SOURCE_PROPAGATED;
+		policy->angle_source = MOTOR_ANGLE_SOURCE_ENCODER;
 		policy->current_source = MOTOR_CURRENT_SOURCE_VELOCITY_LOOP;
 		policy->encoder_required_for_control = true;
 		break;
-	case MOTOR_CONTROL_POLICY_MODE_POSITION:
+	case MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER:
 		policy->motion_source = MOTOR_MOTION_SOURCE_PROFILE;
 		policy->feedback_source = MOTOR_FEEDBACK_ENCODER;
-		policy->angle_source = in->features.encoder_read_enabled ?
-					       MOTOR_ANGLE_SOURCE_ENCODER :
-					       MOTOR_ANGLE_SOURCE_PROPAGATED;
+		policy->angle_source = MOTOR_ANGLE_SOURCE_ENCODER;
 		policy->current_source = MOTOR_CURRENT_SOURCE_POSITION_LOOP;
 		policy->encoder_required_for_control = true;
 		break;
@@ -104,7 +98,7 @@ int motor_control_policy_derive(const struct motor_control_policy_input *in,
 		policy->motion_source = MOTOR_MOTION_SOURCE_HOLD;
 		policy->feedback_source = in->features.encoder_read_enabled ?
 						  MOTOR_FEEDBACK_ENCODER :
-						  MOTOR_FEEDBACK_GENERATED_MODEL;
+						  MOTOR_FEEDBACK_GENERATED_REFERENCE;
 		policy->angle_source = in->features.angle_gen_enabled ?
 					       MOTOR_ANGLE_SOURCE_GENERATED :
 					       MOTOR_ANGLE_SOURCE_ENCODER;
@@ -211,6 +205,12 @@ bool motor_control_policy_is_valid(const struct motor_control_policy *policy,
 		return false;
 	}
 
+	if (policy->encoder_required_for_control &&
+	    policy->feedback_source == MOTOR_FEEDBACK_ENCODER &&
+	    !policy->encoder_read_enabled) {
+		return false;
+	}
+
 	return true;
 }
 
@@ -231,7 +231,7 @@ const char *motor_feedback_source_to_string(enum motor_feedback_source source)
 	case MOTOR_FEEDBACK_NONE: return "none";
 	case MOTOR_FEEDBACK_ENCODER: return "encoder";
 	case MOTOR_FEEDBACK_SENSORLESS_OBSERVER: return "sensorless_observer";
-	case MOTOR_FEEDBACK_GENERATED_MODEL: return "generated_model";
+	case MOTOR_FEEDBACK_GENERATED_REFERENCE: return "generated_reference";
 	default: return "unknown";
 	}
 }

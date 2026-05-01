@@ -15,7 +15,7 @@ struct motor_dq_decoupling_enable_input {
 	bool feature_enabled;
 	bool online_control_state;
 	bool control_armed;
-	bool torque_mode_state;
+	bool current_encoder_mode_state;
 	bool min_speed_reached;
 	bool flux_valid;
 	bool speed_valid;

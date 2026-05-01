@@ -98,7 +98,7 @@ Keep app-side:
 Acceptance:
 
 1. Existing HIL flows still pass.
-2. No increase in fault regressions during ALIGN/OFFLINE/ONLINE transitions.
+2. No increase in fault regressions during ALIGN/PREPARE_ONLINE/ONLINE transitions.
 
 ### Phase 1: In-file Structural Split
 
@@ -169,4 +169,4 @@ Acceptance:
 3. Validate with:
    - `motor info live`
    - `motor encoder capture compare`
-   - torque/velocity_open/velocity_closed smoke tests on hardware.
+   - torque/velocity_generated/velocity_encoder smoke tests on hardware.

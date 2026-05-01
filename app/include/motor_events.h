@@ -14,7 +14,7 @@ enum motor_event_type {
 	MOTOR_EVENT_INIT,                /* Initial event to start state machine */
 	MOTOR_EVENT_RUN,                 /* Generic run event for state transitions */
 	MOTOR_EVENT_IDLE,                /* Request transition to IDLE state */
-	MOTOR_EVENT_OFFLINE,             /* Request transition to OFFLINE state */
+	MOTOR_EVENT_PREPARE_ONLINE,      /* Request transition to PREPARE_ONLINE state */
 	MOTOR_EVENT_ONLINE,              /* Request transition to ONLINE state */
 	MOTOR_EVENT_CALIBRATE_REQUEST,   /* Request calibration sequence */
 	MOTOR_EVENT_COMMISSION_REQUEST,  /* Request commissioning sequence */

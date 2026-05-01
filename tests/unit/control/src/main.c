@@ -226,7 +226,7 @@ ZTEST(control_ref_path, test_decoupling_enable_gate_requires_all_conditions)
 		.feature_enabled = true,
 		.online_control_state = true,
 		.control_armed = true,
-		.torque_mode_state = false,
+		.current_encoder_mode_state = false,
 		.min_speed_reached = true,
 		.flux_valid = true,
 		.speed_valid = true,

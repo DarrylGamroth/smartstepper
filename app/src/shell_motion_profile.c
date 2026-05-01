@@ -63,9 +63,10 @@ int cmd_motor_profile_move(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) &&
-	    !motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN)) {
-		shell_error(sh, "Profile move requires ONLINE_POSITION or ONLINE_PROFILE_OPEN mode.");
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER) &&
+	    !motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED)) {
+		shell_error(sh,
+			    "Profile move requires ONLINE_POSITION_ENCODER or ONLINE_POSITION_GENERATED mode.");
 		return -EACCES;
 	}
 

@@ -46,7 +46,7 @@ These decisions should meet in the app-owned fast-loop orchestration layer. The 
 
 ## Current State
 
-`ONLINE_VELOCITY_OPEN` already approximates the desired model:
+`ONLINE_VELOCITY_GENERATED` already approximates the desired model:
 
 1. encoder read is disabled,
 2. `MOTOR_FEATURE_ANGLE_GEN` is enabled,
@@ -74,13 +74,13 @@ First slice:
 3. add a pure policy-derive helper,
 4. add unit tests for the existing modes,
 5. do not alter `motor_control_loop.c` behavior,
-6. do not add `profile_open` yet.
+6. do not add `position_generated` yet.
 
 Phase 1 is complete only when:
 
 1. the firmware still builds,
 2. unit tests pass,
-3. `velocity_open` maps to generated-angle/current-regulated FOC policy,
+3. `velocity_generated` maps to generated-angle/current-regulated FOC policy,
 4. closed-loop modes map to encoder-required policies,
 5. invalid backend/current/feedback combinations are rejected by tests.
 
@@ -95,10 +95,10 @@ Status as of 2026-04-30:
 | Phase 1: Policy types | Complete | `motor_control_policy` and backend capability validation are implemented and unit-tested. |
 | Phase 2: Fast-loop data-flow refs | Complete | The fast loop now passes explicit motion, feedback, actuator, angle, current, and commutation refs internally. |
 | Phase 3: Motion/current-source split | Complete | Generated-angle velocity is driven from `motor_motion_ref`; current arbitration no longer owns angle-generator trajectory state. |
-| Phase 4: `profile_open` | Complete | `ONLINE_PROFILE_OPEN` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
+| Phase 4: `position_generated` | Complete | `ONLINE_POSITION_GENERATED` exists and drives generated mechanical angle from profile position without requiring encoder feedback. |
 | Phase 5: Shell/status cleanup | Complete | `motor state policy` and `motor state status` expose motion source, feedback source, angle source, current source, backend kind, and encoder dependency. |
-| Phase 6: Simulation/unit tests | Mostly complete | Pure policy, motion, and servo-to-actuator adapter tests cover profile-open encoder independence, generated-angle profile sequencing, disarm effort clearing, backend domain rejection, and simulated FOC/brushed/step-dir adapter mapping. |
-| Phase 7: HIL validation | Complete | Real target validation passed for velocity-open smoke and profile-open timer-triggered sequence with generated angle and encoder not required. |
+| Phase 6: Simulation/unit tests | Mostly complete | Pure policy, motion, and servo-to-actuator adapter tests cover position-generated encoder independence, generated-angle profile sequencing, disarm effort clearing, backend domain rejection, and simulated FOC/brushed/step-dir adapter mapping. |
+| Phase 7: HIL validation | Complete | Real target validation passed for velocity-generated smoke and position-generated timer-triggered sequence with generated angle and encoder not required. |
 
 Additional status:
 
@@ -238,7 +238,7 @@ enum motor_feedback_source {
 	MOTOR_FEEDBACK_NONE,
 	MOTOR_FEEDBACK_ENCODER,
 	MOTOR_FEEDBACK_SENSORLESS_OBSERVER,
-	MOTOR_FEEDBACK_GENERATED_MODEL,
+	MOTOR_FEEDBACK_GENERATED_REFERENCE,
 };
 
 enum motor_current_source {
@@ -272,54 +272,58 @@ struct motor_control_policy {
 Initial policy mapping:
 
 ```text
-velocity_open:
+velocity_generated:
   motion_source = VELOCITY_TRAJ
-  feedback_source = GENERATED_MODEL or NONE
+  feedback_source = GENERATED_REFERENCE or NONE
   angle_source = GENERATED
   current_source = COMMANDED
   actuator_kind = FOC_CURRENT
   encoder_required_for_control = false
 
-profile_open:
+position_generated:
   motion_source = PROFILE or PROFILE_SEQUENCE
-  feedback_source = GENERATED_MODEL or NONE
+  feedback_source = GENERATED_REFERENCE or NONE
   angle_source = GENERATED
   current_source = COMMANDED
   actuator_kind = FOC_CURRENT
   encoder_required_for_control = false
 
-torque:
+current_encoder:
   motion_source = HOLD
   feedback_source = ENCODER
-  angle_source = ENCODER/PROPAGATED
+  angle_source = ENCODER
   current_source = COMMANDED
   actuator_kind = FOC_CURRENT
   encoder_required_for_control = true
 
-velocity_closed:
+velocity_encoder:
   motion_source = VELOCITY_TRAJ
   feedback_source = ENCODER
-  angle_source = ENCODER/PROPAGATED
+  angle_source = ENCODER
   current_source = VELOCITY_LOOP
   actuator_kind = FOC_CURRENT
   encoder_required_for_control = true
 
-position:
+position_encoder:
   motion_source = PROFILE
   feedback_source = ENCODER
-  angle_source = ENCODER/PROPAGATED
+  angle_source = ENCODER
   current_source = POSITION_LOOP
   actuator_kind = FOC_CURRENT
   encoder_required_for_control = true
 
 step_dir_profile:
   motion_source = PROFILE or PROFILE_SEQUENCE
-  feedback_source = NONE, ENCODER, or GENERATED_MODEL
+  feedback_source = NONE, ENCODER, or GENERATED_REFERENCE
   angle_source = not applicable
   current_source = not applicable
   actuator_kind = STEP_DIR
   encoder_required_for_control = false unless configured as closed-loop stepper
 ```
+
+`MOTOR_ANGLE_SOURCE_PROPAGATED` is an internal angle-path fallback for
+observer continuity and diagnostics. It is not a valid normal policy result for
+encoder-required control modes.
 
 ### Motion Reference
 
@@ -412,8 +416,8 @@ struct motor_current_ref {
 
 Initial behavior:
 
-1. `profile_open` uses commanded current.
-2. `velocity_open` uses commanded current.
+1. `position_generated` uses commanded current.
+2. `velocity_generated` uses commanded current.
 3. closed-loop velocity and position use the existing outer-loop/MPR/PI path.
 4. calibration/alignment continues to override current refs explicitly.
 
@@ -604,7 +608,7 @@ Scope:
 
 Acceptance:
 
-1. `velocity_open`, `torque`, `velocity_closed`, and `position` map to expected policies,
+1. `velocity_generated`, `current_encoder`, `velocity_encoder`, and `position_encoder` map to expected policies,
 2. invalid policy/backend pairings are rejected by tests,
 3. no shell-visible behavior changes,
 4. unit tests cover policy derivation,
@@ -624,7 +628,7 @@ Refactor `app/src/motor_control_loop.c` so local stages pass explicit refs:
 
 Scope:
 
-1. preserve current `velocity_open` behavior,
+1. preserve current `velocity_generated` behavior,
 2. preserve current closed-loop modes,
 3. keep mechanical units in motion refs,
 4. do not move app state into `motor_core`,
@@ -657,11 +661,11 @@ Scope:
 
 Acceptance:
 
-1. `velocity_open` still moves using commanded `Iq`,
+1. `velocity_generated` still moves using commanded `Iq`,
 2. closed-loop velocity still uses velocity trajectory as the velocity target,
 3. current interlocks still zero current when disarmed.
 
-## Phase 4: Add `profile_open`
+## Phase 4: Add `position_generated`
 
 Add a new online state/mode for generated-angle profile execution.
 
@@ -677,13 +681,13 @@ Implementation notes:
 
 1. profile position should set the generated mechanical angle directly,
 2. profile velocity should remain available for telemetry and later feedforward,
-3. the profile-open mode should not calculate closed-loop position error,
-4. profile-open should use the same alignment/trim offset semantics as generated-angle velocity mode.
+3. the position-generated mode should not calculate closed-loop position error,
+4. position-generated should use the same alignment/trim offset semantics as generated-angle velocity mode.
 
 Acceptance:
 
-1. new shell mode exists, likely `motor state mode profile_open`,
-2. profile sequence can run in `profile_open` with encoder disabled,
+1. new shell mode exists, likely `motor state mode position_generated`,
+2. profile sequence can run in `position_generated` with encoder disabled,
 3. current commands still require `motor arm`,
 4. entering/exiting the mode resets profile/generator state deterministically.
 
@@ -700,13 +704,13 @@ Required shell/status additions:
 5. actuator/backend kind,
 6. whether encoder is required for control.
 
-Minimum profile-open workflow:
+Minimum position-generated workflow:
 
 ```text
-motor state offline
+motor state prepare
 motor safety timeout 0
 motor arm
-motor state mode profile_open
+motor state mode position_generated
 motor current id 0
 motor current iq 0.15
 motor profile seq clear
@@ -718,9 +722,9 @@ motor profile seq start
 
 Acceptance:
 
-1. existing `velocity_open` workflow still works,
+1. existing `velocity_generated` workflow still works,
 2. status output explains the active control policy,
-3. encoder telemetry can be enabled in profile-open without becoming a control dependency.
+3. encoder telemetry can be enabled in `position_generated` without becoming a control dependency.
 
 ## Phase 6: Simulation And Unit Tests
 
@@ -730,7 +734,7 @@ Test matrix:
 
 ```text
 policy derivation:
-  velocity_open, profile_open, torque, velocity_closed, position
+  velocity_generated, position_generated, current_encoder, velocity_encoder, position_encoder
   invalid backend/current/feedback combinations
 
 motion stage:
@@ -738,7 +742,7 @@ motion stage:
   all outputs in mechanical SI units
 
 feedback stage:
-  none, encoder, generated model, propagated observer
+  none, encoder, generated reference, propagated observer
 
 FOC angle stage:
   generated position-driven, generated velocity-driven, encoder, propagated
@@ -753,7 +757,7 @@ backend stage:
 
 Simulation-style tests:
 
-1. run a profile-open two-point sequence and verify generated angle follows the profile,
+1. run a position-generated two-point sequence and verify generated angle follows the profile,
 2. run the same profile with encoder disabled and verify no encoder fault gates commutation,
 3. run closed-loop position policy and verify encoder invalidity gates control as expected,
 4. verify disarm zeros current without corrupting profile state,
@@ -771,9 +775,9 @@ Status:
 
 Hardware checks:
 
-1. `velocity_open` smoke test remains unchanged,
-2. `profile_open` executes a small two-position move with encoder disabled,
-3. `profile_open` executes trigger-driven sequence with encoder telemetry disabled,
+1. `velocity_generated` smoke test remains unchanged,
+2. `position_generated` executes a small two-position move with encoder disabled,
+3. `position_generated` executes trigger-driven sequence with encoder telemetry disabled,
 4. optional encoder capture verifies generated/encoder phase relationship when the encoder is usable,
 5. closed-loop modes are unchanged except for clearer status reporting.
 
@@ -791,6 +795,6 @@ Hardware checks:
 
 1. Add policy types and tests with no runtime behavior change.
 2. Move fast-loop locals to explicit data-flow structs with no shell behavior change.
-3. Preserve `velocity_open` as the first proof of generated-angle policy.
-4. Add `profile_open` after the generated-angle path is explicit.
+3. Preserve `velocity_generated` as the first proof of generated-angle policy.
+4. Add `position_generated` after the generated-angle path is explicit.
 5. Only after HIL validation, consider renaming or reorganizing shell commands around motion/angle/current policy.

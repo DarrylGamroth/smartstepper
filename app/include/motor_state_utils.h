@@ -16,11 +16,11 @@
  */
 static inline bool motor_state_is_online_submode(enum motor_state state)
 {
-	return state == MOTOR_STATE_ONLINE_TORQUE ||
-	       state == MOTOR_STATE_ONLINE_VELOCITY_OPEN ||
-	       state == MOTOR_STATE_ONLINE_PROFILE_OPEN ||
-	       state == MOTOR_STATE_ONLINE_VELOCITY_CLOSED ||
-	       state == MOTOR_STATE_ONLINE_POSITION;
+	return state == MOTOR_STATE_ONLINE_CURRENT_ENCODER ||
+	       state == MOTOR_STATE_ONLINE_VELOCITY_GENERATED ||
+	       state == MOTOR_STATE_ONLINE_POSITION_GENERATED ||
+	       state == MOTOR_STATE_ONLINE_VELOCITY_ENCODER ||
+	       state == MOTOR_STATE_ONLINE_POSITION_ENCODER;
 }
 
 /**
@@ -37,11 +37,11 @@ static inline bool motor_state_ptr_is_mode(const struct smf_state *state, enum m
 static inline bool motor_state_ptr_is_online_control_state(const struct smf_state *state)
 {
 	return motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_TORQUE) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_CURRENT_ENCODER) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION_GENERATED) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
+	       motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 }
 
 #endif /* MOTOR_STATE_UTILS_H_ */

@@ -23,7 +23,7 @@
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
 		offset-pole-hz = <300>;
-		/* Start conservative; verify direction with velocity_open capture. */
+		/* Start conservative; verify direction with velocity_generated capture. */
 		encoder-direction-sign = <1>;
 		align-current-ma = <200>;
 		align-duration-ms = <100>;

@@ -73,11 +73,11 @@ ZTEST(runtime, test_foc_actuator_ref_carries_dq_current_without_motion_coupling)
 	zassert_within(actuator.iq_ref_a, 0.0f, 1.0e-6f, NULL);
 }
 
-ZTEST(runtime, test_profile_open_encoder_disabled_still_builds_foc_actuator_command)
+ZTEST(runtime, test_position_generated_encoder_disabled_still_builds_foc_actuator_command)
 {
 	struct motor_control_policy policy = {0};
 	struct motor_control_policy_input input = {
-		.mode = MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN,
+		.mode = MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED,
 		.features = {
 			.encoder_read_enabled = false,
 			.angle_gen_enabled = true,
@@ -202,7 +202,7 @@ ZTEST(runtime, test_config_snapshot_publish_read_is_coherent)
 		.profile_sequence_period_ms = 40U,
 		.control_policy_valid = true,
 		.control_policy_input = {
-			.mode = MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED,
+			.mode = MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER,
 			.features = {
 				.encoder_read_enabled = true,
 				.angle_gen_enabled = false,

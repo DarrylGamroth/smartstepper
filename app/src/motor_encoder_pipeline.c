@@ -77,7 +77,13 @@ static atomic_t motor_encoder_collect_frame_parity_error_count;
 static atomic_t motor_encoder_collect_frame_status_error_count;
 static atomic_t motor_encoder_test_inject_mode;
 
-#define MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT 2
+/*
+ * Safe baseline for Zephyr STM32 SPI RTIO. Back-to-back overlapping encoder
+ * reads can fault inside the upstream SPI completion path on the AEAT-9955
+ * hardware. Keep only one request in flight until the SPI backend path is
+ * proven safe for queued ISR-rate submissions.
+ */
+#define MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT 1
 
 static inline void motor_encoder_inflight_decrement(void)
 {

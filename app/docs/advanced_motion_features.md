@@ -69,7 +69,7 @@ Suggested API:
 
 ### Commissioning Flow
 
-1. run constant-speed sweep in `velocity_open` or stable `velocity_closed`
+1. run constant-speed sweep in `velocity_generated` or stable `velocity_encoder`
 2. record periodic speed error vs electrical angle
 3. fit feedforward LUT minimizing periodic error
 4. validate reduction in RMS ripple before apply

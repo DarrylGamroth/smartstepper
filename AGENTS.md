@@ -163,9 +163,9 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
 - Files:
   - `app/boards/smartstepper_v2.overlay`
   - `app/boards/smartstepper.overlay`
-- Verification method (velocity-open direction check):
-  1. Run `motor state offline`, then `motor arm`.
-  2. Enter `motor state mode velocity_open`.
+- Verification method (generated-angle velocity direction check):
+  1. Run `motor state prepare`, then `motor arm`.
+  2. Enter `motor state mode velocity_generated`.
   3. Set `motor current iq 0.15` and `motor velocity target 5`.
   4. Capture encoder data (`motor encoder capture start 1`, wait, `motor encoder capture stop`).
   5. Compare with generated reference (`motor encoder capture compare 96 gen`).
@@ -175,7 +175,7 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
 
 - The AEAT-9955 may be usable for coarse before/after motion telemetry even
   when it is not good enough for closed-loop commutation.
-- For generated-angle modes such as `velocity_open` and `profile_open`, use the
+- For generated-angle modes such as `velocity_generated` and `position_generated`, use the
   Zephyr sensor shell to sample it before and after a move:
 
 ```text

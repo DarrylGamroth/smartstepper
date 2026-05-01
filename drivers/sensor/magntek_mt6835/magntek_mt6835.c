@@ -416,19 +416,25 @@ static int mt6835_channel_get(const struct device *dev, enum sensor_channel chan
 static void mt6835_complete_result(struct rtio *ctx, const struct rtio_sqe *sqe, int res,
 				   void *arg0)
 {
-	ARG_UNUSED(res);
+	ARG_UNUSED(sqe);
 
 	struct rtio_iodev_sqe *iodev_sqe = (struct rtio_iodev_sqe *)arg0;
-	struct rtio_cqe *cqe;
-	int err = 0;
+	int err = res;
 
-	do {
-		cqe = rtio_cqe_consume(ctx);
-		if (cqe != NULL) {
+	/*
+	 * This callback is chained behind exactly one internal SPI transceive
+	 * SQE. Consume only that CQE so overlapping outer sensor reads cannot
+	 * steal each other's private RTIO completions.
+	 */
+	struct rtio_cqe *cqe = rtio_cqe_consume(ctx);
+	if (cqe != NULL) {
+		if (cqe->result != 0) {
 			err = cqe->result;
-			rtio_cqe_release(ctx, cqe);
 		}
-	} while (cqe != NULL);
+		rtio_cqe_release(ctx, cqe);
+	} else if (err == 0) {
+		err = -EIO;
+	}
 
 	if (err) {
 		rtio_iodev_sqe_err(iodev_sqe, err);

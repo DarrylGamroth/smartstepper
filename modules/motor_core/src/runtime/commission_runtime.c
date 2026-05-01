@@ -53,9 +53,9 @@ static inline bool motor_commission_obs_matches_expected(
 	case MOTOR_COMMISSION_EXPECT_ANY:
 		return true;
 	case MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED:
-		return obs->mode_velocity_closed;
+		return obs->mode_velocity_encoder;
 	case MOTOR_COMMISSION_EXPECT_TORQUE:
-		return obs->mode_torque;
+		return obs->mode_current_encoder;
 	default:
 		return false;
 	}

@@ -59,7 +59,7 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor state mode profile_open
+motor state mode position_generated
 motor state online
 motor arm
 motor current id 0
@@ -78,7 +78,7 @@ Observed:
 - Profile completed.
 - Policy remained generated-angle:
   - Motion source: `profile`
-  - Feedback source: `generated_model`
+  - Feedback source: `generated_reference`
   - Angle source: `generated`
   - Encoder read: `DISABLED`
   - Encoder required: `NO`
@@ -93,7 +93,7 @@ This first before/after sensor check aliased and did not prove physical movement
 Commands:
 
 ```text
-motor state mode velocity_open
+motor state mode velocity_generated
 motor state online
 motor current iq 0.15
 motor velocity target 1.3
@@ -123,7 +123,7 @@ Conclusion:
 Commands:
 
 ```text
-motor state mode profile_open
+motor state mode position_generated
 motor state online
 motor info live
 sensor get aeat9955@0
@@ -214,7 +214,7 @@ Observed:
 ## Conclusions
 
 1. Telnet shell is suitable for HIL command/control and avoids the serial logging congestion seen earlier.
-2. Generated-angle motion control works independently of encoder feedback in both `velocity_open` and `profile_open`.
+2. Generated-angle motion control works independently of encoder feedback in both `velocity_generated` and `position_generated`.
 3. The current loop tracks the commanded `Iq` during generated-angle motion.
 4. The AEAT-9955 can be used as coarse measurement-only telemetry for motion validation.
 5. Single encoder before/after reads can alias; repeated samples or deterministic non-integer timing are required for reliable movement evidence.
@@ -308,7 +308,7 @@ Profile-open raw trace with zero current:
 ```text
 motor state clear_error
 motor safety timeout 0
-motor state mode profile_open
+motor state mode position_generated
 motor state online
 motor arm
 motor current iq 0
@@ -363,7 +363,7 @@ Nonzero-current velocity-open raw trace:
 ```text
 motor state clear_error
 motor safety timeout 0
-motor state mode velocity_open
+motor state mode velocity_generated
 motor state online
 motor arm
 motor current id 0

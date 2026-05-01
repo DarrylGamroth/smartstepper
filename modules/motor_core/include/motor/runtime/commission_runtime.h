@@ -100,8 +100,8 @@ struct motor_commission_results {
 
 struct motor_commission_observation {
 	uint32_t control_loop_count;
-	bool mode_velocity_closed;
-	bool mode_torque;
+	bool mode_velocity_encoder;
+	bool mode_current_encoder;
 	bool control_armed;
 	bool encoder_fresh;
 	bool encoder_warning;

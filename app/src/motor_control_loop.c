@@ -107,20 +107,20 @@ static inline bool motor_is_align_active_state(uint32_t mode_flags)
 static inline enum motor_control_policy_mode
 motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN)) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_GENERATED)) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_GENERATED;
 	}
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_PROFILE_OPEN)) {
-		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION_GENERATED)) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED;
 	}
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE)) {
-		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER)) {
+		return MOTOR_CONTROL_POLICY_MODE_CURRENT_ENCODER;
 	}
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED)) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER)) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER;
 	}
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION)) {
-		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION_ENCODER)) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
 	}
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS) ||
 	    motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
@@ -443,7 +443,7 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 	ctx->motion_ref.velocity_rad_s = ctx->speed_mech_rad_s;
 	ctx->motion_ref.acceleration_rad_s2 = ctx->accel_mech_rad_s2;
 
-	ctx->feedback_ref.source = MOTOR_FEEDBACK_GENERATED_MODEL;
+	ctx->feedback_ref.source = MOTOR_FEEDBACK_NONE;
 	ctx->feedback_ref.input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	ctx->feedback_ref.position_rad = ctx->position_mech_rad;
 	ctx->feedback_ref.velocity_rad_s = ctx->speed_mech_rad_s;
@@ -458,9 +458,9 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 static inline void motor_control_step_prepare_commission_obs(
 	struct motor_commission_observation *obs, uint32_t mode_flags, bool control_armed)
 {
-	obs->mode_velocity_closed =
-		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED);
-	obs->mode_torque = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
+	obs->mode_velocity_encoder =
+		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER);
+	obs->mode_current_encoder = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER);
 	obs->control_armed = control_armed;
 	obs->encoder_fresh = false;
 	obs->encoder_warning = false;
@@ -491,6 +491,8 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	enc_res->frame_status = enc_res->control_fb.status;
 	enc_res->frame_warning = enc_res->control_fb.warning;
 	enc_res->frame_error = enc_res->control_fb.error;
+	enc_res->io_fault = enc_res->control_fb.io_fault;
+	enc_res->position_quality_flags = enc_res->feedback.control.quality_flags;
 
 	if (enc_ret == -EIO) {
 		return -EIO;
@@ -559,9 +561,9 @@ static inline void motor_control_step_finalize(struct motor_parameters *params,
 					       struct motor_commission_observation *commission_obs)
 {
 	commission_obs->control_armed = control_armed;
-	commission_obs->mode_velocity_closed = motor_rt_mode_active(
-		mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED);
-	commission_obs->mode_torque = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
+	commission_obs->mode_velocity_encoder = motor_rt_mode_active(
+		mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER);
+	commission_obs->mode_current_encoder = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER);
 	commission_obs->fault_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ERROR);
 	motor_runtime_fast_sync(params, mode_flags, control_armed);
 	motor_runtime_diag_sync(params);
@@ -581,10 +583,12 @@ static inline void motor_control_measurements_from_encoder(
 
 	meas->angle_control_degrees = enc_stage->angle_control_deg;
 	meas->encoder_input_source = enc_stage->input_source;
+	meas->position_quality_flags = enc_stage->position_quality_flags;
 	meas->fresh_encoder_sample = enc_stage->fresh;
 	meas->encoder_frame_status = enc_stage->frame_status;
 	meas->encoder_frame_warning = enc_stage->frame_warning;
 	meas->encoder_frame_error = enc_stage->frame_error;
+	meas->encoder_io_fault = enc_stage->io_fault;
 	meas->position_mech_rad = enc_stage->control_fb.position_mech_rad;
 	meas->speed_mech_rad_s = enc_stage->control_fb.speed_mech_rad_s;
 	meas->accel_mech_rad_s2 = enc_stage->control_fb.accel_mech_rad_s2;
@@ -599,19 +603,61 @@ static inline void motor_feedback_ref_from_measurements(
 		return;
 	}
 
-	feedback_ref->source = (meas->encoder_input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER) ?
-				       MOTOR_FEEDBACK_ENCODER :
-				       MOTOR_FEEDBACK_GENERATED_MODEL;
+	switch (meas->encoder_input_source) {
+	case MOTOR_ANGLE_INPUT_SRC_ENCODER:
+		feedback_ref->source = MOTOR_FEEDBACK_ENCODER;
+		break;
+	case MOTOR_ANGLE_INPUT_SRC_GENERATED:
+		feedback_ref->source = MOTOR_FEEDBACK_GENERATED_REFERENCE;
+		break;
+	default:
+		feedback_ref->source = MOTOR_FEEDBACK_NONE;
+		break;
+	}
 	feedback_ref->input_source = meas->encoder_input_source;
+	feedback_ref->quality_flags = meas->position_quality_flags;
 	feedback_ref->status = meas->encoder_frame_status;
 	feedback_ref->fresh = meas->fresh_encoder_sample;
 	feedback_ref->warning = meas->encoder_frame_warning;
-	feedback_ref->error = meas->encoder_frame_error;
+	feedback_ref->error = meas->encoder_frame_error || meas->encoder_io_fault;
 	feedback_ref->angle_control_deg = meas->angle_control_degrees;
 	feedback_ref->position_rad = meas->position_mech_rad;
 	feedback_ref->velocity_rad_s = meas->speed_mech_rad_s;
 	feedback_ref->acceleration_rad_s2 = meas->accel_mech_rad_s2;
 	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
+}
+
+static inline bool motor_encoder_required_feedback_valid(
+	const struct motor_control_policy *policy,
+	const struct motor_feedback_ref *feedback_ref,
+	uint16_t stale_count,
+	uint32_t stale_limit)
+{
+	if (policy == NULL || feedback_ref == NULL) {
+		return false;
+	}
+
+	if (!policy->encoder_required_for_control) {
+		return true;
+	}
+
+	if (feedback_ref->source == MOTOR_FEEDBACK_ENCODER &&
+	    feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
+	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U &&
+	    !feedback_ref->warning &&
+	    !feedback_ref->error) {
+		return true;
+	}
+
+	/*
+	 * Encoder SPI is asynchronous to the ADC ISR. A sample can legitimately
+	 * be pending for a short window, and occasional rejected frames should
+	 * not immediately tear down control if the angle observer can propagate
+	 * from the last valid sample. The encoder feedback core owns the actual
+	 * fault threshold; this guard only rejects sustained stale feedback.
+	 */
+	return feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_PROPAGATED &&
+	       stale_count <= stale_limit;
 }
 
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct motor_parameters *params,
@@ -686,7 +732,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 	return false;
 }
 
-static inline void motor_control_step_profile_open_motion(struct motor_parameters *params,
+static inline void motor_control_step_position_generated_motion(struct motor_parameters *params,
 							  bool advance,
 							  struct motor_motion_ref *motion_ref,
 							  struct motor_feedback_ref *feedback_ref)
@@ -765,7 +811,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	bool generated_angle_position_driven =
 		ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_POSITION_DRIVEN;
 	if (generated_angle_position_driven) {
-		motor_control_step_profile_open_motion(params, ctx->control_armed, motion_ref,
+		motor_control_step_position_generated_motion(params, ctx->control_armed, motion_ref,
 						       feedback_ref);
 		meas->position_mech_rad = feedback_ref->position_rad;
 		meas->speed_mech_rad_s = feedback_ref->velocity_rad_s;
@@ -773,10 +819,10 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		meas->speed_mech_filtered_rad_s = feedback_ref->velocity_filtered_rad_s;
 	}
 
-	bool position_loop_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION);
+	bool position_loop_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION_ENCODER);
 	bool velocity_loop_active =
-		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED) ||
-		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION);
+		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER) ||
+		motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_POSITION_ENCODER);
 	bool position_loop_update =
 		motor_control_step_decimation_tick(position_loop_active,
 						   &params->position_loop_phase,
@@ -925,7 +971,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	float32_t decoupling_speed_limit_rad_s =
 		MAX(50.0f, params->profile_max_velocity_rad_s * (float32_t)MOTOR_POLE_PAIRS * 1.5f);
 	float32_t flux_linkage_wb_abs = fabsf(params->flux_linkage_wb_active);
-	bool torque_mode_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_TORQUE);
+	bool current_encoder_mode_state = motor_rt_mode_active(ctx->mode_flags, MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER);
 	bool decoupling_min_speed_reached =
 		fabsf(feedback_ref->velocity_filtered_rad_s) >=
 		CURRENT_DECOUPLING_MIN_MECH_SPEED_RAD_S;
@@ -941,7 +987,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 		.feature_enabled = CURRENT_DECOUPLING_ENABLED,
 		.online_control_state = ctx->online_control_state,
 		.control_armed = ctx->control_armed,
-		.torque_mode_state = torque_mode_state,
+		.current_encoder_mode_state = current_encoder_mode_state,
 		.min_speed_reached = decoupling_min_speed_reached,
 		.flux_valid = decoupling_flux_valid,
 		.speed_valid = decoupling_speed_valid,
@@ -1186,6 +1232,12 @@ void motor_control_loop_step(struct motor_parameters *params,
 	motor_control_step_prepare_encoder_reports(params, encoder_sample, enc_stage, report);
 	motor_control_measurements_from_encoder(meas, enc_stage);
 	motor_feedback_ref_from_measurements(feedback_ref, meas);
+	if (!motor_encoder_required_feedback_valid(&ctx->policy, feedback_ref,
+						  params->live.position_stale_count,
+						  ENCODER_FAULT_THRESHOLD)) {
+		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
+		goto isr_done;
+	}
 
 	/* Skip control if PWM output not enabled */
 	if (!feature_pwm_output) {

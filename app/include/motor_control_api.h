@@ -62,11 +62,11 @@ int motor_control_api_init(struct motor_parameters *params);
  * @brief Request motor start (thread-safe)
  * 
  * Posts start request to state machine. State machine will transition
- * from IDLE to OFFLINE if conditions are met.
+ * from IDLE to PREPARE_ONLINE if conditions are met.
  * 
  * @return 0 on success, negative errno on failure
  */
-int motor_api_request_offline(void);
+int motor_api_request_prepare_online(void);
 
 /**
  * @brief Request motor stop (thread-safe)

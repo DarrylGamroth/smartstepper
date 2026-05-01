@@ -94,20 +94,20 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 	if (motor_state_ptr_is_online_control_state(state)) {
 		mode_flags |= MOTOR_RT_MODE_ONLINE_CONTROL;
 	}
-	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]) {
-		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN;
+	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_GENERATED]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_GENERATED;
 	}
-	if (state == &motor_states[MOTOR_STATE_ONLINE_PROFILE_OPEN]) {
-		mode_flags |= MOTOR_RT_MODE_ONLINE_PROFILE_OPEN;
+	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION_GENERATED]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_POSITION_GENERATED;
 	}
-	if (state == &motor_states[MOTOR_STATE_ONLINE_TORQUE]) {
-		mode_flags |= MOTOR_RT_MODE_ONLINE_TORQUE;
+	if (state == &motor_states[MOTOR_STATE_ONLINE_CURRENT_ENCODER]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER;
 	}
-	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_CLOSED]) {
-		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED;
+	if (state == &motor_states[MOTOR_STATE_ONLINE_VELOCITY_ENCODER]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER;
 	}
-	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION]) {
-		mode_flags |= MOTOR_RT_MODE_ONLINE_POSITION;
+	if (state == &motor_states[MOTOR_STATE_ONLINE_POSITION_ENCODER]) {
+		mode_flags |= MOTOR_RT_MODE_ONLINE_POSITION_ENCODER;
 	}
 	if (state == &motor_states[MOTOR_STATE_ERROR]) {
 		mode_flags |= MOTOR_RT_MODE_ERROR;
@@ -119,20 +119,20 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 static inline enum motor_control_policy_mode
 motor_publish_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_OPEN) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_GENERATED) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_GENERATED;
 	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_PROFILE_OPEN) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_GENERATED) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED;
 	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_TORQUE) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_CURRENT_ENCODER;
 	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_CLOSED) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER;
 	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_ENCODER) != 0U) {
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
 	}
 	if ((mode_flags & (MOTOR_RT_MODE_OFFSET_MEAS |
 			   MOTOR_RT_MODE_RS_EST |
@@ -239,14 +239,14 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 
 static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
 {
-	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
 
 	if (params != NULL) {
 		mode = (enum motor_state)params->calibration.requested_online_mode;
 	}
 
 	if (!motor_state_is_online_submode(mode)) {
-		mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+		mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
 	}
 
 	return mode;
@@ -322,9 +322,9 @@ static void motor_state_ctrl_init_entry(void *obj);
 static enum smf_state_result motor_state_ctrl_init_run(void *obj);
 static void motor_state_idle_entry(void *obj);
 static enum smf_state_result motor_state_idle_run(void *obj);
-static void motor_state_offline_entry(void *obj);
-static enum smf_state_result motor_state_offline_run(void *obj);
-static void motor_state_offline_exit(void *obj);
+static void motor_state_prepare_online_entry(void *obj);
+static enum smf_state_result motor_state_prepare_online_run(void *obj);
+static void motor_state_prepare_online_exit(void *obj);
 static void motor_state_error_entry(void *obj);
 static enum smf_state_result motor_state_error_run(void *obj);
 
@@ -339,7 +339,7 @@ const struct smf_state motor_states[] = {
 	[MOTOR_STATE_CALIBRATION] = SMF_CREATE_STATE(motor_state_calibration_entry,
 						      motor_state_calibration_run,
 						      motor_state_calibration_exit,
-						      &motor_states[MOTOR_STATE_OFFLINE],
+						      &motor_states[MOTOR_STATE_PREPARE_ONLINE],
 						      &motor_states[MOTOR_STATE_OFFSET_MEAS]),
 	[MOTOR_STATE_OFFSET_MEAS] = SMF_CREATE_STATE(motor_state_offset_meas_entry,
 				       motor_state_offset_meas_run,
@@ -384,37 +384,37 @@ const struct smf_state motor_states[] = {
 	[MOTOR_STATE_IDLE] = SMF_CREATE_STATE(motor_state_idle_entry,
 					       motor_state_idle_run,
 					       NULL, NULL, NULL),
-	[MOTOR_STATE_OFFLINE] = SMF_CREATE_STATE(motor_state_offline_entry,
-						  motor_state_offline_run,
-					  motor_state_offline_exit, NULL,
+	[MOTOR_STATE_PREPARE_ONLINE] = SMF_CREATE_STATE(motor_state_prepare_online_entry,
+						  motor_state_prepare_online_run,
+					  motor_state_prepare_online_exit, NULL,
 						  &motor_states[MOTOR_STATE_CALIBRATION]),
 	[MOTOR_STATE_ONLINE] = SMF_CREATE_STATE(motor_state_online_entry,
 						 motor_state_online_run,
 					 motor_state_online_exit, NULL,
-						 &motor_states[MOTOR_STATE_ONLINE_VELOCITY_OPEN]),
-	[MOTOR_STATE_ONLINE_TORQUE] = SMF_CREATE_STATE(motor_state_online_torque_entry,
-							 motor_state_online_torque_run,
-						 motor_state_online_torque_exit,
+						 &motor_states[MOTOR_STATE_ONLINE_VELOCITY_GENERATED]),
+	[MOTOR_STATE_ONLINE_CURRENT_ENCODER] = SMF_CREATE_STATE(motor_state_online_current_encoder_entry,
+							 motor_state_online_current_encoder_run,
+						 motor_state_online_current_encoder_exit,
 							 &motor_states[MOTOR_STATE_ONLINE],
 							 NULL),
-	[MOTOR_STATE_ONLINE_VELOCITY_OPEN] = SMF_CREATE_STATE(motor_state_online_velocity_open_entry,
-								motor_state_online_velocity_open_run,
-								motor_state_online_velocity_open_exit,
+	[MOTOR_STATE_ONLINE_VELOCITY_GENERATED] = SMF_CREATE_STATE(motor_state_online_velocity_generated_entry,
+								motor_state_online_velocity_generated_run,
+								motor_state_online_velocity_generated_exit,
 								&motor_states[MOTOR_STATE_ONLINE],
 								NULL),
-	[MOTOR_STATE_ONLINE_PROFILE_OPEN] = SMF_CREATE_STATE(motor_state_online_profile_open_entry,
-							      motor_state_online_profile_open_run,
-							      motor_state_online_profile_open_exit,
+	[MOTOR_STATE_ONLINE_POSITION_GENERATED] = SMF_CREATE_STATE(motor_state_online_position_generated_entry,
+							      motor_state_online_position_generated_run,
+							      motor_state_online_position_generated_exit,
 							      &motor_states[MOTOR_STATE_ONLINE],
 							      NULL),
-	[MOTOR_STATE_ONLINE_VELOCITY_CLOSED] = SMF_CREATE_STATE(motor_state_online_velocity_closed_entry,
-								  motor_state_online_velocity_closed_run,
-								  motor_state_online_velocity_closed_exit,
+	[MOTOR_STATE_ONLINE_VELOCITY_ENCODER] = SMF_CREATE_STATE(motor_state_online_velocity_encoder_entry,
+								  motor_state_online_velocity_encoder_run,
+								  motor_state_online_velocity_encoder_exit,
 								  &motor_states[MOTOR_STATE_ONLINE],
 								  NULL),
-	[MOTOR_STATE_ONLINE_POSITION] = SMF_CREATE_STATE(motor_state_online_position_entry,
-							  motor_state_online_position_run,
-							  motor_state_online_position_exit,
+	[MOTOR_STATE_ONLINE_POSITION_ENCODER] = SMF_CREATE_STATE(motor_state_online_position_encoder_entry,
+							  motor_state_online_position_encoder_run,
+							  motor_state_online_position_encoder_exit,
 							  &motor_states[MOTOR_STATE_ONLINE],
 							  NULL),
 	[MOTOR_STATE_ERROR] = SMF_CREATE_STATE(motor_state_error_entry,
@@ -455,13 +455,13 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_ALIGN_NEG_INJECT: return "ALIGN_NEG_INJECT";
 	case MOTOR_STATE_ALIGN_NEG_SAMPLE: return "ALIGN_NEG_SAMPLE";
 	case MOTOR_STATE_IDLE:         return "IDLE";
-	case MOTOR_STATE_OFFLINE:      return "OFFLINE";
+	case MOTOR_STATE_PREPARE_ONLINE: return "PREPARE_ONLINE";
 	case MOTOR_STATE_ONLINE:       return "ONLINE";
-	case MOTOR_STATE_ONLINE_TORQUE:          return "ONLINE_TORQUE";
-	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:   return "ONLINE_VELOCITY_OPEN";
-	case MOTOR_STATE_ONLINE_PROFILE_OPEN:    return "ONLINE_PROFILE_OPEN";
-	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED: return "ONLINE_VELOCITY_CLOSED";
-	case MOTOR_STATE_ONLINE_POSITION:        return "ONLINE_POSITION";
+	case MOTOR_STATE_ONLINE_CURRENT_ENCODER:     return "ONLINE_CURRENT_ENCODER";
+	case MOTOR_STATE_ONLINE_VELOCITY_GENERATED:  return "ONLINE_VELOCITY_GENERATED";
+	case MOTOR_STATE_ONLINE_POSITION_GENERATED:  return "ONLINE_POSITION_GENERATED";
+	case MOTOR_STATE_ONLINE_VELOCITY_ENCODER:    return "ONLINE_VELOCITY_ENCODER";
+	case MOTOR_STATE_ONLINE_POSITION_ENCODER:    return "ONLINE_POSITION_ENCODER";
 	case MOTOR_STATE_ERROR:        return "ERROR";
 	default:                       return "UNKNOWN";
 	}
@@ -473,7 +473,7 @@ const char *motor_event_to_string(enum motor_event_type event_type)
 	case MOTOR_EVENT_INIT:              return "INIT";
 	case MOTOR_EVENT_RUN:               return "RUN";
 	case MOTOR_EVENT_IDLE:              return "IDLE";
-	case MOTOR_EVENT_OFFLINE:           return "OFFLINE";
+	case MOTOR_EVENT_PREPARE_ONLINE:      return "PREPARE_ONLINE";
 	case MOTOR_EVENT_ONLINE:            return "ONLINE";
 	case MOTOR_EVENT_CALIBRATE_REQUEST: return "CALIBRATE_REQUEST";
 	case MOTOR_EVENT_COMMISSION_REQUEST: return "COMMISSION_REQUEST";
@@ -609,7 +609,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	/* Initialize velocity/position scaffold defaults */
 	params->position_target_rad = 0.0f;
 	params->encoder_direction_sign = (ENCODER_DIRECTION_SIGN >= 0) ? 1 : -1;
-	params->calibration.requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_OPEN;
+	params->calibration.requested_online_mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
 	params->profile_max_velocity_rad_s = VELOCITY_MAX_RAD_S;
 	params->profile_max_accel_rad_s2 = VELOCITY_MAX_ACCEL_RAD_S2;
 	params->outer_loop_mode = OUTER_LOOP_MPR_DEFAULT_ENABLED ?
@@ -909,9 +909,9 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 		LOG_WRN("ONLINE request ignored: calibration not complete");
 		return SMF_EVENT_HANDLED;
 
-	case MOTOR_EVENT_OFFLINE:
-		LOG_INF("OFFLINE request received, transitioning to OFFLINE");
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_OFFLINE]);
+	case MOTOR_EVENT_PREPARE_ONLINE:
+		LOG_INF("PREPARE_ONLINE request received, transitioning to PREPARE_ONLINE");
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_PREPARE_ONLINE]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_CALIBRATE_REQUEST:
@@ -937,15 +937,15 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	}
 }
 
-/* State: OFFLINE - Motor energized, calibration and open-loop control */
-static void motor_state_offline_entry(void *obj)
+/* State: PREPARE_ONLINE - motor energized, calibration before online control */
+static void motor_state_prepare_online_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Entering OFFLINE state");
+	LOG_INF("Entering PREPARE_ONLINE state");
 
-	/* OFFLINE baseline requirements (shared by all OFFLINE substates).
-	 * CALIBRATION is a child of OFFLINE and should not own PWM-output baseline.
+	/* PREPARE_ONLINE baseline requirements (shared by calibration substates).
+	 * CALIBRATION is a child of PREPARE_ONLINE and should not own PWM-output baseline.
 	 */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PWM_OUTPUT));
 
@@ -959,24 +959,24 @@ static void motor_state_offline_entry(void *obj)
 	drv8328_enable_channel(gate_driver_b, 0);
 	drv8328_enable_channel(gate_driver_b, 1);
 
-	/* First OFFLINE entry after boot runs fast boot calibration sequence. */
+	/* First PREPARE_ONLINE entry after boot runs fast boot calibration sequence. */
 	if (!params->calibration.complete &&
 	    params->calibration.mode != MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 	}
 }
 
-static void motor_state_offline_exit(void *obj)
+static void motor_state_prepare_online_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting OFFLINE state");
+	LOG_INF("Exiting PREPARE_ONLINE state");
 
-	/* Clear OFFLINE baseline requirements on exit. */
+	/* Clear PREPARE_ONLINE baseline requirements on exit. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_PWM_OUTPUT));
 }
 
-static enum smf_state_result motor_state_offline_run(void *obj)
+static enum smf_state_result motor_state_prepare_online_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
@@ -1015,7 +1015,7 @@ static enum smf_state_result motor_state_offline_run(void *obj)
 		break;
 	}
 
-	/* Auto-enter ONLINE once OFFLINE has no active calibration and the required
+		/* Auto-enter ONLINE once PREPARE_ONLINE has no active calibration and the required
 	 * boot calibration has already completed.
 	 */
 	if (!params->calibration.running && params->calibration.complete) {

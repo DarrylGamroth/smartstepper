@@ -43,8 +43,8 @@ static inline uint32_t motor_profile_period_ms_to_ticks(uint32_t period_ms)
 static inline bool motor_profile_seq_mode_active(const struct motor_parameters *params)
 {
 	return params != NULL &&
-	       (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ||
-		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN));
+	       (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER) ||
+		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED));
 }
 
 static const char *motor_profile_seq_trigger_source_to_string(uint8_t source)
@@ -790,7 +790,8 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 	}
 
 	if (!motor_profile_seq_mode_active(g_motor_params)) {
-		shell_error(sh, "Sequence start requires ONLINE_POSITION or ONLINE_PROFILE_OPEN mode.");
+		shell_error(sh,
+			    "Sequence start requires ONLINE_POSITION_ENCODER or ONLINE_POSITION_GENERATED mode.");
 		return -EACCES;
 	}
 

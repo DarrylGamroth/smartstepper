@@ -436,7 +436,7 @@ void motor_control_loop_step(struct motor_parameters *params,
    - open-loop velocity
    - torque closed-loop engage/disengage
    - velocity closed-loop engage
-   - offline->align transitions
+   - prepare->align transitions
    - encoder transport/frame-error handling
 4. ISR budget tracking before/after each phase.
 

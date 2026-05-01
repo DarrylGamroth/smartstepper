@@ -39,7 +39,7 @@ LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
 static inline bool motor_state_allows_arm(int state)
 {
 	return state == MOTOR_STATE_IDLE ||
-	       state == MOTOR_STATE_OFFLINE ||
+	       state == MOTOR_STATE_PREPARE_ONLINE ||
 	       state == MOTOR_STATE_ONLINE ||
 	       motor_state_is_online_submode(state);
 }
@@ -81,16 +81,16 @@ static const char *motor_calibration_mode_to_string(uint8_t mode)
 static enum motor_control_policy_mode motor_shell_policy_mode_from_state(int state)
 {
 	switch (state) {
-	case MOTOR_STATE_ONLINE_VELOCITY_OPEN:
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_OPEN;
-	case MOTOR_STATE_ONLINE_PROFILE_OPEN:
-		return MOTOR_CONTROL_POLICY_MODE_PROFILE_OPEN;
-	case MOTOR_STATE_ONLINE_TORQUE:
-		return MOTOR_CONTROL_POLICY_MODE_TORQUE;
-	case MOTOR_STATE_ONLINE_VELOCITY_CLOSED:
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_CLOSED;
-	case MOTOR_STATE_ONLINE_POSITION:
-		return MOTOR_CONTROL_POLICY_MODE_POSITION;
+	case MOTOR_STATE_ONLINE_VELOCITY_GENERATED:
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_GENERATED;
+	case MOTOR_STATE_ONLINE_POSITION_GENERATED:
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED;
+	case MOTOR_STATE_ONLINE_CURRENT_ENCODER:
+		return MOTOR_CONTROL_POLICY_MODE_CURRENT_ENCODER;
+	case MOTOR_STATE_ONLINE_VELOCITY_ENCODER:
+		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER;
+	case MOTOR_STATE_ONLINE_POSITION_ENCODER:
+		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
 	case MOTOR_STATE_CALIBRATION:
 	case MOTOR_STATE_OFFSET_MEAS:
 	case MOTOR_STATE_RS_EST:
@@ -151,7 +151,7 @@ static void motor_shell_print_control_policy(const struct shell *sh,
 		    motor_current_source_to_string(policy->current_source));
 	shell_print(sh, "  Actuator/backend: %s",
 		    motor_actuator_kind_to_string(policy->actuator_kind));
-	shell_print(sh, "  Encoder read:     %s",
+	shell_print(sh, "  Encoder control:  %s",
 		    policy->encoder_read_enabled ? "ENABLED" : "DISABLED");
 	shell_print(sh, "  Encoder required: %s",
 		    policy->encoder_required_for_control ? "YES" : "NO");
@@ -444,8 +444,8 @@ static void motor_fault_snapshot_reset(struct motor_parameters *params, bool cle
 	}
 }
 
-/* motor state offline */
-int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv)
+/* motor state prepare */
+int cmd_motor_state_prepare_online(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
@@ -455,11 +455,11 @@ int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	if (motor_api_request_offline() == 0) {
-		shell_print(sh, "OFFLINE state requested");
+	if (motor_api_request_prepare_online() == 0) {
+		shell_print(sh, "PREPARE_ONLINE state requested");
 		return 0;
 	} else {
-		shell_error(sh, "Failed to request OFFLINE state");
+		shell_error(sh, "Failed to request PREPARE_ONLINE state");
 		return -EIO;
 	}
 }
@@ -562,7 +562,7 @@ int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv)
 
 	int state = motor_api_get_state();
 	if (!motor_state_allows_arm(state)) {
-		shell_error(sh, "Cannot arm while in state %s. Wait for IDLE/OFFLINE/ONLINE.",
+		shell_error(sh, "Cannot arm while in state %s. Wait for IDLE/PREPARE_ONLINE/ONLINE.",
 			    motor_state_to_string(state));
 		return -EAGAIN;
 	}
@@ -640,10 +640,10 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 	bool autonomous_keepalive =
 		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_seq.running,
@@ -759,44 +759,49 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 	return 0;
 }
 
-/* motor state mode torque */
-int cmd_motor_state_mode_torque(const struct shell *sh, size_t argc, char **argv)
+/* motor state mode current_encoder */
+int cmd_motor_state_mode_current_encoder(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_TORQUE, "torque");
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_CURRENT_ENCODER,
+					 "current_encoder");
 }
 
-/* motor state mode velocity_open */
-int cmd_motor_state_mode_velocity_open(const struct shell *sh, size_t argc, char **argv)
+/* motor state mode velocity_generated */
+int cmd_motor_state_mode_velocity_generated(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_OPEN, "velocity_open");
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_GENERATED,
+					 "velocity_generated");
 }
 
-/* motor state mode profile_open */
-int cmd_motor_state_mode_profile_open(const struct shell *sh, size_t argc, char **argv)
+/* motor state mode position_generated */
+int cmd_motor_state_mode_position_generated(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_PROFILE_OPEN, "profile_open");
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION_GENERATED,
+					 "position_generated");
 }
 
-/* motor state mode velocity_closed */
-int cmd_motor_state_mode_velocity_closed(const struct shell *sh, size_t argc, char **argv)
+/* motor state mode velocity_encoder */
+int cmd_motor_state_mode_velocity_encoder(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_CLOSED, "velocity_closed");
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
+					 "velocity_encoder");
 }
 
-/* motor state mode position */
-int cmd_motor_state_mode_position(const struct shell *sh, size_t argc, char **argv)
+/* motor state mode position_encoder */
+int cmd_motor_state_mode_position_encoder(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION, "position");
+	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION_ENCODER,
+					 "position_encoder");
 }
 
 /* motor safety timeout <ms> */
@@ -862,10 +867,10 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 	bool timeout_enabled = g_motor_params->command_timeout_ms > 0U;
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION);
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
+		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 	bool autonomous_keepalive =
 		motor_keepalive_policy_should_keepalive(control_armed, autonomous_mode_active,
 						 g_motor_params->profile_seq.running,
@@ -1556,7 +1561,7 @@ int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **
 	} else {
 		shell_print(sh, "  Clean span:   none");
 	}
-	shell_print(sh, "  Counts:       clean=%u fresh=%u enabled=%u warn=%u err=%u io=%u",
+	shell_print(sh, "  Counts:       clean=%u fresh=%u ctrl_en=%u warn=%u err=%u io=%u",
 		    clean_count, fresh_count, enabled_count, warn_count, err_count, io_count);
 	shell_print(sh, "  Status bits:  or=0x%02X and=0x%02X first=0x%02X last=0x%02X",
 		    status_or, status_and,
@@ -1599,7 +1604,7 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "Raw trace dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad obs_in_rad q fresh warn err io status enabled");
+		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad obs_in_rad q fresh warn err io status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *sample =
@@ -1654,7 +1659,7 @@ int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char *
 		const struct motor_encoder_capture_sample *newest =
 			&g_motor_params->encoder_capture.samples[newest_idx];
 		shell_print(sh,
-			    "  Latest:     loop=%u src=%s deg=%.3f fresh=%u warn=%u err=%u status=0x%02X enabled=%u",
+			    "  Latest:     loop=%u src=%s deg=%.3f fresh=%u warn=%u err=%u status=0x%02X ctrl_en=%u",
 			    newest->control_loop_count,
 			    motor_encoder_input_source_to_string(newest->input_source),
 			    (double)newest->angle_deg,
@@ -1782,7 +1787,7 @@ int cmd_motor_encoder_capture_summary(const struct shell *sh, size_t argc, char 
 	} else {
 		shell_print(sh, "  Clean span:   none");
 	}
-	shell_print(sh, "  Counts:       clean=%u fresh=%u enabled=%u warn=%u err=%u compare=%u",
+	shell_print(sh, "  Counts:       clean=%u fresh=%u ctrl_en=%u warn=%u err=%u compare=%u",
 		    clean_count, fresh_count, enabled_count, warn_count, err_count, compare_count);
 	shell_print(sh, "  Status bits:  or=0x%02X and=0x%02X first=0x%02X last=0x%02X",
 		    status_or, status_and,
@@ -1825,7 +1830,7 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "Capture dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop source deg rad norm q31 fresh warn err status enabled");
+		    "idx loop source deg rad norm q31 fresh warn err status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		const struct motor_encoder_capture_sample *sample =

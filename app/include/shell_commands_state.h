@@ -9,7 +9,7 @@
 #include <zephyr/shell/shell.h>
 
 /* State mode and transition commands */
-int cmd_motor_state_offline(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_prepare_online(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_idle(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_online(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv);
@@ -17,11 +17,11 @@ int cmd_motor_state_commission(const struct shell *sh, size_t argc, char **argv)
 int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_policy(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_state_mode_torque(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_state_mode_velocity_open(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_state_mode_profile_open(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_state_mode_velocity_closed(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_state_mode_position(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_mode_current_encoder(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_mode_velocity_generated(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_mode_position_generated(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_mode_velocity_encoder(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_mode_position_encoder(const struct shell *sh, size_t argc, char **argv);
 
 /* Arm/disarm and safety commands */
 int cmd_motor_arm(const struct shell *sh, size_t argc, char **argv);

@@ -25,7 +25,7 @@ bool motor_dq_decoupling_is_enabled(const struct motor_dq_decoupling_enable_inpu
 	return in->feature_enabled &&
 	       in->online_control_state &&
 	       in->control_armed &&
-	       !in->torque_mode_state &&
+	       !in->current_encoder_mode_state &&
 	       in->min_speed_reached &&
 	       in->flux_valid &&
 	       in->speed_valid &&

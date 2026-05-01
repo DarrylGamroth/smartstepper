@@ -307,19 +307,19 @@ int motor_api_post_event(const struct motor_event *evt)
 	return motor_api_post_event_back(evt);
 }
 
-int motor_api_request_offline(void)
+int motor_api_request_prepare_online(void)
 {
 	struct motor_event evt = {
-		.type = MOTOR_EVENT_OFFLINE,
-	};
-	
-	int ret = motor_api_post_event_back(&evt);
+		.type = MOTOR_EVENT_PREPARE_ONLINE,
+		};
+
+		int ret = motor_api_post_event_back(&evt);
 	if (ret != 0) {
-		LOG_ERR("Failed to post OFFLINE request: queue full");
+		LOG_ERR("Failed to post PREPARE_ONLINE request: queue full");
 		return ret;
-	}
-	
-	LOG_DBG("OFFLINE request posted");
+		}
+
+		LOG_DBG("PREPARE_ONLINE request posted");
 	return 0;
 }
 

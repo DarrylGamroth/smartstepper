@@ -207,7 +207,7 @@ Purpose: make ISR latency improvements measurable and prevent backsliding.
 Tasks:
 
 1. Add a documented disassembly/symbol-size check command.
-2. Add a documented HIL command sequence to record ISR max/average cycles in `velocity_open`, `torque`, and `velocity_closed` if hardware is stable.
+2. Add a documented HIL command sequence to record ISR max/average cycles in `velocity_generated`, `torque`, and `velocity_encoder` if hardware is stable.
 3. Record before/after numbers in `app/docs/plan/execution_log.md`.
 4. Consider a lightweight source-level test that scans for forbidden ISR dependencies: shell, `k_msgq_put`, logging, allocation.
 

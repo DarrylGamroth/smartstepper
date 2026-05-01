@@ -153,7 +153,7 @@ Tasks:
 4. Preserve decimation semantics and MPR/PI/DOB fallback behavior.
 
 Acceptance:
-- No behavior delta in `velocity_closed` and `position` modes.
+- No behavior delta in `velocity_encoder` and `position` modes.
 - Existing unit tests pass; add targeted tests for scheduler and fallback gates.
 
 ### Phase 1 Execution Report (2026-03-03)
@@ -293,7 +293,7 @@ Implemented:
 
 5. Removed app state-machine symbol dependency from commissioning runtime:
 - Replaced `smf_state*` mode checks with explicit observation flags:
-  - `mode_velocity_closed`
+  - `mode_velocity_encoder`
   - `mode_torque`
 - Updated observation producer in:
   - `modules/motor_core/src/runtime/motor_core_step.c`
@@ -485,9 +485,9 @@ Tests:
 
 Hardware smoke (recommended per major phase):
 1. Flash target.
-2. Verify `offline -> arm -> velocity_open`.
+2. Verify `prepare -> arm -> velocity_generated`.
 3. Verify encoder capture/compare pipeline.
-4. Verify `torque` and `velocity_closed` transition stability.
+4. Verify `torque` and `velocity_encoder` transition stability.
 
 ## Risks and Mitigations
 

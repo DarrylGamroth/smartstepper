@@ -209,17 +209,17 @@ enum smf_state_result motor_state_online_run(void *obj)
 	}
 }
 
-/* Substate: ONLINE_TORQUE - Direct Id/Iq control mode */
-void motor_state_online_torque_entry(void *obj)
+/* Substate: ONLINE_CURRENT_ENCODER - encoder-commutated direct Id/Iq control */
+void motor_state_online_current_encoder_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Entering ONLINE_TORQUE substate (direct Id/Iq control)");
+	LOG_INF("Entering ONLINE_CURRENT_ENCODER substate (direct Id/Iq control)");
 
 	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 	motor_online_reset_feedback_quality(params);
-	/* Start torque mode from a neutral current command for bumpless handover. */
+	/* Start direct Id/Iq control from a neutral command for bumpless handover. */
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
 	pi_set_ui(&params->pi_Id, 0.0f);
@@ -241,35 +241,35 @@ void motor_state_online_torque_entry(void *obj)
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
-void motor_state_online_torque_exit(void *obj)
+void motor_state_online_current_encoder_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting ONLINE_TORQUE substate");
+	LOG_INF("Exiting ONLINE_CURRENT_ENCODER substate");
 
 	/* Clear this substate's additional requirements. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 }
 
-enum smf_state_result motor_state_online_torque_run(void *obj)
+enum smf_state_result motor_state_online_current_encoder_run(void *obj)
 {
 	ARG_UNUSED(obj);
-	/* Direct torque control - no additional processing needed
-	 * Id/Iq setpoints are controlled via shell commands
+	/* Direct Id/Iq control - no additional processing needed.
+	 * Id/Iq setpoints are controlled via shell commands.
 	 * Parent ONLINE state handles stop/error events
 	 */
 	return SMF_EVENT_PROPAGATE;
 }
 
-/* Substate: ONLINE_VELOCITY_OPEN - Open-loop velocity control */
-void motor_state_online_velocity_open_entry(void *obj)
+/* Substate: ONLINE_VELOCITY_GENERATED - generated-angle velocity control */
+void motor_state_online_velocity_generated_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t mech_angle_rad = params->live.position_rad;
 
-	LOG_INF("Entering ONLINE_VELOCITY_OPEN substate");
+	LOG_INF("Entering ONLINE_VELOCITY_GENERATED substate");
 
-	/* Open-loop velocity control uses angle generator and velocity trajectory.
+	/* Generated-angle velocity control uses angle generator and velocity trajectory.
 	 * ONLINE provides the baseline.
 	 */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
@@ -299,12 +299,12 @@ void motor_state_online_velocity_open_entry(void *obj)
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 
-	LOG_INF("Open-loop velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
+	LOG_INF("Generated-angle velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
 		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
 		(double)(params->profile_max_accel_rad_s2 / (2.0f * PI_F32)));
 }
 
-enum smf_state_result motor_state_online_velocity_open_run(void *obj)
+enum smf_state_result motor_state_online_velocity_generated_run(void *obj)
 {
 	ARG_UNUSED(obj);
 	/* Velocity control happens in motor_isr based on active substate
@@ -313,11 +313,11 @@ enum smf_state_result motor_state_online_velocity_open_run(void *obj)
 	return SMF_EVENT_PROPAGATE;
 }
 
-void motor_state_online_velocity_open_exit(void *obj)
+void motor_state_online_velocity_generated_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting ONLINE_VELOCITY_OPEN substate");
+	LOG_INF("Exiting ONLINE_VELOCITY_GENERATED substate");
 
 	/* Reset angle generator and trajectory */
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
@@ -330,15 +330,15 @@ void motor_state_online_velocity_open_exit(void *obj)
 				      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 }
 
-/* Substate: ONLINE_PROFILE_OPEN - Open-loop generated-angle profile control */
-void motor_state_online_profile_open_entry(void *obj)
+/* Substate: ONLINE_POSITION_GENERATED - generated-angle position/profile control */
+void motor_state_online_position_generated_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t mech_angle_rad = params->live.position_rad;
 
-	LOG_INF("Entering ONLINE_PROFILE_OPEN substate");
+	LOG_INF("Entering ONLINE_POSITION_GENERATED substate");
 
-	/* Open-loop profile control drives generated mechanical position directly.
+	/* Generated-angle position/profile control drives mechanical position directly.
 	 * Encoder reads remain disabled; capture telemetry can still request samples.
 	 */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
@@ -362,21 +362,21 @@ void motor_state_online_profile_open_entry(void *obj)
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 
-	LOG_INF("Open-loop profile mode initialized at %.2f deg",
+	LOG_INF("Generated-angle position/profile mode initialized at %.2f deg",
 		(double)(mech_angle_rad * 180.0f / PI_F32));
 }
 
-enum smf_state_result motor_state_online_profile_open_run(void *obj)
+enum smf_state_result motor_state_online_position_generated_run(void *obj)
 {
 	return motor_profile_sequence_run((struct motor_parameters *)obj);
 }
 
-void motor_state_online_profile_open_exit(void *obj)
+void motor_state_online_position_generated_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t hold_rad = angle_gen_get_angle(&params->angle_gen);
 
-	LOG_INF("Exiting ONLINE_PROFILE_OPEN substate");
+	LOG_INF("Exiting ONLINE_POSITION_GENERATED substate");
 
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	motion_profile_quintic_cancel(&params->position_profile, hold_rad);
@@ -396,15 +396,15 @@ void motor_state_online_profile_open_exit(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
 }
 
-/* Substate: ONLINE_VELOCITY_CLOSED - Closed-loop velocity control */
-void motor_state_online_velocity_closed_entry(void *obj)
+/* Substate: ONLINE_VELOCITY_ENCODER - encoder-feedback velocity control */
+void motor_state_online_velocity_encoder_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
 
-	LOG_INF("Entering ONLINE_VELOCITY_CLOSED substate");
+	LOG_INF("Entering ONLINE_VELOCITY_ENCODER substate");
 
-	/* Closed-loop velocity uses measured speed and acceleration-limited velocity profile. */
+	/* Encoder-feedback velocity uses measured speed and acceleration-limited velocity profile. */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
@@ -434,17 +434,17 @@ void motor_state_online_velocity_closed_entry(void *obj)
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
-enum smf_state_result motor_state_online_velocity_closed_run(void *obj)
+enum smf_state_result motor_state_online_velocity_encoder_run(void *obj)
 {
 	ARG_UNUSED(obj);
 	return SMF_EVENT_PROPAGATE;
 }
 
-void motor_state_online_velocity_closed_exit(void *obj)
+void motor_state_online_velocity_encoder_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting ONLINE_VELOCITY_CLOSED substate");
+	LOG_INF("Exiting ONLINE_VELOCITY_ENCODER substate");
 
 	/* Clear this substate's additional requirements. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
@@ -452,14 +452,14 @@ void motor_state_online_velocity_closed_exit(void *obj)
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 }
 
-/* Substate: ONLINE_POSITION - Cascaded position->velocity->current scaffold */
-void motor_state_online_position_entry(void *obj)
+/* Substate: ONLINE_POSITION_ENCODER - encoder-feedback position/profile control */
+void motor_state_online_position_encoder_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
 	float32_t position_mech_rad = params->live.position_rad;
 
-	LOG_INF("Entering ONLINE_POSITION substate");
+	LOG_INF("Entering ONLINE_POSITION_ENCODER substate");
 
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
@@ -492,16 +492,16 @@ void motor_state_online_position_entry(void *obj)
 	params->live.velocity_dob_residual_rad_s = 0.0f;
 }
 
-enum smf_state_result motor_state_online_position_run(void *obj)
+enum smf_state_result motor_state_online_position_encoder_run(void *obj)
 {
 	return motor_profile_sequence_run((struct motor_parameters *)obj);
 }
 
-void motor_state_online_position_exit(void *obj)
+void motor_state_online_position_encoder_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting ONLINE_POSITION substate");
+	LOG_INF("Exiting ONLINE_POSITION_ENCODER substate");
 
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);

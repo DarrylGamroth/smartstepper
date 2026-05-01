@@ -42,9 +42,9 @@ static const char *motor_commission_expected_mode_to_string(uint8_t expected_mod
 {
 	switch (expected_mode) {
 	case MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED:
-		return "ONLINE_VELOCITY_CLOSED";
+		return "ONLINE_VELOCITY_ENCODER";
 	case MOTOR_COMMISSION_EXPECT_TORQUE:
-		return "ONLINE_TORQUE";
+		return "ONLINE_CURRENT_ENCODER";
 	case MOTOR_COMMISSION_EXPECT_ANY:
 	default:
 		return "ANY";
@@ -192,12 +192,12 @@ static int motor_commission_auto_run_flux(const struct shell *sh,
 		return ret;
 	}
 
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
 
-	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_CLOSED,
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
 					     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
 	if (ret != 0) {
 		return ret;
@@ -259,11 +259,11 @@ static int motor_commission_auto_run_flux(const struct shell *sh,
 static int motor_commission_auto_run_mech(const struct shell *sh,
 					  const struct motor_commission_mech_config *cfg)
 {
-	int ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+	int ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
-	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_CLOSED,
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
 					     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
 	if (ret != 0) {
 		return ret;
@@ -279,11 +279,11 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
 	}
 
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_TORQUE);
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
-	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_TORQUE,
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER,
 					     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
 	if (ret != 0) {
 		return ret;
@@ -560,14 +560,14 @@ int cmd_motor_commission_flux_run(const struct shell *sh, size_t argc, char **ar
 	/* Prepare expected control mode and limits; capture gating handles transitions. */
 	(void)motor_api_set_param("velocity_cl_iq_limit_A", cfg.iq_limit_a);
 	(void)motor_api_request_online();
-	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_CLOSED);
+	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 
 	shell_print(sh,
 		    "Flux commissioning started: %.3f..%.3f Hz, steps=%u, settle=%u ms, sample=%u ms, iq_limit=%.3f A",
 		    (double)cfg.min_speed_hz, (double)cfg.max_speed_hz, cfg.steps, cfg.settle_ms,
 		    cfg.sample_ms, (double)cfg.iq_limit_a);
 	shell_print(sh,
-		    "Ensure control is armed and velocity commands are applied; capture expects ONLINE_VELOCITY_CLOSED.");
+		    "Ensure control is armed and velocity commands are applied; capture expects ONLINE_VELOCITY_ENCODER.");
 	return 0;
 }
 
@@ -601,14 +601,14 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 	}
 
 	(void)motor_api_request_online();
-	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_TORQUE);
+	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
 
 	shell_print(sh,
 		    "Mechanical commissioning started: coast=%.3f Hz, prbs_amp=%.3f A, prbs_period=%u ms, duration=%u ms",
 		    (double)cfg.coast_speed_hz, (double)cfg.prbs_amp_a, cfg.prbs_period_ms,
 		    cfg.duration_ms);
 	shell_print(sh,
-		    "Ensure control is armed and torque excitation is applied; capture expects ONLINE_TORQUE.");
+		    "Ensure control is armed and current excitation is applied; capture expects ONLINE_CURRENT_ENCODER.");
 	return 0;
 }
 

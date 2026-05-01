@@ -581,9 +581,10 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 	}
 
 	const struct smf_state *mode = g_motor_params->state_for_isr;
-	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
-	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED)) {
-		shell_error(sh, "Velocity target requires velocity_open or velocity_closed mode.");
+	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_ENCODER)) {
+		shell_error(sh,
+			    "Velocity target requires velocity_generated or velocity_encoder mode.");
 		return -EACCES;
 	}
 
@@ -668,10 +669,10 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	}
 
 	const struct smf_state *mode = g_motor_params->state_for_isr;
-	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_OPEN) &&
-	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_PROFILE_OPEN) &&
-	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) &&
-	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_POSITION)) {
+	if (!motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_POSITION_GENERATED) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) &&
+	    !motor_state_ptr_is_mode(mode, MOTOR_STATE_ONLINE_POSITION_ENCODER)) {
 		shell_print(sh, "Velocity controller: INACTIVE");
 		return 0;
 	}
@@ -1090,8 +1091,9 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 		return -ENODEV;
 	}
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
-		shell_error(sh, "Not in position mode. Use 'motor state mode position' first.");
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER)) {
+		shell_error(sh,
+			    "Not in position_encoder mode. Use 'motor state mode position_encoder' first.");
 		return -EACCES;
 	}
 
@@ -1165,7 +1167,7 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 		return -ENODEV;
 	}
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION)) {
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER)) {
 		shell_print(sh, "Position controller: INACTIVE");
 		return 0;
 	}
@@ -1561,18 +1563,24 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 
 /* motor state mode subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state_mode,
-	SHELL_CMD(torque, NULL, "Torque (Id/Iq) control mode", cmd_motor_state_mode_torque),
-	SHELL_CMD(velocity_open, NULL, "Open-loop velocity control mode", cmd_motor_state_mode_velocity_open),
-	SHELL_CMD(profile_open, NULL, "Open-loop generated-angle profile mode", cmd_motor_state_mode_profile_open),
-	SHELL_CMD(velocity_closed, NULL, "Closed-loop velocity control mode", cmd_motor_state_mode_velocity_closed),
-	SHELL_CMD(position, NULL, "Closed-loop position control mode", cmd_motor_state_mode_position),
+	SHELL_CMD(current_encoder, NULL, "Encoder-commutated direct Id/Iq current mode",
+		  cmd_motor_state_mode_current_encoder),
+	SHELL_CMD(velocity_generated, NULL, "Generated-angle velocity mode",
+		  cmd_motor_state_mode_velocity_generated),
+	SHELL_CMD(position_generated, NULL, "Generated-angle position/profile mode",
+		  cmd_motor_state_mode_position_generated),
+	SHELL_CMD(velocity_encoder, NULL, "Encoder-feedback velocity mode",
+		  cmd_motor_state_mode_velocity_encoder),
+	SHELL_CMD(position_encoder, NULL, "Encoder-feedback position/profile mode",
+		  cmd_motor_state_mode_position_encoder),
 	SHELL_SUBCMD_SET_END
 );
 
 /* motor state subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(idle, NULL, "Transition to IDLE state", cmd_motor_state_idle),
-	SHELL_CMD(offline, NULL, "Transition to OFFLINE state", cmd_motor_state_offline),
+	SHELL_CMD(prepare, NULL, "Run prepare/calibration path before ONLINE",
+		  cmd_motor_state_prepare_online),
 	SHELL_CMD(online, NULL, "Transition to ONLINE state", cmd_motor_state_online),
 	SHELL_CMD(calibrate, NULL, "Run fast boot calibration (offset + align)", cmd_motor_state_calibrate),
 	SHELL_CMD(commission, NULL, "Run full commissioning (offset + R/L + Rs + align)", cmd_motor_state_commission),

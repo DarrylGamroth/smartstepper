@@ -131,7 +131,7 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	if (!params || !params->chopper_cal.active) {
 		return;
 	}
-	if (!motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
+	if (!motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
 	    atomic_get(&params->control_armed) == 0) {
 		params->chopper_cal.active = false;
 		params->chopper_cal.complete = false;
@@ -247,8 +247,8 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	}
 #endif
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_OPEN)) {
-		shell_error(sh, "Calibration requires ONLINE_VELOCITY_OPEN mode.");
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED)) {
+		shell_error(sh, "Calibration requires ONLINE_VELOCITY_GENERATED mode.");
 		return -EACCES;
 	}
 

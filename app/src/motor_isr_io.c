@@ -69,10 +69,10 @@ static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *param
 	const struct smf_state *state = params->state_for_isr;
 	bool online_control_state = motor_state_ptr_is_online_control_state(state);
 	bool autonomous_mode_active =
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_OPEN) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_PROFILE_OPEN) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_CLOSED) ||
-		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION);
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION_GENERATED) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
+		motor_state_ptr_is_mode(state, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 	bool profile_active = motion_profile_quintic_is_active(&params->position_profile);
 	bool autonomous_keepalive = motor_keepalive_policy_should_keepalive(
 		control_armed, autonomous_mode_active, params->profile_seq.running,
@@ -167,8 +167,8 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 	if (params->profile_seq.running &&
 	    atomic_get(&params->control_armed) != 0 &&
 	    params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
-	    (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION) ||
-	     motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_PROFILE_OPEN))) {
+	    (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER) ||
+	     motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED))) {
 		uint32_t period_ticks = params->profile_seq.period_ticks;
 		if (period_ticks == 0U) {
 			period_ticks = 1U;
