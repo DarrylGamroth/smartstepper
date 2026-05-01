@@ -122,6 +122,8 @@ Before HIL validation, clean up the remaining real-time/API concerns found durin
 
 Phase 7 should validate behavior, not discover avoidable ISR/API boundary problems.
 
+Detailed execution plan: `app/docs/isr_latency_ti_style_plan.md`.
+
 ## Target Pipeline
 
 The fast loop should become an explicit pipeline:
