@@ -45,6 +45,24 @@ podman exec wonderful_goldberg bash -lc '\
     -DEXTRA_CONF_FILE="debug.conf;logging.conf"'
 ```
 
+Reconfigure + build (AEAT-9955 HIL shell, recommended for real motor motion
+tests):
+
+```bash
+podman exec wonderful_goldberg bash -lc '\
+  west build \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2_hil_shell \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
+    -DEXTRA_CONF_FILE="hil_shell.conf;logging.conf"'
+```
+
+Use the HIL shell build for hardware motion checks. Avoid `debug.conf` for
+motion validation unless specifically debugging faults; it enables debug
+optimization and debug log volume that can perturb timing and serial behavior.
+
 Reconfigure + build (MT6835 serial shell):
 
 ```bash
@@ -115,7 +133,8 @@ tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 ```
 
 - For automation in this environment, keep one PTY session open to `tio` and send commands through that persistent session.
-- Debug/HIL builds include larger shell buffers in `app/debug.conf`:
+- Debug/HIL builds include larger shell buffers in `app/debug.conf` or
+  `app/hil_shell.conf`:
   `CONFIG_SHELL_CMD_BUFF_SIZE=512`,
   `CONFIG_SHELL_HISTORY_BUFFER=1024`, and
   `CONFIG_SHELL_BACKEND_SERIAL_RX_RING_BUFFER_SIZE=8192`.

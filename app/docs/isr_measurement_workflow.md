@@ -10,6 +10,19 @@ Use the normal west build from the container:
 podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
 ```
 
+For real hardware motion tests, prefer the HIL shell build. It keeps the larger
+serial shell buffers without enabling the heavier `debug.conf` settings:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p always \
+  -b smartstepper_v2/stm32h743xx \
+  /workspace/chopper/app \
+  -d /workspace/build/chopper/smartstepper_v2_hil_shell \
+  -S serial-shell -S serial-console -- \
+  -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay" \
+  -DEXTRA_CONF_FILE="hil_shell.conf;logging.conf"'
+```
+
 For a minimal ISR feature build, use a temporary config file and separate build directory:
 
 ```bash
