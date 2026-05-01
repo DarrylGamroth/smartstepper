@@ -78,6 +78,8 @@ static inline float32_t adc_to_vbus_v(q31_t q31_value)
 #define CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO 0.60f
 #define CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO 0.70f
 
+#define MOTOR_ISR_STAGE_NOINLINE __attribute__((noinline))
+
 static inline bool motor_rt_mode_active(uint32_t mode_flags, uint32_t flag)
 {
 	return (mode_flags & flag) != 0U;
@@ -300,8 +302,12 @@ static inline void motor_current_ref_policy_ctx_refresh(struct motor_current_ref
 static inline void motor_rls_runtime_ctx_refresh(struct motor_rls_runtime_ctx *ctx,
 						 struct motor_parameters *params)
 {
+#if defined(CONFIG_RLS_PARAMETER_ESTIMATION) && (CONFIG_RLS_PARAMETER_ESTIMATION == 1)
 	ctx->rls_feature_enabled =
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_RLS_ESTIMATION);
+#else
+	ctx->rls_feature_enabled = false;
+#endif
 	ctx->control_loop_count = params->control_loop_count;
 	ctx->vd_v = params->Vd_V;
 	ctx->vq_v = params->Vq_V;
@@ -431,7 +437,7 @@ static inline void motor_control_step_init_commission_obs(
 	};
 }
 
-static int motor_control_step_read_encoder(struct motor_parameters *params,
+static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor_parameters *params,
 					   uint32_t mode_flags,
 					   const struct motor_control_encoder_sample *encoder_sample,
 					   bool feature_angle_gen,
@@ -495,7 +501,7 @@ static inline void motor_control_step_publish_encoder_sidework(
 		return;
 	}
 
-	if (params->encoder_capture.enabled) {
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_CAPTURE) && params->encoder_capture.enabled) {
 		struct motor_capture_feedback capture_fb = {0};
 		(void)motor_encoder_feedback_prepare_capture(&params->rt_adapters.encoder_feedback,
 							     &enc_res->feedback,
@@ -506,7 +512,8 @@ static inline void motor_control_step_publish_encoder_sidework(
 		}
 	}
 
-	if (report != NULL && params->encoder_raw_trace.enabled && encoder_sample != NULL) {
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_RAW_TRACE) &&
+	    report != NULL && params->encoder_raw_trace.enabled && encoder_sample != NULL) {
 		report->encoder_raw_trace_valid = true;
 		report->encoder_sample = *encoder_sample;
 		report->encoder_feedback = enc_res->control_fb;
@@ -526,8 +533,10 @@ static inline void motor_control_step_finalize(struct motor_parameters *params,
 	commission_obs->fault_active = motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ERROR);
 	motor_runtime_fast_sync(params, mode_flags, control_armed);
 	motor_runtime_diag_sync(params);
-	motor_commission_runtime_ctx_refresh(&params->rt_adapters.commission, params);
-	motor_commission_update(&params->rt_adapters.commission, commission_obs);
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_COMMISSION_CAPTURE)) {
+		motor_commission_runtime_ctx_refresh(&params->rt_adapters.commission, params);
+		motor_commission_update(&params->rt_adapters.commission, commission_obs);
+	}
 }
 
 static inline void motor_control_measurements_from_encoder(
@@ -573,7 +582,7 @@ static inline void motor_feedback_ref_from_measurements(
 	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
 }
 
-static bool motor_control_step_measure_stage(struct motor_parameters *params,
+static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct motor_parameters *params,
 					     uint32_t mode_flags,
 					     const q31_t *values,
 					     const struct motor_current_ref *current_ref,
@@ -614,7 +623,7 @@ static bool motor_control_step_measure_stage(struct motor_parameters *params,
 	current_meas_ref->id_meas_a = meas->id_a;
 	current_meas_ref->iq_meas_a = meas->iq_a;
 
-	if (params->fault_snapshot.enabled) {
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) && params->fault_snapshot.enabled) {
 		motor_fault_snapshot_prepare(report,
 					     meas->angle_control_degrees,
 					     params->live.encoder_observer_input_rad,
@@ -684,7 +693,7 @@ static inline void motor_control_step_profile_open_motion(struct motor_parameter
 	params->position_target_rad = wrap_rad_2pi(position_rad);
 }
 
-static void motor_control_step_reference_stage(struct motor_parameters *params,
+static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct motor_parameters *params,
 					       struct motor_rt_control_ctx *ctx,
 					       struct motor_control_measurements *meas,
 					       struct motor_motion_ref *motion_ref,
@@ -818,7 +827,7 @@ static void motor_control_step_reference_stage(struct motor_parameters *params,
 	}
 }
 
-static bool motor_control_step_foc_stage(struct motor_parameters *params,
+static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_parameters *params,
 					 const struct motor_rt_control_ctx *ctx,
 					 const struct motor_control_measurements *meas,
 					 const struct motor_motion_ref *motion_ref,
@@ -968,7 +977,7 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 	return false;
 }
 
-static inline void motor_control_step_publish_stage(
+static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	struct motor_parameters *params,
 	const struct motor_control_measurements *meas,
 	const struct motor_motion_ref *motion_ref,

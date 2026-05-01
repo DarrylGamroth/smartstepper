@@ -142,8 +142,10 @@ void motor_state_online_entry(void *obj)
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_BRAKING) |
 				     BIT(MOTOR_FEATURE_PWM_OUTPUT) |
 				     BIT(MOTOR_FEATURE_PI_CONTROL) |
-				     BIT(MOTOR_FEATURE_RLS_ESTIMATION) |
 				     BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+#if defined(CONFIG_RLS_PARAMETER_ESTIMATION) && (CONFIG_RLS_PARAMETER_ESTIMATION == 1)
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_RLS_ESTIMATION));
+#endif
 }
 
 void motor_state_online_exit(void *obj)
@@ -156,8 +158,10 @@ void motor_state_online_exit(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_BRAKING) |
 				      BIT(MOTOR_FEATURE_PWM_OUTPUT) |
 				      BIT(MOTOR_FEATURE_PI_CONTROL) |
-				      BIT(MOTOR_FEATURE_RLS_ESTIMATION) |
 				      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
+#if defined(CONFIG_RLS_PARAMETER_ESTIMATION) && (CONFIG_RLS_PARAMETER_ESTIMATION == 1)
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_RLS_ESTIMATION));
+#endif
 }
 
 enum smf_state_result motor_state_online_run(void *obj)

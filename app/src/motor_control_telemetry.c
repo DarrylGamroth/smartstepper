@@ -45,6 +45,7 @@ void motor_control_telemetry_consume_capture(const struct motor_capture_feedback
 void motor_control_telemetry_store_encoder_capture(struct motor_parameters *params,
 						   const struct motor_capture_feedback *capture)
 {
+#if IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_CAPTURE)
 	if (params == NULL || capture == NULL || !params->encoder_capture.enabled) {
 		return;
 	}
@@ -84,6 +85,10 @@ void motor_control_telemetry_store_encoder_capture(struct motor_parameters *para
 	} else {
 		params->encoder_capture.overrun_count++;
 	}
+#else
+	ARG_UNUSED(params);
+	ARG_UNUSED(capture);
+#endif
 }
 
 void motor_control_telemetry_store_encoder_raw_trace(
@@ -92,6 +97,7 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	const struct motor_control_feedback *control_fb,
 	uint8_t position_quality_flags)
 {
+#if IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_RAW_TRACE)
 	if (params == NULL || raw_sample == NULL || control_fb == NULL ||
 	    !params->encoder_raw_trace.enabled) {
 		return;
@@ -131,12 +137,19 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	} else {
 		params->encoder_raw_trace.overrun_count++;
 	}
+#else
+	ARG_UNUSED(params);
+	ARG_UNUSED(raw_sample);
+	ARG_UNUSED(control_fb);
+	ARG_UNUSED(position_quality_flags);
+#endif
 }
 
 void motor_control_telemetry_store_fault_snapshot(
 	struct motor_parameters *params,
 	const struct motor_control_fault_snapshot *snapshot)
 {
+#if IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT)
 	if (params == NULL || snapshot == NULL || !snapshot->valid ||
 	    !params->fault_snapshot.enabled) {
 		return;
@@ -178,4 +191,8 @@ void motor_control_telemetry_store_fault_snapshot(
 	} else {
 		params->fault_snapshot.overrun_count++;
 	}
+#else
+	ARG_UNUSED(params);
+	ARG_UNUSED(snapshot);
+#endif
 }

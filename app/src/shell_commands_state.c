@@ -1150,6 +1150,12 @@ int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
 /* motor encoder capture start [decimation] */
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv)
 {
+#if !IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_CAPTURE)
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "Encoder capture telemetry is not compiled in");
+	return -ENOTSUP;
+#else
 	if (argc != 1U && argc != 2U) {
 		shell_error(sh, "Usage: motor encoder capture start [decimation]");
 		return -EINVAL;
@@ -1177,6 +1183,7 @@ int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **
 		    g_motor_params->encoder_capture.decimation,
 		    MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 	return 0;
+#endif
 }
 
 /* motor encoder capture stop */
@@ -1217,6 +1224,12 @@ int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **
 /* motor encoder trace start [decimation] */
 int cmd_motor_encoder_trace_start(const struct shell *sh, size_t argc, char **argv)
 {
+#if !IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_RAW_TRACE)
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "Encoder raw trace telemetry is not compiled in");
+	return -ENOTSUP;
+#else
 	if (argc != 1U && argc != 2U) {
 		shell_error(sh, "Usage: motor encoder trace start [decimation]");
 		return -EINVAL;
@@ -1243,6 +1256,7 @@ int cmd_motor_encoder_trace_start(const struct shell *sh, size_t argc, char **ar
 		    g_motor_params->encoder_raw_trace.decimation,
 		    MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 	return 0;
+#endif
 }
 
 /* motor encoder trace stop */
@@ -1292,6 +1306,8 @@ int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **a
 	}
 
 	shell_print(sh, "Encoder raw trace:");
+	shell_print(sh, "  Compiled:   %s",
+		    IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_RAW_TRACE) ? "YES" : "NO");
 	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_raw_trace.enabled ? "YES" : "NO");
 	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_raw_trace.decimation);
 	shell_print(sh, "  Stored:     %u / %u",
@@ -1400,6 +1416,8 @@ int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char *
 	}
 
 	shell_print(sh, "Encoder capture:");
+	shell_print(sh, "  Compiled:   %s",
+		    IS_ENABLED(CONFIG_MOTOR_ISR_ENCODER_CAPTURE) ? "YES" : "NO");
 	shell_print(sh, "  Enabled:    %s", g_motor_params->encoder_capture.enabled ? "YES" : "NO");
 	shell_print(sh, "  Decimation: %u", g_motor_params->encoder_capture.decimation);
 	shell_print(sh, "  Stored:     %u / %u",
@@ -1621,6 +1639,12 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 /* motor fault snapshot start [decimation] */
 int cmd_motor_fault_snapshot_start(const struct shell *sh, size_t argc, char **argv)
 {
+#if !IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT)
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "Fault snapshot telemetry is not compiled in");
+	return -ENOTSUP;
+#else
 	if (argc != 1U && argc != 2U) {
 		shell_error(sh, "Usage: motor fault snapshot start [decimation]");
 		return -EINVAL;
@@ -1648,6 +1672,7 @@ int cmd_motor_fault_snapshot_start(const struct shell *sh, size_t argc, char **a
 		    g_motor_params->fault_snapshot.decimation,
 		    MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 	return 0;
+#endif
 }
 
 /* motor fault snapshot stop */
@@ -1680,6 +1705,8 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh, "Fault snapshot:");
+	shell_print(sh, "  Compiled:   %s",
+		    IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) ? "YES" : "NO");
 	shell_print(sh, "  Enabled:    %s", g_motor_params->fault_snapshot.enabled ? "YES" : "NO");
 	shell_print(sh, "  Decimation: %u", g_motor_params->fault_snapshot.decimation);
 	shell_print(sh, "  Latched:    %s", g_motor_params->fault_snapshot.latched ? "YES" : "NO");

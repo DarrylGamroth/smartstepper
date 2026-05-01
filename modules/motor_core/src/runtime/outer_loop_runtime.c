@@ -9,6 +9,8 @@
 #include <errno.h>
 #include <math.h>
 
+#include <zephyr/sys/util.h>
+
 #include "motor/math/math_constants.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
@@ -16,9 +18,16 @@
 #include "motor/motion/outer_loop_sched.h"
 #include "motor/runtime/feedback_quality.h"
 
+#define MOTOR_OUTER_LOOP_NOINLINE __attribute__((noinline))
+
 static inline bool motor_outer_loop_use_mpr(const struct motor_outer_loop_runtime_ctx *ctx)
 {
+#if defined(CONFIG_MOTOR_OUTER_LOOP_MPR) && (CONFIG_MOTOR_OUTER_LOOP_MPR == 1)
 	return ctx->outer_loop_mode != 0U;
+#else
+	ARG_UNUSED(ctx);
+	return false;
+#endif
 }
 
 static void motor_outer_loop_outputs_init(const struct motor_outer_loop_inputs *in,
@@ -31,7 +40,7 @@ static void motor_outer_loop_outputs_init(const struct motor_outer_loop_inputs *
 	out->iq_ref_a = in->iq_ref_a;
 }
 
-static void motor_outer_loop_schedule_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_schedule_step(struct motor_outer_loop_runtime_ctx *ctx,
 					   const struct motor_outer_loop_inputs *in,
 					   bool *position_loop_update,
 					   bool *velocity_loop_update)
@@ -54,7 +63,7 @@ static void motor_outer_loop_schedule_step(struct motor_outer_loop_runtime_ctx *
 	*velocity_loop_update = sched_out.velocity_update;
 }
 
-static void motor_outer_loop_position_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_position_step(struct motor_outer_loop_runtime_ctx *ctx,
 					   const struct motor_outer_loop_inputs *in,
 					   struct motor_outer_loop_outputs *out,
 					   bool position_loop_update)
@@ -138,7 +147,7 @@ static void motor_outer_loop_position_step(struct motor_outer_loop_runtime_ctx *
 	traj_set_target_value(ctx->traj_velocity, out->velocity_target_rad_s);
 }
 
-static void motor_outer_loop_velocity_plan_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_plan_step(struct motor_outer_loop_runtime_ctx *ctx,
 						const struct motor_outer_loop_inputs *in,
 						struct motor_outer_loop_outputs *out)
 {
@@ -149,7 +158,7 @@ static void motor_outer_loop_velocity_plan_step(struct motor_outer_loop_runtime_
 	}
 }
 
-static void motor_outer_loop_hold_on_bad_feedback(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_hold_on_bad_feedback(struct motor_outer_loop_runtime_ctx *ctx,
 						  const struct motor_outer_loop_inputs *in,
 						  struct motor_outer_loop_outputs *out)
 {
@@ -171,12 +180,13 @@ static void motor_outer_loop_hold_on_bad_feedback(struct motor_outer_loop_runtim
 	*ctx->live_velocity_dob_residual_rad_s = 0.0f;
 }
 
-static bool motor_outer_loop_velocity_mpr_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE bool motor_outer_loop_velocity_mpr_step(struct motor_outer_loop_runtime_ctx *ctx,
 					       const struct motor_outer_loop_inputs *in,
 					       struct motor_outer_loop_outputs *out,
 					       float32_t torque_gain_nm_per_a,
 					       float32_t *iq_cmd_pre_dob_a)
 {
+#if defined(CONFIG_MOTOR_OUTER_LOOP_MPR) && (CONFIG_MOTOR_OUTER_LOOP_MPR == 1)
 	if (!motor_outer_loop_use_mpr(ctx)) {
 		return false;
 	}
@@ -216,9 +226,17 @@ static bool motor_outer_loop_velocity_mpr_step(struct motor_outer_loop_runtime_c
 	out->iq_ref_a = *iq_cmd_pre_dob_a;
 	*ctx->velocity_cl_i_term_a = 0.0f;
 	return true;
+#else
+	ARG_UNUSED(ctx);
+	ARG_UNUSED(in);
+	ARG_UNUSED(out);
+	ARG_UNUSED(torque_gain_nm_per_a);
+	ARG_UNUSED(iq_cmd_pre_dob_a);
+	return false;
+#endif
 }
 
-static void motor_outer_loop_velocity_pi_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_pi_step(struct motor_outer_loop_runtime_ctx *ctx,
 					      const struct motor_outer_loop_inputs *in,
 					      struct motor_outer_loop_outputs *out,
 					      float32_t *iq_cmd_pre_dob_a)
@@ -252,12 +270,13 @@ static void motor_outer_loop_velocity_pi_step(struct motor_outer_loop_runtime_ct
 	out->iq_ref_a = *iq_cmd_pre_dob_a;
 }
 
-static void motor_outer_loop_velocity_dob_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_dob_step(struct motor_outer_loop_runtime_ctx *ctx,
 					       const struct motor_outer_loop_inputs *in,
 					       struct motor_outer_loop_outputs *out,
 					       float32_t torque_gain_nm_per_a,
 					       float32_t iq_cmd_pre_dob_a)
 {
+#if defined(CONFIG_MOTOR_VELOCITY_DOB) && (CONFIG_MOTOR_VELOCITY_DOB == 1)
 	if (!isfinite(torque_gain_nm_per_a) || torque_gain_nm_per_a <= 0.0f) {
 		return;
 	}
@@ -319,9 +338,16 @@ static void motor_outer_loop_velocity_dob_step(struct motor_outer_loop_runtime_c
 		*ctx->live_velocity_dob_disturbance_nm = 0.0f;
 		*ctx->live_velocity_dob_residual_rad_s = 0.0f;
 	}
+#else
+	ARG_UNUSED(ctx);
+	ARG_UNUSED(in);
+	ARG_UNUSED(out);
+	ARG_UNUSED(torque_gain_nm_per_a);
+	ARG_UNUSED(iq_cmd_pre_dob_a);
+#endif
 }
 
-static void motor_outer_loop_velocity_step(struct motor_outer_loop_runtime_ctx *ctx,
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct motor_outer_loop_runtime_ctx *ctx,
 					   const struct motor_outer_loop_inputs *in,
 					   struct motor_outer_loop_outputs *out,
 					   bool velocity_loop_update)
