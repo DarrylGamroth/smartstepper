@@ -117,7 +117,6 @@ tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 - For automation in this environment, keep one PTY session open to `tio` and send commands through that persistent session.
 - Debug/HIL builds include larger shell buffers in `app/debug.conf`:
   `CONFIG_SHELL_CMD_BUFF_SIZE=512`,
-  `CONFIG_SHELL_PRINTF_BUFF_SIZE=256`,
   `CONFIG_SHELL_HISTORY_BUFFER=1024`, and
   `CONFIG_SHELL_BACKEND_SERIAL_RX_RING_BUFFER_SIZE=8192`.
 - Even with the larger RX ring, automation should pace commands and wait for
