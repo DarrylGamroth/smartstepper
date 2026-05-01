@@ -97,6 +97,38 @@ motor state idle
 motor safety timeout 1000
 ```
 
+Profile-open generated-angle move with AEAT-9955 telemetry-only check:
+
+```text
+motor state clear_error
+motor disarm
+motor state idle
+motor safety timeout 0
+motor state offline
+motor arm
+motor state mode profile_open
+motor state online
+sensor get aeat9955@0
+motor profile seq clear
+motor profile seq add 0
+motor profile seq add 45
+motor profile seq config 2000 1000 0.12 0
+motor profile seq start timer
+motor profile seq status
+sensor get aeat9955@0
+motor profile seq stop
+motor current iq 0
+motor disarm
+motor state idle
+motor safety timeout 1000
+```
+
+Use this check when the AEAT-9955 is useful as coarse telemetry but not trusted
+for commutation. In `profile_open`, generated angle/current drive the motor and
+the encoder is not a control dependency. The `sensor get aeat9955@0` readings
+before and after the move should show gross position change without placing the
+AEAT-9955 in the real-time commutation path.
+
 Torque/closed-loop checks should only be run when encoder quality is known good:
 
 ```text

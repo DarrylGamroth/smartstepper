@@ -115,6 +115,14 @@ tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 ```
 
 - For automation in this environment, keep one PTY session open to `tio` and send commands through that persistent session.
+- Debug/HIL builds include larger shell buffers in `app/debug.conf`:
+  `CONFIG_SHELL_CMD_BUFF_SIZE=512`,
+  `CONFIG_SHELL_PRINTF_BUFF_SIZE=256`,
+  `CONFIG_SHELL_HISTORY_BUFFER=1024`, and
+  `CONFIG_SHELL_BACKEND_SERIAL_RX_RING_BUFFER_SIZE=8192`.
+- Even with the larger RX ring, automation should pace commands and wait for
+  output/prompt boundaries. Avoid pasting long multi-command bursts into the
+  serial shell while logs are active.
 
 ## Debug Probe
 
@@ -144,6 +152,20 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
   4. Capture encoder data (`motor encoder capture start 1`, wait, `motor encoder capture stop`).
   5. Compare with generated reference (`motor encoder capture compare 96 gen`).
   6. Correct mapping is when encoder mechanical direction matches generated mechanical direction over the capture window.
+
+## AEAT-9955 Telemetry-Only Use
+
+- The AEAT-9955 may be usable for coarse before/after motion telemetry even
+  when it is not good enough for closed-loop commutation.
+- For generated-angle modes such as `velocity_open` and `profile_open`, use the
+  Zephyr sensor shell to sample it before and after a move:
+
+```text
+sensor get aeat9955@0
+```
+
+- Do not treat this as proof that the AEAT-9955 is safe as the FOC angle
+  source; it only verifies gross rotor movement and sensor availability.
 
 ## Notes
 
