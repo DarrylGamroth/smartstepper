@@ -35,4 +35,17 @@ int motor_current_loop_step_fast(struct pi_f32 *pi_id, struct pi_f32 *pi_iq,
 				 const struct motor_current_loop_input *in,
 				 struct motor_current_loop_output *out);
 
+int motor_current_loop_step_fast_values(struct pi_f32 *pi_id,
+					struct pi_f32 *pi_iq,
+					float32_t id_ref_a,
+					float32_t iq_ref_a,
+					float32_t id_a,
+					float32_t iq_a,
+					float32_t max_voltage_magnitude_v,
+					float32_t vd_ff_v,
+					float32_t vq_ff_v,
+					float32_t *vd_v,
+					float32_t *vq_v,
+					float32_t *vq_limit_v);
+
 #endif /* MOTOR_CURRENT_LOOP_H_ */

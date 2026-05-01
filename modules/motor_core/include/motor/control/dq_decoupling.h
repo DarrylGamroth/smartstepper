@@ -49,4 +49,17 @@ int motor_dq_decoupling_feedforward_step_fast(
 	const struct motor_dq_decoupling_feedforward_input *in,
 	struct motor_dq_decoupling_feedforward_output *out);
 
+int motor_dq_decoupling_feedforward_step_fast_values(bool enabled,
+						     float32_t electrical_speed_rad_s,
+						     float32_t ld_h,
+						     float32_t lq_h,
+						     float32_t flux_linkage_wb,
+						     float32_t id_a,
+						     float32_t iq_a,
+						     float32_t max_voltage_magnitude_v,
+						     float32_t flux_headroom_ratio,
+						     float32_t ff_limit_ratio,
+						     float32_t *vd_ff_v,
+						     float32_t *vq_ff_v);
+
 #endif /* MOTOR_DQ_DECOUPLING_H_ */

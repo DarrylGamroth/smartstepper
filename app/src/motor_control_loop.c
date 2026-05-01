@@ -25,7 +25,7 @@
 #include "motor/math/angle_wrap.h"
 #include "motor/runtime/config_snapshot.h"
 #include "motor/estimation/rls_runtime.h"
-#include "motor/control/foc_voltage_pwm.h"
+#include "motor/control/current_loop.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor/control/dob.h"
 #include "motor/motion/motion_planner.h"
@@ -40,6 +40,7 @@
 #include "motor/runtime/control_refs.h"
 #include "motor/protection/interlocks.h"
 #include "motor/control/dq_decoupling.h"
+#include "motor/control/pwm_synthesis.h"
 #include "motor/control/transforms.h"
 
 /**
@@ -874,43 +875,82 @@ static bool motor_control_step_foc_stage(struct motor_parameters *params,
 	}
 #endif
 
-	struct motor_foc_voltage_pwm_inputs foc_inputs = {
-		.id_ref_a = current_ref->id_ref_a,
-		.iq_ref_a = current_ref->iq_ref_a,
-		.id_a = current_ref->id_meas_a,
-		.iq_a = current_ref->iq_meas_a,
-		.vbus_v = meas->vbus_v,
-		.max_modulation_index = params->max_modulation_index,
-		.inv_park_angle_rad = angle_ref->predicted_electrical_angle_rad,
-		.dq_decoupling_enabled = dq_decoupling_enabled,
-		.electrical_speed_rad_s = decoupling_speed_rad_s,
-		.ld_h = params->rls.ld_est_h,
-		.lq_h = params->rls.lq_est_h,
-		.flux_linkage_wb = params->flux_linkage_wb_active,
-		.dq_decoupling_flux_headroom_ratio = CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO,
-		.dq_decoupling_ff_limit_ratio = CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO,
-		.braking_enabled = ctx->feature_braking,
-		.braking_iq_ref_a = current_ref->iq_ref_a,
-		.braking_speed_rad_s = meas->speed_mech_rad_s,
-		.braking_vbus_limit_v = VBUS_REGEN_LIMIT_V,
-		.braking_vbus_margin_inv = VBUS_VOLTAGE_MARGIN_INV,
-	};
-	struct motor_foc_voltage_pwm_outputs foc_outputs = {0};
-
-	if (motor_foc_voltage_pwm_step_fast(&params->pi_Id, &params->pi_Iq, &foc_inputs,
-					    &foc_outputs) != 0) {
+	float32_t max_voltage_magnitude_v = params->max_modulation_index * meas->vbus_v;
+	if (max_voltage_magnitude_v <= 0.0f) {
 		return true;
 	}
 
-	commutation_ref->vd_v = foc_outputs.vd_v;
-	commutation_ref->vq_v = foc_outputs.vq_v;
-	commutation_ref->va_v = foc_outputs.va_v;
-	commutation_ref->vb_v = foc_outputs.vb_v;
-	commutation_ref->da_hb1_pu = foc_outputs.da_hb1_pu;
-	commutation_ref->da_hb2_pu = foc_outputs.da_hb2_pu;
-	commutation_ref->db_hb1_pu = foc_outputs.db_hb1_pu;
-	commutation_ref->db_hb2_pu = foc_outputs.db_hb2_pu;
-	commutation_ref->max_voltage_magnitude_v = foc_outputs.max_voltage_magnitude_v;
+	float32_t vd_ff_v = 0.0f;
+	float32_t vq_ff_v = 0.0f;
+	if (motor_dq_decoupling_feedforward_step_fast_values(
+		    dq_decoupling_enabled,
+		    decoupling_speed_rad_s,
+		    params->rls.ld_est_h,
+		    params->rls.lq_est_h,
+		    params->flux_linkage_wb_active,
+		    current_ref->id_meas_a,
+		    current_ref->iq_meas_a,
+		    max_voltage_magnitude_v,
+		    CURRENT_DQ_DECOUPLING_FLUX_HEADROOM_RATIO,
+		    CURRENT_DQ_DECOUPLING_FF_LIMIT_RATIO,
+		    &vd_ff_v,
+		    &vq_ff_v) != 0) {
+		return true;
+	}
+
+	float32_t vq_limit_v = 0.0f;
+	if (motor_current_loop_step_fast_values(&params->pi_Id,
+						&params->pi_Iq,
+						current_ref->id_ref_a,
+						current_ref->iq_ref_a,
+						current_ref->id_meas_a,
+						current_ref->iq_meas_a,
+						max_voltage_magnitude_v,
+						vd_ff_v,
+						vq_ff_v,
+						&commutation_ref->vd_v,
+						&commutation_ref->vq_v,
+						&vq_limit_v) != 0) {
+		return true;
+	}
+
+	if (motor_transforms_inv_park(commutation_ref->vd_v,
+				      commutation_ref->vq_v,
+				      angle_ref->predicted_electrical_angle_rad,
+				      &commutation_ref->va_v,
+				      &commutation_ref->vb_v) != 0) {
+		return true;
+	}
+
+	float32_t ua_pu;
+	float32_t ub_pu;
+	float32_t da_pu;
+	float32_t db_pu;
+	if (motor_pwm_synthesis_step_fast_values(commutation_ref->va_v,
+						 commutation_ref->vb_v,
+						 meas->vbus_v,
+						 ctx->feature_braking,
+						 current_ref->iq_ref_a,
+						 meas->speed_mech_rad_s,
+						 VBUS_REGEN_LIMIT_V,
+						 VBUS_VOLTAGE_MARGIN_INV,
+						 &ua_pu,
+						 &ub_pu,
+						 &da_pu,
+						 &db_pu,
+						 &commutation_ref->da_hb1_pu,
+						 &commutation_ref->da_hb2_pu,
+						 &commutation_ref->db_hb1_pu,
+						 &commutation_ref->db_hb2_pu) != 0) {
+		return true;
+	}
+	ARG_UNUSED(ua_pu);
+	ARG_UNUSED(ub_pu);
+	ARG_UNUSED(da_pu);
+	ARG_UNUSED(db_pu);
+	ARG_UNUSED(vq_limit_v);
+
+	commutation_ref->max_voltage_magnitude_v = max_voltage_magnitude_v;
 
 	float32_t voltage_norm_sq = commutation_ref->vd_v * commutation_ref->vd_v +
 				    commutation_ref->vq_v * commutation_ref->vq_v;
