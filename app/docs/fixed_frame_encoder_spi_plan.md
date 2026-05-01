@@ -334,6 +334,50 @@ Deliverable:
 
 - Driver requirements note in this document or a companion markdown file.
 
+#### Phase 0 Audit - 2026-05-01
+
+Current AEAT-9955 hardware uses `spi3` on `smartstepper_v2/stm32h743xx`.
+
+Resolved hardware facts:
+
+- SPI peripheral: STM32H7 `SPI3`.
+- MMIO base: `0x40003c00`.
+- IRQ: `51`.
+- Clock enables from STM32H7 devicetree: `STM32_CLOCK(APB1, 15)` plus `STM32_SRC_PLL1_Q SPI123_SEL(0)`.
+- Pins from `boards/rubus/smartstepper_v2/smartstepper_v2.dts`:
+  - SCK: `PC10`
+  - MISO: `PC11`
+  - MOSI: `PC12`
+  - NSS: `PA15`
+- Current AEAT profile overlay: `app/configs/motor_aeat9955_067a.overlay`.
+- Current SPI configuration:
+  - `fifo-enable` present.
+  - no `cs-gpios`.
+  - no `st,soft-nss`.
+  - therefore upstream policy is hardware NSS output.
+- Encoder node: `aeat9955@0`, `compatible = "brcm,aeat-9955"`.
+- Encoder alias: `encoder1 = &aeat9955`.
+- Current control-loop SPI command frame:
+  - 3 bytes.
+  - `tx[0] = AEAT9955_CMD_READ_SPI16 | ((~POPCOUNT(AEAT9955_REG_POS) & 1U) << 7)`.
+  - `tx[1] = AEAT9955_REG_POS`.
+  - `tx[2] = 0x00`.
+- Current AEAT decode:
+  - raw response length: 3 bytes.
+  - position: bits `[21:4]` of the 24-bit response.
+  - status/error bit: response byte 0 bit 6.
+  - parity is odd/even check over the full 24-bit encoder response as implemented by `aeat9955_decode_position()`.
+  - pipeline delay: one sample when using the AEAT pipelined position-read protocol.
+
+Implementation constraint from this audit:
+
+- The first fast transport instance should reference `&spi3` and follow the same CS policy as upstream STM32 SPI:
+  - `cs-gpios` on the SPI node means software NSS plus GPIO CS.
+  - `st,soft-nss` means software NSS without CS assertion.
+  - neither means hardware NSS output.
+- For the initial H7 validation path, `fifo-enable` on the fixed-frame transport enables the H7 FIFO backend.
+- The existing sensor driver remains present for shell/property access; the fast transport must not call Zephyr SPI APIs from ISR context.
+
 ### Phase 1: Transport Interface Skeleton
 
 - Add fixed-frame engine headers.
