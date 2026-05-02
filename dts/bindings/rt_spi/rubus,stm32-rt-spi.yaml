@@ -5,23 +5,74 @@ description: STM32 low-latency ISR-safe SPI transport
 
 compatible: "rubus,stm32-rt-spi"
 
-include: base.yaml
+include:
+  - base.yaml
+  - pinctrl-device.yaml
 
 properties:
-  controller:
-    type: phandle
+  reg:
     required: true
-    description: STM32 SPI controller node owned by this real-time transport.
 
-  spi-max-frequency:
+  clocks:
+    required: true
+
+  interrupts:
+    required: true
+
+  "#address-cells":
+    type: int
+    const: 1
+
+  "#size-cells":
+    type: int
+    const: 0
+
+  st,spi-data-width:
+    type: string
+    required: true
+    enum:
+      - "full-4-to-32-bit"
+      - "full-4-to-16-bit"
+      - "limited-8-16-bit"
+    description: STM32 SPI data-width capability inherited from the SoC node.
+
+  fifo-size:
+    type: int
+    description: STM32H7 FIFO size in bytes inherited from the SoC node.
+
+  fifo-max-transfer-size:
+    type: int
+    description: STM32H7 maximum FIFO-backed transfer size inherited from the SoC node.
+
+  ioswp:
+    type: boolean
+    description: Swap SPI MOSI and MISO pins.
+
+  spi-clock-frequency:
     type: int
     required: true
-    description: Maximum SPI clock rate in Hz.
+    description: Static SPI clock rate in Hz for this real-time transport instance.
 
   max-frame-len:
     type: int
     required: true
     description: Maximum transfer length in bytes accepted by this instance.
+
+  cs-mode:
+    type: string
+    default: "hardware"
+    enum:
+      - "hardware"
+      - "gpio"
+      - "software"
+    description: |
+      Chip-select handling mode. "hardware" uses STM32 hardware NSS output,
+      "gpio" drives cs-gpios around each transfer, and "software" leaves NSS
+      internal/inactive for boards that gate CS externally.
+
+  cs-gpios:
+    type: phandle-array
+    description: GPIO chip select used when cs-mode is "gpio".
 
   spi-cpol:
     type: boolean

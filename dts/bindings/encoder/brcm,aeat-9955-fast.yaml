@@ -8,10 +8,8 @@ compatible: "brcm,aeat-9955-fast"
 include: base.yaml
 
 properties:
-  spi-max-frequency:
-    type: int
+  reg:
     required: true
-    description: Maximum SPI clock rate requested for the real-time transport.
 
   transport:
     type: phandle

@@ -25,6 +25,12 @@ LOG_MODULE_REGISTER(rt_spi_stm32_h7, CONFIG_LOG_DEFAULT_LEVEL);
 
 typedef void (*rt_spi_irq_config_func_t)(const struct device *dev);
 
+enum rt_spi_stm32_cs_mode {
+	RT_SPI_STM32_CS_HARDWARE = 0,
+	RT_SPI_STM32_CS_GPIO,
+	RT_SPI_STM32_CS_SOFTWARE,
+};
+
 struct rt_spi_stm32_config {
 	SPI_TypeDef *spi;
 	const struct pinctrl_dev_config *pcfg;
@@ -37,8 +43,8 @@ struct rt_spi_stm32_config {
 	bool cpol;
 	bool cpha;
 	bool fifo_enabled;
-	bool soft_nss;
 	bool has_cs_gpio;
+	enum rt_spi_stm32_cs_mode cs_mode;
 	uint32_t mssi_clocks;
 	uint32_t midi_clocks;
 };
@@ -146,6 +152,7 @@ static void rt_spi_stm32_publish(const struct device *dev, uint16_t flags)
 	struct rt_spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
 	uint32_t elapsed_cycles = k_cycle_get_32() - data->start_cycles;
+	unsigned int key;
 
 	rt_spi_stm32_disable_irqs(spi);
 	LL_SPI_ClearFlag_EOT(spi);
@@ -154,6 +161,7 @@ static void rt_spi_stm32_publish(const struct device *dev, uint16_t flags)
 	LL_SPI_Disable(spi);
 	rt_spi_stm32_cs_control(cfg, false);
 
+	key = irq_lock();
 	if (data->sample_ready) {
 		flags |= RT_SPI_RESULT_OVERRUN;
 		data->stats.overrun_count++;
@@ -171,6 +179,7 @@ static void rt_spi_stm32_publish(const struct device *dev, uint16_t flags)
 	if (elapsed_cycles > data->stats.max_transaction_cycles) {
 		data->stats.max_transaction_cycles = elapsed_cycles;
 	}
+	irq_unlock(key);
 }
 
 static int rt_spi_stm32_request(const struct device *dev,
@@ -202,6 +211,7 @@ static int rt_spi_stm32_request(const struct device *dev,
 	data->active = true;
 	data->start_cycles = k_cycle_get_32();
 	data->stats.request_count++;
+	irq_unlock(key);
 
 	LL_SPI_Disable(spi);
 	rt_spi_stm32_collect_error_flags(spi);
@@ -217,7 +227,6 @@ static int rt_spi_stm32_request(const struct device *dev,
 	rt_spi_stm32_fill_tx_fifo(dev);
 	rt_spi_stm32_enable_irqs(spi);
 	LL_SPI_StartMasterTransfer(spi);
-	irq_unlock(key);
 
 	return 0;
 }
@@ -369,7 +378,8 @@ static int rt_spi_stm32_configure(const struct device *dev)
 	LL_SPI_SetTransferBitOrder(spi, LL_SPI_MSB_FIRST);
 	LL_SPI_DisableCRC(spi);
 
-	if (cfg->has_cs_gpio || cfg->soft_nss) {
+	if (cfg->cs_mode == RT_SPI_STM32_CS_GPIO ||
+	    cfg->cs_mode == RT_SPI_STM32_CS_SOFTWARE) {
 		if (LL_SPI_GetNSSPolarity(spi) == LL_SPI_NSS_POLARITY_LOW) {
 			LL_SPI_SetInternalSSLevel(spi, LL_SPI_SS_LEVEL_HIGH);
 		}
@@ -414,6 +424,10 @@ static int rt_spi_stm32_init(const struct device *dev)
 		return ret;
 	}
 
+	if ((cfg->cs_mode == RT_SPI_STM32_CS_GPIO) != cfg->has_cs_gpio) {
+		return -EINVAL;
+	}
+
 	if (cfg->has_cs_gpio) {
 		if (!gpio_is_ready_dt(&cfg->cs_gpio)) {
 			return -ENODEV;
@@ -441,10 +455,10 @@ static const struct rt_spi_driver_api rt_spi_stm32_api = {
 	.reset_stats = rt_spi_stm32_reset_stats,
 };
 
-#define RT_SPI_STM32_SPI_NODE(inst) DT_INST_PHANDLE(inst, controller)
-#define RT_SPI_STM32_HAS_CS(inst) DT_NODE_HAS_PROP(RT_SPI_STM32_SPI_NODE(inst), cs_gpios)
+#define RT_SPI_STM32_SPI_NODE(inst) DT_DRV_INST(inst)
+#define RT_SPI_STM32_HAS_CS(inst) DT_INST_NODE_HAS_PROP(inst, cs_gpios)
 #define RT_SPI_STM32_CS_SPEC(inst)							\
-	GPIO_DT_SPEC_GET_BY_IDX_OR(RT_SPI_STM32_SPI_NODE(inst), cs_gpios, 0, {0})
+	GPIO_DT_SPEC_INST_GET_BY_IDX_OR(inst, cs_gpios, 0, {0})
 
 #define RT_SPI_STM32_IRQ_CONFIG(inst)						\
 	static void rt_spi_stm32_irq_config_##inst(const struct device *dev)	\
@@ -467,13 +481,13 @@ static const struct rt_spi_driver_api rt_spi_stm32_api = {
 		.pclk_len = DT_NUM_CLOCKS(RT_SPI_STM32_SPI_NODE(inst)),		\
 		.cs_gpio = RT_SPI_STM32_CS_SPEC(inst),				\
 		.irq_config = rt_spi_stm32_irq_config_##inst,			\
-		.frequency = DT_INST_PROP(inst, spi_max_frequency),			\
+		.frequency = DT_INST_PROP(inst, spi_clock_frequency),		\
 		.max_frame_len = DT_INST_PROP(inst, max_frame_len),			\
 		.cpol = DT_INST_PROP(inst, spi_cpol),					\
 		.cpha = DT_INST_PROP(inst, spi_cpha),					\
 		.fifo_enabled = DT_INST_PROP(inst, fifo_enable),			\
-		.soft_nss = DT_PROP_OR(RT_SPI_STM32_SPI_NODE(inst), st_soft_nss, false),\
 		.has_cs_gpio = RT_SPI_STM32_HAS_CS(inst),				\
+		.cs_mode = DT_INST_ENUM_IDX(inst, cs_mode),			\
 		.mssi_clocks = DT_INST_PROP(inst, mssi_clock),				\
 		.midi_clocks = DT_INST_PROP(inst, midi_clock),				\
 	};										\
