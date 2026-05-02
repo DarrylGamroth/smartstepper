@@ -81,9 +81,33 @@ It should still use Zephyr conventions where useful:
 - Kconfig for compile-time feature selection and diagnostics.
 - Zephyr device model only if it stays lightweight and does not force kernel APIs into ISR paths.
 
+## Driver Strategy
+
+Create new realtime encoder drivers instead of modifying the existing Zephyr
+sensor drivers in place.
+
+For AEAT-9955:
+
+- Keep `drivers/sensor/brcm_aeat-9955/` as the legacy Zephyr sensor/RTIO
+  driver.
+- Add a new `brcm,aeat-9955-fast` driver above `rt_spi`.
+- Put the new implementation under `drivers/encoder/` rather than extending
+  the legacy sensor driver file.
+- Share protocol helpers where practical:
+  - command/parity frame construction,
+  - position-frame decode,
+  - status/parity classification,
+  - register read/write frame construction.
+- Do not require backwards compatibility between the legacy driver internals
+  and the new fast driver internals.
+
+This avoids destabilizing the current sensor-shell/reference path while giving
+the realtime path a smaller API and cleaner ISR contract.
+
 ## Non-Goals
 
-- Do not replace the Zephyr sensor drivers immediately.
+- Do not modify the existing Zephyr sensor drivers in place for the realtime
+  path.
 - Do not implement Zephyr's generic `spi_driver_api`.
 - Do not require RTIO internally in the realtime control path.
 - Do not support arbitrary scatter/gather buffers.
@@ -601,6 +625,8 @@ Validation:
 ### Phase 4: AEAT-9955 Fast Driver
 
 - Implement `brcm,aeat-9955-fast` as a real driver above `rt_spi`.
+- Do not modify `drivers/sensor/brcm_aeat-9955/` for this fast-path work,
+  except for extracting shared helpers if that can be done safely.
 - Implement realtime encoder API.
 - Implement AEAT frame preparation.
 - Reuse or share AEAT decode/parity/status logic.
@@ -768,8 +794,9 @@ drivers/encoder/
 ```
 
 This keeps the realtime transport reusable while avoiding the complexity of a
-full Zephyr SPI driver. The encoder drivers provide the reusable device API for
-AEAT-9955, MT6835, and future encoders. For the hot ISR path, start with the
+full Zephyr SPI driver. The new encoder drivers provide the reusable device API
+for AEAT-9955, MT6835, and future encoders without modifying the existing
+Zephyr sensor/RTIO drivers in place. For the hot ISR path, start with the
 custom device API because one function-pointer dispatch per request/collect is
 likely acceptable on Cortex-M7 and is dominated by SPI/control work. If latency
 measurements show otherwise, add optional driver-specific inline fast helpers in
