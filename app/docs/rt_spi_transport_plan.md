@@ -93,7 +93,8 @@ For AEAT-9955:
 - Add a new `brcm,aeat-9955-fast` driver above `rt_spi`.
 - Put the new implementation under `drivers/encoder/` rather than extending
   the legacy sensor driver file.
-- Share protocol helpers where practical:
+- Copy the required AEAT protocol code into the new fast driver instead of
+  sharing implementation with the legacy sensor driver:
   - command/parity frame construction,
   - position-frame decode,
   - status/parity classification,
@@ -291,10 +292,10 @@ Behavior:
 - Return `-EBUSY` if realtime mode owns the encoder pipeline.
 - Never call register helpers from the control ISR.
 
-The existing AEAT attribute implementation should be reused where practical,
-but the low-level bus operations should be factored so both the legacy
-Zephyr-SPI sensor driver and the fast `rt_spi` driver can share command
-formatting and decode logic.
+The existing AEAT attribute implementation may be used as a reference, but do
+not share low-level implementation with the legacy Zephyr-SPI sensor driver.
+Copy the required protocol pieces into the fast driver so the realtime path can
+evolve independently.
 
 Do not mutate EEPROM direction or calibration settings as part of normal motor
 control. Prefer devicetree/runtime software direction settings unless an
@@ -407,9 +408,9 @@ Add a binding such as:
 compatible: "rubus,stm32-rt-spi"
 ```
 
-Candidate properties:
+Candidate transport properties:
 
-- `reg`: SPI peripheral base from parent bus or direct MMIO node.
+- `reg`: SPI peripheral base from the direct MMIO node.
 - `interrupts`: SPI IRQ.
 - `pinctrl-0`, `pinctrl-names`.
 - `cs-gpios`.
@@ -431,7 +432,10 @@ Kconfig should not select board-level CS behavior. It should only enable the
 driver/backend and unavoidable SoC-family workarounds, such as STM32 errata
 handling. Hardware-vs-GPIO CS is board wiring and belongs in devicetree.
 
-Encoder nodes should reference the transport engine:
+Encoder nodes should use idiomatic Zephyr parent/child topology. The
+`rubus,stm32-rt-spi` node owns the SPI peripheral and its children are devices
+on that bus. Fast encoder child nodes should not carry a redundant `transport`
+phandle.
 
 ```dts
 &spi3 {
@@ -444,7 +448,6 @@ Encoder nodes should reference the transport engine:
 	encoder1: aeat9955@0 {
 		compatible = "brcm,aeat-9955-fast";
 		reg = <0>;
-		transport = <&spi3>;
 		encoder-direction-sign = <(-1)>;
 	};
 };
@@ -456,8 +459,8 @@ Add fast encoder drivers above the low-latency transport:
 
 - `drivers/encoder/aeat9955_fast.c`,
 - `drivers/encoder/mt6835_fast.c`,
-- shared decode helpers where practical.
-- shared register command-format helpers where practical.
+- copied per-driver protocol/decode/register helpers rather than shared code
+  with legacy sensor drivers.
 
 Keep a sensor read/decode diagnostic surface available where useful:
 
@@ -625,16 +628,15 @@ Validation:
 ### Phase 4: AEAT-9955 Fast Driver
 
 - Implement `brcm,aeat-9955-fast` as a real driver above `rt_spi`.
-- Do not modify `drivers/sensor/brcm_aeat-9955/` for this fast-path work,
-  except for extracting shared helpers if that can be done safely.
+- Do not modify `drivers/sensor/brcm_aeat-9955/` for this fast-path work.
 - Implement realtime encoder API.
 - Implement AEAT frame preparation.
-- Reuse or share AEAT decode/parity/status logic.
+- Copy required AEAT decode/parity/status logic into the fast driver.
 - Account for AEAT pipeline delay explicitly.
 - Implement `aeat9955_fast_read_register()` and
   `aeat9955_fast_write_register()` using `rt_spi`.
-- Factor shared AEAT command formatting so position reads and register
-  accesses use one protocol implementation.
+- Keep fast-driver position reads and register accesses on one private AEAT
+  protocol implementation.
 - Move/copy sensor attribute support onto the fast driver where it is still
   needed for diagnostics and commissioning.
 - Wire into motor encoder pipeline behind devicetree selection.
@@ -758,7 +760,8 @@ The work is complete when:
 - MT6835 CRC/status errors are counted and do not corrupt transport state.
 - Control ISR uses no Zephyr blocking/kernel queue APIs for encoder acquisition.
 - Existing sensor shell path remains available for diagnostics.
-- Encoder decode is shared or behaviorally identical between sensor and realtime paths.
+- Encoder decode is behaviorally identical between sensor and realtime paths,
+  but not necessarily implemented by shared code.
 - Raw trace can prove frame correctness and sample timing.
 
 ## Open Decisions
