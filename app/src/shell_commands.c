@@ -60,6 +60,7 @@ void motor_command_feed_watchdog(struct motor_parameters *params)
 	}
 
 	params->last_command_update_ms = k_uptime_get_32();
+	params->last_command_update_loop = params->control_loop_count;
 	params->command_timeout_latched = false;
 }
 

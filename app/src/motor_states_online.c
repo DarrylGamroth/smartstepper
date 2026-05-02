@@ -63,6 +63,7 @@ static int motor_position_plan_sequence_move(struct motor_parameters *params, fl
 
 	params->position_target_rad = wrap_rad_2pi(params->live.position_rad);
 	params->last_command_update_ms = k_uptime_get_32();
+	params->last_command_update_loop = params->control_loop_count;
 	params->command_timeout_latched = false;
 
 	return 0;
@@ -129,6 +130,9 @@ void motor_state_online_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ONLINE state");
+	LOG_INF("ONLINE observer offset: base=%.3f deg stored=%.3f deg",
+		(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)),
+		(double)(params->observer.mech_angle_offset_rad * (180.0f / PI_F32)));
 
 	/* ONLINE modes require power-stage channels enabled.
 	 * IDLE entry disables them, so re-enable on every ONLINE entry.

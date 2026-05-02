@@ -150,7 +150,7 @@ int motor_align_plan_id_traj(struct traj_f32 *traj,
 
 float32_t motor_align_fallback_offset_from_mech(float32_t mech_angle_rad)
 {
-	if (!isfinite(mech_angle_rad)) {
+	if (!(mech_angle_rad == mech_angle_rad) || fabsf(mech_angle_rad) > (2.0f * PI_F32)) {
 		return 0.0f;
 	}
 

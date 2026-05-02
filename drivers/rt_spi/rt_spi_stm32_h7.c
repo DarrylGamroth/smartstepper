@@ -70,6 +70,11 @@ static void rt_spi_stm32_cs_control(const struct rt_spi_stm32_config *cfg, bool 
 	}
 }
 
+static inline uint32_t rt_spi_stm32_cycle_get(void)
+{
+	return k_cycle_get_32();
+}
+
 static void rt_spi_stm32_disable_irqs(SPI_TypeDef *spi)
 {
 	LL_SPI_DisableIT_TXP(spi);
@@ -151,7 +156,7 @@ static void rt_spi_stm32_publish(const struct device *dev, uint16_t flags)
 	const struct rt_spi_stm32_config *cfg = dev->config;
 	struct rt_spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
-	uint32_t elapsed_cycles = k_cycle_get_32() - data->start_cycles;
+	uint32_t elapsed_cycles = rt_spi_stm32_cycle_get() - data->start_cycles;
 	unsigned int key;
 
 	rt_spi_stm32_disable_irqs(spi);
@@ -188,7 +193,6 @@ static int rt_spi_stm32_request(const struct device *dev,
 	const struct rt_spi_stm32_config *cfg = dev->config;
 	struct rt_spi_stm32_data *data = dev->data;
 	SPI_TypeDef *spi = cfg->spi;
-	unsigned int key;
 
 	if ((frame == NULL) || (frame->tx == NULL) || (frame->len == 0U) ||
 	    (frame->len > cfg->max_frame_len) ||
@@ -196,10 +200,8 @@ static int rt_spi_stm32_request(const struct device *dev,
 		return -EINVAL;
 	}
 
-	key = irq_lock();
 	if (data->active) {
 		data->stats.busy_count++;
-		irq_unlock(key);
 		return -EBUSY;
 	}
 
@@ -209,9 +211,8 @@ static int rt_spi_stm32_request(const struct device *dev,
 	data->tx_count = 0U;
 	data->rx_count = 0U;
 	data->active = true;
-	data->start_cycles = k_cycle_get_32();
+	data->start_cycles = rt_spi_stm32_cycle_get();
 	data->stats.request_count++;
-	irq_unlock(key);
 
 	LL_SPI_Disable(spi);
 	rt_spi_stm32_collect_error_flags(spi);
@@ -235,20 +236,16 @@ static int rt_spi_stm32_collect(const struct device *dev,
 				     struct rt_spi_result *sample)
 {
 	struct rt_spi_stm32_data *data = dev->data;
-	unsigned int key;
 
 	if (sample == NULL) {
 		return -EINVAL;
 	}
 
-	key = irq_lock();
 	if (!data->sample_ready) {
 		if (data->active) {
-			irq_unlock(key);
 			return -EAGAIN;
 		}
 		data->stats.collect_empty_count++;
-		irq_unlock(key);
 		return -ENODATA;
 	}
 
@@ -257,7 +254,6 @@ static int rt_spi_stm32_collect(const struct device *dev,
 	sample->len = data->len;
 	sample->flags = data->sample_flags;
 	data->sample_ready = false;
-	irq_unlock(key);
 
 	return ((sample->flags & RT_SPI_RESULT_ERROR) != 0U) ? -EIO : 0;
 }
@@ -308,13 +304,13 @@ static int rt_spi_stm32_transceive(const struct device *dev,
 	LL_SPI_SetTransferDirection(spi, LL_SPI_FULL_DUPLEX);
 	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
 
-	start_cycles = k_cycle_get_32();
+	start_cycles = rt_spi_stm32_cycle_get();
 	timeout_cycles = k_us_to_cyc_ceil32(timeout_us);
 	rt_spi_stm32_cs_control(cfg, true);
 	LL_SPI_Enable(spi);
 	LL_SPI_StartMasterTransfer(spi);
 
-	while ((k_cycle_get_32() - start_cycles) < timeout_cycles) {
+	while ((rt_spi_stm32_cycle_get() - start_cycles) < timeout_cycles) {
 		error_flags = rt_spi_stm32_collect_error_flags(spi);
 		if (error_flags != 0U) {
 			sample->flags = RT_SPI_RESULT_ERROR | error_flags;

@@ -713,6 +713,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	atomic_set(&params->control_armed, 0);
 	params->command_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
 	params->last_command_update_ms = k_uptime_get_32();
+	params->last_command_update_loop = params->control_loop_count;
 	params->command_timeout_count = 0U;
 	params->command_timeout_latched = false;
 	params->calibration.complete = false;

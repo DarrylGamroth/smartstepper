@@ -91,20 +91,16 @@ static int aeat9955_fast_decode_position(const uint8_t raw[AEAT9955_FAST_FRAME_L
 static int aeat9955_fast_set_mode(const struct device *dev, enum encoder_rt_mode mode)
 {
 	struct aeat9955_fast_data *data = dev->data;
-	unsigned int key;
 
 	if (mode > ENCODER_RT_MODE_DIAGNOSTIC) {
 		return -EINVAL;
 	}
 
-	key = irq_lock();
 	if (data->sample_in_flight && mode != data->mode) {
-		irq_unlock(key);
 		return -EBUSY;
 	}
 
 	data->mode = mode;
-	irq_unlock(key);
 	return 0;
 }
 
@@ -113,22 +109,13 @@ static int aeat9955_fast_request_sample(const struct device *dev)
 	const struct aeat9955_fast_config *cfg = dev->config;
 	struct aeat9955_fast_data *data = dev->data;
 	uint8_t tx[AEAT9955_FAST_FRAME_LEN];
-	unsigned int key;
 	int ret;
 
-	key = irq_lock();
-	if (data->mode != ENCODER_RT_MODE_REALTIME) {
-		data->stats.disabled_count++;
-		irq_unlock(key);
-		return -ESHUTDOWN;
-	}
 	if (data->sample_in_flight) {
 		data->stats.busy_count++;
-		irq_unlock(key);
 		return -EALREADY;
 	}
 	data->sample_in_flight = true;
-	irq_unlock(key);
 
 	aeat9955_fast_prepare_position_frame(tx);
 	const struct rt_spi_transfer frame = {
@@ -138,20 +125,16 @@ static int aeat9955_fast_request_sample(const struct device *dev)
 
 	ret = rt_spi_request(cfg->transport, &frame);
 	if (ret != 0) {
-		key = irq_lock();
 		data->sample_in_flight = false;
 		if (ret == -EBUSY) {
 			data->stats.busy_count++;
 		} else {
 			data->stats.request_error_count++;
 		}
-		irq_unlock(key);
 		return (ret == -EBUSY) ? -EALREADY : ret;
 	}
 
-	key = irq_lock();
 	data->stats.request_count++;
-	irq_unlock(key);
 	return 0;
 }
 
@@ -164,7 +147,6 @@ static int aeat9955_fast_collect_sample(const struct device *dev,
 	uint32_t position = 0U;
 	bool status_error = false;
 	bool parity_error = false;
-	unsigned int key;
 	int ret;
 
 	if (sample == NULL) {
@@ -174,37 +156,27 @@ static int aeat9955_fast_collect_sample(const struct device *dev,
 	memset(sample, 0, sizeof(*sample));
 	ret = rt_spi_collect(cfg->transport, &result);
 	if (ret == -EAGAIN) {
-		key = irq_lock();
 		data->stats.pending_count++;
-		irq_unlock(key);
 		return -EAGAIN;
 	}
 	if (ret == -ENODATA) {
-		key = irq_lock();
 		data->stats.empty_count++;
-		irq_unlock(key);
 		return -ENODATA;
 	}
 
-	key = irq_lock();
 	data->sample_in_flight = false;
-	irq_unlock(key);
 
 	sample->timestamp_cycles = result.timestamp_cycles;
 	if (ret != 0 || (result.flags & RT_SPI_RESULT_ERROR) != 0U) {
 		sample->flags = ENCODER_RT_SAMPLE_ERROR | ENCODER_RT_SAMPLE_TRANSPORT_ERROR;
-		key = irq_lock();
 		data->stats.collect_error_count++;
 		data->stats.transport_error_count++;
-		irq_unlock(key);
 		return -EIO;
 	}
 	if (result.len != AEAT9955_FAST_FRAME_LEN) {
 		sample->flags = ENCODER_RT_SAMPLE_ERROR | ENCODER_RT_SAMPLE_FRAME_ERROR;
-		key = irq_lock();
 		data->stats.collect_error_count++;
 		data->stats.frame_error_count++;
-		irq_unlock(key);
 		return -EIO;
 	}
 
@@ -228,7 +200,6 @@ static int aeat9955_fast_collect_sample(const struct device *dev,
 				 ENCODER_RT_SAMPLE_FRAME_PARITY_ERROR;
 	}
 
-	key = irq_lock();
 	if (status_error) {
 		data->stats.warning_count++;
 		data->stats.frame_status_error_count++;
@@ -242,7 +213,6 @@ static int aeat9955_fast_collect_sample(const struct device *dev,
 	} else {
 		data->stats.collect_count++;
 	}
-	irq_unlock(key);
 
 	return ret;
 }

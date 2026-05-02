@@ -1267,6 +1267,37 @@ static inline bool adc_stm32_inj_check_and_clear_overrun(ADC_TypeDef *adc)
 	return false;
 }
 
+static inline void adc_stm32_fpu_context_save(void)
+{
+#if defined(CONFIG_CPU_HAS_FPU) && defined(CONFIG_FP_HARDABI)
+	/* The injected ADC callback runs the FPU-heavy motor-control loop from
+	 * a zero-latency direct ISR. Do not rely on Zephyr's thread FPU sharing
+	 * or Cortex-M lazy stacking for this path; preserve the complete FP
+	 * register file used by FPv5-D16 plus FPSCR explicitly.
+	 */
+	__asm__ volatile(
+		"vmrs r0, fpscr\n"
+		"push {r0, r1}\n"
+		"vpush {s0-s31}\n"
+		:
+		:
+		: "memory", "r0", "r1");
+#endif
+}
+
+static inline void adc_stm32_fpu_context_restore(void)
+{
+#if defined(CONFIG_CPU_HAS_FPU) && defined(CONFIG_FP_HARDABI)
+	__asm__ volatile(
+		"vpop {s0-s31}\n"
+		"pop {r0, r1}\n"
+		"vmsr fpscr, r0\n"
+		:
+		:
+		: "memory", "r0", "r1");
+#endif
+}
+
 /* Debug helper function to process ADC conversions */
 static inline void adc_stm32_process_injected_conversions(const struct device *dev,
 							   ADC_TypeDef *adc,
@@ -1314,7 +1345,9 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
                                                                                                    \
 		/* Check JEOS flag */                                                              \
 		if (LL_ADC_IsActiveFlag_JEOS(adc)) {                                               \
+			adc_stm32_fpu_context_save();                                             \
 			adc_stm32_process_injected_conversions(dev, adc, data, config);            \
+			adc_stm32_fpu_context_restore();                                          \
 		}                                                                                  \
                                                                                                    \
 		return 0;                                                                          \

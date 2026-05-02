@@ -338,6 +338,7 @@ struct motor_parameters {
 	atomic_t control_armed;          /* 1 when torque-producing commands are allowed */
 	uint32_t command_timeout_ms;     /* 0 disables timeout */
 	uint32_t last_command_update_ms; /* Last command activity timestamp (k_uptime_get_32) */
+	uint32_t last_command_update_loop; /* Last command activity timestamp (control ISR ticks) */
 	uint32_t command_timeout_count;  /* Number of timeout-triggered disarms */
 	bool command_timeout_latched;    /* Prevent repeated timeout handling */
 
@@ -451,6 +452,7 @@ struct motor_parameters {
 #define USER_PARAMS_NODE DT_PATH(user_parameters)
 #define NOMINAL_VOLTAGE_V ((float32_t)DT_PROP(USER_PARAMS_NODE, nominal_voltage_mv) / 1000.0f)
 #define PWM_FREQUENCY_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, pwm_frequency_hz))
+#define CONTROL_LOOP_FREQUENCY_HZ_U DT_PROP(USER_PARAMS_NODE, control_loop_frequency_hz)
 #define CONTROL_LOOP_FREQUENCY_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, control_loop_frequency_hz))
 #define CURRENT_LOOP_BANDWIDTH_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, current_loop_bandwidth_hz))
 #define CURRENT_LOOP_BANDWIDTH_RPS (2.0f * PI_F32 * (float32_t)DT_PROP(USER_PARAMS_NODE, current_loop_bandwidth_hz))

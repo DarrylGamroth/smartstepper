@@ -43,7 +43,10 @@ struct motor_encoder_feedback_core_state {
  */
 uint8_t motor_encoder_feedback_select_source(bool feature_angle_gen,
 					     bool sample_enabled,
-					     bool fresh);
+					     bool fresh,
+					     bool warning,
+					     bool error,
+					     bool io_fault);
 
 /**
  * @brief Update encoder counters/flags and report fault-threshold state.

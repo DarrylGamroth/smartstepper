@@ -10,6 +10,11 @@
 #include <math.h>
 #include <stddef.h>
 
+static inline bool angle_observer_f32_is_plausible(float32_t value, float32_t max_abs)
+{
+	return (value == value) && (fabsf(value) <= max_abs);
+}
+
 void angle_observer_init(struct angle_observer_state *obs,
 			 float32_t sample_period_s,
 			 float32_t bandwidth_hz,
@@ -45,13 +50,31 @@ void angle_observer_init(struct angle_observer_state *obs,
 void angle_observer_set_offset(struct angle_observer_state *obs,
 			       float32_t offset_rad)
 {
-	obs->mech_angle_offset_rad = offset_rad;
+	obs->mech_angle_offset_rad =
+		angle_observer_f32_is_plausible(offset_rad, 2.0f * PI_F32) ?
+			wrap_rad_pi(offset_rad) :
+			0.0f;
 }
 
 void angle_observer_update(struct angle_observer_state *obs,
 			   float32_t encoder_angle_rad)
 {
 	const float32_t Ts = obs->sample_period_s;
+
+	if (!angle_observer_f32_is_plausible(encoder_angle_rad, 1.0e6f)) {
+		encoder_angle_rad = angle_observer_f32_is_plausible(obs->angle_est_rad, 1.0e6f) ?
+					    obs->angle_est_rad :
+					    0.0f;
+	}
+	if (!angle_observer_f32_is_plausible(obs->mech_angle_offset_rad, 2.0f * PI_F32)) {
+		obs->mech_angle_offset_rad = 0.0f;
+	}
+
+	if (!angle_observer_f32_is_plausible(obs->angle_est_rad, 1.0e6f) ||
+	    !angle_observer_f32_is_plausible(obs->speed_est_rad_s, 1.0e6f)) {
+		angle_observer_reset_tracking(obs, encoder_angle_rad, 0.0f);
+		return;
+	}
 
 	/* 
 	 * α-β Tracking Observer for Mechanical Angle and Speed
@@ -111,6 +134,14 @@ void angle_observer_update(struct angle_observer_state *obs,
 	/* Apply offset to predicted mechanical angle for predicted electrical angle */
 	float32_t mech_angle_pred_offset = obs->mech_angle_pred_rad + obs->mech_angle_offset_rad;
 	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
+
+	if (!angle_observer_f32_is_plausible(obs->mech_angle_rad, 2.0f * PI_F32) ||
+	    !angle_observer_f32_is_plausible(obs->elec_angle_rad, 2.0f * PI_F32) ||
+	    !angle_observer_f32_is_plausible(obs->mech_angle_pred_rad, 2.0f * PI_F32) ||
+	    !angle_observer_f32_is_plausible(obs->elec_angle_pred_rad, 2.0f * PI_F32) ||
+	    !angle_observer_f32_is_plausible(obs->mech_speed_rad_s, 1.0e6f)) {
+		angle_observer_reset_tracking(obs, encoder_angle_rad, 0.0f);
+	}
 }
 
 void angle_observer_reset_tracking(struct angle_observer_state *obs,

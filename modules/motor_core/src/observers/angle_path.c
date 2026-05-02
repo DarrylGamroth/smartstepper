@@ -26,7 +26,10 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 
 	uint8_t source = motor_encoder_feedback_select_source(in->feature_angle_gen,
 							      in->sample_enabled,
-							      in->sample_fresh);
+							      in->sample_fresh,
+							      in->sample_warning,
+							      in->sample_error,
+							      in->sample_io_fault);
 
 	float32_t observer_input_rad = 0.0f;
 	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) {
@@ -42,7 +45,7 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 
 	angle_observer_update(observer, observer_input_rad);
 
-	bool has_error = in->sample_error || in->sample_io_fault;
+	bool has_error = in->sample_warning || in->sample_error || in->sample_io_fault;
 	bool control_fresh = (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) ||
 			     ((source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER) &&
 			      in->sample_fresh);

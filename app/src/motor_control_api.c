@@ -7,6 +7,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
+#include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
 #include <math.h>
@@ -234,6 +235,13 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 	default:
 		return -EINVAL;
 	}
+}
+
+static float32_t motor_observer_base_offset_from_active(const struct motor_parameters *params)
+{
+	float32_t trim_mech_rad = params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;
+
+	return wrap_rad_pi(params->observer.mech_angle_offset_rad - trim_mech_rad);
 }
 
 static void motor_param_apply_profile_limits(struct motor_parameters *params)
@@ -972,6 +980,8 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 			LOG_ERR("Rejected observer_elec_trim_deg outside [-180,180]");
 			break;
 		}
+		params->observer_alignment_offset_rad =
+			motor_observer_base_offset_from_active(params);
 		params->observer_elec_trim_rad = value * (PI_F32 / 180.0f);
 		float32_t mech_trim_rad =
 			params->observer_elec_trim_rad / (float32_t)MOTOR_POLE_PAIRS;

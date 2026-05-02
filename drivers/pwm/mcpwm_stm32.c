@@ -801,11 +801,11 @@ static int mcpwm_stm32_init(const struct device *dev)
 		COND_CODE_1(DT_IRQ_HAS_NAME(PWM(index), cc),                                         \
 			    (IRQ_DIRECT_CONNECT(DT_IRQ_BY_NAME(PWM(index), cc, irq),                 \
 						DT_IRQ_BY_NAME(PWM(index), cc, priority),        \
-						mcpwm_stm32_isr_##index, IRQ_ZERO_LATENCY);      \
+						mcpwm_stm32_isr_##index, 0);                     \
 			     irq_enable(DT_IRQ_BY_NAME(PWM(index), cc, irq));),                      \
 			    (IRQ_DIRECT_CONNECT(DT_IRQN(PWM(index)),                                 \
 						DT_IRQ(PWM(index), priority),                    \
-						mcpwm_stm32_isr_##index, IRQ_ZERO_LATENCY);      \
+						mcpwm_stm32_isr_##index, 0);                     \
 			     irq_enable(DT_IRQN(PWM(index)));)) \
 	}
 

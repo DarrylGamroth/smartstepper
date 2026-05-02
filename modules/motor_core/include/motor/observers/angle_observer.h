@@ -92,7 +92,11 @@ void angle_observer_set_offset(struct angle_observer_state *obs,
 static inline void angle_observer_set_delay(struct angle_observer_state *obs,
 					    float32_t delay_samples)
 {
-	obs->delay_samples = delay_samples;
+	obs->delay_samples = ((delay_samples == delay_samples) &&
+			      delay_samples >= 0.0f &&
+			      delay_samples <= 16.0f) ?
+				      delay_samples :
+				      0.0f;
 }
 
 /**

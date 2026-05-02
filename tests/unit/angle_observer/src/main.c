@@ -161,4 +161,51 @@ ZTEST(angle_observer, test_delay_setter_and_electrical_speed_accessor)
 	zassert_within(angle_observer_get_elec_speed(&obs), -17.5f, 1e-6f, NULL);
 }
 
+ZTEST(angle_observer, test_rejects_nonfinite_sample_without_poisoning_state)
+{
+	struct angle_observer_state obs = {0};
+
+	angle_observer_init(&obs, 0.001f, 40.0f, 7u, 0.0f);
+	angle_observer_update(&obs, 1.0f);
+	angle_observer_update(&obs, NAN);
+
+	zassert_true(isfinite(angle_observer_get_mech_angle(&obs)), NULL);
+	zassert_true(isfinite(angle_observer_get_elec_angle(&obs)), NULL);
+	zassert_true(isfinite(angle_observer_get_elec_angle_pred(&obs)), NULL);
+}
+
+ZTEST(angle_observer, test_recovers_from_nonfinite_internal_state)
+{
+	struct angle_observer_state obs = {0};
+
+	angle_observer_init(&obs, 0.001f, 40.0f, 7u, 0.0f);
+	obs.angle_est_rad = NAN;
+	obs.speed_est_rad_s = INFINITY;
+
+	angle_observer_update(&obs, 1.25f);
+
+	zassert_within(angle_observer_get_mech_angle(&obs), 1.25f, 1e-6f, NULL);
+	zassert_within(angle_observer_get_mech_speed(&obs), 0.0f, 1e-6f, NULL);
+	zassert_true(isfinite(angle_observer_get_elec_angle_pred(&obs)), NULL);
+}
+
+ZTEST(angle_observer, test_sanitizes_offset_and_delay)
+{
+	struct angle_observer_state obs = {0};
+
+	angle_observer_init(&obs, 0.001f, 40.0f, 7u, 0.0f);
+
+	angle_observer_set_offset(&obs, NAN);
+	zassert_within(obs.mech_angle_offset_rad, 0.0f, 1e-6f, NULL);
+
+	angle_observer_set_offset(&obs, 4.0f);
+	zassert_within(obs.mech_angle_offset_rad, wrap_rad_pi(4.0f), 1e-6f, NULL);
+
+	angle_observer_set_delay(&obs, -1.0f);
+	zassert_within(obs.delay_samples, 0.0f, 1e-6f, NULL);
+
+	angle_observer_set_delay(&obs, INFINITY);
+	zassert_within(obs.delay_samples, 0.0f, 1e-6f, NULL);
+}
+
 ZTEST_SUITE(angle_observer, NULL, NULL, NULL, NULL, NULL);

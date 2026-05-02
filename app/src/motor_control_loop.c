@@ -570,6 +570,7 @@ static inline void motor_control_step_finalize(struct motor_parameters *params,
 		motor_commission_runtime_ctx_refresh(&params->rt_adapters.commission, params);
 		motor_commission_update(&params->rt_adapters.commission, commission_obs);
 	}
+	params->live.elec_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
 }
 
 static inline void motor_control_measurements_from_encoder(

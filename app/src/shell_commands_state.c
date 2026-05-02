@@ -196,8 +196,27 @@ static const char *motor_encoder_compare_ref_to_string(uint8_t ref_mode)
 	return (ref_mode == MOTOR_ENCODER_COMPARE_REF_OBSERVER) ? "obs" : "gen";
 }
 
+static uint32_t motor_command_age_ms(const struct motor_parameters *params)
+{
+	uint32_t loop_now = params->control_loop_count;
+	uint32_t loop_age = loop_now - params->last_command_update_loop;
+
+	if (loop_age > 0U) {
+		uint64_t age_ms = ((uint64_t)loop_age * 1000ULL) /
+				  (uint64_t)CONTROL_LOOP_FREQUENCY_HZ_U;
+
+		return age_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)age_ms;
+	}
+
+	return k_uptime_get_32() - params->last_command_update_ms;
+}
+
 static inline float motor_encoder_normalized_from_rad(float32_t angle_rad)
 {
+	if (!(angle_rad == angle_rad) || fabsf(angle_rad) > 1.0e6f) {
+		return 0.0f;
+	}
+
 	float32_t wrapped = wrap_rad_2pi(angle_rad);
 
 	return wrapped / (2.0f * PI_F32);
@@ -205,6 +224,10 @@ static inline float motor_encoder_normalized_from_rad(float32_t angle_rad)
 
 static inline int32_t motor_encoder_q31_from_rad(float32_t angle_rad)
 {
+	if (!(angle_rad == angle_rad) || fabsf(angle_rad) > 1.0e6f) {
+		return 0;
+	}
+
 	float32_t wrapped = wrap_rad_pi(angle_rad);
 	float32_t scaled = wrapped * (2147483648.0f / PI_F32);
 
@@ -216,6 +239,19 @@ static inline int32_t motor_encoder_q31_from_rad(float32_t angle_rad)
 	}
 
 	return (int32_t)lrintf(scaled);
+}
+
+static inline uint32_t motor_shell_f32_bits(float32_t value)
+{
+	uint32_t bits = 0U;
+
+	memcpy(&bits, &value, sizeof(bits));
+	return bits;
+}
+
+static double motor_shell_rad_to_deg(float32_t rad)
+{
+	return (double)rad * (180.0 / (double)PI_F32);
 }
 
 static uint16_t motor_encoder_ring_oldest(uint16_t write_idx, uint16_t count,
@@ -237,7 +273,9 @@ static bool motor_encoder_raw_trace_sample_clean(
 	       sample->sample_fresh &&
 	       !sample->sample_warning &&
 	       !sample->sample_error &&
-	       !sample->sample_io_fault;
+	       !sample->sample_io_fault &&
+	       (sample->raw_angle_rad == sample->raw_angle_rad) &&
+	       fabsf(sample->raw_angle_rad) <= 1.0e6f;
 }
 
 static bool motor_encoder_capture_sample_clean(
@@ -246,7 +284,13 @@ static bool motor_encoder_capture_sample_clean(
 	return sample != NULL &&
 	       sample->sample_fresh &&
 	       !sample->sample_warning &&
-	       !sample->sample_error;
+	       !sample->sample_error &&
+	       (sample->angle_rad == sample->angle_rad) &&
+	       fabsf(sample->angle_rad) <= 1.0e6f &&
+	       (sample->encoder_mech_rad == sample->encoder_mech_rad) &&
+	       fabsf(sample->encoder_mech_rad) <= 1.0e6f &&
+	       (sample->generated_mech_rad == sample->generated_mech_rad) &&
+	       fabsf(sample->generated_mech_rad) <= 1.0e6f;
 }
 
 static int motor_encoder_parse_dump_window(const struct shell *sh,
@@ -665,8 +709,7 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	const char *state_str = motor_state_to_string(state);
 	int error = motor_api_get_error();
 	const char *error_str = motor_error_to_string(error);
-	uint32_t now_ms = k_uptime_get_32();
-	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	uint32_t age_ms = motor_command_age_ms(g_motor_params);
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
 		motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
@@ -891,8 +934,7 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	uint32_t now_ms = k_uptime_get_32();
-	uint32_t age_ms = now_ms - g_motor_params->last_command_update_ms;
+	uint32_t age_ms = motor_command_age_ms(g_motor_params);
 	bool timeout_enabled = g_motor_params->command_timeout_ms > 0U;
 	bool control_armed = motor_control_is_armed(g_motor_params);
 	bool autonomous_mode_active =
@@ -1003,8 +1045,18 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "Live Telemetry:");
 	shell_print(sh, "  State:          %s", motor_state_to_string(state));
 	shell_print(sh, "  Error:          %s", motor_error_to_string(error));
-	shell_print(sh, "  Angle (mech):   %.1f deg", (double)(g_motor_params->live.position_rad * 180.0f / PI_F32));
-	shell_print(sh, "  Angle (elec):   %.1f deg", (double)(g_motor_params->live.elec_angle_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Angle (mech):   %.1f deg",
+		    motor_shell_rad_to_deg(g_motor_params->live.position_rad));
+	shell_print(sh, "  Angle (elec):   %.1f deg",
+		    motor_shell_rad_to_deg(g_motor_params->live.elec_angle_rad));
+	shell_print(sh, "  Obs angle:      mech=%.1f deg elec=%.1f deg pred=%.1f deg",
+		    motor_shell_rad_to_deg(g_motor_params->observer.mech_angle_rad),
+		    motor_shell_rad_to_deg(g_motor_params->observer.elec_angle_rad),
+		    motor_shell_rad_to_deg(g_motor_params->observer.elec_angle_pred_rad));
+	shell_print(sh, "  Obs offset:     %.3f deg",
+		    motor_shell_rad_to_deg(g_motor_params->observer.mech_angle_offset_rad));
+	shell_print(sh, "  Align offset:   %.3f deg",
+		    motor_shell_rad_to_deg(g_motor_params->observer_alignment_offset_rad));
 	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
 		    (double)g_motor_params->live.encoder_raw_deg,
 		    (double)g_motor_params->live.encoder_raw_rad);
@@ -1243,35 +1295,46 @@ int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	float32_t trim_deg = g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32);
-	float32_t base_mech_offset_deg =
-		g_motor_params->observer_alignment_offset_rad * (180.0f / PI_F32);
+	double trim_deg = motor_shell_rad_to_deg(g_motor_params->observer_elec_trim_rad);
+	double base_mech_offset_deg =
+		motor_shell_rad_to_deg(g_motor_params->observer_alignment_offset_rad);
+	double active_mech_offset_deg =
+		motor_shell_rad_to_deg(g_motor_params->observer.mech_angle_offset_rad);
 	if (argc == 1U) {
 		shell_print(sh, "Encoder electrical trim: %.3f deg (mechanical equivalent: %.4f deg)",
-			    (double)trim_deg,
-			    (double)(trim_deg / (float32_t)MOTOR_POLE_PAIRS));
+			    trim_deg,
+			    trim_deg / (double)MOTOR_POLE_PAIRS);
 		shell_print(sh, "Observer base offset (ALIGN): %.3f deg mechanical",
-			    (double)base_mech_offset_deg);
+			    base_mech_offset_deg);
+		shell_print(sh, "Observer active offset: %.3f deg mechanical",
+			    active_mech_offset_deg);
+		shell_print(sh, "Observer raw: align=0x%08X active=0x%08X trim=0x%08X pos=0x%08X",
+			    motor_shell_f32_bits(g_motor_params->observer_alignment_offset_rad),
+			    motor_shell_f32_bits(g_motor_params->observer.mech_angle_offset_rad),
+			    motor_shell_f32_bits(g_motor_params->observer_elec_trim_rad),
+			    motor_shell_f32_bits(g_motor_params->calibration.align_pos_mech_angle_rad));
 		return 0;
 	}
 
-	if (!shell_parse_finite_float(argv[1], &trim_deg)) {
+	float requested_trim_deg = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &requested_trim_deg)) {
 		shell_error(sh, "trim must be a finite number of electrical degrees");
 		return -EINVAL;
 	}
-	if (trim_deg < -180.0f || trim_deg > 180.0f) {
+	if (requested_trim_deg < -180.0f || requested_trim_deg > 180.0f) {
 		shell_error(sh, "trim must be within [-180.0, 180.0] electrical degrees");
 		return -EINVAL;
 	}
 
-	int ret = motor_api_update_param("observer_elec_trim_deg", trim_deg);
+	int ret = motor_api_update_param("observer_elec_trim_deg", requested_trim_deg);
 	if (ret != 0) {
 		shell_error(sh, "Failed to update observer electrical trim (err %d)", ret);
 		return ret;
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
-	shell_print(sh, "Observer electrical trim update posted: %.3f deg", (double)trim_deg);
+	shell_print(sh, "Observer electrical trim update posted: %.3f deg",
+		    (double)requested_trim_deg);
 	return 0;
 }
 
@@ -1944,24 +2007,24 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 		    "idx loop source deg rad norm q31 fresh warn err status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
-		const struct motor_encoder_capture_sample *sample =
-			&g_motor_params->encoder_capture.samples[idx];
-		float32_t norm = motor_encoder_normalized_from_rad(sample->angle_rad);
-		int32_t q31 = motor_encoder_q31_from_rad(sample->angle_rad);
+		struct motor_encoder_capture_sample sample =
+			g_motor_params->encoder_capture.samples[idx];
+		float32_t norm = motor_encoder_normalized_from_rad(sample.angle_rad);
+		int32_t q31 = motor_encoder_q31_from_rad(sample.angle_rad);
 		shell_print(sh,
 			    "%u %u %s %.3f %.6f %.6f %d %u %u %u 0x%02X %u",
 			    i,
-			    sample->control_loop_count,
-			    motor_encoder_input_source_to_string(sample->input_source),
-			    (double)sample->angle_deg,
-			    (double)sample->angle_rad,
+			    sample.control_loop_count,
+			    motor_encoder_input_source_to_string(sample.input_source),
+			    (double)sample.angle_deg,
+			    (double)sample.angle_rad,
 			    (double)norm,
 			    q31,
-			    sample->sample_fresh,
-			    sample->sample_warning,
-			    sample->sample_error,
-			    sample->status,
-			    sample->sample_enabled);
+			    sample.sample_fresh,
+			    sample.sample_warning,
+			    sample.sample_error,
+			    sample.status,
+			    sample.sample_enabled);
 	}
 
 	return 0;
@@ -2043,7 +2106,17 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 		float32_t d_m_deg = 0.0f;
 		float32_t d_e_deg = 0.0f;
 		float32_t rel_phase_deg = 0.0f;
-		if (sample->compare_valid) {
+		bool compare_valid =
+			sample->compare_valid &&
+			(sample->encoder_mech_rad == sample->encoder_mech_rad) &&
+			fabsf(sample->encoder_mech_rad) <= 1.0e6f &&
+			(ref_mech_rad == ref_mech_rad) &&
+			fabsf(ref_mech_rad) <= 1.0e6f &&
+			(sample->encoder_elec_rad == sample->encoder_elec_rad) &&
+			fabsf(sample->encoder_elec_rad) <= 1.0e6f &&
+			(ref_elec_rad == ref_elec_rad) &&
+			fabsf(ref_elec_rad) <= 1.0e6f;
+		if (compare_valid) {
 			float32_t mech_error_rad =
 				wrap_rad_pi(sample->encoder_mech_rad - ref_mech_rad);
 			float32_t elec_error_rad =
@@ -2068,7 +2141,7 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 			    sample->sample_fresh,
 			    sample->sample_warning,
 			    sample->sample_error,
-			    sample->compare_valid,
+			    compare_valid ? 1U : 0U,
 			    motor_encoder_compare_ref_to_string(ref_mode),
 			    (double)enc_m_deg,
 			    (double)ref_m_deg,

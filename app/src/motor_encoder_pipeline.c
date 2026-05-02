@@ -104,11 +104,6 @@ static inline void motor_encoder_inflight_decrement(void)
 void motor_encoder_pipeline_set_enabled(bool enabled)
 {
 	atomic_set(&motor_encoder_pipeline_enabled, enabled ? 1 : 0);
-#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
-	(void)encoder_rt_set_mode(motor_encoder_rt_dev,
-				  enabled ? ENCODER_RT_MODE_REALTIME :
-					    ENCODER_RT_MODE_DISABLED);
-#endif
 }
 
 bool motor_encoder_pipeline_is_enabled(void)
@@ -228,9 +223,6 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 	}
 
 	motor_encoder_inflight_decrement();
-	if (!motor_encoder_pipeline_is_enabled()) {
-		(void)encoder_rt_set_mode(motor_encoder_rt_dev, ENCODER_RT_MODE_DISABLED);
-	}
 
 	sample->angle_deg = enc_sample.mechanical_angle_deg;
 	sample->angle_rad = enc_sample.mechanical_angle_rad;

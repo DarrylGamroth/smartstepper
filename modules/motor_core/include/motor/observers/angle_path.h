@@ -35,6 +35,7 @@ struct motor_angle_path_input {
 	bool feature_angle_gen;
 	bool sample_enabled;
 	bool sample_fresh;
+	bool sample_warning;
 	bool sample_error;
 	bool sample_io_fault;
 	float32_t sample_angle_deg;

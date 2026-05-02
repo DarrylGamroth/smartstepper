@@ -158,6 +158,8 @@ void motor_state_calibration_exit(void *obj)
 		LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
 		LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
 		LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
+		LOG_INF("  Align offset: %.3f deg",
+			(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)));
 		params->calibration.complete = true;
 		if (commissioning) {
 			params->calibration.commissioning_complete = true;
@@ -477,10 +479,15 @@ static inline enum smf_state_result motor_align_apply_offset_and_transition(
 	struct motor_parameters *params,
 	float32_t offset_rad)
 {
-	params->observer_alignment_offset_rad = wrap_rad_pi(offset_rad);
+	float32_t base_offset_rad = wrap_rad_pi(offset_rad);
+
+	params->observer_alignment_offset_rad = base_offset_rad;
 	/* ALIGN defines base commutation reference; runtime trim is reset here. */
 	params->observer_elec_trim_rad = 0.0f;
 	angle_observer_set_offset(&params->observer, params->observer_alignment_offset_rad);
+	LOG_INF("ALIGN observer offset applied: request=%.3f deg stored=%.3f deg",
+		(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)),
+		(double)(params->observer.mech_angle_offset_rad * (180.0f / PI_F32)));
 
 	if (params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
@@ -489,6 +496,16 @@ static inline enum smf_state_result motor_align_apply_offset_and_transition(
 			motor_resolve_requested_online_mode(params);
 		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 	}
+
+	/* smf_set_state() may run exit/entry hooks synchronously. Keep ALIGN as
+	 * the last writer of the commutation reference for the next control tick.
+	 */
+	params->observer_alignment_offset_rad = base_offset_rad;
+	params->observer_elec_trim_rad = 0.0f;
+	angle_observer_set_offset(&params->observer, base_offset_rad);
+	LOG_INF("ALIGN observer offset final: base=%.3f deg stored=%.3f deg",
+		(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)),
+		(double)(params->observer.mech_angle_offset_rad * (180.0f / PI_F32)));
 
 	return SMF_EVENT_HANDLED;
 }

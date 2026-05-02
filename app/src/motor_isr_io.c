@@ -59,8 +59,26 @@ static void motor_adc_publish_step_report(struct motor_parameters *params,
 		params->fault_snapshot.latched = 1U;
 		params->fault_snapshot.latch_error_code = report->error_code;
 		params->fault_snapshot.latch_loop = params->rt_fast.control_loop_count;
-		motor_api_post_error(report->error_code);
+		struct motor_event evt = {
+			.type = MOTOR_EVENT_ERROR,
+			.error_code = report->error_code,
+		};
+		(void)motor_api_enqueue_event_from_isr(&evt);
 	}
+}
+
+static inline uint32_t motor_adc_timeout_ticks_from_ms(uint32_t timeout_ms)
+{
+	uint64_t ticks = ((uint64_t)timeout_ms * (uint64_t)CONTROL_LOOP_FREQUENCY_HZ_U + 999ULL) /
+			 1000ULL;
+
+	if (ticks == 0ULL) {
+		return 1U;
+	}
+	if (ticks > UINT32_MAX) {
+		return UINT32_MAX;
+	}
+	return (uint32_t)ticks;
 }
 
 static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *params)
@@ -79,9 +97,7 @@ static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *param
 		params->chopper_cal.active, profile_active);
 
 	if (autonomous_keepalive) {
-		uint32_t now_ms = k_uptime_get_32();
-
-		params->last_command_update_ms = now_ms;
+		params->last_command_update_loop = params->control_loop_count;
 		params->command_timeout_latched = false;
 	}
 
@@ -89,18 +105,10 @@ static void motor_adc_apply_keepalive_and_timeout(struct motor_parameters *param
 		return;
 	}
 
-	uint32_t now_ms = k_uptime_get_32();
-	struct motor_timeout_interlock_input timeout_in = {
-		.online_control_state = online_control_state,
-		.control_armed = control_armed,
-		.autonomous_keepalive = autonomous_keepalive,
-		.command_timeout_ms = params->command_timeout_ms,
-		.now_ms = now_ms,
-		.last_command_update_ms = params->last_command_update_ms,
-	};
-	struct motor_timeout_interlock_output timeout_out = {0};
-	motor_interlocks_eval_timeout(&timeout_in, &timeout_out);
-	if (!timeout_out.disarm_control) {
+	uint32_t timeout_ticks = motor_adc_timeout_ticks_from_ms(params->command_timeout_ms);
+	uint32_t command_age_ticks = params->control_loop_count - params->last_command_update_loop;
+	if (!online_control_state || !control_armed || autonomous_keepalive ||
+	    command_age_ticks <= timeout_ticks) {
 		return;
 	}
 
