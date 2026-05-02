@@ -282,28 +282,12 @@ static int aeat9955_fast_transfer_blocking(const struct device *dev, const uint8
 					   uint8_t len, struct rt_spi_result *result)
 {
 	const struct aeat9955_fast_config *cfg = dev->config;
-	const uint32_t start_cycles = k_cycle_get_32();
-	const uint32_t timeout_cycles = k_us_to_cyc_ceil32(AEAT9955_FAST_REG_TIMEOUT_US);
 	const struct rt_spi_transfer frame = {
 		.tx = tx,
 		.len = len,
 	};
-	int ret;
 
-	ret = rt_spi_request(cfg->transport, &frame);
-	if (ret != 0) {
-		return ret;
-	}
-
-	do {
-		ret = rt_spi_collect(cfg->transport, result);
-		if (ret != -EAGAIN) {
-			return ret;
-		}
-		k_busy_wait(2);
-	} while ((k_cycle_get_32() - start_cycles) < timeout_cycles);
-
-	return -ETIMEDOUT;
+	return rt_spi_transceive(cfg->transport, &frame, result, AEAT9955_FAST_REG_TIMEOUT_US);
 }
 
 int aeat9955_fast_read_register(const struct device *dev, uint8_t reg, uint8_t *value)

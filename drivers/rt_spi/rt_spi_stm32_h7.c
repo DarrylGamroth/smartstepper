@@ -262,11 +262,139 @@ static int rt_spi_stm32_collect(const struct device *dev,
 	return ((sample->flags & RT_SPI_RESULT_ERROR) != 0U) ? -EIO : 0;
 }
 
+static int rt_spi_stm32_transceive(const struct device *dev,
+				   const struct rt_spi_transfer *frame,
+				   struct rt_spi_result *sample,
+				   uint32_t timeout_us)
+{
+	const struct rt_spi_stm32_config *cfg = dev->config;
+	struct rt_spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	uint8_t tx[RT_SPI_MAX_FRAME_BYTES];
+	uint8_t rx[RT_SPI_MAX_FRAME_BYTES] = {0};
+	uint8_t tx_count = 0U;
+	uint8_t rx_count = 0U;
+	uint16_t error_flags;
+	uint32_t start_cycles;
+	uint32_t timeout_cycles;
+	unsigned int key;
+
+	if ((frame == NULL) || (frame->tx == NULL) || (sample == NULL) ||
+	    (frame->len == 0U) || (frame->len > cfg->max_frame_len) ||
+	    (frame->len > RT_SPI_MAX_FRAME_BYTES) || (timeout_us == 0U)) {
+		return -EINVAL;
+	}
+
+	key = irq_lock();
+	if (data->active || data->sample_ready) {
+		data->stats.busy_count++;
+		irq_unlock(key);
+		return -EBUSY;
+	}
+	data->active = true;
+	data->stats.request_count++;
+	irq_unlock(key);
+
+	memcpy(tx, frame->tx, frame->len);
+	memset(sample, 0, sizeof(*sample));
+
+	rt_spi_stm32_disable_irqs(spi);
+	LL_SPI_Disable(spi);
+	rt_spi_stm32_collect_error_flags(spi);
+	LL_SPI_ClearFlag_EOT(spi);
+	LL_SPI_ClearFlag_TXTF(spi);
+	LL_SPI_ClearFlag_OVR(spi);
+	LL_SPI_SetTransferSize(spi, frame->len);
+	LL_SPI_SetTransferDirection(spi, LL_SPI_FULL_DUPLEX);
+	LL_SPI_SetFIFOThreshold(spi, LL_SPI_FIFO_TH_01DATA);
+
+	start_cycles = k_cycle_get_32();
+	timeout_cycles = k_us_to_cyc_ceil32(timeout_us);
+	rt_spi_stm32_cs_control(cfg, true);
+	LL_SPI_Enable(spi);
+	LL_SPI_StartMasterTransfer(spi);
+
+	while ((k_cycle_get_32() - start_cycles) < timeout_cycles) {
+		error_flags = rt_spi_stm32_collect_error_flags(spi);
+		if (error_flags != 0U) {
+			sample->flags = RT_SPI_RESULT_ERROR | error_flags;
+			goto done;
+		}
+
+		while ((tx_count < frame->len) && LL_SPI_IsActiveFlag_TXP(spi)) {
+			LL_SPI_TransmitData8(spi, tx[tx_count++]);
+		}
+		while ((rx_count < frame->len) && LL_SPI_IsActiveFlag_RXP(spi)) {
+			rx[rx_count++] = LL_SPI_ReceiveData8(spi);
+		}
+
+		if (LL_SPI_IsActiveFlag_EOT(spi)) {
+			while ((rx_count < frame->len) && LL_SPI_IsActiveFlag_RXP(spi)) {
+				rx[rx_count++] = LL_SPI_ReceiveData8(spi);
+			}
+			sample->flags = RT_SPI_RESULT_VALID;
+			goto done;
+		}
+	}
+
+	sample->flags = RT_SPI_RESULT_ERROR | RT_SPI_RESULT_TIMEOUT;
+
+done:
+	rt_spi_stm32_disable_irqs(spi);
+	LL_SPI_ClearFlag_EOT(spi);
+	LL_SPI_ClearFlag_TXTF(spi);
+	LL_SPI_SetTransferSize(spi, 0U);
+	LL_SPI_Disable(spi);
+	rt_spi_stm32_cs_control(cfg, false);
+
+	key = irq_lock();
+	memcpy(sample->raw, rx, frame->len);
+	sample->len = frame->len;
+	sample->timestamp_cycles = start_cycles;
+	data->active = false;
+	data->stats.complete_count++;
+	if ((sample->flags & RT_SPI_RESULT_ERROR) != 0U) {
+		data->stats.error_count++;
+		data->stats.last_error_flags = sample->flags;
+	}
+	irq_unlock(key);
+
+	return ((sample->flags & RT_SPI_RESULT_ERROR) != 0U) ? -EIO : 0;
+}
+
 static bool rt_spi_stm32_busy(const struct device *dev)
 {
 	struct rt_spi_stm32_data *data = dev->data;
 
 	return data->active;
+}
+
+static void rt_spi_stm32_abort(const struct device *dev)
+{
+	const struct rt_spi_stm32_config *cfg = dev->config;
+	struct rt_spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	unsigned int key;
+
+	rt_spi_stm32_disable_irqs(spi);
+	LL_SPI_ClearFlag_EOT(spi);
+	LL_SPI_ClearFlag_TXTF(spi);
+	LL_SPI_ClearFlag_OVR(spi);
+	LL_SPI_SetTransferSize(spi, 0U);
+	LL_SPI_Disable(spi);
+	rt_spi_stm32_cs_control(cfg, false);
+
+	key = irq_lock();
+	if (data->active) {
+		data->stats.error_count++;
+		data->stats.last_error_flags = RT_SPI_RESULT_ERROR | RT_SPI_RESULT_TIMEOUT;
+	}
+	data->active = false;
+	data->sample_ready = false;
+	data->len = 0U;
+	data->tx_count = 0U;
+	data->rx_count = 0U;
+	irq_unlock(key);
 }
 
 static void rt_spi_stm32_get_stats(const struct device *dev,
@@ -450,7 +578,9 @@ static int rt_spi_stm32_init(const struct device *dev)
 static const struct rt_spi_driver_api rt_spi_stm32_api = {
 	.request = rt_spi_stm32_request,
 	.collect = rt_spi_stm32_collect,
+	.transceive = rt_spi_stm32_transceive,
 	.busy = rt_spi_stm32_busy,
+	.abort = rt_spi_stm32_abort,
 	.get_stats = rt_spi_stm32_get_stats,
 	.reset_stats = rt_spi_stm32_reset_stats,
 };

@@ -56,7 +56,12 @@ typedef int (*rt_spi_request_api)(const struct device *dev,
 				  const struct rt_spi_transfer *transfer);
 typedef int (*rt_spi_collect_api)(const struct device *dev,
 				  struct rt_spi_result *result);
+typedef int (*rt_spi_transceive_api)(const struct device *dev,
+				     const struct rt_spi_transfer *transfer,
+				     struct rt_spi_result *result,
+				     uint32_t timeout_us);
 typedef bool (*rt_spi_busy_api)(const struct device *dev);
+typedef void (*rt_spi_abort_api)(const struct device *dev);
 typedef void (*rt_spi_stats_api)(const struct device *dev,
 				 struct rt_spi_stats *stats);
 typedef void (*rt_spi_reset_stats_api)(const struct device *dev);
@@ -64,7 +69,9 @@ typedef void (*rt_spi_reset_stats_api)(const struct device *dev);
 __subsystem struct rt_spi_driver_api {
 	rt_spi_request_api request;
 	rt_spi_collect_api collect;
+	rt_spi_transceive_api transceive;
 	rt_spi_busy_api busy;
+	rt_spi_abort_api abort;
 	rt_spi_stats_api get_stats;
 	rt_spi_reset_stats_api reset_stats;
 };
@@ -85,11 +92,28 @@ static inline int rt_spi_collect(const struct device *dev,
 	return api->collect(dev, result);
 }
 
+static inline int rt_spi_transceive(const struct device *dev,
+				    const struct rt_spi_transfer *transfer,
+				    struct rt_spi_result *result,
+				    uint32_t timeout_us)
+{
+	const struct rt_spi_driver_api *api = dev->api;
+
+	return api->transceive(dev, transfer, result, timeout_us);
+}
+
 static inline bool rt_spi_busy(const struct device *dev)
 {
 	const struct rt_spi_driver_api *api = dev->api;
 
 	return api->busy(dev);
+}
+
+static inline void rt_spi_abort(const struct device *dev)
+{
+	const struct rt_spi_driver_api *api = dev->api;
+
+	api->abort(dev);
 }
 
 static inline void rt_spi_get_stats(const struct device *dev,

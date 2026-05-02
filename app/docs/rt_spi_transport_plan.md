@@ -75,6 +75,13 @@ read/decode API:
 That path exists for sensor-shell/debug access only. It does not need to be the
 same path used by the realtime control loop.
 
+Implementation note: a Zephyr device has one primary `dev->api` pointer. The
+fast encoder device therefore uses `encoder_rt` as its primary API. If sensor
+shell support is needed for the same physical encoder, provide it through
+separate diagnostic shell commands or a separate diagnostic device; do not try
+to make one device simultaneously expose both `encoder_rt_driver_api` and
+`sensor_driver_api`.
+
 It should still use Zephyr conventions where useful:
 
 - Devicetree for hardware instance, pins, CS GPIO, frame size, and backend selection.
@@ -287,7 +294,8 @@ Behavior:
   frames.
 - Implement read as command frame plus response frame.
 - Implement write as command/address frame plus data frame.
-- Use the `rt_spi_request()`/`rt_spi_collect()` transport lifecycle.
+- Use a bounded thread-context `rt_spi_transceive()` helper for register
+  transactions.
 - Poll/bounded-wait only from thread or deferred work context.
 - Return `-EBUSY` if realtime mode owns the encoder pipeline.
 - Never call register helpers from the control ISR.
@@ -521,6 +529,24 @@ The fast path must obey:
 - no shared mutable TX buffer across transactions unless only one in-flight transaction is impossible by construction.
 
 ## Implementation Phases
+
+### Implemented Status - 2026-05-02
+
+- Added generic `encoder_rt` API.
+- Added new `brcm,aeat-9955-fast` driver under `drivers/encoder/`.
+- Left `drivers/sensor/brcm_aeat-9955/` unchanged for legacy/reference use.
+- Updated AEAT profile overlay to use parent/child `rt_spi` topology without
+  an explicit `transport` phandle.
+- Moved AEAT fast control-loop sampling behind `encoder_rt_request_sample()`
+  and `encoder_rt_collect_sample()`.
+- Added `aeat9955_fast_read_register()` and
+  `aeat9955_fast_write_register()`.
+- Added `rt_spi_transceive()` for bounded non-realtime register transactions.
+- HIL smoke result:
+  - `motor encoder alarm` returned `Raw status: 0x60`.
+  - boot calibration completed.
+  - encoder pipeline after ALIGN reported request `ok=809`, collect `ok=809`,
+    transport/frame/parity errors all zero, status warnings `306`.
 
 ### Phase 0: Requirements and Register Audit
 
