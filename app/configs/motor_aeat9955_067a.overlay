@@ -75,7 +75,6 @@
 	aeat9955: aeat9955@0 {
 		compatible = "brcm,aeat-9955-fast";
 		reg = <0>;
-		transport = <&spi3>;
 		pipeline-delay-samples = <1>;
 		status = "okay";
 	};

@@ -5,6 +5,8 @@ description: STM32 low-latency ISR-safe SPI transport
 
 compatible: "rubus,stm32-rt-spi"
 
+bus: rt-spi
+
 include:
   - base.yaml
   - pinctrl-device.yaml

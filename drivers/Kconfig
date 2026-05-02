@@ -4,6 +4,7 @@
 menu "Drivers"
 rsource "adc/Kconfig"
 rsource "rt_spi/Kconfig"
+rsource "encoder/Kconfig"
 rsource "gate_driver/Kconfig"
 rsource "pwm/Kconfig"
 rsource "sensor/Kconfig"

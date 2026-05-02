@@ -26,11 +26,17 @@
 #include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
 
-#if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
+#if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
+#include <drivers/encoder/aeat9955_fast.h>
+#define MOTOR_ENCODER_IS_AEAT9955 1
+#define MOTOR_ENCODER_IS_AEAT9955_FAST 1
+#elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
 #define MOTOR_ENCODER_IS_AEAT9955 1
+#define MOTOR_ENCODER_IS_AEAT9955_FAST 0
 #else
 #define MOTOR_ENCODER_IS_AEAT9955 0
+#define MOTOR_ENCODER_IS_AEAT9955_FAST 0
 #endif
 
 #include <zephyr/logging/log.h>
@@ -361,6 +367,25 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 		return -ENODEV;
 	}
 
+#if MOTOR_ENCODER_IS_AEAT9955_FAST
+	uint8_t status = 0U;
+	int ret = aeat9955_fast_read_register(encoder1, AEAT9955_FAST_REG_ERROR_STATUS, &status);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (status_out) {
+		*status_out = status;
+	}
+	if (mhi_out) {
+		*mhi_out = (status & AEAT9955_FAST_ERROR_MHI_BIT) != 0U;
+	}
+	if (mlo_out) {
+		*mlo_out = (status & AEAT9955_FAST_ERROR_MLO_BIT) != 0U;
+	}
+
+	return 0;
+#else
 	struct sensor_value raw = {0};
 	struct sensor_value mhi = {0};
 	struct sensor_value mlo = {0};
@@ -394,6 +419,7 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 	}
 
 	return 0;
+#endif
 #endif
 }
 #endif

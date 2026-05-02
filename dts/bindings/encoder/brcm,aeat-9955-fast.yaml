@@ -1,20 +1,17 @@
 # Copyright (c) 2026 Rubus Technologies Inc
 # SPDX-License-Identifier: Apache-2.0
 
-description: AEAT-9955 encoder frontend using the low-latency SPI transport
+description: AEAT-9955 encoder using a parent low-latency SPI transport
 
 compatible: "brcm,aeat-9955-fast"
 
 include: base.yaml
 
+on-bus: rt-spi
+
 properties:
   reg:
     required: true
-
-  transport:
-    type: phandle
-    required: true
-    description: Real-time SPI transport device used for position transfers.
 
   pipeline-delay-samples:
     type: int

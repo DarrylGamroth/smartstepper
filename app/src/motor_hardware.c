@@ -21,11 +21,7 @@ const struct gpio_dt_spec trig = GPIO_DT_SPEC_GET(DT_PATH(trig), gpios);
 const struct device *const pwm1 = DEVICE_DT_GET(DT_NODELABEL(pwm1));
 const struct device *const pwm8 = DEVICE_DT_GET(DT_NODELABEL(pwm8));
 const struct device *const pwm3 = DEVICE_DT_GET(DT_NODELABEL(pwm3));
-#if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
-const struct device *const encoder1 = DEVICE_DT_GET(DT_PHANDLE(DT_ALIAS(encoder1), transport));
-#else
 const struct device *const encoder1 = DEVICE_DT_GET(DT_ALIAS(encoder1));
-#endif
 const struct device *const adc1 = DEVICE_DT_GET(DT_NODELABEL(adc1));
 const struct device *const gate_driver_a = DEVICE_DT_GET(DT_ALIAS(gate_driver_a));
 const struct device *const gate_driver_b = DEVICE_DT_GET(DT_ALIAS(gate_driver_b));

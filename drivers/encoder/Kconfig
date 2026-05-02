@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig ENCODER_RT
+	bool "Real-time encoder drivers"
+	depends on RT_SPI
+	default y if DT_HAS_BRCM_AEAT_9955_FAST_ENABLED
+	help
+	  Enables deterministic request/collect encoder drivers for high-rate
+	  motor-control ISR use.
+
+if ENCODER_RT
+
+config ENCODER_RT_INIT_PRIORITY
+	int "Real-time encoder init priority"
+	default 86
+	help
+	  Device init priority. Keep this after RT_SPI_INIT_PRIORITY so child
+	  encoder devices initialize after their low-latency transport.
+
+config BRCM_AEAT_9955_FAST
+	bool "AEAT-9955 real-time encoder driver"
+	depends on DT_HAS_BRCM_AEAT_9955_FAST_ENABLED
+	default y
+	help
+	  Enable the AEAT-9955 encoder driver that uses the low-latency rt_spi
+	  transport and exposes the encoder_rt API.
+
+endif # ENCODER_RT
