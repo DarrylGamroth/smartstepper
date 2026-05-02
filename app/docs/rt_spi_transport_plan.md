@@ -32,10 +32,13 @@ Layering:
 motor control ISR / encoder pipeline
         |
         v
-fast encoder frontend
-  - AEAT-9955 fast frontend
-  - MT6835 fast frontend
-  - future encoder frontends
+realtime encoder API
+  - request_sample() from timer/direct encoder trigger ISR
+  - collect_sample() from ADC/control ISR
+  - owns encoder decode, CRC/parity/status checks, and latency semantics
+  - AEAT-9955 fast driver
+  - MT6835 fast driver
+  - future absolute encoder drivers
         |
         v
 real-time SPI transport
@@ -56,6 +59,22 @@ Zephyr's `spi_driver_api`. It deliberately exposes a tiny RTIO-style lifecycle:
 `request()` starts a short, statically buffered transfer from ISR context and
 `collect()` consumes the completed result later.
 
+Encoder drivers sit above that transport and expose an encoder-specific
+realtime API. The motor-control loop should not know how the encoder frame is
+prepared or decoded. It should only request a sample at the hardware trigger
+point and collect the decoded sample at the control point.
+
+For diagnostics, encoder drivers may also implement Zephyr's modern sensor
+read/decode API:
+
+- implement `.submit`,
+- implement `.get_decoder`,
+- intentionally omit `.sample_fetch`,
+- intentionally omit `.channel_get`.
+
+That path exists for sensor-shell/debug access only. It does not need to be the
+same path used by the realtime control loop.
+
 It should still use Zephyr conventions where useful:
 
 - Devicetree for hardware instance, pins, CS GPIO, frame size, and backend selection.
@@ -66,6 +85,7 @@ It should still use Zephyr conventions where useful:
 
 - Do not replace the Zephyr sensor drivers immediately.
 - Do not implement Zephyr's generic `spi_driver_api`.
+- Do not require RTIO internally in the realtime control path.
 - Do not support arbitrary scatter/gather buffers.
 - Do not support concurrent clients.
 - Do not support dynamic frame allocation.
@@ -110,16 +130,77 @@ Expected behavior:
 
 ## Encoder Frontend API
 
-Each encoder frontend provides static frame configuration and decode helpers:
+Define a reusable realtime encoder device API, similar in spirit to the custom
+`mcpwm` API. This keeps AEAT-9955, MT6835, and future encoders behind a common
+request/collect interface while keeping the SPI transport generic.
 
 ```c
-struct encoder_fast_vtable {
-	uint8_t frame_len;
-	uint8_t pipeline_delay_samples;
-	void (*prepare_frame)(uint8_t *tx);
-	int (*decode)(const uint8_t *raw, struct motor_encoder_sample *sample);
+struct encoder_rt_sample {
+	uint32_t timestamp_cycles;
+	float mechanical_angle_rad;
+	float mechanical_angle_deg;
+	uint32_t raw_count;
+	uint32_t status;
+	uint32_t flags;
+};
+
+struct encoder_rt_stats {
+	uint32_t request_count;
+	uint32_t collect_count;
+	uint32_t busy_count;
+	uint32_t stale_count;
+	uint32_t transport_error_count;
+	uint32_t frame_error_count;
+	uint32_t warning_count;
+};
+
+enum encoder_rt_mode {
+	ENCODER_RT_MODE_DISABLED,
+	ENCODER_RT_MODE_REALTIME,
+	ENCODER_RT_MODE_DIAGNOSTIC,
+};
+
+typedef int (*encoder_rt_set_mode_api)(const struct device *dev,
+				       enum encoder_rt_mode mode);
+typedef int (*encoder_rt_request_sample_api)(const struct device *dev);
+typedef int (*encoder_rt_collect_sample_api)(const struct device *dev,
+					     struct encoder_rt_sample *sample);
+typedef void (*encoder_rt_get_stats_api)(const struct device *dev,
+					 struct encoder_rt_stats *stats);
+typedef void (*encoder_rt_reset_stats_api)(const struct device *dev);
+
+__subsystem struct encoder_rt_driver_api {
+	encoder_rt_set_mode_api set_mode;
+	encoder_rt_request_sample_api request_sample;
+	encoder_rt_collect_sample_api collect_sample;
+	encoder_rt_get_stats_api get_stats;
+	encoder_rt_reset_stats_api reset_stats;
 };
 ```
+
+The public inline wrappers may dispatch through the device API. This adds a
+function pointer call, but the cost is small compared with an SPI transaction
+and the FOC math on the Cortex-M7. If profiling shows it matters, add optional
+driver-specific static-inline fast helpers, following the pattern already used
+by `mcpwm_stm32_set_duty_cycle_*_fast()`.
+
+The fast ISR contract is:
+
+```text
+encoder timer/direct ISR -> encoder_rt_request_sample()
+SPI IRQ                  -> rt_spi publishes completed raw frame
+ADC/control ISR          -> encoder_rt_collect_sample()
+```
+
+The encoder driver owns:
+
+- command bytes,
+- frame length per request,
+- raw frame decode,
+- parity/CRC/status validation,
+- warning/error classification,
+- sensor-specific pipeline latency,
+- counters and diagnostic trace metadata.
 
 Examples:
 
@@ -137,7 +218,47 @@ Examples:
   - check `STATUS[2:0]`.
   - no extra SPI-cycle delay if angle latches on CS low.
 
-The frontend should be usable by both the fast path and existing sensor driver decode tests where practical.
+Decode helpers should remain reusable by unit tests and by any sensor
+read/decode diagnostic path.
+
+## Sensor Read/Decode Debug Path
+
+For the sensor shell, provide a Zephyr sensor driver surface for each fast
+encoder driver where useful:
+
+- `.submit()` starts a diagnostic sample request.
+- `.get_decoder()` returns the decoder for shell-side formatted output.
+- `.sample_fetch()` and `.channel_get()` are intentionally not implemented.
+- The diagnostic path may use a work item to poll `rt_spi_collect()` and then
+  complete the submitted sensor SQE.
+- The diagnostic path must return `-EBUSY` while realtime mode owns the
+  encoder/transport.
+
+This preserves the ability to use the sensor shell for debugging without
+putting Zephyr SPI or RTIO bus transactions in the realtime control path.
+
+## Ownership and Synchronization
+
+The transport and encoder driver are single-client, single-in-flight systems.
+
+Realtime control has priority:
+
+- `ENCODER_RT_MODE_REALTIME` is selected before enabling the control loop.
+- In realtime mode, timer/control ISR request/collect owns the pipeline.
+- Sensor `.submit()` returns `-EBUSY` in realtime mode.
+- Diagnostic mode may be enabled only when the control loop is not using the
+  encoder.
+
+Use short `irq_lock()` critical sections for state ownership transitions and
+sample-ready handoff. Do not use kernel queues, semaphores, logging, or work
+submission from direct ISR context. Atomics are not required for the
+single-core Cortex-M ownership path; simple counters may remain plain integers
+when updated under the same ownership rules.
+
+No callback from `rt_spi` is required initially. The SPI ISR only publishes a
+completed raw frame. The ADC/control ISR collects it. Sensor diagnostic
+completion can be handled by deferred work because that path is not
+latency-critical.
 
 ## STM32H7 FIFO Backend
 
@@ -165,7 +286,7 @@ H7-specific notes:
 
 The first H7 implementation should be FIFO-only and fully validated before this mode is added.
 
-H7 non-FIFO mode exists for parity with the upstream STM32 SPI driver, where FIFO behavior is controlled by devicetree. It should use the same public transport API and the same encoder frontend code.
+H7 non-FIFO mode exists for parity with the upstream STM32 SPI driver, where FIFO behavior is controlled by devicetree. It should use the same public transport API and the same realtime encoder driver code.
 
 Candidate devicetree property:
 
@@ -245,31 +366,37 @@ Kconfig should not select board-level CS behavior. It should only enable the
 driver/backend and unavoidable SoC-family workarounds, such as STM32 errata
 handling. Hardware-vs-GPIO CS is board wiring and belongs in devicetree.
 
-Encoder frontend nodes should reference the engine:
+Encoder nodes should reference the transport engine:
 
 ```dts
-rtspi0: rt-spi@... {
+&spi3 {
 	compatible = "rubus,stm32-rt-spi";
-	cs-gpios = <&gpiox y GPIO_ACTIVE_LOW>;
-	spi-frequency = <1000000>;
+	status = "okay";
+	spi-clock-frequency = <1000000>;
 	max-frame-len = <8>;
 	fifo-enable;
-};
 
-encoder1: encoder@0 {
-	compatible = "brcm,aeat-9955-fast";
-	transport = <&rtspi0>;
-	encoder-direction-sign = <(-1)>;
+	encoder1: aeat9955@0 {
+		compatible = "brcm,aeat-9955-fast";
+		reg = <0>;
+		transport = <&spi3>;
+		encoder-direction-sign = <(-1)>;
+	};
 };
 ```
 
 ## Integration With Existing Code
 
-Keep current RTIO/sensor path available:
+Add fast encoder drivers above the low-latency transport:
+
+- `drivers/encoder/aeat9955_fast.c`,
+- `drivers/encoder/mt6835_fast.c`,
+- shared decode helpers where practical.
+
+Keep a sensor read/decode diagnostic surface available where useful:
 
 - sensor shell diagnostics,
-- register access,
-- commissioning checks,
+- commissioning checks that run outside the control ISR,
 - non-control telemetry,
 - fallback when fast path is disabled.
 
@@ -277,11 +404,10 @@ Add fast path into the motor encoder pipeline:
 
 ```text
 timer/direct encoder trigger ISR
-  -> rt_spi_request()
+  -> encoder_rt_request_sample()
 
 ADC/control ISR
-  -> rt_spi_collect()
-  -> encoder frontend decode
+  -> encoder_rt_collect_sample()
   -> angle_observer_update()
 ```
 
@@ -321,6 +447,7 @@ The fast path must obey:
 - no heap allocation,
 - no unbounded loops,
 - no generic SPI API calls from control ISR,
+- no internal RTIO dependency in the realtime request/collect path,
 - no shared mutable TX buffer across transactions unless only one in-flight transaction is impossible by construction.
 
 ## Implementation Phases
@@ -411,12 +538,33 @@ Validation:
 - HIL: request/collect at 20 kHz trigger rate without hard faults.
 - HIL: raw trace shows no transport drops with motor disabled.
 
-### Phase 3: AEAT-9955 Fast Frontend
+### Phase 3: Realtime Encoder API
 
+- Add `include/drivers/encoder_rt.h`.
+- Add public inline wrappers for set-mode/request/collect/stats.
+- Define common realtime sample and stats structs.
+- Define ownership semantics:
+  - realtime mode owns request/collect,
+  - diagnostic sensor submit returns `-EBUSY` while realtime is active.
+- Keep dispatch as a custom Zephyr device API initially.
+- Document optional driver-specific static-inline fast helpers if profiling
+  shows API dispatch cost is meaningful.
+
+Validation:
+
+- Compile-only validation for the public API.
+- Unit tests for mode transitions if a fake backend is added.
+
+### Phase 4: AEAT-9955 Fast Driver
+
+- Implement `brcm,aeat-9955-fast` as a real driver above `rt_spi`.
+- Implement realtime encoder API.
 - Implement AEAT frame preparation.
 - Reuse or share AEAT decode/parity/status logic.
 - Account for AEAT pipeline delay explicitly.
-- Wire into motor encoder pipeline behind Kconfig/devicetree selection.
+- Wire into motor encoder pipeline behind devicetree selection.
+- Optionally implement Zephyr sensor `.submit` and `.get_decoder` for sensor
+  shell diagnostics; do not implement `.sample_fetch` or `.channel_get`.
 
 Validation:
 
@@ -424,7 +572,7 @@ Validation:
 - Velocity-generated run: raw trace angle changes with expected sign/speed.
 - Current-enabled run: parity errors are counted, not fatal transport crashes.
 
-### Phase 4: H7 FIFO HIL Hardening
+### Phase 5: H7 FIFO HIL Hardening
 
 - Run repeated prepare/alignment cycles.
 - Run generated velocity with fast-path trace.
@@ -439,11 +587,11 @@ Validation:
 - Transport errors, if injected or observed, are counted and recover cleanly.
 - AEAT signal-integrity errors are visible as frame/parity errors only.
 
-### Phase 5: STM32H7 Non-FIFO Backend
+### Phase 6: STM32H7 Non-FIFO Backend
 
 - Implement H7 non-FIFO backend selected by absence of `fifo-enable`.
 - Follow upstream completion/flag-clear handling.
-- Keep same API and encoder frontends.
+- Keep the same transport API and realtime encoder drivers.
 
 Validation:
 
@@ -451,7 +599,7 @@ Validation:
 - Logic analyzer: verify CS timing and frame bytes.
 - HIL smoke test at a conservative trigger rate.
 
-### Phase 6: STM32F4 Byte Backend
+### Phase 7: STM32F4 Byte Backend
 
 - Implement F4 non-FIFO backend.
 - Keep same transport API.
@@ -463,11 +611,14 @@ Validation:
 - If hardware exists: logic analyzer frame check and basic request/collect test.
 - If no hardware: compile-only plus unit-test backend coverage.
 
-### Phase 7: MT6835 Fast Frontend
+### Phase 8: MT6835 Fast Driver
 
 - Implement MT6835 frame preparation.
 - Reuse CRC/status decode.
 - Wire into motor encoder pipeline.
+- Implement realtime encoder API.
+- Optionally implement Zephyr sensor `.submit` and `.get_decoder` for sensor
+  shell diagnostics; do not implement `.sample_fetch` or `.channel_get`.
 
 Validation:
 
@@ -475,11 +626,11 @@ Validation:
 - Velocity-generated run: angle velocity matches commanded direction/speed.
 - Current-enabled run: CRC/status counters remain clean or report cleanly.
 
-### Phase 8: Control Integration
+### Phase 9: Control Integration
 
 - Select encoder source by devicetree/Kconfig:
-  - RTIO sensor path,
-  - real-time SPI fast path.
+  - existing sensor/RTIO diagnostic path when enabled,
+  - realtime encoder API path.
 - Keep control loop input type unchanged.
 - Ensure angle observer owns wrap/offset/latency compensation.
 - Ensure control ISR sees bounded stale/fault behavior.
@@ -490,7 +641,7 @@ Validation:
 - Encoder current mode enters without RTIO/SPI hard fault.
 - Encoder velocity/position modes fail gracefully on frame errors.
 
-### Phase 9: Diagnostics and Operator Shell
+### Phase 10: Diagnostics and Operator Shell
 
 - Add shell commands:
   - `motor encoder fast status`
@@ -504,7 +655,7 @@ Validation:
 - Trace dump works after high-rate capture.
 - Counters distinguish transport errors from parity/CRC/status errors.
 
-### Phase 10: Cleanup and Default Policy
+### Phase 11: Cleanup and Default Policy
 
 - Decide default encoder path per motor profile overlay.
 - Keep RTIO path for shell/sensor diagnostics unless explicitly removed later.
@@ -527,20 +678,21 @@ The work is complete when:
 - MT6835 CRC/status errors are counted and do not corrupt transport state.
 - Control ISR uses no Zephyr blocking/kernel queue APIs for encoder acquisition.
 - Existing sensor shell path remains available for diagnostics.
-- Encoder frontend decode is shared or behaviorally identical between sensor and fast paths.
+- Encoder decode is shared or behaviorally identical between sensor and realtime paths.
 - Raw trace can prove frame correctness and sample timing.
 
 ## Open Decisions
 
 - Whether to put the transport under `drivers/rt_spi/`, `drivers/misc/`, or `app/src/`.
-- Whether to expose it as a Zephyr device with a custom API or plain app-level singleton.
 - Whether H7 and F4 should be separate source files selected by devicetree compatible, or one source with SoC conditionals.
 - Whether CS should be normal GPIO only, or optionally hardware NSS after timing is verified.
 - Whether the fast path should support one latest-sample slot only or always include an optional SPSC ring.
+- Whether realtime encoder API dispatch is acceptable in the final ISR path, or
+  whether selected drivers need direct static-inline helpers after profiling.
 
 ## Recommendation
 
-Start with a custom Zephyr device using a private API:
+Continue with a custom Zephyr device for the transport:
 
 ```text
 drivers/rt_spi/
@@ -552,12 +704,19 @@ drivers/rt_spi/
 dts/bindings/rt_spi/rubus,stm32-rt-spi.yaml
 ```
 
-Then add encoder frontends outside the transport:
+Then add realtime encoder drivers outside the transport:
 
 ```text
 drivers/encoder/
+  encoder_rt.h
   aeat9955_fast.c
   mt6835_fast.c
 ```
 
-This keeps the real-time transport reusable while avoiding the complexity of a full Zephyr SPI driver.
+This keeps the realtime transport reusable while avoiding the complexity of a
+full Zephyr SPI driver. The encoder drivers provide the reusable device API for
+AEAT-9955, MT6835, and future encoders. For the hot ISR path, start with the
+custom device API because one function-pointer dispatch per request/collect is
+likely acceptable on Cortex-M7 and is dominated by SPI/control work. If latency
+measurements show otherwise, add optional driver-specific inline fast helpers in
+the same style as MCPWM's STM32 fast helpers.
