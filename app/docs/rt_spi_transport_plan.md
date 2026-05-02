@@ -237,6 +237,45 @@ encoder driver where useful:
 This preserves the ability to use the sensor shell for debugging without
 putting Zephyr SPI or RTIO bus transactions in the realtime control path.
 
+## Register and Property Access
+
+Encoder register access is a non-realtime service. It is required for sensor
+attributes, commissioning checks, diagnostics, and device setup, but it must not
+be used from the timer/direct ISR or ADC/control ISR.
+
+For AEAT-9955, the fast driver should provide register helpers using `rt_spi`:
+
+```c
+int aeat9955_fast_read_register(const struct device *dev,
+				uint8_t reg,
+				uint8_t *value);
+int aeat9955_fast_write_register(const struct device *dev,
+				 uint8_t reg,
+				 uint8_t value);
+```
+
+Behavior:
+
+- Use the same AEAT SPI4-16 command/parity framing as the existing sensor
+  driver.
+- Preserve protocol semantics that require CS to return high between write
+  frames.
+- Implement read as command frame plus response frame.
+- Implement write as command/address frame plus data frame.
+- Use the `rt_spi_request()`/`rt_spi_collect()` transport lifecycle.
+- Poll/bounded-wait only from thread or deferred work context.
+- Return `-EBUSY` if realtime mode owns the encoder pipeline.
+- Never call register helpers from the control ISR.
+
+The existing AEAT attribute implementation should be reused where practical,
+but the low-level bus operations should be factored so both the legacy
+Zephyr-SPI sensor driver and the fast `rt_spi` driver can share command
+formatting and decode logic.
+
+Do not mutate EEPROM direction or calibration settings as part of normal motor
+control. Prefer devicetree/runtime software direction settings unless an
+explicit operator command is used to write device NVM.
+
 ## Ownership and Synchronization
 
 The transport and encoder driver are single-client, single-in-flight systems.
@@ -248,6 +287,8 @@ Realtime control has priority:
 - Sensor `.submit()` returns `-EBUSY` in realtime mode.
 - Diagnostic mode may be enabled only when the control loop is not using the
   encoder.
+- Register/property access uses diagnostic ownership and returns `-EBUSY` while
+  realtime ownership is active.
 
 Use short `irq_lock()` critical sections for state ownership transitions and
 sample-ready handoff. Do not use kernel queues, semaphores, logging, or work
@@ -392,10 +433,12 @@ Add fast encoder drivers above the low-latency transport:
 - `drivers/encoder/aeat9955_fast.c`,
 - `drivers/encoder/mt6835_fast.c`,
 - shared decode helpers where practical.
+- shared register command-format helpers where practical.
 
 Keep a sensor read/decode diagnostic surface available where useful:
 
 - sensor shell diagnostics,
+- register/property access,
 - commissioning checks that run outside the control ISR,
 - non-control telemetry,
 - fallback when fast path is disabled.
@@ -562,6 +605,12 @@ Validation:
 - Implement AEAT frame preparation.
 - Reuse or share AEAT decode/parity/status logic.
 - Account for AEAT pipeline delay explicitly.
+- Implement `aeat9955_fast_read_register()` and
+  `aeat9955_fast_write_register()` using `rt_spi`.
+- Factor shared AEAT command formatting so position reads and register
+  accesses use one protocol implementation.
+- Move/copy sensor attribute support onto the fast driver where it is still
+  needed for diagnostics and commissioning.
 - Wire into motor encoder pipeline behind devicetree selection.
 - Optionally implement Zephyr sensor `.submit` and `.get_decoder` for sensor
   shell diagnostics; do not implement `.sample_fetch` or `.channel_get`.
@@ -569,6 +618,10 @@ Validation:
 Validation:
 
 - Compare fast-path angle against existing sensor shell at rest.
+- Read AEAT error-status register through the fast driver and verify MHI/MLO
+  formatting matches the existing sensor shell behavior.
+- Write only safe volatile/config test registers during validation; do not
+  program EEPROM unless explicitly commanded.
 - Velocity-generated run: raw trace angle changes with expected sign/speed.
 - Current-enabled run: parity errors are counted, not fatal transport crashes.
 
@@ -675,6 +728,7 @@ The work is complete when:
 
 - H7 low-latency SPI transport runs at the required trigger rate without hard faults.
 - AEAT parity/status errors are counted and do not corrupt transport state.
+- AEAT register reads/writes work through the fast driver outside realtime mode.
 - MT6835 CRC/status errors are counted and do not corrupt transport state.
 - Control ISR uses no Zephyr blocking/kernel queue APIs for encoder acquisition.
 - Existing sensor shell path remains available for diagnostics.
