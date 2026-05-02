@@ -36,6 +36,8 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_reg_read(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char **argv);

@@ -28,6 +28,7 @@
 
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
+#include <drivers/encoder_rt.h>
 #define MOTOR_ENCODER_IS_AEAT9955 1
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 1
 #elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -1298,6 +1299,88 @@ int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  MHI:        %s", mhi ? "SET" : "CLEAR");
 	shell_print(sh, "  MLO:        %s", mlo ? "SET" : "CLEAR");
 
+	return 0;
+#endif
+}
+
+/* motor encoder fast */
+int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	shell_error(sh, "encoder1 is not a fast encoder_rt device on this build");
+	return -ENOTSUP;
+#else
+	if (!device_is_ready(encoder1)) {
+		shell_error(sh, "encoder1 is not ready");
+		return -ENODEV;
+	}
+
+	struct encoder_rt_stats stats = {0};
+	encoder_rt_get_stats(encoder1, &stats);
+
+	shell_print(sh, "Fast Encoder:");
+	shell_print(sh, "  Device:          %s", encoder1->name);
+	shell_print(sh, "  Pipeline delay:  %u samples", encoder_rt_get_pipeline_delay(encoder1));
+	shell_print(sh, "  Request:         ok=%u busy=%u disabled=%u error=%u",
+		    stats.request_count, stats.busy_count,
+		    stats.disabled_count, stats.request_error_count);
+	shell_print(sh, "  Collect:         ok=%u pending=%u empty=%u error=%u",
+		    stats.collect_count, stats.pending_count,
+		    stats.empty_count, stats.collect_error_count);
+	shell_print(sh, "  Errors:          transport=%u frame=%u parity=%u status=%u warning=%u",
+		    stats.transport_error_count,
+		    stats.frame_error_count,
+		    stats.frame_parity_error_count,
+		    stats.frame_status_error_count,
+		    stats.warning_count);
+
+	return 0;
+#endif
+}
+
+/* motor encoder reg_read <addr> */
+int cmd_motor_encoder_reg_read(const struct shell *sh, size_t argc, char **argv)
+{
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "register reads require the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (argc != 2U) {
+		shell_error(sh, "Usage: motor encoder reg_read <addr>");
+		return -EINVAL;
+	}
+	if (!device_is_ready(encoder1)) {
+		shell_error(sh, "encoder1 is not ready");
+		return -ENODEV;
+	}
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before register reads");
+		return -EBUSY;
+	}
+
+	errno = 0;
+	char *endp = NULL;
+	unsigned long reg = strtoul(argv[1], &endp, 0);
+	if (endp == argv[1] || *endp != '\0' || errno == ERANGE || reg > UINT8_MAX) {
+		shell_error(sh, "addr must be an 8-bit register address");
+		return -EINVAL;
+	}
+
+	uint8_t value = 0U;
+	int ret = aeat9955_fast_read_register(encoder1, (uint8_t)reg, &value);
+	if (ret != 0) {
+		shell_error(sh, "Failed to read AEAT register 0x%02X (err %d)",
+			    (unsigned int)reg, ret);
+		return ret;
+	}
+
+	shell_print(sh, "AEAT-9955 register 0x%02X = 0x%02X",
+		    (unsigned int)reg, value);
 	return 0;
 #endif
 }

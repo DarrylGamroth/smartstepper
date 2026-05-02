@@ -64,23 +64,11 @@ realtime API. The motor-control loop should not know how the encoder frame is
 prepared or decoded. It should only request a sample at the hardware trigger
 point and collect the decoded sample at the control point.
 
-For diagnostics, encoder drivers may also implement Zephyr's modern sensor
-read/decode API:
-
-- implement `.submit`,
-- implement `.get_decoder`,
-- intentionally omit `.sample_fetch`,
-- intentionally omit `.channel_get`.
-
-That path exists for sensor-shell/debug access only. It does not need to be the
-same path used by the realtime control loop.
-
-Implementation note: a Zephyr device has one primary `dev->api` pointer. The
-fast encoder device therefore uses `encoder_rt` as its primary API. If sensor
-shell support is needed for the same physical encoder, provide it through
-separate diagnostic shell commands or a separate diagnostic device; do not try
-to make one device simultaneously expose both `encoder_rt_driver_api` and
-`sensor_driver_api`.
+Diagnostics for realtime encoder devices are exposed through motor-shell
+commands, not Zephyr's sensor shell. A Zephyr device has one primary `dev->api`
+pointer, and the fast encoder device uses `encoder_rt` as its primary API.
+Do not design the same fast encoder device to expose both `encoder_rt_driver_api`
+and `sensor_driver_api`.
 
 It should still use Zephyr conventions where useful:
 
@@ -250,30 +238,29 @@ Examples:
   - check `STATUS[2:0]`.
   - no extra SPI-cycle delay if angle latches on CS low.
 
-Decode helpers should remain reusable by unit tests and by any sensor
-read/decode diagnostic path.
+Decode helpers should remain testable, but the fast drivers copy their required
+protocol logic rather than sharing implementation with legacy sensor drivers.
 
-## Sensor Read/Decode Debug Path
+## Motor-Shell Diagnostics
 
-For the sensor shell, provide a Zephyr sensor driver surface for each fast
-encoder driver where useful:
+Fast encoder diagnostics are handled by `motor encoder ...` commands:
 
-- `.submit()` starts a diagnostic sample request.
-- `.get_decoder()` returns the decoder for shell-side formatted output.
-- `.sample_fetch()` and `.channel_get()` are intentionally not implemented.
-- The diagnostic path may use a work item to poll `rt_spi_collect()` and then
-  complete the submitted sensor SQE.
-- The diagnostic path must return `-EBUSY` while realtime mode owns the
-  encoder/transport.
+- realtime encoder status/stats,
+- pipeline request/collect counters,
+- raw/status/error counters,
+- explicit register reads for device diagnostics,
+- future guarded register writes for deliberate commissioning/configuration
+  operations.
 
-This preserves the ability to use the sensor shell for debugging without
-putting Zephyr SPI or RTIO bus transactions in the realtime control path.
+Do not route fast-driver diagnostics through Zephyr sensor shell. If full sensor
+shell behavior is needed for comparison, build an overlay that instantiates the
+legacy sensor driver instead of the fast driver.
 
 ## Register and Property Access
 
-Encoder register access is a non-realtime service. It is required for sensor
-attributes, commissioning checks, diagnostics, and device setup, but it must not
-be used from the timer/direct ISR or ADC/control ISR.
+Encoder register access is a non-realtime service. It is required for
+commissioning checks, diagnostics, and device setup, but it must not be used
+from the timer/direct ISR or ADC/control ISR.
 
 For AEAT-9955, the fast driver should provide register helpers using `rt_spi`:
 
@@ -317,7 +304,6 @@ Realtime control has priority:
 
 - `ENCODER_RT_MODE_REALTIME` is selected before enabling the control loop.
 - In realtime mode, timer/control ISR request/collect owns the pipeline.
-- Sensor `.submit()` returns `-EBUSY` in realtime mode.
 - Diagnostic mode may be enabled only when the control loop is not using the
   encoder.
 - Register/property access uses diagnostic ownership and returns `-EBUSY` while
@@ -330,9 +316,8 @@ single-core Cortex-M ownership path; simple counters may remain plain integers
 when updated under the same ownership rules.
 
 No callback from `rt_spi` is required initially. The SPI ISR only publishes a
-completed raw frame. The ADC/control ISR collects it. Sensor diagnostic
-completion can be handled by deferred work because that path is not
-latency-critical.
+completed raw frame. The ADC/control ISR collects it. Thread-context diagnostic
+register transactions use bounded `rt_spi_transceive()`.
 
 ## STM32H7 FIFO Backend
 
@@ -470,13 +455,14 @@ Add fast encoder drivers above the low-latency transport:
 - copied per-driver protocol/decode/register helpers rather than shared code
   with legacy sensor drivers.
 
-Keep a sensor read/decode diagnostic surface available where useful:
+Keep motor-shell diagnostics available:
 
-- sensor shell diagnostics,
-- register/property access,
+- fast encoder stats/status,
+- register reads,
 - commissioning checks that run outside the control ISR,
 - non-control telemetry,
-- fallback when fast path is disabled.
+- fallback to legacy sensor-driver overlays when sensor shell comparison is
+  required.
 
 Add fast path into the motor encoder pipeline:
 
@@ -542,6 +528,11 @@ The fast path must obey:
 - Added `aeat9955_fast_read_register()` and
   `aeat9955_fast_write_register()`.
 - Added `rt_spi_transceive()` for bounded non-realtime register transactions.
+- Sensor-shell support was intentionally dropped from the fast-device plan;
+  diagnostics now belong in motor shell commands.
+- Added initial fast-driver motor-shell commands:
+  - `motor encoder fast`
+  - `motor encoder reg_read <addr>`
 - HIL smoke result:
   - `motor encoder alarm` returned `Raw status: 0x60`.
   - boot calibration completed.
@@ -601,7 +592,9 @@ Implementation constraint from this audit:
   - `st,soft-nss` means software NSS without CS assertion.
   - neither means hardware NSS output.
 - For the initial H7 validation path, `fifo-enable` on the low-latency transport enables the H7 FIFO backend.
-- The existing sensor driver remains present for shell/property access; the fast transport must not call Zephyr SPI APIs from ISR context.
+- The existing sensor driver remains available through alternate overlays for
+  comparison/debug; the fast transport must not call Zephyr SPI APIs from ISR
+  context.
 
 ### Phase 1: Transport Interface Skeleton
 
@@ -641,7 +634,7 @@ Validation:
 - Define common realtime sample and stats structs.
 - Define ownership semantics:
   - realtime mode owns request/collect,
-  - diagnostic sensor submit returns `-EBUSY` while realtime is active.
+  - register diagnostics return `-EBUSY` while realtime is active.
 - Keep dispatch as a custom Zephyr device API initially.
 - Document optional driver-specific static-inline fast helpers if profiling
   shows API dispatch cost is meaningful.
@@ -663,17 +656,16 @@ Validation:
   `aeat9955_fast_write_register()` using `rt_spi`.
 - Keep fast-driver position reads and register accesses on one private AEAT
   protocol implementation.
-- Move/copy sensor attribute support onto the fast driver where it is still
-  needed for diagnostics and commissioning.
+- Add motor-shell diagnostics for fast-driver status and selected register
+  reads.
 - Wire into motor encoder pipeline behind devicetree selection.
-- Optionally implement Zephyr sensor `.submit` and `.get_decoder` for sensor
-  shell diagnostics; do not implement `.sample_fetch` or `.channel_get`.
 
 Validation:
 
-- Compare fast-path angle against existing sensor shell at rest.
+- Compare fast-path angle against a known-good reference workflow at rest when
+  needed.
 - Read AEAT error-status register through the fast driver and verify MHI/MLO
-  formatting matches the existing sensor shell behavior.
+  formatting through motor shell.
 - Write only safe volatile/config test registers during validation; do not
   program EEPROM unless explicitly commanded.
 - Velocity-generated run: raw trace angle changes with expected sign/speed.
@@ -724,19 +716,18 @@ Validation:
 - Reuse CRC/status decode.
 - Wire into motor encoder pipeline.
 - Implement realtime encoder API.
-- Optionally implement Zephyr sensor `.submit` and `.get_decoder` for sensor
-  shell diagnostics; do not implement `.sample_fetch` or `.channel_get`.
 
 Validation:
 
-- Compare fast-path angle against existing sensor shell at rest.
+- Compare fast-path angle against a known-good reference workflow at rest when
+  needed.
 - Velocity-generated run: angle velocity matches commanded direction/speed.
 - Current-enabled run: CRC/status counters remain clean or report cleanly.
 
 ### Phase 9: Control Integration
 
 - Select encoder source by devicetree/Kconfig:
-  - existing sensor/RTIO diagnostic path when enabled,
+  - legacy sensor/RTIO overlay when enabled,
   - realtime encoder API path.
 - Keep control loop input type unchanged.
 - Ensure angle observer owns wrap/offset/latency compensation.
@@ -765,7 +756,8 @@ Validation:
 ### Phase 11: Cleanup and Default Policy
 
 - Decide default encoder path per motor profile overlay.
-- Keep RTIO path for shell/sensor diagnostics unless explicitly removed later.
+- Keep legacy RTIO sensor-driver overlays available for comparison/debug unless
+  explicitly removed later.
 - Document known-good HIL workflows.
 - Remove obsolete experimental SPI code if no longer needed.
 
@@ -785,7 +777,9 @@ The work is complete when:
 - AEAT register reads/writes work through the fast driver outside realtime mode.
 - MT6835 CRC/status errors are counted and do not corrupt transport state.
 - Control ISR uses no Zephyr blocking/kernel queue APIs for encoder acquisition.
-- Existing sensor shell path remains available for diagnostics.
+- Fast-driver diagnostics are available through motor shell.
+- Legacy sensor shell access remains available only through legacy sensor-driver
+  overlays.
 - Encoder decode is behaviorally identical between sensor and realtime paths,
   but not necessarily implemented by shared code.
 - Raw trace can prove frame correctness and sample timing.
