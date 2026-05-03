@@ -619,7 +619,7 @@ void motor_state_align_pos_inject_exit(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
 }
 
-/* State: ALIGN_POS_SAMPLE - hold +Id and capture fresh encoder-driven observer samples */
+/* State: ALIGN_POS_SAMPLE - hold +Id in generated frame and capture fresh encoder samples */
 void motor_state_align_pos_sample_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
@@ -627,7 +627,13 @@ void motor_state_align_pos_sample_entry(void *obj)
 	LOG_INF("Entering ALIGN_POS_SAMPLE state");
 	params->calibration.align_pos_sample_retries = 0U;
 	motor_align_reset_pos_sample_accumulator(params);
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+	/*
+	 * Keep generated-angle commutation active while sampling the raw encoder.
+	 * The encoder offset is not known yet; using encoder angle for Park/invPark
+	 * here would move the alignment vector during the measurement window.
+	 */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_ENCODER_READ) |
 				     BIT(MOTOR_FEATURE_PI_CONTROL));
 	(void)motor_align_start_sample_window(params);
 }
@@ -690,7 +696,8 @@ void motor_state_align_pos_sample_exit(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Exiting ALIGN_POS_SAMPLE state");
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				      BIT(MOTOR_FEATURE_ENCODER_READ));
 }
 
 /* State: ALIGN_NEG_INJECT - inject -Id with generated angle frame */
@@ -738,7 +745,7 @@ void motor_state_align_neg_inject_exit(void *obj)
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
 }
 
-/* State: ALIGN_NEG_SAMPLE - hold -Id, capture observer sample, finalize offset */
+/* State: ALIGN_NEG_SAMPLE - hold -Id in generated frame, capture encoder sample, finalize offset */
 void motor_state_align_neg_sample_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
@@ -746,7 +753,9 @@ void motor_state_align_neg_sample_entry(void *obj)
 	LOG_INF("Entering ALIGN_NEG_SAMPLE state");
 	params->calibration.align_neg_sample_retries = 0U;
 	motor_align_reset_neg_sample_accumulator(params);
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
+	/* See ALIGN_POS_SAMPLE: commutation must remain in generated frame. */
+	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				     BIT(MOTOR_FEATURE_ENCODER_READ) |
 				     BIT(MOTOR_FEATURE_PI_CONTROL));
 	(void)motor_align_start_sample_window(params);
 }
@@ -838,5 +847,6 @@ void motor_state_align_neg_sample_exit(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Exiting ALIGN_NEG_SAMPLE state");
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
+				      BIT(MOTOR_FEATURE_ENCODER_READ));
 }

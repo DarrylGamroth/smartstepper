@@ -550,10 +550,11 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	}
 
 	if (motor_is_align_sample_state(mode_flags) &&
-	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
+	    encoder_sample != NULL &&
+	    encoder_sample->enabled &&
 	    enc_res->fresh &&
 	    !enc_res->frame_error) {
-		float32_t align_mech_rad = enc_res->control_fb.observer_input_rad;
+		float32_t align_mech_rad = enc_res->angle_control_deg * (PI_F32 / 180.0f);
 		if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
 			struct motor_align_sample_accum acc = {0};
 			motor_align_load_pos_accum(params, &acc);
