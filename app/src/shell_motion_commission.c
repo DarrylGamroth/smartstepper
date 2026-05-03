@@ -797,7 +797,6 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 
 		struct motor_encoder_map_detect_sample *sample =
 			&encoder_detect_samples[accepted++];
-		sample->generated_elec_rad = wrap_rad_2pi(g_motor_params->live.elec_angle_rad);
 		sample->flags = 0U;
 
 		struct motor_encoder_raw_trace_sample raw_trace = {0};
@@ -806,8 +805,12 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 									&raw_trace);
 		if (have_raw_trace) {
 			last_trace_loop = raw_trace.control_loop_count;
+			sample->generated_mech_rad = wrap_rad_2pi(raw_trace.generated_mech_rad);
+			sample->generated_elec_rad = wrap_rad_2pi(raw_trace.generated_elec_rad);
 			sample->encoder_mech_rad = wrap_rad_2pi(raw_trace.raw_angle_rad);
 		} else {
+			sample->generated_mech_rad = 0.0f;
+			sample->generated_elec_rad = 0.0f;
 			sample->encoder_mech_rad = 0.0f;
 			sample->flags |= MOTOR_ENCODER_MAP_SAMPLE_ERROR;
 		}
@@ -819,6 +822,7 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		     (raw_trace.sample_error != 0U ||
 		      raw_trace.sample_io_fault != 0U ||
 		      raw_trace.sample_fresh == 0U)) ||
+		    !isfinite(sample->generated_mech_rad) ||
 		    !isfinite(sample->generated_elec_rad) ||
 		    !isfinite(sample->encoder_mech_rad)) {
 			sample->flags |= MOTOR_ENCODER_MAP_SAMPLE_ERROR;

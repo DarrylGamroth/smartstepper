@@ -48,14 +48,14 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 	}
 
 	bool have_prev = false;
-	float32_t prev_gen_wrapped = 0.0f;
+	float32_t prev_gen_mech_wrapped = 0.0f;
 	float32_t prev_enc_wrapped = 0.0f;
-	float32_t gen_unwrapped = 0.0f;
+	float32_t gen_mech_unwrapped = 0.0f;
 	float32_t enc_unwrapped = 0.0f;
 	float32_t first_enc_unwrapped = 0.0f;
 	float32_t last_enc_unwrapped = 0.0f;
-	float32_t first_gen_unwrapped = 0.0f;
-	float32_t last_gen_unwrapped = 0.0f;
+	float32_t first_gen_mech_unwrapped = 0.0f;
+	float32_t last_gen_mech_unwrapped = 0.0f;
 	float32_t corr_num = 0.0f;
 	float32_t corr_gen_sq = 0.0f;
 	float32_t corr_enc_sq = 0.0f;
@@ -68,6 +68,7 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 			out->encoder_warning_count++;
 		}
 		if ((sample->flags & MOTOR_ENCODER_MAP_SAMPLE_ERROR) != 0U ||
+		    !isfinite(sample->generated_mech_rad) ||
 		    !isfinite(sample->generated_elec_rad) ||
 		    !isfinite(sample->encoder_mech_rad)) {
 			out->rejected_samples++;
@@ -77,34 +78,34 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 			continue;
 		}
 
-		float32_t gen_wrapped = wrap_rad_2pi(sample->generated_elec_rad);
+		float32_t gen_mech_wrapped = wrap_rad_2pi(sample->generated_mech_rad);
 		float32_t enc_wrapped = wrap_rad_2pi(sample->encoder_mech_rad);
 		if (!have_prev) {
 			have_prev = true;
-			prev_gen_wrapped = gen_wrapped;
+			prev_gen_mech_wrapped = gen_mech_wrapped;
 			prev_enc_wrapped = enc_wrapped;
-			gen_unwrapped = gen_wrapped;
+			gen_mech_unwrapped = gen_mech_wrapped;
 			enc_unwrapped = enc_wrapped;
-			first_gen_unwrapped = gen_unwrapped;
+			first_gen_mech_unwrapped = gen_mech_unwrapped;
 			first_enc_unwrapped = enc_unwrapped;
-			last_gen_unwrapped = gen_unwrapped;
+			last_gen_mech_unwrapped = gen_mech_unwrapped;
 			last_enc_unwrapped = enc_unwrapped;
 			accepted++;
 			continue;
 		}
 
-		float32_t dgen = wrap_rad_pi(gen_wrapped - prev_gen_wrapped);
+		float32_t dgen = wrap_rad_pi(gen_mech_wrapped - prev_gen_mech_wrapped);
 		float32_t denc = wrap_rad_pi(enc_wrapped - prev_enc_wrapped);
-		gen_unwrapped += dgen;
+		gen_mech_unwrapped += dgen;
 		enc_unwrapped += denc;
 		corr_num += dgen * denc;
 		corr_gen_sq += dgen * dgen;
 		corr_enc_sq += denc * denc;
 		deltas++;
 
-		prev_gen_wrapped = gen_wrapped;
+		prev_gen_mech_wrapped = gen_mech_wrapped;
 		prev_enc_wrapped = enc_wrapped;
-		last_gen_unwrapped = gen_unwrapped;
+		last_gen_mech_unwrapped = gen_mech_unwrapped;
 		last_enc_unwrapped = enc_unwrapped;
 		accepted++;
 	}
@@ -115,9 +116,9 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 	}
 
 	out->mech_motion_rad = fabsf(last_enc_unwrapped - first_enc_unwrapped);
-	float32_t gen_motion_rad = fabsf(last_gen_unwrapped - first_gen_unwrapped);
+	float32_t gen_motion_rad = fabsf(last_gen_mech_unwrapped - first_gen_mech_unwrapped);
 	if (out->mech_motion_rad < cfg->min_mech_motion_rad ||
-	    gen_motion_rad < cfg->min_mech_motion_rad * cfg->pole_pairs) {
+	    gen_motion_rad < cfg->min_mech_motion_rad) {
 		return -ERANGE;
 	}
 
@@ -132,7 +133,9 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 
 	float32_t total_enc_delta = last_enc_unwrapped - first_enc_unwrapped;
 	if (fabsf(total_enc_delta) > 1.0e-6f) {
-		out->ratio = fabsf((last_gen_unwrapped - first_gen_unwrapped) / total_enc_delta);
+		float32_t gen_elec_delta =
+			(last_gen_mech_unwrapped - first_gen_mech_unwrapped) * cfg->pole_pairs;
+		out->ratio = fabsf(gen_elec_delta / total_enc_delta);
 	} else {
 		out->ratio = 0.0f;
 	}
@@ -141,35 +144,35 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 	float32_t offset_sum_sin = 0.0f;
 	float32_t offset_sum_cos = 0.0f;
 	have_prev = false;
-	prev_gen_wrapped = 0.0f;
+	prev_gen_mech_wrapped = 0.0f;
 	prev_enc_wrapped = 0.0f;
 
 	for (uint32_t i = 0U; i < sample_count; i++) {
 		const struct motor_encoder_map_detect_sample *sample = &samples[i];
 		if ((sample->flags & MOTOR_ENCODER_MAP_SAMPLE_ERROR) != 0U ||
+		    !isfinite(sample->generated_mech_rad) ||
 		    !isfinite(sample->generated_elec_rad) ||
 		    !isfinite(sample->encoder_mech_rad)) {
 			continue;
 		}
 
-		float32_t gen_wrapped = wrap_rad_2pi(sample->generated_elec_rad);
+		float32_t gen_mech_wrapped = wrap_rad_2pi(sample->generated_mech_rad);
+		float32_t gen_elec_wrapped = wrap_rad_2pi(sample->generated_elec_rad);
 		float32_t enc_wrapped = wrap_rad_2pi(sample->encoder_mech_rad);
 		float32_t offset_sample =
-			wrap_rad_pi(gen_wrapped -
+			wrap_rad_pi(gen_elec_wrapped -
 				    ((float32_t)out->direction_sign * cfg->pole_pairs * enc_wrapped));
 		offset_sum_sin += sinf(offset_sample);
 		offset_sum_cos += cosf(offset_sample);
 
 		if (have_prev) {
-			float32_t dgen = wrap_rad_pi(gen_wrapped - prev_gen_wrapped);
+			float32_t dgen = wrap_rad_pi(gen_mech_wrapped - prev_gen_mech_wrapped);
 			float32_t denc = wrap_rad_pi(enc_wrapped - prev_enc_wrapped);
-			float32_t direction_err =
-				wrap_rad_pi(dgen -
-					    ((float32_t)out->direction_sign * cfg->pole_pairs * denc));
+			float32_t direction_err = dgen - ((float32_t)out->direction_sign * denc);
 			direction_sse += direction_err * direction_err;
 		}
 		have_prev = true;
-		prev_gen_wrapped = gen_wrapped;
+		prev_gen_mech_wrapped = gen_mech_wrapped;
 		prev_enc_wrapped = enc_wrapped;
 	}
 
@@ -186,6 +189,7 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 	for (uint32_t i = 0U; i < sample_count; i++) {
 		const struct motor_encoder_map_detect_sample *sample = &samples[i];
 		if ((sample->flags & MOTOR_ENCODER_MAP_SAMPLE_ERROR) != 0U ||
+		    !isfinite(sample->generated_mech_rad) ||
 		    !isfinite(sample->generated_elec_rad) ||
 		    !isfinite(sample->encoder_mech_rad)) {
 			continue;

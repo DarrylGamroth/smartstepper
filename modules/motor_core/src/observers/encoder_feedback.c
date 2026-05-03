@@ -96,6 +96,10 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	}
 
 	float32_t generated_angle_rad = angle_gen_get_angle(ctx->angle_gen);
+	float32_t generated_mech_rad = wrap_rad_2pi(generated_angle_rad);
+	float32_t generated_elec_rad =
+		wrap_rad_2pi((generated_mech_rad + ctx->observer->mech_angle_offset_rad) *
+			     (float32_t)ctx->pole_pairs);
 	struct motor_angle_path_input path_in = {
 		.feature_angle_gen = feature_angle_gen,
 		.sample_enabled = raw_sample_enabled,
@@ -117,6 +121,8 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	feedback->input_source = path_out.control.input_source;
 	*ctx->observer_input_rad = path_out.observer_input_rad;
 	*ctx->encoder_input_source = feedback->input_source;
+	feedback->generated_mech_rad = generated_mech_rad;
+	feedback->generated_elec_rad = generated_elec_rad;
 	feedback->observer_input_rad = path_out.observer_input_rad;
 	feedback->observer_mech_rad = path_out.observer_mech_rad;
 	feedback->observer_elec_rad = path_out.observer_elec_rad;

@@ -200,6 +200,10 @@ motor commission encoder clear
 - If the result is invalid with low measured motion, increase the generated
   sweep current/speed or debug open-loop motion first. The command intentionally
   leaves runtime parameters unchanged unless `apply` is run after a valid result.
+- AEAT-9955 HIL evidence shows parity-clean implausible angle jumps can occur.
+  The encoder pipeline has a `glitch` counter in `motor encoder pipeline status`
+  and rejects jumps above the ISR plausibility threshold before the observer uses
+  them.
 
 ## AEAT-9955 Telemetry-Only Use
 

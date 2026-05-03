@@ -263,6 +263,8 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->input_source = encoder_fb->input_source;
 	control_fb->angle_sensor_deg = encoder_fb->angle_sensor_deg;
 	control_fb->angle_control_deg = encoder_fb->angle_control_deg;
+	control_fb->generated_mech_rad = encoder_fb->generated_mech_rad;
+	control_fb->generated_elec_rad = encoder_fb->generated_elec_rad;
 	control_fb->observer_input_rad = encoder_fb->observer_input_rad;
 	control_fb->observer_mech_rad = encoder_fb->observer_mech_rad;
 	control_fb->observer_elec_rad = encoder_fb->observer_elec_rad;

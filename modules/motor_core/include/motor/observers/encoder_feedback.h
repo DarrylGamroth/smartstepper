@@ -58,6 +58,8 @@ struct motor_encoder_feedback {
 
 	float32_t angle_sensor_deg;
 	float32_t angle_control_deg;
+	float32_t generated_mech_rad;
+	float32_t generated_elec_rad;
 	float32_t observer_input_rad;
 	float32_t observer_mech_rad;
 	float32_t observer_elec_rad;

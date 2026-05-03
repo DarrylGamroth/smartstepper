@@ -89,6 +89,8 @@ struct motor_encoder_raw_trace_sample {
 	float32_t raw_angle_rad;
 	float32_t control_angle_deg;
 	float32_t control_angle_rad;
+	float32_t generated_mech_rad;
+	float32_t generated_elec_rad;
 	float32_t observer_input_rad;
 	uint8_t input_source;
 	uint8_t quality_flags;

@@ -31,6 +31,7 @@ struct motor_encoder_map_detect_config {
 };
 
 struct motor_encoder_map_detect_sample {
+	float32_t generated_mech_rad;
 	float32_t generated_elec_rad;
 	float32_t encoder_mech_rad;
 	uint32_t flags;

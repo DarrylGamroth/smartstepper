@@ -396,3 +396,8 @@ Validation evidence:
   insufficient mechanical motion; a 5 Hz sweep collected motion but failed residual/correlation
   quality gates, which is expected behavior for a commissioning check when the encoder/motion
   relationship is not yet reliable.
+- Follow-up HIL on 2026-05-03 showed the AEAT encoder stream contains parity-clean but implausible
+  angle jumps. The encoder pipeline now counts and rejects those as `glitch` frame errors before
+  the observer consumes them. Example evidence from one 0.8 s sweep after adding the gate:
+  `parity=157`, `glitch=831`, and the clean raw trace span was only `-23.040 deg`, so encoder
+  signal/data integrity remains the blocker for encoder-based commutation.

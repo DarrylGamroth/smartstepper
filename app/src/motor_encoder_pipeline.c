@@ -6,6 +6,7 @@
 #include "motor_encoder_pipeline.h"
 
 #include <errno.h>
+#include <math.h>
 #include <string.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
@@ -84,7 +85,15 @@ static atomic_t motor_encoder_collect_transport_error_count;
 static atomic_t motor_encoder_collect_frame_error_count;
 static atomic_t motor_encoder_collect_frame_parity_error_count;
 static atomic_t motor_encoder_collect_frame_status_error_count;
+static atomic_t motor_encoder_collect_frame_glitch_error_count;
 static atomic_t motor_encoder_test_inject_mode;
+
+#define MOTOR_ENCODER_MAX_STEP_DEG 10.0f
+#define MOTOR_ENCODER_GLITCH_RESYNC_COUNT 8U
+
+static bool motor_encoder_last_angle_valid;
+static float32_t motor_encoder_last_angle_deg;
+static uint8_t motor_encoder_consecutive_glitches;
 
 /*
  * Safe baseline for Zephyr STM32 SPI RTIO. Back-to-back overlapping encoder
@@ -99,6 +108,49 @@ static inline void motor_encoder_inflight_decrement(void)
 	if (atomic_get(&motor_encoder_read_in_flight_count) > 0) {
 		atomic_dec(&motor_encoder_read_in_flight_count);
 	}
+}
+
+static inline float32_t motor_encoder_wrap_delta_deg(float32_t delta_deg)
+{
+	while (delta_deg > 180.0f) {
+		delta_deg -= 360.0f;
+	}
+	while (delta_deg < -180.0f) {
+		delta_deg += 360.0f;
+	}
+	return delta_deg;
+}
+
+static bool motor_encoder_pipeline_angle_glitch(float32_t angle_deg)
+{
+	if (!isfinite(angle_deg)) {
+		return true;
+	}
+
+	if (!motor_encoder_last_angle_valid) {
+		motor_encoder_last_angle_deg = angle_deg;
+		motor_encoder_last_angle_valid = true;
+		motor_encoder_consecutive_glitches = 0U;
+		return false;
+	}
+
+	float32_t delta_deg =
+		motor_encoder_wrap_delta_deg(angle_deg - motor_encoder_last_angle_deg);
+	if (fabsf(delta_deg) <= MOTOR_ENCODER_MAX_STEP_DEG) {
+		motor_encoder_last_angle_deg = angle_deg;
+		motor_encoder_consecutive_glitches = 0U;
+		return false;
+	}
+
+	if (motor_encoder_consecutive_glitches < UINT8_MAX) {
+		motor_encoder_consecutive_glitches++;
+	}
+	if (motor_encoder_consecutive_glitches >= MOTOR_ENCODER_GLITCH_RESYNC_COUNT) {
+		motor_encoder_last_angle_deg = angle_deg;
+		motor_encoder_consecutive_glitches = 0U;
+	}
+
+	return true;
 }
 
 void motor_encoder_pipeline_set_enabled(bool enabled)
@@ -138,6 +190,8 @@ void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_parity_error_count);
 	stats->collect_frame_status_error =
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_status_error_count);
+	stats->collect_frame_glitch_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_frame_glitch_error_count);
 }
 
 void motor_encoder_pipeline_reset_stats(void)
@@ -154,6 +208,10 @@ void motor_encoder_pipeline_reset_stats(void)
 	atomic_set(&motor_encoder_collect_frame_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_parity_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_status_error_count, 0);
+	atomic_set(&motor_encoder_collect_frame_glitch_error_count, 0);
+	motor_encoder_last_angle_valid = false;
+	motor_encoder_last_angle_deg = 0.0f;
+	motor_encoder_consecutive_glitches = 0U;
 }
 
 void motor_encoder_pipeline_set_test_inject_mode(enum motor_encoder_test_inject_mode mode)
@@ -250,6 +308,12 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 		atomic_inc(&motor_encoder_collect_frame_status_error_count);
 	}
 
+	if (ret == 0 && !sample->error &&
+	    motor_encoder_pipeline_angle_glitch(sample->angle_deg)) {
+		sample->error = true;
+		atomic_inc(&motor_encoder_collect_frame_glitch_error_count);
+	}
+
 	if (ret != 0 || sample->error) {
 		atomic_inc(&motor_encoder_collect_error_count);
 		if ((enc_sample.flags & ENCODER_RT_SAMPLE_TRANSPORT_ERROR) != 0U) {
@@ -291,6 +355,12 @@ static int motor_encoder_pipeline_decode_buffer(uint8_t *buf, struct motor_encod
 	if (sample->frame_status_error) {
 		/* Count all encoder status-flag assertions, including warning-only cases. */
 		atomic_inc(&motor_encoder_collect_frame_status_error_count);
+	}
+
+	if (decode_ret == 0 && !sample->error &&
+	    motor_encoder_pipeline_angle_glitch(sample->angle_deg)) {
+		sample->error = true;
+		atomic_inc(&motor_encoder_collect_frame_glitch_error_count);
 	}
 
 	if (decode_ret != 0 || sample->error) {

@@ -34,6 +34,7 @@ struct motor_encoder_pipeline_stats {
 	uint32_t collect_frame_error;
 	uint32_t collect_frame_parity_error;
 	uint32_t collect_frame_status_error;
+	uint32_t collect_frame_glitch_error;
 };
 
 enum motor_encoder_test_inject_mode {

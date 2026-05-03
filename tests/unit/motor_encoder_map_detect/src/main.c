@@ -34,9 +34,11 @@ static void fill_sweep(struct motor_encoder_map_detect_sample *samples,
 {
 	for (uint32_t i = 0U; i < count; i++) {
 		float32_t mech = 0.20f + (0.004f * (float32_t)i);
+		float32_t generated_mech = (float32_t)sign * mech;
 		float32_t generated_elec =
-			((float32_t)sign * TEST_POLE_PAIRS * mech) + offset_elec_rad;
+			(TEST_POLE_PAIRS * generated_mech) + offset_elec_rad;
 
+		samples[i].generated_mech_rad = wrap_rad_2pi(generated_mech);
 		samples[i].generated_elec_rad = wrap_rad_2pi(generated_elec);
 		samples[i].encoder_mech_rad = wrap_rad_2pi(mech);
 		samples[i].flags = 0U;

@@ -120,6 +120,8 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	sample->raw_angle_rad = raw_sample->angle_deg * (PI_F32 / 180.0f);
 	sample->control_angle_deg = control_fb->angle_control_deg;
 	sample->control_angle_rad = control_fb->angle_control_deg * (PI_F32 / 180.0f);
+	sample->generated_mech_rad = control_fb->generated_mech_rad;
+	sample->generated_elec_rad = control_fb->generated_elec_rad;
 	sample->observer_input_rad = control_fb->observer_input_rad;
 	sample->input_source = control_fb->input_source;
 	sample->quality_flags = position_quality_flags;

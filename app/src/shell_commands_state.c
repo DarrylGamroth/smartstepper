@@ -1178,11 +1178,12 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Collect:  ok=%u pending=%u empty=%u error=%u",
 		    stats.collect_ok, stats.collect_pending,
 		    stats.collect_empty, stats.collect_error);
-	shell_print(sh, "  Errors:   transport=%u frame=%u parity=%u status=%u",
+	shell_print(sh, "  Errors:   transport=%u frame=%u parity=%u status=%u glitch=%u",
 		    stats.collect_transport_error,
 		    stats.collect_frame_error,
 		    stats.collect_frame_parity_error,
-		    stats.collect_frame_status_error);
+		    stats.collect_frame_status_error,
+		    stats.collect_frame_glitch_error);
 
 	return 0;
 }
@@ -1634,11 +1635,13 @@ int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **a
 		const struct motor_encoder_raw_trace_sample *newest =
 			&g_motor_params->encoder_raw_trace.samples[newest_idx];
 		shell_print(sh,
-			    "  Latest:     loop=%u src=%s raw_deg=%.3f ctrl_deg=%.3f q=0x%02X fresh=%u warn=%u err=%u io=%u status=0x%02X",
+			    "  Latest:     loop=%u src=%s raw_deg=%.3f ctrl_deg=%.3f gen_mech=%.3fdeg gen_elec=%.3fdeg q=0x%02X fresh=%u warn=%u err=%u io=%u status=0x%02X",
 			    newest->control_loop_count,
 			    motor_encoder_input_source_to_string(newest->input_source),
 			    (double)newest->raw_angle_deg,
 			    (double)newest->control_angle_deg,
+			    motor_shell_rad_to_deg(newest->generated_mech_rad),
+			    motor_shell_rad_to_deg(newest->generated_elec_rad),
 			    newest->quality_flags,
 			    newest->sample_fresh,
 			    newest->sample_warning,
@@ -1789,13 +1792,13 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "Raw trace dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad obs_in_rad q fresh warn err io status ctrl_en");
+		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad gen_mech gen_elec obs_in_rad q fresh warn err io status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *sample =
 			&g_motor_params->encoder_raw_trace.samples[idx];
 		shell_print(sh,
-			    "%u %u %s %.3f %.6f %.3f %.6f %.6f 0x%02X %u %u %u %u 0x%02X %u",
+			    "%u %u %s %.3f %.6f %.3f %.6f %.6f %.6f %.6f 0x%02X %u %u %u %u 0x%02X %u",
 			    i,
 			    sample->control_loop_count,
 			    motor_encoder_input_source_to_string(sample->input_source),
@@ -1803,6 +1806,8 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 			    (double)sample->raw_angle_rad,
 			    (double)sample->control_angle_deg,
 			    (double)sample->control_angle_rad,
+			    (double)sample->generated_mech_rad,
+			    (double)sample->generated_elec_rad,
 			    (double)sample->observer_input_rad,
 			    sample->quality_flags,
 			    sample->sample_fresh,
