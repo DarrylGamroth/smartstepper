@@ -53,16 +53,21 @@ ZTEST(motor_encoder_feedback_core, test_select_source_propagated_when_not_fresh)
 	zassert_equal(src_disabled, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
 }
 
-ZTEST(motor_encoder_feedback_core, test_select_source_propagated_on_error_flags)
+ZTEST(motor_encoder_feedback_core, test_select_source_encoder_on_warning_only)
 {
 	uint8_t src_warning = motor_encoder_feedback_select_source(false, true, true,
 								  true, false, false);
+
+	zassert_equal(src_warning, MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER, NULL);
+}
+
+ZTEST(motor_encoder_feedback_core, test_select_source_propagated_on_error_flags)
+{
 	uint8_t src_error = motor_encoder_feedback_select_source(false, true, true,
 								false, true, false);
 	uint8_t src_io_fault = motor_encoder_feedback_select_source(false, true, true,
 								   false, false, true);
 
-	zassert_equal(src_warning, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
 	zassert_equal(src_error, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
 	zassert_equal(src_io_fault, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
 }
@@ -290,7 +295,7 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_error_clears_valid)
 	zassert_equal(out.control.input_source, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
 }
 
-ZTEST(motor_encoder_feedback_core, test_angle_path_warning_clears_valid)
+ZTEST(motor_encoder_feedback_core, test_angle_path_warning_only_remains_valid)
 {
 	struct angle_observer_state obs = {0};
 	struct motor_angle_path_input in = {0};
@@ -309,9 +314,9 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_warning_clears_valid)
 	in.encoder_delay_samples = 1.0f;
 
 	zassert_ok(motor_angle_path_step(&obs, &in, &out), NULL);
-	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) != 0U, NULL);
-	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U, NULL);
-	zassert_equal(out.control.input_source, MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED, NULL);
+	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U, NULL);
+	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U, NULL);
+	zassert_equal(out.control.input_source, MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER, NULL);
 }
 
 ZTEST_SUITE(motor_encoder_feedback_core, NULL, NULL, NULL, NULL, NULL);

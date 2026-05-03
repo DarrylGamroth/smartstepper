@@ -271,7 +271,6 @@ static bool motor_encoder_raw_trace_sample_clean(
 {
 	return sample != NULL &&
 	       sample->sample_fresh &&
-	       !sample->sample_warning &&
 	       !sample->sample_error &&
 	       !sample->sample_io_fault &&
 	       (sample->raw_angle_rad == sample->raw_angle_rad) &&
@@ -283,7 +282,6 @@ static bool motor_encoder_capture_sample_clean(
 {
 	return sample != NULL &&
 	       sample->sample_fresh &&
-	       !sample->sample_warning &&
 	       !sample->sample_error &&
 	       (sample->angle_rad == sample->angle_rad) &&
 	       fabsf(sample->angle_rad) <= 1.0e6f &&

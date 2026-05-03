@@ -40,6 +40,10 @@ struct motor_encoder_feedback_core_state {
 
 /**
  * @brief Resolve control-path angle source selection.
+ *
+ * Warning-only encoder status (for example magnet strength alarms) is
+ * diagnostic. It is not treated as a control-invalid sample; frame/parity,
+ * transport, and IO faults are.
  */
 uint8_t motor_encoder_feedback_select_source(bool feature_angle_gen,
 					     bool sample_enabled,

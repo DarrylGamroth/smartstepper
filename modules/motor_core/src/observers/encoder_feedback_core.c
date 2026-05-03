@@ -18,7 +18,8 @@ uint8_t motor_encoder_feedback_select_source(bool feature_angle_gen,
 	if (feature_angle_gen) {
 		return MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED;
 	}
-	if (sample_enabled && fresh && !warning && !error && !io_fault) {
+	(void)warning;
+	if (sample_enabled && fresh && !error && !io_fault) {
 		return MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER;
 	}
 	return MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED;
