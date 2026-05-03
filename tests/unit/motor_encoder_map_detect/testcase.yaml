@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_encoder_map_detect.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - encoder
+      - calibration
+    harness: ztest
+    integration_platforms:
+      - native_sim

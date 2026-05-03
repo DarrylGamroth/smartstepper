@@ -20,12 +20,25 @@
 #include "motor_commission_adapter.h"
 #include "motor/motion/traj.h"
 #include "motor/math/math_constants.h"
+#include "motor/math/angle_wrap.h"
+#include "motor/calibration/encoder_map_detect.h"
+#include "motor/observers/angle_observer.h"
 #include "motor_torque.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
 #define MOTOR_COMMISSION_AUTO_POST_WAIT_MS 2500U
 #define MOTOR_COMMISSION_AUTO_SPINUP_MS 1200U
+#define MOTOR_COMMISSION_ENCODER_MAX_SAMPLES 512U
+#define MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS 5U
+#define MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS 3000U
+
+static struct motor_encoder_map_detect_sample encoder_detect_samples[
+	MOTOR_COMMISSION_ENCODER_MAX_SAMPLES];
+static struct motor_encoder_map_detect_result encoder_detect_result;
+static bool encoder_detect_result_valid;
+static uint32_t encoder_detect_duration_ms;
+static uint32_t encoder_detect_sample_period_ms;
 
 static int motor_post_mode_change(enum motor_state target_mode)
 {
@@ -169,6 +182,80 @@ static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 				   g_motor_params->profile_max_velocity_rad_s);
 
 	traj_set_target_value(&g_motor_params->traj_velocity, limited);
+}
+
+static void motor_commission_encoder_clear_result(void)
+{
+	memset(encoder_detect_samples, 0, sizeof(encoder_detect_samples));
+	memset(&encoder_detect_result, 0, sizeof(encoder_detect_result));
+	encoder_detect_result_valid = false;
+	encoder_detect_duration_ms = 0U;
+	encoder_detect_sample_period_ms = 0U;
+}
+
+static void motor_commission_encoder_stop_generated(void)
+{
+	if (g_motor_params == NULL) {
+		return;
+	}
+
+	motor_commission_set_velocity_target_hz(0.0f);
+	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
+	(void)motor_api_set_param("Iq_setpoint_A", 0.0f);
+	motor_command_feed_watchdog(g_motor_params);
+}
+
+struct motor_commission_encoder_trace_guard {
+	bool raw_trace_enabled;
+	uint16_t raw_trace_decimation;
+	uint16_t raw_trace_phase;
+};
+
+static void motor_commission_encoder_trace_force_on(
+	struct motor_commission_encoder_trace_guard *guard)
+{
+	guard->raw_trace_enabled = g_motor_params->encoder_raw_trace.enabled;
+	guard->raw_trace_decimation = g_motor_params->encoder_raw_trace.decimation;
+	guard->raw_trace_phase = g_motor_params->encoder_raw_trace.phase;
+
+	/* Generated/open-loop modes do not normally request encoder samples.
+	 * Raw-trace enable is the existing ISR-safe telemetry gate that asks the
+	 * encoder pipeline to sample without changing the commutation policy.
+	 */
+	g_motor_params->encoder_raw_trace.enabled = true;
+	g_motor_params->encoder_raw_trace.decimation = 1U;
+	g_motor_params->encoder_raw_trace.phase = 0U;
+}
+
+static void motor_commission_encoder_trace_restore(
+	const struct motor_commission_encoder_trace_guard *guard)
+{
+	g_motor_params->encoder_raw_trace.enabled = guard->raw_trace_enabled;
+	g_motor_params->encoder_raw_trace.decimation = guard->raw_trace_decimation;
+	g_motor_params->encoder_raw_trace.phase = guard->raw_trace_phase;
+}
+
+static bool motor_commission_encoder_latest_raw_trace_after(
+	uint32_t min_loop,
+	struct motor_encoder_raw_trace_sample *out)
+{
+	if (out == NULL || g_motor_params == NULL ||
+	    g_motor_params->encoder_raw_trace.count == 0U) {
+		return false;
+	}
+
+	uint16_t write_idx = g_motor_params->encoder_raw_trace.write_idx;
+	uint16_t idx = (write_idx == 0U) ?
+			       (uint16_t)(MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES - 1U) :
+			       (uint16_t)(write_idx - 1U);
+	struct motor_encoder_raw_trace_sample sample =
+		g_motor_params->encoder_raw_trace.samples[idx];
+	if (sample.control_loop_count <= min_loop) {
+		return false;
+	}
+
+	*out = sample;
+	return true;
 }
 
 static uint32_t motor_commission_prbs_next(uint32_t state)
@@ -465,6 +552,7 @@ int cmd_motor_commission_clear(const struct shell *sh, size_t argc, char **argv)
 	struct motor_commission_runtime_ctx commission_ctx;
 	motor_commission_ctx_from_global(&commission_ctx);
 	motor_commission_reset(&commission_ctx);
+	motor_commission_encoder_clear_result();
 	shell_print(sh, "Commission context cleared");
 	return 0;
 }
@@ -609,6 +697,241 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 		    cfg.duration_ms);
 	shell_print(sh,
 		    "Ensure control is armed and current excitation is applied; capture expects ONLINE_CURRENT_ENCODER.");
+	return 0;
+}
+
+int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 4) {
+		shell_error(sh, "Usage: motor commission encoder run <current_a> <mech_hz> <cycles>");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.complete) {
+		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before encoder detect");
+		return -EACCES;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	float32_t current_a = 0.0f;
+	float32_t mech_hz = 0.0f;
+	float32_t cycles_f = 0.0f;
+	if (!shell_parse_finite_float(argv[1], &current_a) ||
+	    !shell_parse_finite_float(argv[2], &mech_hz) ||
+	    !shell_parse_finite_float(argv[3], &cycles_f) ||
+	    fabsf(current_a) < 1.0e-6f ||
+	    fabsf(mech_hz) < 1.0e-6f ||
+	    cycles_f <= 0.0f) {
+		shell_error(sh, "current_a and mech_hz must be non-zero; cycles must be > 0");
+		return -EINVAL;
+	}
+	if (fabsf(current_a) > MOTOR_MAX_CURRENT_A) {
+		shell_error(sh, "current_a exceeds motor current limit %.3f A",
+			    (double)MOTOR_MAX_CURRENT_A);
+		return -ERANGE;
+	}
+
+	motor_commission_encoder_clear_result();
+
+	int ret = motor_api_request_online();
+	if (ret != 0) {
+		shell_error(sh, "Failed to request ONLINE state (err %d)", ret);
+		return ret;
+	}
+	if (motor_api_get_state() != MOTOR_STATE_ONLINE_VELOCITY_GENERATED) {
+		ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
+		if (ret != 0) {
+			shell_error(sh, "Failed to request velocity_generated mode (err %d)",
+				    ret);
+			return ret;
+		}
+		ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_GENERATED,
+						     MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS);
+		if (ret != 0) {
+			shell_error(sh, "Timed out waiting for velocity_generated mode");
+			return ret;
+		}
+	}
+
+	float32_t duration_ms_f = (cycles_f / fabsf(mech_hz)) * 1000.0f;
+	uint32_t duration_ms = (uint32_t)ceilf(duration_ms_f);
+	duration_ms = MAX(duration_ms, MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS);
+	uint32_t sample_period_ms =
+		MAX(MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS,
+		    (uint32_t)ceilf((float32_t)duration_ms /
+				   (float32_t)MOTOR_COMMISSION_ENCODER_MAX_SAMPLES));
+	uint32_t target_samples = duration_ms / sample_period_ms;
+	target_samples = CLAMP(target_samples, 4U, MOTOR_COMMISSION_ENCODER_MAX_SAMPLES);
+
+	encoder_detect_duration_ms = duration_ms;
+	encoder_detect_sample_period_ms = sample_period_ms;
+
+	struct motor_commission_encoder_trace_guard trace_guard;
+	motor_commission_encoder_trace_force_on(&trace_guard);
+
+	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
+	(void)motor_api_set_param("Iq_setpoint_A", current_a);
+	motor_commission_set_velocity_target_hz(mech_hz);
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh,
+		    "Encoder mapping detect: current=%.3f A velocity=%.3f Hz cycles=%.2f duration=%u ms sample=%u ms N=%u",
+		    (double)current_a, (double)mech_hz, (double)cycles_f,
+		    duration_ms, sample_period_ms, target_samples);
+
+	uint32_t accepted = 0U;
+	uint32_t last_trace_loop = g_motor_params->rt_fast.control_loop_count;
+	for (uint32_t i = 0U; i < target_samples; i++) {
+		k_msleep(sample_period_ms);
+		motor_command_feed_watchdog(g_motor_params);
+
+		struct motor_encoder_map_detect_sample *sample =
+			&encoder_detect_samples[accepted++];
+		sample->generated_elec_rad = wrap_rad_2pi(g_motor_params->live.elec_angle_rad);
+		sample->flags = 0U;
+
+		struct motor_encoder_raw_trace_sample raw_trace = {0};
+		bool have_raw_trace =
+			motor_commission_encoder_latest_raw_trace_after(last_trace_loop,
+									&raw_trace);
+		if (have_raw_trace) {
+			last_trace_loop = raw_trace.control_loop_count;
+			sample->encoder_mech_rad = wrap_rad_2pi(raw_trace.raw_angle_rad);
+		} else {
+			sample->encoder_mech_rad = 0.0f;
+			sample->flags |= MOTOR_ENCODER_MAP_SAMPLE_ERROR;
+		}
+
+		if (have_raw_trace && raw_trace.sample_warning != 0U) {
+			sample->flags |= MOTOR_ENCODER_MAP_SAMPLE_WARNING;
+		}
+		if ((have_raw_trace &&
+		     (raw_trace.sample_error != 0U ||
+		      raw_trace.sample_io_fault != 0U ||
+		      raw_trace.sample_fresh == 0U)) ||
+		    !isfinite(sample->generated_elec_rad) ||
+		    !isfinite(sample->encoder_mech_rad)) {
+			sample->flags |= MOTOR_ENCODER_MAP_SAMPLE_ERROR;
+		}
+	}
+
+	motor_commission_encoder_stop_generated();
+	motor_commission_encoder_trace_restore(&trace_guard);
+
+	struct motor_encoder_map_detect_config cfg = {
+		.pole_pairs = (float32_t)MOTOR_POLE_PAIRS,
+		.min_mech_motion_rad = 0.02f,
+		.max_offset_residual_rad = 0.35f,
+		.max_direction_residual_rad = 0.50f,
+		.min_direction_correlation = 0.70f,
+		.estimate_ratio = false,
+	};
+	ret = motor_encoder_map_detect_compute(&cfg, encoder_detect_samples, accepted,
+					       &encoder_detect_result);
+	encoder_detect_result_valid = encoder_detect_result.valid;
+
+	shell_print(sh,
+		    "Encoder mapping result: valid=%s dir=%d corr=%.4f off_mech=%.3f deg off_elec=%.3f deg",
+		    encoder_detect_result.valid ? "YES" : "NO",
+		    encoder_detect_result.direction_sign,
+		    (double)encoder_detect_result.direction_corr,
+		    (double)(encoder_detect_result.offset_mech_rad * 180.0f / PI_F32),
+		    (double)(encoder_detect_result.offset_elec_rad * 180.0f / PI_F32));
+	shell_print(sh,
+		    "  residuals: offset=%.4f rad direction=%.4f rad motion=%.3f deg samples=%u rejected=%u warn=%u err=%u ret=%d",
+		    (double)encoder_detect_result.offset_residual_rad,
+		    (double)encoder_detect_result.direction_residual_rad,
+		    (double)(encoder_detect_result.mech_motion_rad * 180.0f / PI_F32),
+		    encoder_detect_result.sample_count,
+		    encoder_detect_result.rejected_samples,
+		    encoder_detect_result.encoder_warning_count,
+		    encoder_detect_result.encoder_error_count,
+		    ret);
+	if (encoder_detect_result.valid) {
+		shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
+	}
+
+	return ret;
+}
+
+int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Encoder Mapping Detect:");
+	shell_print(sh, "  Staged valid:   %s", encoder_detect_result_valid ? "YES" : "NO");
+	shell_print(sh, "  Duration/sample:%u ms / %u ms",
+		    encoder_detect_duration_ms, encoder_detect_sample_period_ms);
+	shell_print(sh, "  Valid:          %s", encoder_detect_result.valid ? "YES" : "NO");
+	shell_print(sh, "  Direction:      sign=%d valid=%s corr=%.4f residual=%.4f rad",
+		    encoder_detect_result.direction_sign,
+		    encoder_detect_result.direction_valid ? "YES" : "NO",
+		    (double)encoder_detect_result.direction_corr,
+		    (double)encoder_detect_result.direction_residual_rad);
+	shell_print(sh, "  Offset:         valid=%s mech=%.4f deg elec=%.3f deg residual=%.4f rad",
+		    encoder_detect_result.offset_valid ? "YES" : "NO",
+		    (double)(encoder_detect_result.offset_mech_rad * 180.0f / PI_F32),
+		    (double)(encoder_detect_result.offset_elec_rad * 180.0f / PI_F32),
+		    (double)encoder_detect_result.offset_residual_rad);
+	shell_print(sh, "  Ratio:          %.4f valid=%s",
+		    (double)encoder_detect_result.ratio,
+		    encoder_detect_result.ratio_valid ? "YES" : "NO");
+	shell_print(sh, "  Samples:        accepted=%u rejected=%u warn=%u err=%u motion=%.3f deg",
+		    encoder_detect_result.sample_count,
+		    encoder_detect_result.rejected_samples,
+		    encoder_detect_result.encoder_warning_count,
+		    encoder_detect_result.encoder_error_count,
+		    (double)(encoder_detect_result.mech_motion_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!encoder_detect_result_valid || !encoder_detect_result.valid) {
+		shell_error(sh, "No valid staged encoder mapping result");
+		return -ENOENT;
+	}
+
+	g_motor_params->encoder_direction_sign =
+		(encoder_detect_result.direction_sign >= 0) ? 1 : -1;
+	g_motor_params->observer_alignment_offset_rad =
+		wrap_rad_pi(encoder_detect_result.offset_mech_rad);
+	g_motor_params->observer_elec_trim_rad = 0.0f;
+	angle_observer_set_offset(&g_motor_params->observer,
+				  g_motor_params->observer_alignment_offset_rad);
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "Encoder mapping applied: sign=%d offset=%.4f deg mechanical",
+		    g_motor_params->encoder_direction_sign,
+		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+int cmd_motor_commission_encoder_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	motor_commission_encoder_clear_result();
+	shell_print(sh, "Encoder mapping detect result cleared");
 	return 0;
 }
 

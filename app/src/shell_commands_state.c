@@ -55,9 +55,7 @@ static inline bool motor_state_is_align_phase(int state)
 {
 	return state == MOTOR_STATE_ALIGN ||
 	       state == MOTOR_STATE_ALIGN_POS_INJECT ||
-	       state == MOTOR_STATE_ALIGN_POS_SAMPLE ||
-	       state == MOTOR_STATE_ALIGN_NEG_INJECT ||
-	       state == MOTOR_STATE_ALIGN_NEG_SAMPLE;
+	       state == MOTOR_STATE_ALIGN_POS_SAMPLE;
 }
 
 static const char *motor_encoder_input_source_to_string(uint8_t source)
@@ -105,8 +103,6 @@ static enum motor_control_policy_mode motor_shell_policy_mode_from_state(int sta
 	case MOTOR_STATE_ALIGN:
 	case MOTOR_STATE_ALIGN_POS_INJECT:
 	case MOTOR_STATE_ALIGN_POS_SAMPLE:
-	case MOTOR_STATE_ALIGN_NEG_INJECT:
-	case MOTOR_STATE_ALIGN_NEG_SAMPLE:
 		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
 	default:
 		return MOTOR_CONTROL_POLICY_MODE_DISABLED;
@@ -750,16 +746,10 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	if (g_motor_params->calibration.running || motor_state_is_align_phase(state)) {
 		shell_print(sh, "  Align phase:  %s", state_str);
 		shell_print(sh,
-			    "  Align +Id:   samples=%u retries=%u mean=%.2f deg",
-			    g_motor_params->calibration.align_pos_sample_count,
-			    g_motor_params->calibration.align_pos_sample_retries,
-			    (double)(g_motor_params->calibration.align_pos_mech_angle_rad *
-				     (180.0f / PI_F32)));
-		shell_print(sh,
-			    "  Align -Id:   samples=%u retries=%u mean=%.2f deg",
-			    g_motor_params->calibration.align_neg_sample_count,
-			    g_motor_params->calibration.align_neg_sample_retries,
-			    (double)(g_motor_params->calibration.align_neg_mech_angle_rad *
+			    "  Align sample: samples=%u retries=%u mean=%.2f deg",
+			    g_motor_params->calibration.align_sample_count,
+			    g_motor_params->calibration.align_sample_retries,
+			    (double)(g_motor_params->calibration.align_mech_angle_rad *
 				     (180.0f / PI_F32)));
 		shell_print(sh,
 			    "  Align offset: %.2f deg",
@@ -1330,10 +1320,10 @@ int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "Observer active offset: %.3f deg mechanical",
 			    active_mech_offset_deg);
 		shell_print(sh, "Observer raw: align=0x%08X active=0x%08X trim=0x%08X pos=0x%08X",
-			    motor_shell_f32_bits(g_motor_params->observer_alignment_offset_rad),
-			    motor_shell_f32_bits(g_motor_params->observer.mech_angle_offset_rad),
-			    motor_shell_f32_bits(g_motor_params->observer_elec_trim_rad),
-			    motor_shell_f32_bits(g_motor_params->calibration.align_pos_mech_angle_rad));
+		    motor_shell_f32_bits(g_motor_params->observer_alignment_offset_rad),
+		    motor_shell_f32_bits(g_motor_params->observer.mech_angle_offset_rad),
+		    motor_shell_f32_bits(g_motor_params->observer_elec_trim_rad),
+		    motor_shell_f32_bits(g_motor_params->calibration.align_mech_angle_rad));
 		return 0;
 	}
 

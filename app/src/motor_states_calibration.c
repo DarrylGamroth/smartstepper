@@ -448,24 +448,14 @@ static inline bool motor_align_plan_injection_or_fault(struct motor_parameters *
 	return true;
 }
 
-static inline void motor_align_reset_pos_sample_accumulator(struct motor_parameters *params)
+static inline void motor_align_reset_sample_accumulator(struct motor_parameters *params)
 {
 	struct motor_align_sample_accum acc = {0};
 
 	motor_align_accum_reset(&acc);
-	params->calibration.align_pos_sample_count = acc.count;
-	params->calibration.align_pos_sum_sin = acc.sum_sin;
-	params->calibration.align_pos_sum_cos = acc.sum_cos;
-}
-
-static inline void motor_align_reset_neg_sample_accumulator(struct motor_parameters *params)
-{
-	struct motor_align_sample_accum acc = {0};
-
-	motor_align_accum_reset(&acc);
-	params->calibration.align_neg_sample_count = acc.count;
-	params->calibration.align_neg_sum_sin = acc.sum_sin;
-	params->calibration.align_neg_sum_cos = acc.sum_cos;
+	params->calibration.align_sample_count = acc.count;
+	params->calibration.align_sum_sin = acc.sum_sin;
+	params->calibration.align_sum_cos = acc.sum_cos;
 }
 
 static inline bool motor_align_start_sample_window(struct motor_parameters *params)
@@ -516,7 +506,7 @@ static inline enum smf_state_result motor_align_fallback_from_mech(
 	const char *reason)
 {
 	float32_t mech_wrapped_rad = wrap_rad_2pi(mech_angle_rad);
-	float32_t fallback_offset_rad = motor_align_fallback_offset_from_mech(mech_wrapped_rad);
+	float32_t fallback_offset_rad = motor_align_offset_from_mech_sample(mech_wrapped_rad);
 
 	LOG_WRN("ALIGN fallback: %s (mech=%.2f deg, offset=%.2f deg)",
 		reason,
@@ -538,7 +528,7 @@ static inline enum smf_state_result motor_align_fallback_from_observer(
 	return motor_align_fallback_from_mech(params, mech_angle_rad, reason);
 }
 
-/* State: ALIGN - parent state for dual-polarity rotor alignment */
+/* State: ALIGN - parent state for single-vector rotor alignment */
 void motor_state_align_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
@@ -550,12 +540,9 @@ void motor_state_align_entry(void *obj)
 		(double)ALIGN_STABILIZE_DURATION_S,
 		params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING ?
 			"commissioning" : "boot");
-	params->calibration.align_pos_sample_retries = 0U;
-	params->calibration.align_neg_sample_retries = 0U;
-	params->calibration.align_pos_mech_angle_rad = 0.0f;
-	params->calibration.align_neg_mech_angle_rad = 0.0f;
-	motor_align_reset_pos_sample_accumulator(params);
-	motor_align_reset_neg_sample_accumulator(params);
+	params->calibration.align_sample_retries = 0U;
+	params->calibration.align_mech_angle_rad = 0.0f;
+	motor_align_reset_sample_accumulator(params);
 }
 
 enum smf_state_result motor_state_align_run(void *obj)
@@ -625,8 +612,8 @@ void motor_state_align_pos_sample_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ALIGN_POS_SAMPLE state");
-	params->calibration.align_pos_sample_retries = 0U;
-	motor_align_reset_pos_sample_accumulator(params);
+	params->calibration.align_sample_retries = 0U;
+	motor_align_reset_sample_accumulator(params);
 	/*
 	 * Keep generated-angle commutation active while sampling the raw encoder.
 	 * The encoder offset is not known yet; using encoder angle for Park/invPark
@@ -647,18 +634,18 @@ enum smf_state_result motor_state_align_pos_sample_run(void *obj)
 	}
 
 	LOG_INF("ALIGN +Id sample window complete: fresh=%u retries=%u min_required=%u",
-		params->calibration.align_pos_sample_count,
-		params->calibration.align_pos_sample_retries,
+		params->calibration.align_sample_count,
+		params->calibration.align_sample_retries,
 		ALIGN_SAMPLE_MIN_FRESH_SAMPLES);
 
 	enum motor_calibration_window_action action =
 		motor_calibration_window_evaluate(&align_sample_window_policy,
-						      params->calibration.align_pos_sample_count,
-						      &params->calibration.align_pos_sample_retries);
+						      params->calibration.align_sample_count,
+						      &params->calibration.align_sample_retries);
 	if (action == MOTOR_CALIBRATION_WINDOW_EXTEND) {
 		LOG_WRN("ALIGN +Id sample: only %u fresh samples, extending window (%u/%u)",
-			params->calibration.align_pos_sample_count,
-			params->calibration.align_pos_sample_retries,
+			params->calibration.align_sample_count,
+			params->calibration.align_sample_retries,
 			ALIGN_SAMPLE_MAX_RETRIES);
 		if (!motor_align_start_sample_window(params)) {
 			return SMF_EVENT_HANDLED;
@@ -670,25 +657,26 @@ enum smf_state_result motor_state_align_pos_sample_run(void *obj)
 			"+Id sample window insufficient fresh encoder samples");
 	}
 
-	struct motor_align_sample_accum pos_acc = {
-		.sum_sin = params->calibration.align_pos_sum_sin,
-		.sum_cos = params->calibration.align_pos_sum_cos,
-		.count = params->calibration.align_pos_sample_count,
+	struct motor_align_sample_accum align_acc = {
+		.sum_sin = params->calibration.align_sum_sin,
+		.sum_cos = params->calibration.align_sum_cos,
+		.count = params->calibration.align_sample_count,
 	};
 
-	float32_t pos_mean_rad = 0.0f;
-	if (!motor_align_circular_mean(&pos_acc, &pos_mean_rad)) {
+	float32_t mean_rad = 0.0f;
+	if (!motor_align_circular_mean(&align_acc, &mean_rad)) {
 		return motor_align_fallback_from_observer(params,
 			"+Id sample circular mean invalid");
 	}
 
-	params->calibration.align_pos_mech_angle_rad = pos_mean_rad;
-	LOG_INF("ALIGN +Id sample mean: mech=%.2f deg (%u samples)",
-		(double)(pos_mean_rad * (180.0f / PI_F32)),
-		params->calibration.align_pos_sample_count);
+	params->calibration.align_mech_angle_rad = mean_rad;
+	float32_t offset_rad = motor_align_offset_from_mech_sample(mean_rad);
+	LOG_INF("Alignment complete: mech=%.2f deg offset=%.2f deg (%u samples)",
+		(double)(mean_rad * (180.0f / PI_F32)),
+		(double)(offset_rad * (180.0f / PI_F32)),
+		params->calibration.align_sample_count);
 
-	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_NEG_INJECT]);
-	return SMF_EVENT_HANDLED;
+	return motor_align_apply_offset_and_transition(params, offset_rad);
 }
 
 void motor_state_align_pos_sample_exit(void *obj)
@@ -696,157 +684,6 @@ void motor_state_align_pos_sample_exit(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Exiting ALIGN_POS_SAMPLE state");
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				      BIT(MOTOR_FEATURE_ENCODER_READ));
-}
-
-/* State: ALIGN_NEG_INJECT - inject -Id with generated angle frame */
-void motor_state_align_neg_inject_entry(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Entering ALIGN_NEG_INJECT state");
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				     BIT(MOTOR_FEATURE_PI_CONTROL));
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
-
-	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
-	angle_gen_set_velocity(&params->angle_gen, 0.0f);
-	angle_gen_set_angle(&params->angle_gen, 0.0f);
-
-	if (!motor_align_plan_injection_or_fault(params, -ALIGN_CURRENT_A, "ALIGN_NEG_INJECT")) {
-		return;
-	}
-	LOG_INF("ALIGN -Id inject: Id=%.3fA for %.3fs",
-		(double)(-ALIGN_CURRENT_A), (double)ALIGN_INJECT_DURATION_S);
-
-	(void)motor_calibration_start_timer_or_fault(params,
-						     ALIGN_INJECT_DURATION_S,
-						     "ALIGN_NEG_INJECT");
-}
-
-enum smf_state_result motor_state_align_neg_inject_run(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	if (motor_calibration_state_timeout_elapsed(params)) {
-		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN_NEG_SAMPLE]);
-		return SMF_EVENT_HANDLED;
-	}
-
-	return SMF_EVENT_PROPAGATE;
-}
-
-void motor_state_align_neg_inject_exit(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Exiting ALIGN_NEG_INJECT state");
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
-}
-
-/* State: ALIGN_NEG_SAMPLE - hold -Id in generated frame, capture encoder sample, finalize offset */
-void motor_state_align_neg_sample_entry(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Entering ALIGN_NEG_SAMPLE state");
-	params->calibration.align_neg_sample_retries = 0U;
-	motor_align_reset_neg_sample_accumulator(params);
-	/* See ALIGN_POS_SAMPLE: commutation must remain in generated frame. */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				     BIT(MOTOR_FEATURE_ENCODER_READ) |
-				     BIT(MOTOR_FEATURE_PI_CONTROL));
-	(void)motor_align_start_sample_window(params);
-}
-
-enum smf_state_result motor_state_align_neg_sample_run(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	if (!motor_calibration_state_timeout_elapsed(params)) {
-		return SMF_EVENT_PROPAGATE;
-	}
-
-	LOG_INF("ALIGN -Id sample window complete: fresh=%u retries=%u min_required=%u",
-		params->calibration.align_neg_sample_count,
-		params->calibration.align_neg_sample_retries,
-		ALIGN_SAMPLE_MIN_FRESH_SAMPLES);
-
-	enum motor_calibration_window_action action =
-		motor_calibration_window_evaluate(&align_sample_window_policy,
-						      params->calibration.align_neg_sample_count,
-						      &params->calibration.align_neg_sample_retries);
-	if (action == MOTOR_CALIBRATION_WINDOW_EXTEND) {
-		LOG_WRN("ALIGN -Id sample: only %u fresh samples, extending window (%u/%u)",
-			params->calibration.align_neg_sample_count,
-			params->calibration.align_neg_sample_retries,
-			ALIGN_SAMPLE_MAX_RETRIES);
-		if (!motor_align_start_sample_window(params)) {
-			return SMF_EVENT_HANDLED;
-		}
-		return SMF_EVENT_HANDLED;
-	}
-	if (action == MOTOR_CALIBRATION_WINDOW_FALLBACK) {
-		return motor_align_fallback_from_mech(params,
-			params->calibration.align_pos_mech_angle_rad,
-			"-Id sample window insufficient fresh encoder samples");
-	}
-
-	struct motor_align_sample_accum pos_acc = {0};
-	struct motor_align_sample_accum neg_acc = {0};
-	struct motor_align_config align_cfg = {
-		.pole_pairs = (float32_t)MOTOR_POLE_PAIRS,
-		.opposed_elec_tol_rad = ALIGN_OPPOSED_ELEC_TOL_RAD,
-	};
-	struct motor_align_offset_result align_result = {0};
-
-	pos_acc.sum_sin = params->calibration.align_pos_sum_sin;
-	pos_acc.sum_cos = params->calibration.align_pos_sum_cos;
-	pos_acc.count = params->calibration.align_pos_sample_count;
-	neg_acc.sum_sin = params->calibration.align_neg_sum_sin;
-	neg_acc.sum_cos = params->calibration.align_neg_sum_cos;
-	neg_acc.count = params->calibration.align_neg_sample_count;
-
-	if (!motor_align_resolve_offset(&align_cfg, &pos_acc, &neg_acc, &align_result)) {
-		return motor_align_fallback_from_mech(params,
-			params->calibration.align_pos_mech_angle_rad,
-			"offset solve invalid");
-	}
-
-	params->calibration.align_pos_mech_angle_rad = align_result.pos_mech_rad;
-	params->calibration.align_neg_mech_angle_rad = align_result.neg_mech_rad;
-	if (align_result.dual_solution_available) {
-		LOG_INF("ALIGN dual-polarity solve: +Id=%.2f deg -Id=%.2f deg |delta|=%.2f deg expected=%.2f deg valid=%s",
-			(double)(params->calibration.align_pos_mech_angle_rad * (180.0f / PI_F32)),
-			(double)(params->calibration.align_neg_mech_angle_rad * (180.0f / PI_F32)),
-			(double)(fabsf(align_result.measured_delta_mech_rad) * (180.0f / PI_F32)),
-			(double)(align_result.expected_delta_mech_rad * (180.0f / PI_F32)),
-			align_result.dual_solution_valid ? "yes" : "no");
-	} else {
-		LOG_WRN("ALIGN dual-polarity solve unavailable; using +Id fallback offset");
-	}
-	if (!align_result.dual_solution_valid) {
-		float32_t delta_tol_mech_rad = ALIGN_OPPOSED_ELEC_TOL_RAD / (float32_t)MOTOR_POLE_PAIRS;
-		LOG_WRN("ALIGN dual-polarity mismatch/invalid: |delta|=%.2f deg expected=%.2f deg (tol=%.2f deg), using +Id fallback offset",
-			(double)(fabsf(align_result.measured_delta_mech_rad) * (180.0f / PI_F32)),
-			(double)(align_result.expected_delta_mech_rad * (180.0f / PI_F32)),
-			(double)(delta_tol_mech_rad * (180.0f / PI_F32)));
-	}
-
-	float32_t final_offset_rad = align_result.final_offset_rad;
-	LOG_INF("Alignment complete: +Id=%.2f deg, -Id=%.2f deg, offset=%.2f deg",
-		(double)(params->calibration.align_pos_mech_angle_rad * (180.0f / PI_F32)),
-		(double)(params->calibration.align_neg_mech_angle_rad * (180.0f / PI_F32)),
-		(double)(final_offset_rad * (180.0f / PI_F32)));
-	return motor_align_apply_offset_and_transition(params, final_offset_rad);
-}
-
-void motor_state_align_neg_sample_exit(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Exiting ALIGN_NEG_SAMPLE state");
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 				      BIT(MOTOR_FEATURE_ENCODER_READ));
 }

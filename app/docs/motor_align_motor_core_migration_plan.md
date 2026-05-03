@@ -3,6 +3,13 @@
 Date: 2026-03-04  
 Scope: Move ALIGN algorithms from app state-machine implementation into `modules/motor_core`, while preserving real-time behavior and simplifying app-side calibration states.
 
+Superseded runtime decision:
+- As of 2026-05-03, runtime boot ALIGN no longer uses dual-polarity validation.
+- The normal ALIGN path is single-vector and trajectory-ramped.
+- Encoder direction/offset validation is handled by the generated-sweep commissioning flow described in
+  `app/docs/runtime_alignment_simplification_plan.md`.
+- The dual-polarity material below is retained as historical context only.
+
 Historical note:
 - References below to `modules/motor_core/src/runtime/motor_core_step.c` describe the intermediate ISR process-stage location before the final runtime boundary cut.
 - Current ALIGN sample accumulation integration is in `app/src/motor_control_loop.c`.

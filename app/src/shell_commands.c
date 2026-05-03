@@ -1789,6 +1789,20 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission encoder subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_encoder,
+	SHELL_CMD_ARG(run, NULL,
+		      "Run generated sweep encoder mapping <current_a> <mech_hz> <cycles>",
+		      cmd_motor_commission_encoder_run, 4, 0),
+	SHELL_CMD(status, NULL, "Show staged encoder mapping result",
+		  cmd_motor_commission_encoder_status),
+	SHELL_CMD(apply, NULL, "Apply valid staged encoder mapping",
+		  cmd_motor_commission_encoder_apply),
+	SHELL_CMD(clear, NULL, "Clear staged encoder mapping result",
+		  cmd_motor_commission_encoder_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission auto subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 	SHELL_CMD_ARG(run, NULL, "Run identify+tune workflow [apply]",
@@ -1808,6 +1822,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(apply, NULL, "Apply valid commissioning estimates to active runtime params", cmd_motor_commission_apply),
 	SHELL_CMD(flux, &sub_motor_commission_flux, "Flux-linkage commissioning", NULL),
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
+	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Generated-sweep encoder mapping", NULL),
 	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),
 	SHELL_SUBCMD_SET_END
 );

@@ -47,14 +47,6 @@ void motor_align_accum_push(struct motor_align_sample_accum *acc, float32_t mech
 	}
 }
 
-static inline void motor_align_rad_to_sin_cos(float32_t angle_rad,
-					       float32_t *sin_out,
-					       float32_t *cos_out)
-{
-	float32_t angle_deg = wrap_rad_2pi(angle_rad) * (180.0f / PI_F32);
-	arm_sin_cos_f32(angle_deg, sin_out, cos_out);
-}
-
 bool motor_align_circular_mean(const struct motor_align_sample_accum *acc, float32_t *mean_rad)
 {
 	if (acc == NULL || mean_rad == NULL || acc->count == 0U) {
@@ -70,61 +62,6 @@ bool motor_align_circular_mean(const struct motor_align_sample_accum *acc, float
 	}
 
 	*mean_rad = wrap_rad_2pi(atan2f(acc->sum_sin, acc->sum_cos));
-	return true;
-}
-
-bool motor_align_compute_dual_polarity(const struct motor_align_config *cfg,
-				       const struct motor_align_sample_accum *pos,
-				       const struct motor_align_sample_accum *neg,
-				       struct motor_align_dual_result *out)
-{
-	if (cfg == NULL || pos == NULL || neg == NULL || out == NULL ||
-	    cfg->pole_pairs <= 0.0f || !isfinite(cfg->pole_pairs)) {
-		return false;
-	}
-
-	float32_t pos_mean = 0.0f;
-	float32_t neg_mean = 0.0f;
-	if (!motor_align_circular_mean(pos, &pos_mean) ||
-	    !motor_align_circular_mean(neg, &neg_mean)) {
-		return false;
-	}
-
-	float32_t expected_delta_mech_rad = PI_F32 / cfg->pole_pairs;
-	float32_t measured_delta_mech_rad = wrap_rad_pi(neg_mean - pos_mean);
-	float32_t delta_tol_mech_rad = cfg->opposed_elec_tol_rad / cfg->pole_pairs;
-	float32_t delta_abs_error_rad = fabsf(fabsf(measured_delta_mech_rad) - expected_delta_mech_rad);
-
-	/*
-	 * Alignment offset is only unique modulo one electrical period. Average
-	 * the +Id and -Id solutions in electrical-angle space before converting
-	 * back to a mechanical offset; averaging full mechanical offsets can put
-	 * high pole-pair motors near the wrong electrical phase at 2pi wraps.
-	 */
-	float32_t offset_plus_elec_rad = wrap_rad_pi(-(pos_mean * cfg->pole_pairs));
-	float32_t offset_minus_elec_rad = wrap_rad_pi(PI_F32 - (neg_mean * cfg->pole_pairs));
-	float32_t sin_plus = 0.0f;
-	float32_t cos_plus = 0.0f;
-	float32_t sin_minus = 0.0f;
-	float32_t cos_minus = 0.0f;
-
-	motor_align_rad_to_sin_cos(offset_plus_elec_rad, &sin_plus, &cos_plus);
-	motor_align_rad_to_sin_cos(offset_minus_elec_rad, &sin_minus, &cos_minus);
-
-	float32_t offset_sum_sin = sin_plus + sin_minus;
-	float32_t offset_sum_cos = cos_plus + cos_minus;
-
-	if ((fabsf(offset_sum_sin) < 1e-6f) && (fabsf(offset_sum_cos) < 1e-6f)) {
-		return false;
-	}
-
-	out->valid = (delta_abs_error_rad <= delta_tol_mech_rad);
-	out->pos_mech_rad = pos_mean;
-	out->neg_mech_rad = neg_mean;
-	out->final_offset_rad =
-		wrap_rad_pi(atan2f(offset_sum_sin, offset_sum_cos) / cfg->pole_pairs);
-	out->measured_delta_mech_rad = measured_delta_mech_rad;
-	out->expected_delta_mech_rad = expected_delta_mech_rad;
 	return true;
 }
 
@@ -155,52 +92,11 @@ int motor_align_plan_id_traj(struct traj_f32 *traj,
 	return 0;
 }
 
-float32_t motor_align_fallback_offset_from_mech(float32_t mech_angle_rad)
+float32_t motor_align_offset_from_mech_sample(float32_t mech_angle_rad)
 {
 	if (!(mech_angle_rad == mech_angle_rad) || fabsf(mech_angle_rad) > (2.0f * PI_F32)) {
 		return 0.0f;
 	}
 
 	return wrap_rad_pi(-wrap_rad_2pi(mech_angle_rad));
-}
-
-bool motor_align_resolve_offset(const struct motor_align_config *cfg,
-				const struct motor_align_sample_accum *pos,
-				const struct motor_align_sample_accum *neg,
-				struct motor_align_offset_result *out)
-{
-	if (cfg == NULL || pos == NULL || neg == NULL || out == NULL ||
-	    cfg->pole_pairs <= 0.0f || !isfinite(cfg->pole_pairs)) {
-		return false;
-	}
-
-	*out = (struct motor_align_offset_result){0};
-
-	float32_t pos_mean_rad = 0.0f;
-	if (!motor_align_circular_mean(pos, &pos_mean_rad)) {
-		return false;
-	}
-	out->pos_mech_rad = pos_mean_rad;
-	out->expected_delta_mech_rad = PI_F32 / cfg->pole_pairs;
-
-	struct motor_align_dual_result dual = {0};
-	if (!motor_align_compute_dual_polarity(cfg, pos, neg, &dual)) {
-		out->final_offset_rad = motor_align_fallback_offset_from_mech(pos_mean_rad);
-		return true;
-	}
-
-	out->dual_solution_available = true;
-	out->dual_solution_valid = dual.valid;
-	out->pos_mech_rad = dual.pos_mech_rad;
-	out->neg_mech_rad = dual.neg_mech_rad;
-	out->measured_delta_mech_rad = dual.measured_delta_mech_rad;
-	out->expected_delta_mech_rad = dual.expected_delta_mech_rad;
-
-	if (dual.valid) {
-		out->final_offset_rad = dual.final_offset_rad;
-	} else {
-		out->final_offset_rad = motor_align_fallback_offset_from_mech(pos_mean_rad);
-	}
-
-	return true;
 }

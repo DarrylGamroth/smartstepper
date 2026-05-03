@@ -178,6 +178,29 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
   produced real closed-loop torque response; high current (`0.50 A`) caused
   overcurrent, so use conservative currents while debugging.
 
+## Encoder Mapping Commissioning
+
+- Runtime boot ALIGN is intentionally single-vector and trajectory-ramped.
+- Dual-polarity ALIGN is no longer part of the normal boot calibration path.
+- Use the generated-sweep commissioning command to validate/stage encoder sign
+  and offset:
+
+```text
+motor commission encoder run <current_a> <mech_hz> <cycles>
+motor commission encoder status
+motor commission encoder apply
+motor commission encoder clear
+```
+
+- The command drives `velocity_generated`, samples generated electrical phase
+  and raw encoder angle, and reports direction, offset, residuals, warnings,
+  and errors.
+- Warning status is reported separately; parity/transport/sample errors reject
+  the staged result.
+- If the result is invalid with low measured motion, increase the generated
+  sweep current/speed or debug open-loop motion first. The command intentionally
+  leaves runtime parameters unchanged unless `apply` is run after a valid result.
+
 ## AEAT-9955 Telemetry-Only Use
 
 - The AEAT-9955 may be usable for coarse before/after motion telemetry even

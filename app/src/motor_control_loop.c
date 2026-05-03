@@ -89,14 +89,12 @@ static inline bool motor_rt_mode_active(uint32_t mode_flags, uint32_t flag)
 
 static inline bool motor_is_align_injection_state(uint32_t mode_flags)
 {
-	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_INJECT) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_NEG_INJECT);
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_INJECT);
 }
 
 static inline bool motor_is_align_sample_state(uint32_t mode_flags)
 {
-	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_NEG_SAMPLE);
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE);
 }
 
 static inline bool motor_is_align_active_state(uint32_t mode_flags)
@@ -132,52 +130,28 @@ motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 	return MOTOR_CONTROL_POLICY_MODE_DISABLED;
 }
 
-static inline void motor_align_load_pos_accum(const struct motor_parameters *params,
-					      struct motor_align_sample_accum *acc)
+static inline void motor_align_load_accum(const struct motor_parameters *params,
+					  struct motor_align_sample_accum *acc)
 {
 	if (params == NULL || acc == NULL) {
 		return;
 	}
 
-	acc->sum_sin = params->calibration.align_pos_sum_sin;
-	acc->sum_cos = params->calibration.align_pos_sum_cos;
-	acc->count = params->calibration.align_pos_sample_count;
+	acc->sum_sin = params->calibration.align_sum_sin;
+	acc->sum_cos = params->calibration.align_sum_cos;
+	acc->count = params->calibration.align_sample_count;
 }
 
-static inline void motor_align_store_pos_accum(struct motor_parameters *params,
-					       const struct motor_align_sample_accum *acc)
+static inline void motor_align_store_accum(struct motor_parameters *params,
+					   const struct motor_align_sample_accum *acc)
 {
 	if (params == NULL || acc == NULL) {
 		return;
 	}
 
-	params->calibration.align_pos_sum_sin = acc->sum_sin;
-	params->calibration.align_pos_sum_cos = acc->sum_cos;
-	params->calibration.align_pos_sample_count = acc->count;
-}
-
-static inline void motor_align_load_neg_accum(const struct motor_parameters *params,
-					      struct motor_align_sample_accum *acc)
-{
-	if (params == NULL || acc == NULL) {
-		return;
-	}
-
-	acc->sum_sin = params->calibration.align_neg_sum_sin;
-	acc->sum_cos = params->calibration.align_neg_sum_cos;
-	acc->count = params->calibration.align_neg_sample_count;
-}
-
-static inline void motor_align_store_neg_accum(struct motor_parameters *params,
-					       const struct motor_align_sample_accum *acc)
-{
-	if (params == NULL || acc == NULL) {
-		return;
-	}
-
-	params->calibration.align_neg_sum_sin = acc->sum_sin;
-	params->calibration.align_neg_sum_cos = acc->sum_cos;
-	params->calibration.align_neg_sample_count = acc->count;
+	params->calibration.align_sum_sin = acc->sum_sin;
+	params->calibration.align_sum_cos = acc->sum_cos;
+	params->calibration.align_sample_count = acc->count;
 }
 
 static inline void motor_fault_snapshot_prepare(struct motor_control_step_report *report,
@@ -555,17 +529,11 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	    enc_res->fresh &&
 	    !enc_res->frame_error) {
 		float32_t align_mech_rad = enc_res->angle_control_deg * (PI_F32 / 180.0f);
-		if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
-			struct motor_align_sample_accum acc = {0};
-			motor_align_load_pos_accum(params, &acc);
-			motor_align_accum_push(&acc, align_mech_rad);
-			motor_align_store_pos_accum(params, &acc);
-		} else {
-			struct motor_align_sample_accum acc = {0};
-			motor_align_load_neg_accum(params, &acc);
-			motor_align_accum_push(&acc, align_mech_rad);
-			motor_align_store_neg_accum(params, &acc);
-		}
+		struct motor_align_sample_accum acc = {0};
+
+		motor_align_load_accum(params, &acc);
+		motor_align_accum_push(&acc, align_mech_rad);
+		motor_align_store_accum(params, &acc);
 	}
 
 	return 0;

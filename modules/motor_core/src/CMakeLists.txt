@@ -38,6 +38,7 @@ motor_core_configure_target(motor_core_estimation)
 
 add_library(motor_core_commission STATIC
 	runtime/commission_tune.c
+	calibration/encoder_map_detect.c
 	estimation/flux_id_estimator.c
 	estimation/mech_id_estimator.c
 	math/matrix_solve.c

@@ -85,12 +85,6 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 	if (state == &motor_states[MOTOR_STATE_ALIGN_POS_SAMPLE]) {
 		mode_flags |= MOTOR_RT_MODE_ALIGN_POS_SAMPLE;
 	}
-	if (state == &motor_states[MOTOR_STATE_ALIGN_NEG_INJECT]) {
-		mode_flags |= MOTOR_RT_MODE_ALIGN_NEG_INJECT;
-	}
-	if (state == &motor_states[MOTOR_STATE_ALIGN_NEG_SAMPLE]) {
-		mode_flags |= MOTOR_RT_MODE_ALIGN_NEG_SAMPLE;
-	}
 	if (motor_state_ptr_is_online_control_state(state)) {
 		mode_flags |= MOTOR_RT_MODE_ONLINE_CONTROL;
 	}
@@ -138,9 +132,7 @@ motor_publish_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 			   MOTOR_RT_MODE_RS_EST |
 			   MOTOR_RT_MODE_ROVERL_MEAS |
 			   MOTOR_RT_MODE_ALIGN_POS_INJECT |
-			   MOTOR_RT_MODE_ALIGN_POS_SAMPLE |
-			   MOTOR_RT_MODE_ALIGN_NEG_INJECT |
-			   MOTOR_RT_MODE_ALIGN_NEG_SAMPLE)) != 0U) {
+			   MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) != 0U) {
 		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
 	}
 
@@ -371,16 +363,6 @@ const struct smf_state motor_states[] = {
 						  motor_state_align_pos_sample_exit,
 						  &motor_states[MOTOR_STATE_ALIGN],
 						  NULL),
-	[MOTOR_STATE_ALIGN_NEG_INJECT] = SMF_CREATE_STATE(motor_state_align_neg_inject_entry,
-						  motor_state_align_neg_inject_run,
-						  motor_state_align_neg_inject_exit,
-						  &motor_states[MOTOR_STATE_ALIGN],
-						  NULL),
-	[MOTOR_STATE_ALIGN_NEG_SAMPLE] = SMF_CREATE_STATE(motor_state_align_neg_sample_entry,
-						  motor_state_align_neg_sample_run,
-						  motor_state_align_neg_sample_exit,
-						  &motor_states[MOTOR_STATE_ALIGN],
-						  NULL),
 	[MOTOR_STATE_IDLE] = SMF_CREATE_STATE(motor_state_idle_entry,
 					       motor_state_idle_run,
 					       NULL, NULL, NULL),
@@ -452,8 +434,6 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_ALIGN:        return "ALIGN";
 	case MOTOR_STATE_ALIGN_POS_INJECT: return "ALIGN_POS_INJECT";
 	case MOTOR_STATE_ALIGN_POS_SAMPLE: return "ALIGN_POS_SAMPLE";
-	case MOTOR_STATE_ALIGN_NEG_INJECT: return "ALIGN_NEG_INJECT";
-	case MOTOR_STATE_ALIGN_NEG_SAMPLE: return "ALIGN_NEG_SAMPLE";
 	case MOTOR_STATE_IDLE:         return "IDLE";
 	case MOTOR_STATE_PREPARE_ONLINE: return "PREPARE_ONLINE";
 	case MOTOR_STATE_ONLINE:       return "ONLINE";
@@ -720,21 +700,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration.running = false;
 	params->calibration.commissioning_complete = false;
 	params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
-	params->calibration.align_pos_sample_retries = 0U;
-	params->calibration.align_neg_sample_retries = 0U;
+	params->calibration.align_sample_retries = 0U;
 	{
 		struct motor_align_sample_accum align_acc = {0};
 
 		motor_align_accum_reset(&align_acc);
-		params->calibration.align_pos_sample_count = align_acc.count;
-		params->calibration.align_pos_sum_sin = align_acc.sum_sin;
-		params->calibration.align_pos_sum_cos = align_acc.sum_cos;
-		params->calibration.align_neg_sample_count = align_acc.count;
-		params->calibration.align_neg_sum_sin = align_acc.sum_sin;
-		params->calibration.align_neg_sum_cos = align_acc.sum_cos;
+		params->calibration.align_sample_count = align_acc.count;
+		params->calibration.align_sum_sin = align_acc.sum_sin;
+		params->calibration.align_sum_cos = align_acc.sum_cos;
 	}
-	params->calibration.align_pos_mech_angle_rad = 0.0f;
-	params->calibration.align_neg_mech_angle_rad = 0.0f;
+	params->calibration.align_mech_angle_rad = 0.0f;
 	{
 		struct motor_commission_runtime_ctx commission_ctx;
 		motor_commission_runtime_ctx_init(&commission_ctx, params);
