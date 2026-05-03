@@ -381,7 +381,11 @@ static void aeat9955_fast_reset_stats(const struct device *dev)
 static uint8_t aeat9955_fast_get_pipeline_delay(const struct device *dev)
 {
 	const struct aeat9955_fast_config *cfg = dev->config;
+	struct aeat9955_fast_data *data = dev->data;
 
+	if (data->spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) {
+		return 0U;
+	}
 	return cfg->pipeline_delay_samples;
 }
 
@@ -748,6 +752,49 @@ int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev)
 		return ret != 0 ? ret : -EIO;
 	}
 
+	return 0;
+}
+
+int aeat9955_fast_read_position_raw(const struct device *dev, uint8_t *raw,
+				    uint8_t raw_len, uint8_t *frame_len)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	struct rt_spi_result result = {0};
+	uint8_t tx[AEAT9955_FAST_MAX_FRAME_LEN];
+	uint8_t len;
+	unsigned int key;
+	int ret;
+
+	if (raw == NULL || frame_len == NULL) {
+		return -EINVAL;
+	}
+	if (k_is_in_isr()) {
+		return -EWOULDBLOCK;
+	}
+
+	key = irq_lock();
+	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
+		irq_unlock(key);
+		return -EBUSY;
+	}
+	len = aeat9955_fast_frame_len(data->spi4_mode);
+	irq_unlock(key);
+
+	if (raw_len < len) {
+		return -ENOBUFS;
+	}
+
+	aeat9955_fast_prepare_position_frame(tx, data->spi4_mode);
+	ret = aeat9955_fast_transfer_blocking(dev, tx, len, &result);
+	if (ret != 0) {
+		return ret;
+	}
+	if (result.len != len) {
+		return -EIO;
+	}
+
+	memcpy(raw, result.raw, len);
+	*frame_len = len;
 	return 0;
 }
 

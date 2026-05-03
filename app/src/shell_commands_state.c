@@ -29,6 +29,7 @@
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
 #include <drivers/encoder_rt.h>
+#include <drivers/rt_spi.h>
 #define MOTOR_ENCODER_IS_AEAT9955 1
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 1
 #elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -1637,6 +1638,95 @@ int cmd_motor_encoder_protocol_spi4_16_volatile(const struct shell *sh, size_t a
 	}
 
 	shell_print(sh, "AEAT-9955 volatile protocol set to SPI4-16 parity");
+	return 0;
+#endif
+}
+
+int cmd_motor_encoder_protocol_driver_spi4_8(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before changing driver mode");
+		return -EBUSY;
+	}
+
+	int ret = aeat9955_fast_set_spi4_mode_runtime(encoder1, AEAT9955_FAST_SPI4_8_CRC16);
+	if (ret != 0) {
+		shell_error(sh, "Failed to force driver SPI4-8 mode (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "AEAT-9955 driver-only protocol set to SPI4-8 CRC16");
+	return 0;
+#endif
+}
+
+int cmd_motor_encoder_protocol_driver_spi4_16(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before changing driver mode");
+		return -EBUSY;
+	}
+
+	int ret = aeat9955_fast_set_spi4_mode_runtime(encoder1, AEAT9955_FAST_SPI4_16_PARITY);
+	if (ret != 0) {
+		shell_error(sh, "Failed to force driver SPI4-16 mode (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "AEAT-9955 driver-only protocol set to SPI4-16 parity");
+	return 0;
+#endif
+}
+
+int cmd_motor_encoder_protocol_raw_position(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	shell_error(sh, "AEAT raw position requires the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before raw position read");
+		return -EBUSY;
+	}
+
+	uint8_t raw[RT_SPI_MAX_FRAME_BYTES] = {0};
+	uint8_t len = 0U;
+	int ret = aeat9955_fast_read_position_raw(encoder1, raw, sizeof(raw), &len);
+	if (ret != 0) {
+		shell_error(sh, "Failed to read raw AEAT position frame (err %d)", ret);
+		return ret;
+	}
+
+	enum aeat9955_fast_spi4_mode mode = AEAT9955_FAST_SPI4_16_PARITY;
+	(void)aeat9955_fast_get_spi4_mode(encoder1, &mode);
+	shell_print(sh, "AEAT-9955 raw position frame:");
+	shell_print(sh, "  Mode: %s",
+		    (mode == AEAT9955_FAST_SPI4_8_CRC16) ?
+			    "spi4-8-crc16" : "spi4-16-parity");
+	shell_print(sh, "  Len:  %u", len);
+	shell_fprintf(sh, SHELL_NORMAL, "  Raw: ");
+	for (uint8_t i = 0U; i < len; i++) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02X%s", raw[i],
+			      (i + 1U == len) ? "" : " ");
+	}
+	shell_fprintf(sh, SHELL_NORMAL, "\n");
 	return 0;
 #endif
 }

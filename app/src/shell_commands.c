@@ -1733,6 +1733,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_protocol,
 		  cmd_motor_encoder_protocol_spi4_8_volatile),
 	SHELL_CMD(spi4_16_volatile, NULL, "Switch AEAT to volatile SPI4-16 parity",
 		  cmd_motor_encoder_protocol_spi4_16_volatile),
+	SHELL_CMD(driver_spi4_8, NULL, "Set driver-only protocol to SPI4-8 CRC16",
+		  cmd_motor_encoder_protocol_driver_spi4_8),
+	SHELL_CMD(driver_spi4_16, NULL, "Set driver-only protocol to SPI4-16 parity",
+		  cmd_motor_encoder_protocol_driver_spi4_16),
+	SHELL_CMD(raw_position, NULL, "Read one raw AEAT position frame",
+		  cmd_motor_encoder_protocol_raw_position),
 	SHELL_SUBCMD_SET_END
 );
 
