@@ -1739,6 +1739,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_protocol,
 		  cmd_motor_encoder_protocol_driver_spi4_16),
 	SHELL_CMD(raw_position, NULL, "Read one raw AEAT position frame",
 		  cmd_motor_encoder_protocol_raw_position),
+	SHELL_CMD_ARG(raw_reg, NULL, "Read one raw AEAT register frame <addr>",
+		      cmd_motor_encoder_protocol_raw_reg, 2, 0),
 	SHELL_SUBCMD_SET_END
 );
 

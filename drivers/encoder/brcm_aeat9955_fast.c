@@ -798,6 +798,62 @@ int aeat9955_fast_read_position_raw(const struct device *dev, uint8_t *raw,
 	return 0;
 }
 
+int aeat9955_fast_read_register_raw(const struct device *dev, uint8_t reg,
+				    uint8_t *raw, uint8_t raw_len,
+				    uint8_t *frame_len)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	struct rt_spi_result result = {0};
+	uint8_t tx[AEAT9955_FAST_MAX_FRAME_LEN] = {0};
+	uint8_t len;
+	unsigned int key;
+	int ret;
+
+	if (raw == NULL || frame_len == NULL) {
+		return -EINVAL;
+	}
+	if (k_is_in_isr()) {
+		return -EWOULDBLOCK;
+	}
+
+	key = irq_lock();
+	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
+		irq_unlock(key);
+		return -EBUSY;
+	}
+	if (data->spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) {
+		tx[0] = AEAT9955_FAST_CMD_READ_SPI8;
+		tx[1] = reg;
+		len = AEAT9955_FAST_SPI8_REG_READ_FRAME_LEN;
+	} else {
+		aeat9955_fast_prepare_read_frame(tx, reg);
+		len = AEAT9955_FAST_SPI16_REG_FRAME_LEN;
+	}
+	irq_unlock(key);
+
+	if (raw_len < len) {
+		return -ENOBUFS;
+	}
+
+	ret = aeat9955_fast_transfer_blocking(dev, tx, len, &result);
+	if (ret != 0) {
+		return ret;
+	}
+	if (data->spi4_mode == AEAT9955_FAST_SPI4_16_PARITY) {
+		ret = aeat9955_fast_transfer_blocking(dev, tx, len, &result);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+	if (result.len != len) {
+		return -EIO;
+	}
+
+	memcpy(raw, result.raw, len);
+	*frame_len = len;
+	return 0;
+}
+
 static int aeat9955_fast_init(const struct device *dev)
 {
 	const struct aeat9955_fast_config *cfg = dev->config;

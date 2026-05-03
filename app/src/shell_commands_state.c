@@ -1731,6 +1731,55 @@ int cmd_motor_encoder_protocol_raw_position(const struct shell *sh, size_t argc,
 #endif
 }
 
+int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char **argv)
+{
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "AEAT raw register read requires the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (argc != 2U) {
+		shell_error(sh, "Usage: motor encoder protocol raw_reg <addr>");
+		return -EINVAL;
+	}
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before raw register read");
+		return -EBUSY;
+	}
+
+	uint8_t reg = 0U;
+	if (motor_encoder_parse_u8_arg(argv[1], &reg) != 0) {
+		shell_error(sh, "addr must be an 8-bit register address");
+		return -EINVAL;
+	}
+
+	uint8_t raw[RT_SPI_MAX_FRAME_BYTES] = {0};
+	uint8_t len = 0U;
+	int ret = aeat9955_fast_read_register_raw(encoder1, reg, raw, sizeof(raw), &len);
+	if (ret != 0) {
+		shell_error(sh, "Failed to read raw AEAT register frame (err %d)", ret);
+		return ret;
+	}
+
+	enum aeat9955_fast_spi4_mode mode = AEAT9955_FAST_SPI4_16_PARITY;
+	(void)aeat9955_fast_get_spi4_mode(encoder1, &mode);
+	shell_print(sh, "AEAT-9955 raw register frame:");
+	shell_print(sh, "  Mode: %s",
+		    (mode == AEAT9955_FAST_SPI4_8_CRC16) ?
+			    "spi4-8-crc16" : "spi4-16-parity");
+	shell_print(sh, "  Reg:  0x%02X", reg);
+	shell_print(sh, "  Len:  %u", len);
+	shell_fprintf(sh, SHELL_NORMAL, "  Raw: ");
+	for (uint8_t i = 0U; i < len; i++) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02X%s", raw[i],
+			      (i + 1U == len) ? "" : " ");
+	}
+	shell_fprintf(sh, SHELL_NORMAL, "\n");
+	return 0;
+#endif
+}
+
 /* motor encoder capture start [decimation] */
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv)
 {

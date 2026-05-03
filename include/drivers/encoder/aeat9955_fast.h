@@ -64,6 +64,9 @@ int aeat9955_fast_configure_spi4_8_crc16_volatile(const struct device *dev);
 int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev);
 int aeat9955_fast_read_position_raw(const struct device *dev, uint8_t *raw,
 				    uint8_t raw_len, uint8_t *frame_len);
+int aeat9955_fast_read_register_raw(const struct device *dev, uint8_t reg,
+				    uint8_t *raw, uint8_t raw_len,
+				    uint8_t *frame_len);
 
 #ifdef __cplusplus
 }
