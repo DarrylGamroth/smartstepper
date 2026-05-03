@@ -95,15 +95,21 @@ bool motor_align_compute_dual_polarity(const struct motor_align_config *cfg,
 	float32_t delta_tol_mech_rad = cfg->opposed_elec_tol_rad / cfg->pole_pairs;
 	float32_t delta_abs_error_rad = fabsf(fabsf(measured_delta_mech_rad) - expected_delta_mech_rad);
 
-	float32_t offset_plus_rad = wrap_rad_pi(-pos_mean);
-	float32_t offset_minus_rad = wrap_rad_pi((PI_F32 / cfg->pole_pairs) - neg_mean);
+	/*
+	 * Alignment offset is only unique modulo one electrical period. Average
+	 * the +Id and -Id solutions in electrical-angle space before converting
+	 * back to a mechanical offset; averaging full mechanical offsets can put
+	 * high pole-pair motors near the wrong electrical phase at 2pi wraps.
+	 */
+	float32_t offset_plus_elec_rad = wrap_rad_pi(-(pos_mean * cfg->pole_pairs));
+	float32_t offset_minus_elec_rad = wrap_rad_pi(PI_F32 - (neg_mean * cfg->pole_pairs));
 	float32_t sin_plus = 0.0f;
 	float32_t cos_plus = 0.0f;
 	float32_t sin_minus = 0.0f;
 	float32_t cos_minus = 0.0f;
 
-	motor_align_rad_to_sin_cos(offset_plus_rad, &sin_plus, &cos_plus);
-	motor_align_rad_to_sin_cos(offset_minus_rad, &sin_minus, &cos_minus);
+	motor_align_rad_to_sin_cos(offset_plus_elec_rad, &sin_plus, &cos_plus);
+	motor_align_rad_to_sin_cos(offset_minus_elec_rad, &sin_minus, &cos_minus);
 
 	float32_t offset_sum_sin = sin_plus + sin_minus;
 	float32_t offset_sum_cos = cos_plus + cos_minus;
@@ -115,7 +121,8 @@ bool motor_align_compute_dual_polarity(const struct motor_align_config *cfg,
 	out->valid = (delta_abs_error_rad <= delta_tol_mech_rad);
 	out->pos_mech_rad = pos_mean;
 	out->neg_mech_rad = neg_mean;
-	out->final_offset_rad = wrap_rad_pi(atan2f(offset_sum_sin, offset_sum_cos));
+	out->final_offset_rad =
+		wrap_rad_pi(atan2f(offset_sum_sin, offset_sum_cos) / cfg->pole_pairs);
 	out->measured_delta_mech_rad = measured_delta_mech_rad;
 	out->expected_delta_mech_rad = expected_delta_mech_rad;
 	return true;

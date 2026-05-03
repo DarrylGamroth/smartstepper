@@ -10,6 +10,20 @@
 #include "motor/math/math_constants.h"
 #include "motor/math/angle_wrap.h"
 
+static float32_t deg_to_rad(float32_t deg)
+{
+	return deg * (PI_F32 / 180.0f);
+}
+
+static float32_t electrical_alignment_error(float32_t mech_rad,
+					    float32_t offset_rad,
+					    float32_t pole_pairs,
+					    float32_t target_elec_rad)
+{
+	return fabsf(wrap_rad_pi(((mech_rad + offset_rad) * pole_pairs) -
+				 target_elec_rad));
+}
+
 ZTEST(motor_align, test_accum_reset_clears_fields)
 {
 	struct motor_align_sample_accum acc = {
@@ -66,6 +80,30 @@ ZTEST(motor_align, test_dual_polarity_succeeds_for_expected_spacing)
 	zassert_true(out.valid, NULL);
 	zassert_within(out.expected_delta_mech_rad, expected_delta, 1e-4f, NULL);
 	zassert_within(out.measured_delta_mech_rad, expected_delta, 1e-3f, NULL);
+}
+
+ZTEST(motor_align, test_dual_polarity_averages_offsets_in_electrical_domain)
+{
+	const float32_t pole_pairs = 50.0f;
+	const float32_t pos = deg_to_rad(358.24f);
+	const float32_t neg = deg_to_rad(355.03f);
+	struct motor_align_config cfg = {
+		.pole_pairs = pole_pairs,
+		.opposed_elec_tol_rad = (25.0f * PI_F32 / 180.0f),
+	};
+	struct motor_align_sample_accum acc_pos = {0};
+	struct motor_align_sample_accum acc_neg = {0};
+	struct motor_align_dual_result out = {0};
+
+	motor_align_accum_push(&acc_pos, pos);
+	motor_align_accum_push(&acc_neg, neg);
+
+	zassert_true(motor_align_compute_dual_polarity(&cfg, &acc_pos, &acc_neg, &out), NULL);
+	zassert_true(out.valid, NULL);
+	zassert_within(electrical_alignment_error(pos, out.final_offset_rad, pole_pairs, 0.0f),
+		       0.0f, 0.25f, NULL);
+	zassert_within(electrical_alignment_error(neg, out.final_offset_rad, pole_pairs, PI_F32),
+		       0.0f, 0.25f, NULL);
 }
 
 ZTEST(motor_align, test_plan_id_traj_updates_target_and_rate)
