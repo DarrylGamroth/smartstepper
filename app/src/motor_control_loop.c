@@ -299,6 +299,27 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->input_source = encoder_fb->control.input_source;
 }
 
+static inline void motor_control_publish_encoder_live(
+	struct motor_parameters *params,
+	const struct motor_control_feedback *control_fb,
+	uint8_t position_quality_flags)
+{
+	if (params == NULL || control_fb == NULL) {
+		return;
+	}
+
+	params->live.encoder_raw_deg = control_fb->angle_sensor_deg;
+	params->live.encoder_raw_rad = control_fb->angle_sensor_deg * (PI_F32 / 180.0f);
+	params->live.encoder_observer_input_rad = control_fb->observer_input_rad;
+	params->live.encoder_input_source = control_fb->input_source;
+	params->live.position_rad = control_fb->position_mech_rad;
+	params->live.position_unwrapped_rad = control_fb->position_mech_rad;
+	params->live.velocity_rad_s = control_fb->speed_mech_rad_s;
+	params->live.acceleration_rad_s2 = control_fb->accel_mech_rad_s2;
+	params->live.velocity_filtered_rad_s = control_fb->speed_mech_filtered_rad_s;
+	params->live.position_quality_flags = position_quality_flags;
+}
+
 static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_runtime_ctx *ctx,
 							struct motor_parameters *params,
 							bool control_armed)
@@ -493,6 +514,8 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	enc_res->frame_error = enc_res->control_fb.error;
 	enc_res->io_fault = enc_res->control_fb.io_fault;
 	enc_res->position_quality_flags = enc_res->feedback.control.quality_flags;
+	motor_control_publish_encoder_live(params, &enc_res->control_fb,
+					   enc_res->position_quality_flags);
 
 	if (enc_ret == -EIO) {
 		return -EIO;
@@ -509,7 +532,7 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	    enc_res->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
 	    enc_res->fresh &&
 	    !enc_res->frame_error) {
-		float32_t align_mech_rad = enc_res->control_fb.observer_mech_rad;
+		float32_t align_mech_rad = enc_res->control_fb.observer_input_rad;
 		if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) {
 			struct motor_align_sample_accum acc = {0};
 			motor_align_load_pos_accum(params, &acc);

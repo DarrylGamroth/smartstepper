@@ -249,9 +249,9 @@ static inline uint32_t motor_shell_f32_bits(float32_t value)
 	return bits;
 }
 
-static double motor_shell_rad_to_deg(float32_t rad)
+static inline double motor_shell_rad_to_deg(float32_t rad)
 {
-	return (double)rad * (180.0 / (double)PI_F32);
+	return (double)(rad * (180.0f / PI_F32));
 }
 
 static uint16_t motor_encoder_ring_oldest(uint16_t write_idx, uint16_t count,
@@ -1039,25 +1039,46 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	
 	int state = motor_api_get_state();
 	int error = motor_api_get_error();
+	float32_t live_position_rad = g_motor_params->live.position_rad;
+	float32_t live_elec_angle_rad = g_motor_params->live.elec_angle_rad;
+	float32_t obs_mech_rad = g_motor_params->observer.mech_angle_rad;
+	float32_t obs_elec_rad = g_motor_params->observer.elec_angle_rad;
+	float32_t obs_elec_pred_rad = g_motor_params->observer.elec_angle_pred_rad;
+	float32_t obs_offset_rad = g_motor_params->observer.mech_angle_offset_rad;
+	float32_t align_offset_rad = g_motor_params->observer_alignment_offset_rad;
+	float32_t enc_observer_input_rad = g_motor_params->live.encoder_observer_input_rad;
+	float32_t enc_raw_deg = g_motor_params->live.encoder_raw_deg;
+	float32_t enc_raw_rad = g_motor_params->live.encoder_raw_rad;
 	
 	shell_print(sh, "Live Telemetry:");
 	shell_print(sh, "  State:          %s", motor_state_to_string(state));
 	shell_print(sh, "  Error:          %s", motor_error_to_string(error));
 	shell_print(sh, "  Angle (mech):   %.1f deg",
-		    motor_shell_rad_to_deg(g_motor_params->live.position_rad));
+		    motor_shell_rad_to_deg(live_position_rad));
 	shell_print(sh, "  Angle (elec):   %.1f deg",
-		    motor_shell_rad_to_deg(g_motor_params->live.elec_angle_rad));
+		    motor_shell_rad_to_deg(live_elec_angle_rad));
 	shell_print(sh, "  Obs angle:      mech=%.1f deg elec=%.1f deg pred=%.1f deg",
-		    motor_shell_rad_to_deg(g_motor_params->observer.mech_angle_rad),
-		    motor_shell_rad_to_deg(g_motor_params->observer.elec_angle_rad),
-		    motor_shell_rad_to_deg(g_motor_params->observer.elec_angle_pred_rad));
+		    motor_shell_rad_to_deg(obs_mech_rad),
+		    motor_shell_rad_to_deg(obs_elec_rad),
+		    motor_shell_rad_to_deg(obs_elec_pred_rad));
+	shell_print(sh, "  Obs raw rad:    mech=%.6f elec=%.6f pred=%.6f",
+		    (double)obs_mech_rad,
+		    (double)obs_elec_rad,
+		    (double)obs_elec_pred_rad);
+	shell_print(sh, "  Obs raw bits:   mech=0x%08X elec=0x%08X pred=0x%08X",
+		    motor_shell_f32_bits(obs_mech_rad),
+		    motor_shell_f32_bits(obs_elec_rad),
+		    motor_shell_f32_bits(obs_elec_pred_rad));
 	shell_print(sh, "  Obs offset:     %.3f deg",
-		    motor_shell_rad_to_deg(g_motor_params->observer.mech_angle_offset_rad));
+		    motor_shell_rad_to_deg(obs_offset_rad));
+	shell_print(sh, "  Obs off raw:    %.6f rad bits=0x%08X",
+		    (double)obs_offset_rad,
+		    motor_shell_f32_bits(obs_offset_rad));
 	shell_print(sh, "  Align offset:   %.3f deg",
-		    motor_shell_rad_to_deg(g_motor_params->observer_alignment_offset_rad));
+		    motor_shell_rad_to_deg(align_offset_rad));
 	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
-		    (double)g_motor_params->live.encoder_raw_deg,
-		    (double)g_motor_params->live.encoder_raw_rad);
+		    (double)enc_raw_deg,
+		    (double)enc_raw_rad);
 	shell_print(sh, "  Enc dir sign:   %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	shell_print(sh, "  Enc trim:       elec=%.3f deg mech=%.4f deg",
@@ -1065,9 +1086,11 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    (double)((g_motor_params->observer_elec_trim_rad * (180.0f / PI_F32)) /
 			     (float32_t)MOTOR_POLE_PAIRS));
 	shell_print(sh, "  Enc used:       %.6f rad (%s, fresh=%s)",
-		    (double)g_motor_params->live.encoder_observer_input_rad,
+		    (double)enc_observer_input_rad,
 		    motor_encoder_input_source_to_string(g_motor_params->live.encoder_input_source),
 		    g_motor_params->live.encoder_sample_fresh ? "yes" : "no");
+	shell_print(sh, "  Enc used bits:  0x%08X", motor_shell_f32_bits(
+		    enc_observer_input_rad));
 	shell_print(sh, "  Enc flags:      status=0x%02X warn=%s err=%s",
 		    g_motor_params->live.encoder_last_status,
 		    g_motor_params->live.encoder_sample_warning ? "SET" : "CLEAR",
@@ -2002,7 +2025,7 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "Capture dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop source deg rad norm q31 fresh warn err status ctrl_en");
+		    "idx loop source deg rad enc_rad obs_rad norm q31 fresh warn err status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_CAPTURE_MAX_SAMPLES);
 		struct motor_encoder_capture_sample sample =
@@ -2010,12 +2033,14 @@ int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **a
 		float32_t norm = motor_encoder_normalized_from_rad(sample.angle_rad);
 		int32_t q31 = motor_encoder_q31_from_rad(sample.angle_rad);
 		shell_print(sh,
-			    "%u %u %s %.3f %.6f %.6f %d %u %u %u 0x%02X %u",
+			    "%u %u %s %.3f %.6f %.6f %.6f %.6f %d %u %u %u 0x%02X %u",
 			    i,
 			    sample.control_loop_count,
 			    motor_encoder_input_source_to_string(sample.input_source),
 			    (double)sample.angle_deg,
 			    (double)sample.angle_rad,
+			    (double)sample.encoder_mech_rad,
+			    (double)sample.observer_mech_rad,
 			    (double)norm,
 			    q31,
 			    sample.sample_fresh,
@@ -2083,8 +2108,9 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 			   "Capture is still running; compare dump may include concurrently updated samples.");
 	}
 
-	shell_print(sh,
-		    "idx loop src fresh warn err cmp ref enc_m_deg ref_m_deg d_m_deg enc_e_deg ref_e_deg d_e_deg rel_phase_deg");
+	shell_print(sh, "idx loop src fresh warn err cmp ref");
+	shell_print(sh, "  mech: enc_deg ref_deg d_deg");
+	shell_print(sh, "  elec: enc_deg ref_deg d_deg rel_phase_deg");
 	bool rel_phase_init = false;
 	float32_t rel_phase_base_rad = 0.0f;
 	for (uint16_t i = 0U; i < count; i++) {
@@ -2132,7 +2158,7 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 			}
 		}
 		shell_print(sh,
-			    "%u %u %s %u %u %u %u %s %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
+			    "%u %u %s %u %u %u %u %s",
 			    i,
 			    sample->control_loop_count,
 			    motor_encoder_input_source_to_string(sample->input_source),
@@ -2140,10 +2166,14 @@ int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char 
 			    sample->sample_warning,
 			    sample->sample_error,
 			    compare_valid ? 1U : 0U,
-			    motor_encoder_compare_ref_to_string(ref_mode),
+			    motor_encoder_compare_ref_to_string(ref_mode));
+		shell_print(sh,
+			    "  mech: %.3f %.3f %.3f",
 			    (double)enc_m_deg,
 			    (double)ref_m_deg,
-			    (double)d_m_deg,
+			    (double)d_m_deg);
+		shell_print(sh,
+			    "  elec: %.3f %.3f %.3f %.3f",
 			    (double)enc_e_deg,
 			    (double)ref_e_deg,
 			    (double)d_e_deg,

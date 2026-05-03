@@ -176,13 +176,13 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 	capture->generated_elec_rad =
 		wrap_rad_2pi((capture->generated_mech_rad + observer_mech_offset_rad) *
 			     (float32_t)ctx->pole_pairs);
-	capture->input_source = feedback->sample_available ?
-				MOTOR_ENCODER_INPUT_SRC_ENCODER :
-				feedback->input_source;
+	capture->input_source = feedback->input_source;
 
 	if (feedback->sample_available && feedback->fresh && !feedback->error) {
-		capture->encoder_mech_rad = capture->observer_mech_rad;
-		capture->encoder_elec_rad = capture->observer_elec_rad;
+		capture->encoder_mech_rad = wrap_rad_2pi(capture->angle_rad);
+		capture->encoder_elec_rad =
+			wrap_rad_2pi((capture->encoder_mech_rad + observer_mech_offset_rad) *
+				     (float32_t)ctx->pole_pairs);
 		capture->mech_error_rad =
 			wrap_rad_pi(capture->encoder_mech_rad - capture->generated_mech_rad);
 		capture->elec_error_rad =
