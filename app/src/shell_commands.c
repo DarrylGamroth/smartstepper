@@ -1726,12 +1726,25 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_trace,
 	SHELL_SUBCMD_SET_END
 );
 
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_protocol,
+	SHELL_CMD(status, NULL, "Show AEAT-9955 protocol/config state",
+		  cmd_motor_encoder_protocol_status),
+	SHELL_CMD(spi4_8_volatile, NULL, "Switch AEAT to volatile SPI4-8 CRC16",
+		  cmd_motor_encoder_protocol_spi4_8_volatile),
+	SHELL_CMD(spi4_16_volatile, NULL, "Switch AEAT to volatile SPI4-16 parity",
+		  cmd_motor_encoder_protocol_spi4_16_volatile),
+	SHELL_SUBCMD_SET_END
+);
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
 	SHELL_CMD(fast, NULL, "Show fast encoder_rt driver status/counters",
 		  cmd_motor_encoder_fast),
 	SHELL_CMD_ARG(reg_read, NULL, "Read AEAT-9955 register <addr>",
 		      cmd_motor_encoder_reg_read, 2, 0),
+	SHELL_CMD_ARG(reg_write, NULL, "Write AEAT-9955 register <addr> <value>",
+		      cmd_motor_encoder_reg_write, 3, 0),
+	SHELL_CMD(protocol, &sub_motor_encoder_protocol, "AEAT-9955 protocol control", NULL),
 	SHELL_CMD_ARG(direction, NULL, "Get/set encoder direction sign [<1|-1>]",
 		      cmd_motor_encoder_direction, 1, 1),
 	SHELL_CMD_ARG(trim, NULL, "Get/set electrical commutation trim [<-180..180> deg]",

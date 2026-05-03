@@ -84,6 +84,7 @@ static atomic_t motor_encoder_collect_error_count;
 static atomic_t motor_encoder_collect_transport_error_count;
 static atomic_t motor_encoder_collect_frame_error_count;
 static atomic_t motor_encoder_collect_frame_parity_error_count;
+static atomic_t motor_encoder_collect_frame_crc_error_count;
 static atomic_t motor_encoder_collect_frame_status_error_count;
 static atomic_t motor_encoder_collect_frame_glitch_error_count;
 static atomic_t motor_encoder_test_inject_mode;
@@ -188,6 +189,8 @@ void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_error_count);
 	stats->collect_frame_parity_error =
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_parity_error_count);
+	stats->collect_frame_crc_error =
+		(uint32_t)atomic_get(&motor_encoder_collect_frame_crc_error_count);
 	stats->collect_frame_status_error =
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_status_error_count);
 	stats->collect_frame_glitch_error =
@@ -207,6 +210,7 @@ void motor_encoder_pipeline_reset_stats(void)
 	atomic_set(&motor_encoder_collect_transport_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_parity_error_count, 0);
+	atomic_set(&motor_encoder_collect_frame_crc_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_status_error_count, 0);
 	atomic_set(&motor_encoder_collect_frame_glitch_error_count, 0);
 	motor_encoder_last_angle_valid = false;
@@ -291,6 +295,8 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 		(enc_sample.flags & ENCODER_RT_SAMPLE_FRAME_STATUS_ERROR) != 0U;
 	sample->frame_parity_error =
 		(enc_sample.flags & ENCODER_RT_SAMPLE_FRAME_PARITY_ERROR) != 0U;
+	sample->frame_crc_error =
+		(enc_sample.flags & ENCODER_RT_SAMPLE_FRAME_CRC_ERROR) != 0U;
 
 	enum motor_encoder_test_inject_mode inject_mode =
 		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
@@ -323,6 +329,9 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 		}
 		if (sample->frame_parity_error) {
 			atomic_inc(&motor_encoder_collect_frame_parity_error_count);
+		}
+		if (sample->frame_crc_error) {
+			atomic_inc(&motor_encoder_collect_frame_crc_error_count);
 		}
 		return -EIO;
 	}

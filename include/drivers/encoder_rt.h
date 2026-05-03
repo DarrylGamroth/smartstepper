@@ -30,6 +30,7 @@ enum encoder_rt_sample_flags {
 	ENCODER_RT_SAMPLE_FRAME_ERROR = BIT(4),
 	ENCODER_RT_SAMPLE_FRAME_PARITY_ERROR = BIT(5),
 	ENCODER_RT_SAMPLE_FRAME_STATUS_ERROR = BIT(6),
+	ENCODER_RT_SAMPLE_FRAME_CRC_ERROR = BIT(7),
 };
 
 struct encoder_rt_sample {
@@ -53,6 +54,7 @@ struct encoder_rt_stats {
 	uint32_t transport_error_count;
 	uint32_t frame_error_count;
 	uint32_t frame_parity_error_count;
+	uint32_t frame_crc_error_count;
 	uint32_t frame_status_error_count;
 	uint32_t warning_count;
 };

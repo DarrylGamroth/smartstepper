@@ -17,3 +17,14 @@ properties:
     type: int
     default: 1
     description: Protocol/sample delay to account for in angle-observer configuration.
+
+  spi4-mode:
+    type: string
+    default: "spi4-16-parity"
+    enum:
+      - "spi4-16-parity"
+      - "spi4-8-crc16"
+    description: |
+      Runtime protocol expected when the driver starts. Use "spi4-16-parity"
+      for factory-default AEAT-9955 devices. Use "spi4-8-crc16" only after
+      the encoder has been deliberately configured to SPI4-8 safety mode.

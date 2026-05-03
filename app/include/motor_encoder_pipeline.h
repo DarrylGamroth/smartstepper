@@ -18,6 +18,7 @@ struct motor_encoder_sample {
 	bool error;
 	bool frame_status_error;
 	bool frame_parity_error;
+	bool frame_crc_error;
 	bool fresh;
 };
 
@@ -33,6 +34,7 @@ struct motor_encoder_pipeline_stats {
 	uint32_t collect_transport_error;
 	uint32_t collect_frame_error;
 	uint32_t collect_frame_parity_error;
+	uint32_t collect_frame_crc_error;
 	uint32_t collect_frame_status_error;
 	uint32_t collect_frame_glitch_error;
 };

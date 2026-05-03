@@ -82,6 +82,7 @@
 	spi-clock-frequency = <DT_FREQ_M(4)>;
 	max-frame-len = <8>;
 	cs-mode = "hardware";
+	spi-cpha;
 	fifo-enable;
 
 	aeat9955: aeat9955@0 {
