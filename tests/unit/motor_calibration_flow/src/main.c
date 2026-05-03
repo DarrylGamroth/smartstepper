@@ -63,11 +63,24 @@ ZTEST(motor_calibration_flow, test_timer_start_validates_duration)
 	zassert_ok(motor_calibration_timer_start_s(&timer, 0.001f), NULL);
 }
 
+ZTEST(motor_calibration_flow, test_timer_elapsed_ignores_timeout_event_without_timer_status)
+{
+	struct k_timer timer;
+	bool stale = true;
+	k_timer_init(&timer, timer_noop_expiry, NULL);
+
+	zassert_false(motor_calibration_timer_has_elapsed(&timer, true, &stale), NULL);
+	zassert_false(stale, NULL);
+}
+
 ZTEST(motor_calibration_flow, test_timer_elapsed_detects_timeout_event_path)
 {
 	struct k_timer timer;
 	bool stale = true;
 	k_timer_init(&timer, timer_noop_expiry, NULL);
+
+	zassert_ok(motor_calibration_timer_start_s(&timer, 0.002f), NULL);
+	k_msleep(5);
 
 	zassert_true(motor_calibration_timer_has_elapsed(&timer, true, &stale), NULL);
 	zassert_false(stale, NULL);

@@ -159,17 +159,24 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
 
 ## Encoder Direction Mapping
 
-- Default devicetree mapping for this hardware is `encoder-direction-sign = <(-1)>`.
+- AEAT-9955 and MT6835 motor profile overlays use
+  `encoder-direction-sign = <1>` for closed-loop commutation.
 - Files:
-  - `app/boards/smartstepper_v2.overlay`
-  - `app/boards/smartstepper.overlay`
-- Verification method (generated-angle velocity direction check):
-  1. Run `motor state prepare`, then `motor arm`.
-  2. Enter `motor state mode velocity_generated`.
-  3. Set `motor current iq 0.15` and `motor velocity target 5`.
-  4. Capture encoder data (`motor encoder capture start 1`, wait, `motor encoder capture stop`).
-  5. Compare with generated reference (`motor encoder capture compare 96 gen`).
-  6. Correct mapping is when encoder mechanical direction matches generated mechanical direction over the capture window.
+  - `app/configs/motor_aeat9955_067a.overlay`
+  - `app/configs/motor_mt6835_2a.overlay`
+- Verification method (closed-loop commutation check):
+  1. Build and flash the matching motor profile overlay.
+  2. Run `motor safety timeout 0`, then `motor state calibrate`.
+  3. Enter `motor state mode current_encoder`.
+  4. Start encoder telemetry capture.
+  5. Arm and apply a conservative positive q-axis current, for example
+     `motor current iq 0.10`.
+  6. Stop current, disarm, stop capture, and verify rotor movement with
+     `motor encoder capture summary`.
+- HIL note: on the AEAT-9955 setup, runtime `-1` regulated current but
+  snapped roughly one electrical quadrant to a holding point. Runtime `+1`
+  produced real closed-loop torque response; high current (`0.50 A`) caused
+  overcurrent, so use conservative currents while debugging.
 
 ## AEAT-9955 Telemetry-Only Use
 

@@ -41,15 +41,9 @@ bool motor_calibration_timer_has_elapsed(struct k_timer *timer,
 		return false;
 	}
 
-	if (timeout_event_seen) {
-		/* Drain stale status to avoid immediate fire in next state. */
-		(void)k_timer_status_get(timer);
-		return true;
-	}
-
 	if (k_timer_status_get(timer) > 0U) {
 		if (stale_expiry_out != NULL) {
-			*stale_expiry_out = true;
+			*stale_expiry_out = !timeout_event_seen;
 		}
 		return true;
 	}
