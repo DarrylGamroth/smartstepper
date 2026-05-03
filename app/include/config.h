@@ -259,6 +259,10 @@ struct motor_live_telemetry_ctx {
 	float32_t encoder_raw_deg;
 	float32_t encoder_raw_rad;
 	float32_t encoder_observer_input_rad;
+	float32_t observer_mech_rad;
+	float32_t observer_elec_rad;
+	float32_t observer_elec_pred_rad;
+	float32_t observer_elec_speed_rad_s;
 	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
 	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
 	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */

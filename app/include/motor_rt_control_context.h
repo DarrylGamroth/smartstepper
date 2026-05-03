@@ -29,7 +29,11 @@ struct motor_control_measurements {
 	float32_t id_a;
 	float32_t iq_a;
 	float32_t park_angle_rad;
+	float32_t observer_input_rad;
 	float32_t position_mech_rad;
+	float32_t electrical_angle_rad;
+	float32_t predicted_electrical_angle_rad;
+	float32_t electrical_speed_rad_s;
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
@@ -47,6 +51,10 @@ struct motor_encoder_stage_result {
 	struct motor_control_feedback control_fb;
 	uint8_t input_source;
 	float32_t angle_control_deg;
+	float32_t observer_mech_rad;
+	float32_t observer_elec_rad;
+	float32_t observer_elec_pred_rad;
+	float32_t observer_elec_speed_rad_s;
 	bool fresh;
 	uint8_t frame_status;
 	bool frame_warning;

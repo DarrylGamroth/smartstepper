@@ -292,7 +292,13 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->observer_input_rad = encoder_fb->observer_input_rad;
 	control_fb->observer_mech_rad = encoder_fb->observer_mech_rad;
 	control_fb->observer_elec_rad = encoder_fb->observer_elec_rad;
+	control_fb->observer_elec_pred_rad = encoder_fb->observer_elec_pred_rad;
+	control_fb->observer_elec_speed_rad_s = encoder_fb->observer_elec_speed_rad_s;
 	control_fb->position_mech_rad = encoder_fb->control.position_mech_rad;
+	control_fb->electrical_angle_rad = encoder_fb->control.electrical_angle_rad;
+	control_fb->predicted_electrical_angle_rad =
+		encoder_fb->control.predicted_electrical_angle_rad;
+	control_fb->electrical_speed_rad_s = encoder_fb->control.electrical_speed_rad_s;
 	control_fb->speed_mech_rad_s = encoder_fb->control.speed_mech_rad_s;
 	control_fb->accel_mech_rad_s2 = encoder_fb->control.accel_mech_rad_s2;
 	control_fb->speed_mech_filtered_rad_s = encoder_fb->control.speed_mech_filtered_rad_s;
@@ -311,6 +317,10 @@ static inline void motor_control_publish_encoder_live(
 	params->live.encoder_raw_deg = control_fb->angle_sensor_deg;
 	params->live.encoder_raw_rad = control_fb->angle_sensor_deg * (PI_F32 / 180.0f);
 	params->live.encoder_observer_input_rad = control_fb->observer_input_rad;
+	params->live.observer_mech_rad = control_fb->observer_mech_rad;
+	params->live.observer_elec_rad = control_fb->observer_elec_rad;
+	params->live.observer_elec_pred_rad = control_fb->observer_elec_pred_rad;
+	params->live.observer_elec_speed_rad_s = control_fb->observer_elec_speed_rad_s;
 	params->live.encoder_input_source = control_fb->input_source;
 	params->live.position_rad = control_fb->position_mech_rad;
 	params->live.position_unwrapped_rad = control_fb->position_mech_rad;
@@ -452,7 +462,11 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 		}
 	}
 
+	ctx->meas.observer_input_rad = 0.0f;
 	ctx->meas.position_mech_rad = ctx->position_mech_rad;
+	ctx->meas.electrical_angle_rad = 0.0f;
+	ctx->meas.predicted_electrical_angle_rad = 0.0f;
+	ctx->meas.electrical_speed_rad_s = 0.0f;
 	ctx->meas.speed_mech_rad_s = ctx->speed_mech_rad_s;
 	ctx->meas.accel_mech_rad_s2 = ctx->accel_mech_rad_s2;
 	ctx->meas.speed_mech_filtered_rad_s = ctx->speed_mech_filtered_rad_s;
@@ -467,6 +481,9 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 	ctx->feedback_ref.source = MOTOR_FEEDBACK_NONE;
 	ctx->feedback_ref.input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	ctx->feedback_ref.position_rad = ctx->position_mech_rad;
+	ctx->feedback_ref.electrical_angle_rad = 0.0f;
+	ctx->feedback_ref.predicted_electrical_angle_rad = 0.0f;
+	ctx->feedback_ref.electrical_speed_rad_s = 0.0f;
 	ctx->feedback_ref.velocity_rad_s = ctx->speed_mech_rad_s;
 	ctx->feedback_ref.acceleration_rad_s2 = ctx->accel_mech_rad_s2;
 	ctx->feedback_ref.velocity_filtered_rad_s = ctx->speed_mech_filtered_rad_s;
@@ -508,6 +525,10 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 
 	enc_res->input_source = enc_res->control_fb.input_source;
 	enc_res->angle_control_deg = enc_res->control_fb.angle_control_deg;
+	enc_res->observer_mech_rad = enc_res->control_fb.observer_mech_rad;
+	enc_res->observer_elec_rad = enc_res->control_fb.observer_elec_rad;
+	enc_res->observer_elec_pred_rad = enc_res->control_fb.observer_elec_pred_rad;
+	enc_res->observer_elec_speed_rad_s = enc_res->control_fb.observer_elec_speed_rad_s;
 	enc_res->fresh = enc_res->control_fb.fresh;
 	enc_res->frame_status = enc_res->control_fb.status;
 	enc_res->frame_warning = enc_res->control_fb.warning;
@@ -593,7 +614,6 @@ static inline void motor_control_step_finalize(struct motor_parameters *params,
 		motor_commission_runtime_ctx_refresh(&params->rt_adapters.commission, params);
 		motor_commission_update(&params->rt_adapters.commission, commission_obs);
 	}
-	params->live.elec_angle_rad = angle_observer_get_elec_angle_pred(&params->observer);
 }
 
 static inline void motor_control_measurements_from_encoder(
@@ -612,7 +632,12 @@ static inline void motor_control_measurements_from_encoder(
 	meas->encoder_frame_warning = enc_stage->frame_warning;
 	meas->encoder_frame_error = enc_stage->frame_error;
 	meas->encoder_io_fault = enc_stage->io_fault;
+	meas->observer_input_rad = enc_stage->control_fb.observer_input_rad;
 	meas->position_mech_rad = enc_stage->control_fb.position_mech_rad;
+	meas->electrical_angle_rad = enc_stage->control_fb.electrical_angle_rad;
+	meas->predicted_electrical_angle_rad =
+		enc_stage->control_fb.predicted_electrical_angle_rad;
+	meas->electrical_speed_rad_s = enc_stage->control_fb.electrical_speed_rad_s;
 	meas->speed_mech_rad_s = enc_stage->control_fb.speed_mech_rad_s;
 	meas->accel_mech_rad_s2 = enc_stage->control_fb.accel_mech_rad_s2;
 	meas->speed_mech_filtered_rad_s = enc_stage->control_fb.speed_mech_filtered_rad_s;
@@ -644,7 +669,11 @@ static inline void motor_feedback_ref_from_measurements(
 	feedback_ref->warning = meas->encoder_frame_warning;
 	feedback_ref->error = meas->encoder_frame_error || meas->encoder_io_fault;
 	feedback_ref->angle_control_deg = meas->angle_control_degrees;
+	feedback_ref->observer_input_rad = meas->observer_input_rad;
 	feedback_ref->position_rad = meas->position_mech_rad;
+	feedback_ref->electrical_angle_rad = meas->electrical_angle_rad;
+	feedback_ref->predicted_electrical_angle_rad = meas->predicted_electrical_angle_rad;
+	feedback_ref->electrical_speed_rad_s = meas->electrical_speed_rad_s;
 	feedback_ref->velocity_rad_s = meas->speed_mech_rad_s;
 	feedback_ref->acceleration_rad_s2 = meas->accel_mech_rad_s2;
 	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
@@ -714,7 +743,7 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 
 	meas->ia_a -= params->Ia_offset;
 	meas->ib_a -= params->Ib_offset;
-	meas->park_angle_rad = angle_observer_get_elec_angle(&params->observer);
+	meas->park_angle_rad = meas->electrical_angle_rad;
 
 	if (motor_transforms_park(meas->ia_a, meas->ib_a, meas->park_angle_rad, &meas->id_a,
 				  &meas->iq_a) != 0) {
@@ -726,9 +755,9 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 	if (IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) && params->fault_snapshot.enabled) {
 		motor_fault_snapshot_prepare(report,
 					     meas->angle_control_degrees,
-					     params->live.encoder_observer_input_rad,
+					     meas->observer_input_rad,
 					     meas->park_angle_rad,
-					     angle_observer_get_elec_speed(&params->observer),
+					     meas->electrical_speed_rad_s,
 					     current_ref->id_ref_a,
 					     current_ref->iq_ref_a,
 					     meas->id_a,
@@ -984,10 +1013,10 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 {
 	ARG_UNUSED(motion_ref);
 
-	angle_ref->electrical_angle_rad = angle_observer_get_elec_angle(&params->observer);
+	angle_ref->electrical_angle_rad = feedback_ref->electrical_angle_rad;
 	angle_ref->predicted_electrical_angle_rad =
-		angle_observer_get_elec_angle_pred(&params->observer);
-	angle_ref->electrical_speed_rad_s = angle_observer_get_elec_speed(&params->observer);
+		feedback_ref->predicted_electrical_angle_rad;
+	angle_ref->electrical_speed_rad_s = feedback_ref->electrical_speed_rad_s;
 	angle_ref->source = ctx->policy.angle_source;
 
 	float32_t decoupling_speed_limit_rad_s =
@@ -1167,6 +1196,10 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	params->live.position_rad = feedback_ref->position_rad;
 	params->live.position_unwrapped_rad = feedback_ref->position_rad;
 	params->live.position_innovation_rad = 0.0f;
+	params->live.observer_mech_rad = feedback_ref->position_rad;
+	params->live.observer_elec_rad = feedback_ref->electrical_angle_rad;
+	params->live.observer_elec_pred_rad = feedback_ref->predicted_electrical_angle_rad;
+	params->live.observer_elec_speed_rad_s = feedback_ref->electrical_speed_rad_s;
 	params->live.velocity_rad_s = feedback_ref->velocity_rad_s;
 	params->live.acceleration_rad_s2 = feedback_ref->acceleration_rad_s2;
 	params->live.velocity_filtered_rad_s = feedback_ref->velocity_filtered_rad_s;

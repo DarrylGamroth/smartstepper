@@ -64,8 +64,13 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 	out->observer_input_rad = observer_input_rad;
 	out->observer_mech_rad = angle_observer_get_mech_angle(observer);
 	out->observer_elec_rad = angle_observer_get_elec_angle(observer);
+	out->observer_elec_pred_rad = angle_observer_get_elec_angle_pred(observer);
+	out->observer_elec_speed_rad_s = angle_observer_get_elec_speed(observer);
 
 	out->control.position_mech_rad = out->observer_mech_rad;
+	out->control.electrical_angle_rad = out->observer_elec_rad;
+	out->control.predicted_electrical_angle_rad = out->observer_elec_pred_rad;
+	out->control.electrical_speed_rad_s = out->observer_elec_speed_rad_s;
 	out->control.speed_mech_rad_s = angle_observer_get_mech_speed(observer);
 	out->control.accel_mech_rad_s2 = 0.0f;
 	out->control.speed_mech_filtered_rad_s = out->control.speed_mech_rad_s;

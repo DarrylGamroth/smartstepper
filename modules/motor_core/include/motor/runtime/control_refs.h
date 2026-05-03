@@ -37,6 +37,9 @@ struct motor_feedback_ref {
 	float32_t angle_control_deg;
 	float32_t observer_input_rad;
 	float32_t position_rad;
+	float32_t electrical_angle_rad;
+	float32_t predicted_electrical_angle_rad;
+	float32_t electrical_speed_rad_s;
 	float32_t velocity_rad_s;
 	float32_t acceleration_rad_s2;
 	float32_t velocity_filtered_rad_s;

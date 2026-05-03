@@ -120,6 +120,8 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	feedback->observer_input_rad = path_out.observer_input_rad;
 	feedback->observer_mech_rad = path_out.observer_mech_rad;
 	feedback->observer_elec_rad = path_out.observer_elec_rad;
+	feedback->observer_elec_pred_rad = path_out.observer_elec_pred_rad;
+	feedback->observer_elec_speed_rad_s = path_out.observer_elec_speed_rad_s;
 	feedback->control = path_out.control;
 
 	if (feedback->input_source == MOTOR_ENCODER_INPUT_SRC_ENCODER) {
@@ -144,6 +146,10 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	*ctx->position_jitter_count = 0U;
 
 	feedback->position_mech_rad = feedback->control.position_mech_rad;
+	feedback->electrical_angle_rad = feedback->control.electrical_angle_rad;
+	feedback->predicted_electrical_angle_rad =
+		feedback->control.predicted_electrical_angle_rad;
+	feedback->electrical_speed_rad_s = feedback->control.electrical_speed_rad_s;
 	feedback->speed_mech_rad_s = feedback->control.speed_mech_rad_s;
 	feedback->accel_mech_rad_s2 = feedback->control.accel_mech_rad_s2;
 	feedback->speed_mech_filtered_rad_s = feedback->control.speed_mech_filtered_rad_s;

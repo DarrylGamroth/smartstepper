@@ -1041,9 +1041,9 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	int error = motor_api_get_error();
 	float32_t live_position_rad = g_motor_params->live.position_rad;
 	float32_t live_elec_angle_rad = g_motor_params->live.elec_angle_rad;
-	float32_t obs_mech_rad = g_motor_params->observer.mech_angle_rad;
-	float32_t obs_elec_rad = g_motor_params->observer.elec_angle_rad;
-	float32_t obs_elec_pred_rad = g_motor_params->observer.elec_angle_pred_rad;
+	float32_t obs_mech_rad = g_motor_params->live.observer_mech_rad;
+	float32_t obs_elec_rad = g_motor_params->live.observer_elec_rad;
+	float32_t obs_elec_pred_rad = g_motor_params->live.observer_elec_pred_rad;
 	float32_t obs_offset_rad = g_motor_params->observer.mech_angle_offset_rad;
 	float32_t align_offset_rad = g_motor_params->observer_alignment_offset_rad;
 	float32_t enc_observer_input_rad = g_motor_params->live.encoder_observer_input_rad;

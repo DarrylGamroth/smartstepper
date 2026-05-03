@@ -21,6 +21,9 @@
  */
 struct motor_encoder_control_sample {
 	float32_t position_mech_rad;
+	float32_t electrical_angle_rad;
+	float32_t predicted_electrical_angle_rad;
+	float32_t electrical_speed_rad_s;
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
@@ -51,6 +54,8 @@ struct motor_angle_path_output {
 	float32_t observer_input_rad;
 	float32_t observer_mech_rad;
 	float32_t observer_elec_rad;
+	float32_t observer_elec_pred_rad;
+	float32_t observer_elec_speed_rad_s;
 	float32_t angle_sensor_deg;
 	float32_t angle_control_deg;
 	struct motor_encoder_control_sample control;
