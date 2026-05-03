@@ -720,11 +720,30 @@ int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev)
 		return ret;
 	}
 
+	uint8_t verify_reg0 = 0U;
 	uint8_t verify_reg7 = 0U;
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4, &verify_reg7);
+	uint8_t verify_reg9 = 0U;
+	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0, &verify_reg0);
+	if (ret == 0) {
+		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4,
+						  &verify_reg7);
+	}
+	if (ret == 0) {
+		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG1_PSEL,
+						  &verify_reg9);
+	}
 	if (ret != 0 ||
+	    (verify_reg0 & (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
+			    AEAT9955_FAST_CONFIG0_CRC_SELECT |
+			    AEAT9955_FAST_CONFIG0_CRC_INIT_MASK)) !=
+		    (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
+		     AEAT9955_FAST_CONFIG0_CRC_SELECT |
+		     AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF) ||
 	    (verify_reg7 & AEAT9955_FAST_CONFIG0_SPI4_MODE_MASK) !=
-		    AEAT9955_FAST_CONFIG0_SPI4_MODE_16) {
+		    AEAT9955_FAST_CONFIG0_SPI4_MODE_16 ||
+	    (verify_reg9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) != 0U ||
+	    verify_reg7 == AEAT9955_FAST_REG_CONFIG0_SPI4 ||
+	    verify_reg9 == AEAT9955_FAST_REG_CONFIG1_PSEL) {
 		(void)aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_8_CRC16);
 		return ret != 0 ? ret : -EIO;
 	}
