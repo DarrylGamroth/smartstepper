@@ -25,6 +25,7 @@
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
+#include "motor_encoder_control.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -45,6 +46,26 @@ static inline void motor_online_reset_feedback_quality(struct motor_parameters *
 	params->live.position_stale_events = 0U;
 	params->live.position_glitch_count = 0U;
 	params->live.position_jitter_count = 0U;
+}
+
+static inline enum motor_state motor_online_current_substate(const struct motor_parameters *params)
+{
+	if (motor_state_ptr_is_mode(params->smf.current, MOTOR_STATE_ONLINE_CURRENT_ENCODER)) {
+		return MOTOR_STATE_ONLINE_CURRENT_ENCODER;
+	}
+	if (motor_state_ptr_is_mode(params->smf.current, MOTOR_STATE_ONLINE_VELOCITY_ENCODER)) {
+		return MOTOR_STATE_ONLINE_VELOCITY_ENCODER;
+	}
+	if (motor_state_ptr_is_mode(params->smf.current, MOTOR_STATE_ONLINE_POSITION_ENCODER)) {
+		return MOTOR_STATE_ONLINE_POSITION_ENCODER;
+	}
+	if (motor_state_ptr_is_mode(params->smf.current, MOTOR_STATE_ONLINE_VELOCITY_GENERATED)) {
+		return MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+	}
+	if (motor_state_ptr_is_mode(params->smf.current, MOTOR_STATE_ONLINE_POSITION_GENERATED)) {
+		return MOTOR_STATE_ONLINE_POSITION_GENERATED;
+	}
+	return MOTOR_STATE_ONLINE;
 }
 
 static int motor_position_plan_sequence_move(struct motor_parameters *params, float32_t target_wrapped_rad)
@@ -202,6 +223,20 @@ enum smf_state_result motor_state_online_run(void *obj)
 			LOG_ERR("Invalid mode change target: %s",
 				motor_state_to_string(params->event.target_mode));
 			return SMF_EVENT_HANDLED;
+		}
+
+		if (motor_encoder_control_mode_requires_encoder(params->event.target_mode)) {
+			char reason[96] = {0};
+
+			if (!motor_encoder_control_ready_for_transition(
+				    params, motor_online_current_substate(params),
+				    params->event.target_mode, true, reason,
+				    sizeof(reason))) {
+				LOG_ERR("Encoder mode %s rejected: %s",
+					motor_state_to_string(params->event.target_mode),
+					reason);
+				return SMF_EVENT_HANDLED;
+			}
 		}
 
 		smf_set_state(SMF_CTX(params), &motor_states[params->event.target_mode]);
@@ -483,13 +518,15 @@ void motor_state_online_position_encoder_entry(void *obj)
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	params->live.velocity_target_rad_s = 0.0f;
 	params->live.velocity_ref_rad_s = speed_mech_rad_s;
+	params->live.Id_ref_A = params->Id_setpoint_A;
+	params->live.Iq_ref_A = 0.0f;
 	params->velocity_cl_i_term_A = 0.0f;
 	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
 	params->position_loop_phase = 0U;
 	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, params->live.Iq_ref_A);
-	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
+	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, 0.0f);
+	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = 0.0f;

@@ -1776,6 +1776,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 		  cmd_motor_encoder_pipeline_reset),
 	SHELL_CMD_ARG(pipeline_inject, NULL, "Pipeline fault inject mode [none|status|frame]",
 		      cmd_motor_encoder_pipeline_inject, 1, 1),
+	SHELL_CMD(control_status, NULL, "Show encoder-control readiness gate",
+		  cmd_motor_encoder_control_status),
 	SHELL_SUBCMD_SET_END
 );
 

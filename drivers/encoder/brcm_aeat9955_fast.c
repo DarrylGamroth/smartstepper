@@ -480,6 +480,11 @@ static int aeat9955_fast_read_register_spi8(const struct device *dev, uint8_t re
 						  AEAT9955_FAST_SPI8_REG_READ_FRAME_LEN,
 						  &result);
 	if (ret == 0) {
+		ret = aeat9955_fast_transfer_blocking(dev, tx,
+						      AEAT9955_FAST_SPI8_REG_READ_FRAME_LEN,
+						      &result);
+	}
+	if (ret == 0) {
 		*value = result.raw[3];
 	}
 
@@ -972,7 +977,8 @@ int aeat9955_fast_read_register_raw(const struct device *dev, uint8_t reg,
 	if (ret != 0) {
 		return ret;
 	}
-	if (data->spi4_mode == AEAT9955_FAST_SPI4_16_PARITY) {
+	if (data->spi4_mode == AEAT9955_FAST_SPI4_16_PARITY ||
+	    data->spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) {
 		ret = aeat9955_fast_transfer_blocking(dev, tx, len, &result);
 		if (ret != 0) {
 			return ret;

@@ -125,6 +125,23 @@ ZTEST(motor_encoder_map_detect, test_rejects_encoder_error_samples)
 	zassert_equal(result.rejected_samples, 1U, NULL);
 }
 
+ZTEST(motor_encoder_map_detect, test_accepts_bounded_encoder_error_samples)
+{
+	struct motor_encoder_map_detect_sample samples[64];
+	struct motor_encoder_map_detect_result result = {0};
+	struct motor_encoder_map_detect_config cfg = default_cfg();
+
+	fill_sweep(samples, ARRAY_SIZE(samples), 1, 0.2f);
+	samples[10].flags = MOTOR_ENCODER_MAP_SAMPLE_ERROR;
+	cfg.max_error_samples = 1U;
+
+	zassert_ok(motor_encoder_map_detect_compute(&cfg, samples, ARRAY_SIZE(samples), &result),
+		   NULL);
+	zassert_true(result.valid, NULL);
+	zassert_equal(result.encoder_error_count, 1U, NULL);
+	zassert_equal(result.rejected_samples, 1U, NULL);
+}
+
 ZTEST(motor_encoder_map_detect, test_accepts_warning_samples_but_counts_them)
 {
 	struct motor_encoder_map_detect_sample samples[64];

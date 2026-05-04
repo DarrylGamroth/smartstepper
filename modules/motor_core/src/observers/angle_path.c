@@ -32,17 +32,23 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 							      in->sample_io_fault);
 
 	float32_t observer_input_rad = 0.0f;
+	bool encoder_handoff = false;
 	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) {
 		angle_observer_set_delay(observer, 0.0f);
 		observer_input_rad = in->generated_mech_rad;
 	} else if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER) {
 		angle_observer_set_delay(observer, in->encoder_delay_samples);
 		observer_input_rad = out->angle_control_deg * (PI_F32 / 180.0f);
+		encoder_handoff =
+			in->previous_input_source != MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER;
 	} else {
 		angle_observer_set_delay(observer, 0.0f);
 		observer_input_rad = angle_observer_get_mech_angle(observer);
 	}
 
+	if (encoder_handoff) {
+		angle_observer_reset_tracking(observer, observer_input_rad, 0.0f);
+	}
 	angle_observer_update(observer, observer_input_rad);
 
 	bool has_error = in->sample_error || in->sample_io_fault;

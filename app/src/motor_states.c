@@ -37,6 +37,7 @@
 #include "motor_states_online.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor_commission_adapter.h"
+#include "motor_encoder_control.h"
 #include "motor_torque.h"
 #include "motor/runtime/config_snapshot.h"
 
@@ -248,6 +249,16 @@ static inline enum motor_state motor_resolve_requested_online_mode(const struct 
 
 	if (!motor_state_is_online_submode(mode)) {
 		mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+	}
+	if (motor_encoder_control_mode_requires_encoder(mode)) {
+		char reason[96] = {0};
+
+		if (!motor_encoder_control_ready_for_mode(params, mode, true,
+							  reason, sizeof(reason))) {
+			LOG_WRN("Requested encoder online mode %s rejected: %s; using velocity_generated",
+				motor_state_to_string(mode), reason);
+			mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+		}
 	}
 
 	return mode;

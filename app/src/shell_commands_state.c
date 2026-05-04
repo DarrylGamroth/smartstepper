@@ -21,6 +21,7 @@
 #include "motor/runtime/keepalive_policy.h"
 #include "motor/runtime/control_policy.h"
 #include "motor_hardware.h"
+#include "motor_encoder_control.h"
 #include "motor_encoder_pipeline.h"
 #include "config.h"
 #include "motor/math/angle_wrap.h"
@@ -867,6 +868,20 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 	}
 
 	int current_state = motor_api_get_state();
+	if (motor_encoder_control_mode_requires_encoder(target_state)) {
+		char reason[96] = {0};
+
+		if (!motor_encoder_control_ready_for_transition(g_motor_params,
+								(enum motor_state)current_state,
+								target_state, true,
+								reason, sizeof(reason))) {
+			shell_error(sh, "Cannot enter %s: %s", mode_name, reason);
+			shell_error(sh,
+				    "Run 'motor commission encoder run <current_a> <mech_hz> <cycles>' then 'motor commission encoder apply'");
+			return -EACCES;
+		}
+	}
+
 	bool online_active = (current_state == MOTOR_STATE_ONLINE) ||
 			    motor_state_is_online_submode(current_state);
 	if (!online_active) {
@@ -1346,6 +1361,62 @@ int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char 
 
 	motor_encoder_pipeline_set_test_inject_mode(mode);
 	shell_print(sh, "Encoder pipeline inject mode set: %s", argv[1]);
+	return 0;
+}
+
+/* motor encoder control_status */
+int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	struct motor_encoder_control_status status = {0};
+	char reason[96] = {0};
+	int ret = motor_encoder_control_get_status(g_motor_params, true, &status,
+						   reason, sizeof(reason));
+	if (ret != 0) {
+		shell_error(sh, "Failed to evaluate encoder-control readiness (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Encoder Control Readiness:");
+	shell_print(sh, "  Ready:           %s", status.ready ? "YES" : "NO");
+	shell_print(sh, "  Reason:          %s", reason);
+	shell_print(sh, "  Device ready:    %s", status.device_ready ? "YES" : "NO");
+	shell_print(sh, "  Mapping applied: %s", status.mapping_complete ? "YES" : "NO");
+	shell_print(sh, "  Pipeline idle:   %s", status.pipeline_idle ? "YES" : "NO");
+	shell_print(sh, "  Injection off:   %s", status.injection_disabled ? "YES" : "NO");
+	shell_print(sh, "  Protocol ok:     %s", status.protocol_ok ? "YES" : "NO");
+	if (status.protocol_checked) {
+		shell_print(sh, "  AEAT Config0:    0x%02X", status.config0);
+		shell_print(sh, "  AEAT SPI4/UVW:   0x%02X", status.config7);
+		shell_print(sh, "  AEAT PSEL:       0x%02X", status.config9);
+	}
+	if (status.protocol_error != 0) {
+		shell_print(sh, "  Protocol error:  %d", status.protocol_error);
+	}
+	shell_print(sh, "  Pipeline req:    ok=%u busy=%u disabled=%u error=%u",
+		    status.pipeline_stats.request_ok,
+		    status.pipeline_stats.request_busy,
+		    status.pipeline_stats.request_disabled,
+		    status.pipeline_stats.request_error);
+	shell_print(sh, "  Pipeline collect: ok=%u pending=%u empty=%u error=%u",
+		    status.pipeline_stats.collect_ok,
+		    status.pipeline_stats.collect_pending,
+		    status.pipeline_stats.collect_empty,
+		    status.pipeline_stats.collect_error);
+	shell_print(sh, "  Pipeline errors: transport=%u parity=%u crc=%u glitch=%u status=%u",
+		    status.pipeline_stats.collect_transport_error,
+		    status.pipeline_stats.collect_frame_parity_error,
+		    status.pipeline_stats.collect_frame_crc_error,
+		    status.pipeline_stats.collect_frame_glitch_error,
+		    status.pipeline_stats.collect_frame_status_error);
+
 	return 0;
 }
 

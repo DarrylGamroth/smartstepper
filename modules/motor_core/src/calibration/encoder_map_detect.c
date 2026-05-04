@@ -208,7 +208,7 @@ int motor_encoder_map_detect_compute(const struct motor_encoder_map_detect_confi
 	out->direction_valid = out->direction_valid &&
 			       (out->direction_residual_rad <= cfg->max_direction_residual_rad);
 	out->valid = out->direction_valid && out->offset_valid && out->ratio_valid &&
-		     out->encoder_error_count == 0U;
+		     out->encoder_error_count <= cfg->max_error_samples;
 
 	return out->valid ? 0 : -ERANGE;
 }

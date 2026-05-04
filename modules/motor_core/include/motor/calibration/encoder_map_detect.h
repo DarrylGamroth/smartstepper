@@ -27,6 +27,7 @@ struct motor_encoder_map_detect_config {
 	float32_t max_offset_residual_rad;
 	float32_t max_direction_residual_rad;
 	float32_t min_direction_correlation;
+	uint32_t max_error_samples;
 	bool estimate_ratio;
 };
 

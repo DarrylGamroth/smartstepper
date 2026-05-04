@@ -107,6 +107,7 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 		.sample_warning = raw_warning,
 		.sample_error = raw_error,
 		.sample_io_fault = raw_io_fault,
+		.previous_input_source = *ctx->encoder_input_source,
 		.sample_angle_deg = raw_angle_deg,
 		.encoder_direction_sign = encoder_direction_sign,
 		.generated_mech_rad = generated_angle_rad,
@@ -140,11 +141,13 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 
 	if (sample_fresh) {
 		*ctx->position_stale_count = 0U;
-	} else if (*ctx->position_stale_count < UINT16_MAX) {
+	} else if (raw_sample_enabled && *ctx->position_stale_count < UINT16_MAX) {
 		(*ctx->position_stale_count)++;
 		if (*ctx->position_stale_count == MOTOR_FEEDBACK_STALE_THRESHOLD_SAMPLES) {
 			(*ctx->position_stale_events)++;
 		}
+	} else if (!raw_sample_enabled) {
+		*ctx->position_stale_count = 0U;
 	}
 
 	*ctx->position_quality_flags = quality_flags;
@@ -176,10 +179,12 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 	float32_t generated_mech_rad = angle_gen_get_angle(ctx->angle_gen);
 	float32_t observer_mech_offset_rad = ctx->observer->mech_angle_offset_rad;
 
-	capture->angle_rad = feedback->sample_available ?
+	bool raw_sample_valid = feedback->fresh && !feedback->error;
+
+	capture->angle_rad = raw_sample_valid ?
 				     (feedback->angle_control_deg * (PI_F32 / 180.0f)) :
 				     feedback->observer_input_rad;
-	capture->angle_deg = feedback->sample_available ?
+	capture->angle_deg = raw_sample_valid ?
 				     feedback->angle_control_deg :
 				     (feedback->observer_input_rad * (180.0f / PI_F32));
 	capture->observer_mech_rad = feedback->observer_mech_rad;
@@ -190,7 +195,7 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 			     (float32_t)ctx->pole_pairs);
 	capture->input_source = feedback->input_source;
 
-	if (feedback->sample_available && feedback->fresh && !feedback->error) {
+	if (raw_sample_valid) {
 		capture->encoder_mech_rad = wrap_rad_2pi(capture->angle_rad);
 		capture->encoder_elec_rad =
 			wrap_rad_2pi((capture->encoder_mech_rad + observer_mech_offset_rad) *

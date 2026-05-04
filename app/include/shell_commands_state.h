@@ -68,6 +68,7 @@ int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **a
 int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_clear(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_clear(const struct shell *sh, size_t argc, char **argv);

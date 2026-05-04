@@ -319,4 +319,32 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_warning_only_remains_valid)
 	zassert_equal(out.control.input_source, MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER, NULL);
 }
 
+ZTEST(motor_encoder_feedback_core, test_angle_path_encoder_handoff_reseeds_without_speed_spike)
+{
+	struct angle_observer_state obs = {0};
+	struct motor_angle_path_input in = {0};
+	struct motor_angle_path_output out = {0};
+
+	angle_observer_init(&obs, 0.001f, 100.0f, 50U, 0.0f);
+	angle_observer_reset_tracking(&obs, 0.0f, 0.0f);
+
+	in.feature_angle_gen = false;
+	in.sample_enabled = true;
+	in.sample_fresh = true;
+	in.sample_warning = false;
+	in.sample_error = false;
+	in.sample_io_fault = false;
+	in.previous_input_source = MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED;
+	in.sample_angle_deg = 90.0f;
+	in.encoder_direction_sign = 1.0f;
+	in.generated_mech_rad = 0.0f;
+	in.encoder_delay_samples = 0.0f;
+
+	zassert_ok(motor_angle_path_step(&obs, &in, &out), NULL);
+	zassert_equal(out.control.input_source, MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER, NULL);
+	zassert_within(out.control.position_mech_rad, PI_F32 * 0.5f, 1.0e-3f, NULL);
+	zassert_within(out.control.speed_mech_rad_s, 0.0f, 1.0e-3f, NULL);
+	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U, NULL);
+}
+
 ZTEST_SUITE(motor_encoder_feedback_core, NULL, NULL, NULL, NULL, NULL);

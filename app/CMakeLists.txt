@@ -23,6 +23,7 @@ target_sources(app PRIVATE
 	src/shell_motion_chopper_calib.c
 	src/shell_motion_commission.c
 	src/motor_control_api.c
+	src/motor_encoder_control.c
 	src/motor_encoder_pipeline.c
 	src/motor_control_telemetry.c
 	src/motor_control_loop.c

@@ -24,12 +24,14 @@
 #include "motor/calibration/encoder_map_detect.h"
 #include "motor/observers/angle_observer.h"
 #include "motor_torque.h"
+#include "motor_encoder_pipeline.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
 #define MOTOR_COMMISSION_AUTO_POST_WAIT_MS 2500U
 #define MOTOR_COMMISSION_ENCODER_MAX_SAMPLES 512U
 #define MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS 5U
+#define MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES 4U
 #define MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
@@ -254,6 +256,14 @@ static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 	traj_set_target_value(&g_motor_params->traj_velocity, limited);
 }
 
+static void motor_commission_set_direct_current(float32_t id_a, float32_t iq_a)
+{
+	g_motor_params->Id_setpoint_A = id_a;
+	g_motor_params->Iq_setpoint_A = iq_a;
+	g_motor_params->live.Id_ref_A = id_a;
+	g_motor_params->live.Iq_ref_A = iq_a;
+}
+
 static int motor_commission_apply_detent_velocity_gains(
 	float32_t speed_hz,
 	float32_t iq_limit_a,
@@ -358,8 +368,7 @@ static void motor_commission_encoder_stop_generated(void)
 	}
 
 	motor_commission_set_velocity_target_hz(0.0f);
-	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
-	(void)motor_api_set_param("Iq_setpoint_A", 0.0f);
+	motor_commission_set_direct_current(0.0f, 0.0f);
 	motor_command_feed_watchdog(g_motor_params);
 }
 
@@ -1428,8 +1437,7 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 	struct motor_commission_encoder_trace_guard trace_guard;
 	motor_commission_encoder_trace_force_on(&trace_guard);
 
-	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
-	(void)motor_api_set_param("Iq_setpoint_A", current_a);
+	motor_commission_set_direct_current(0.0f, current_a);
 	motor_commission_set_velocity_target_hz(mech_hz);
 	motor_command_feed_watchdog(g_motor_params);
 
@@ -1484,11 +1492,18 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 	struct motor_encoder_map_detect_config cfg = {
 		.pole_pairs = (float32_t)MOTOR_POLE_PAIRS,
 		.min_mech_motion_rad = 0.02f,
-		.max_offset_residual_rad = 0.35f,
-		.max_direction_residual_rad = 0.50f,
-		.min_direction_correlation = 0.70f,
-		.estimate_ratio = false,
-	};
+		/* Hybrid steppers can show substantial electrical phase ripple during
+		 * generated-angle sweeps because detent torque and open-loop load angle
+		 * modulate the measured rotor position. Keep the residual visible in
+		 * the report, but do not reject an otherwise clean full-revolution
+		 * mapping unless the RMS phase spread is clearly excessive.
+		 */
+		.max_offset_residual_rad = 0.80f,
+			.max_direction_residual_rad = 0.50f,
+			.min_direction_correlation = 0.70f,
+			.max_error_samples = MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES,
+			.estimate_ratio = false,
+		};
 	ret = motor_encoder_map_detect_compute(&cfg, encoder_detect_samples, accepted,
 					       &encoder_detect_result);
 	encoder_detect_result_valid = encoder_detect_result.valid;
@@ -1510,9 +1525,10 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		    encoder_detect_result.encoder_warning_count,
 		    encoder_detect_result.encoder_error_count,
 		    ret);
-	if (encoder_detect_result.valid) {
-		shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
-	}
+		if (encoder_detect_result.valid) {
+			motor_encoder_pipeline_reset_stats();
+			shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
+		}
 
 	return ret;
 }
