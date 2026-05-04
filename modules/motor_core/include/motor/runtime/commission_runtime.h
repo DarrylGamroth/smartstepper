@@ -70,6 +70,9 @@ struct motor_commission_sample {
 };
 
 struct motor_commission_results {
+	float32_t iq_move_min_pos_a;
+	float32_t iq_move_min_neg_a;
+	float32_t iq_move_recommended_a;
 	float32_t psi_f_wb;
 	float32_t psi_f_bias_v;
 	float32_t psi_f_residual_rms_v;
@@ -86,6 +89,13 @@ struct motor_commission_results {
 	float32_t mapping_offset_ratio;
 	float32_t mapping_pole_pairs_est;
 	float32_t mapping_confidence;
+	uint16_t iq_move_pos_sample_count;
+	uint16_t iq_move_neg_sample_count;
+	uint16_t iq_move_warning_count;
+	uint16_t iq_move_error_count;
+	bool iq_move_pos_valid;
+	bool iq_move_neg_valid;
+	bool iq_move_valid;
 	bool psi_f_valid;
 	bool mech_valid;
 	bool mapping_direction_valid;

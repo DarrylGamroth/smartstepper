@@ -32,6 +32,10 @@
 #define MOTOR_COMMISSION_ENCODER_MAX_SAMPLES 512U
 #define MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS 3000U
+#define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
+#define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
+#define MOTOR_COMMISSION_MOTION_MIN_SAMPLES 4U
+#define MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS 80U
 
 static struct motor_encoder_map_detect_sample encoder_detect_samples[
 	MOTOR_COMMISSION_ENCODER_MAX_SAMPLES];
@@ -258,6 +262,250 @@ static bool motor_commission_encoder_latest_raw_trace_after(
 	return true;
 }
 
+struct motor_commission_motion_measurement {
+	float32_t iq_a;
+	float32_t net_motion_rad;
+	float32_t abs_motion_rad;
+	uint16_t sample_count;
+	uint16_t warning_count;
+	uint16_t error_count;
+	bool valid;
+};
+
+struct motor_commission_motion_threshold_result {
+	float32_t threshold_a;
+	float32_t best_net_motion_rad;
+	float32_t best_abs_motion_rad;
+	uint16_t sample_count;
+	uint16_t warning_count;
+	uint16_t error_count;
+	bool valid;
+};
+
+static bool motor_commission_motion_sample_clean(
+	const struct motor_encoder_raw_trace_sample *sample)
+{
+	return sample != NULL &&
+	       sample->sample_fresh != 0U &&
+	       sample->sample_error == 0U &&
+	       sample->sample_io_fault == 0U &&
+	       isfinite(sample->raw_angle_rad);
+}
+
+static void motor_commission_motion_stop_current(void)
+{
+	if (g_motor_params == NULL) {
+		return;
+	}
+
+	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
+	(void)motor_api_set_param("Iq_setpoint_A", 0.0f);
+	g_motor_params->Id_setpoint_A = 0.0f;
+	g_motor_params->Iq_setpoint_A = 0.0f;
+	motor_command_feed_watchdog(g_motor_params);
+}
+
+static int motor_commission_motion_measure_current(
+	float32_t signed_iq_a,
+	uint32_t hold_ms,
+	float32_t min_motion_rad,
+	struct motor_commission_motion_measurement *out)
+{
+	if (g_motor_params == NULL || out == NULL ||
+	    !isfinite(signed_iq_a) || !isfinite(min_motion_rad) ||
+	    hold_ms < MOTOR_COMMISSION_MOTION_SAMPLE_MS) {
+		return -EINVAL;
+	}
+
+	*out = (struct motor_commission_motion_measurement){
+		.iq_a = signed_iq_a,
+	};
+
+	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
+	(void)motor_api_set_param("Iq_setpoint_A", signed_iq_a);
+	g_motor_params->Id_setpoint_A = 0.0f;
+	g_motor_params->Iq_setpoint_A = signed_iq_a;
+	motor_command_feed_watchdog(g_motor_params);
+
+	bool have_prev = false;
+	float32_t prev_angle_rad = 0.0f;
+	uint32_t last_trace_loop = g_motor_params->rt_fast.control_loop_count;
+	uint32_t start_ms = k_uptime_get_32();
+
+	while ((k_uptime_get_32() - start_ms) < hold_ms) {
+		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+			return -EFAULT;
+		}
+
+		k_msleep(MOTOR_COMMISSION_MOTION_SAMPLE_MS);
+		motor_command_feed_watchdog(g_motor_params);
+
+		struct motor_encoder_raw_trace_sample raw_trace = {0};
+		if (!motor_commission_encoder_latest_raw_trace_after(last_trace_loop,
+								     &raw_trace)) {
+			continue;
+		}
+		last_trace_loop = raw_trace.control_loop_count;
+		out->warning_count += raw_trace.sample_warning ? 1U : 0U;
+		if (!motor_commission_motion_sample_clean(&raw_trace)) {
+			out->error_count++;
+			continue;
+		}
+
+		out->sample_count++;
+		if (!have_prev) {
+			prev_angle_rad = raw_trace.raw_angle_rad;
+			have_prev = true;
+			continue;
+		}
+
+		float32_t delta_rad = wrap_rad_pi(raw_trace.raw_angle_rad - prev_angle_rad);
+		if (!isfinite(delta_rad)) {
+			out->error_count++;
+			continue;
+		}
+		out->net_motion_rad += delta_rad;
+		out->abs_motion_rad += fabsf(delta_rad);
+		prev_angle_rad = raw_trace.raw_angle_rad;
+	}
+
+	out->valid = out->sample_count >= MOTOR_COMMISSION_MOTION_MIN_SAMPLES &&
+		     out->error_count == 0U &&
+		     fabsf(out->net_motion_rad) >= min_motion_rad &&
+		     out->abs_motion_rad >= min_motion_rad;
+
+	return 0;
+}
+
+static int motor_commission_motion_sweep_direction(
+	const struct shell *sh,
+	float32_t sign,
+	float32_t start_a,
+	float32_t stop_a,
+	float32_t step_a,
+	uint32_t hold_ms,
+	float32_t min_motion_rad,
+	struct motor_commission_motion_threshold_result *out)
+{
+	if (out == NULL || !isfinite(sign) || sign == 0.0f ||
+	    !isfinite(start_a) || !isfinite(stop_a) || !isfinite(step_a) ||
+	    start_a <= 0.0f || stop_a < start_a || step_a <= 0.0f) {
+		return -EINVAL;
+	}
+
+	*out = (struct motor_commission_motion_threshold_result){0};
+
+	for (float32_t amp_a = start_a; amp_a <= (stop_a + 0.5f * step_a); amp_a += step_a) {
+		float32_t limited_amp_a = MIN(amp_a, stop_a);
+		struct motor_commission_motion_measurement meas = {0};
+		int ret = motor_commission_motion_measure_current(sign * limited_amp_a,
+								  hold_ms,
+								  min_motion_rad,
+								  &meas);
+		motor_commission_motion_stop_current();
+		k_msleep(MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
+		motor_command_feed_watchdog(g_motor_params);
+		if (ret != 0) {
+			return ret;
+		}
+
+		out->warning_count += meas.warning_count;
+		out->error_count += meas.error_count;
+		out->sample_count += meas.sample_count;
+		if (fabsf(meas.abs_motion_rad) > fabsf(out->best_abs_motion_rad)) {
+			out->best_abs_motion_rad = meas.abs_motion_rad;
+			out->best_net_motion_rad = meas.net_motion_rad;
+		}
+
+		shell_print(sh,
+			    "  %s Iq=%.3f A: net=%.3f deg abs=%.3f deg samples=%u warn=%u err=%u %s",
+			    (sign > 0.0f) ? "pos" : "neg",
+			    (double)limited_amp_a,
+			    (double)(meas.net_motion_rad * 180.0f / PI_F32),
+			    (double)(meas.abs_motion_rad * 180.0f / PI_F32),
+			    meas.sample_count,
+			    meas.warning_count,
+			    meas.error_count,
+			    meas.valid ? "PASS" : "wait");
+
+		if (meas.valid) {
+			out->threshold_a = limited_amp_a;
+			out->best_abs_motion_rad = meas.abs_motion_rad;
+			out->best_net_motion_rad = meas.net_motion_rad;
+			out->valid = true;
+			return 0;
+		}
+
+		if (limited_amp_a >= stop_a) {
+			break;
+		}
+	}
+
+	return -ENODATA;
+}
+
+static int motor_commission_run_motion_threshold(
+	const struct shell *sh,
+	float32_t start_a,
+	float32_t stop_a,
+	float32_t step_a,
+	uint32_t hold_ms,
+	float32_t min_motion_rad)
+{
+	int ret = motor_api_request_online();
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER,
+					     MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		return ret;
+	}
+
+	struct motor_commission_encoder_trace_guard trace_guard;
+	motor_commission_encoder_trace_force_on(&trace_guard);
+
+	struct motor_commission_motion_threshold_result pos = {0};
+	struct motor_commission_motion_threshold_result neg = {0};
+	ret = motor_commission_motion_sweep_direction(sh, 1.0f, start_a, stop_a, step_a,
+						      hold_ms, min_motion_rad, &pos);
+	int neg_ret = 0;
+	if (ret == 0 || ret == -ENODATA) {
+		neg_ret = motor_commission_motion_sweep_direction(sh, -1.0f, start_a, stop_a,
+								  step_a, hold_ms,
+								  min_motion_rad, &neg);
+	}
+
+	motor_commission_motion_stop_current();
+	motor_commission_encoder_trace_restore(&trace_guard);
+
+	struct motor_commission_results *res = &g_motor_params->commission.results;
+	res->iq_move_pos_valid = pos.valid;
+	res->iq_move_neg_valid = neg.valid;
+	res->iq_move_min_pos_a = pos.valid ? pos.threshold_a : 0.0f;
+	res->iq_move_min_neg_a = neg.valid ? neg.threshold_a : 0.0f;
+	res->iq_move_recommended_a = (pos.valid && neg.valid) ?
+					     MAX(pos.threshold_a, neg.threshold_a) :
+					     0.0f;
+	res->iq_move_valid = pos.valid && neg.valid;
+	res->iq_move_pos_sample_count = pos.sample_count;
+	res->iq_move_neg_sample_count = neg.sample_count;
+	res->iq_move_warning_count = pos.warning_count + neg.warning_count;
+	res->iq_move_error_count = pos.error_count + neg.error_count;
+
+	if (ret != 0 || neg_ret != 0 || !res->iq_move_valid) {
+		return (ret != 0) ? ret : ((neg_ret != 0) ? neg_ret : -ENODATA);
+	}
+
+	return 0;
+}
+
 static uint32_t motor_commission_prbs_next(uint32_t state)
 {
 	state ^= (state << 13);
@@ -460,6 +708,16 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    ctx->reject_fault, ctx->reject_saturation, ctx->reject_data_invalid);
 	shell_print(sh, "  Decimation:     %u", ctx->sample_decimation);
 	shell_print(sh, "  Last abort:     %s", ctx->last_abort_reason);
+	shell_print(sh, "  Motion thresh:  valid=%s pos=%.3f A neg=%.3f A rec=%.3f A",
+		    ctx->results.iq_move_valid ? "YES" : "NO",
+		    (double)ctx->results.iq_move_min_pos_a,
+		    (double)ctx->results.iq_move_min_neg_a,
+		    (double)ctx->results.iq_move_recommended_a);
+	shell_print(sh, "  Motion counts:  posN=%u negN=%u warn=%u err=%u",
+		    ctx->results.iq_move_pos_sample_count,
+		    ctx->results.iq_move_neg_sample_count,
+		    ctx->results.iq_move_warning_count,
+		    ctx->results.iq_move_error_count);
 	shell_print(sh, "  Estimates:      psi_f=%s mech=%s",
 		    ctx->results.psi_f_valid ? "VALID" : "INVALID",
 		    ctx->results.mech_valid ? "VALID" : "INVALID");
@@ -536,6 +794,82 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active,
 		    (double)g_motor_params->coulomb_friction_nm_active);
 
+	return 0;
+}
+
+int cmd_motor_commission_motion_threshold(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 5 && argc != 6) {
+		shell_error(sh,
+			    "Usage: motor commission motion threshold <start_a> <stop_a> <step_a> <hold_ms> [min_motion_deg]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.complete) {
+		shell_error(sh, "Calibration is not complete; run calibration first");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' first");
+		return -EACCES;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	float32_t start_a = 0.0f;
+	float32_t stop_a = 0.0f;
+	float32_t step_a = 0.0f;
+	float32_t min_motion_deg = 2.0f;
+	uint32_t hold_ms = 0U;
+	if (!shell_parse_finite_float(argv[1], &start_a) ||
+	    !shell_parse_finite_float(argv[2], &stop_a) ||
+	    !shell_parse_finite_float(argv[3], &step_a) ||
+	    !shell_parse_u32(argv[4], &hold_ms) ||
+	    (argc == 6 && !shell_parse_finite_float(argv[5], &min_motion_deg))) {
+		shell_error(sh, "Invalid threshold arguments");
+		return -EINVAL;
+	}
+	if (start_a <= 0.0f || stop_a < start_a || step_a <= 0.0f ||
+	    stop_a > MOTOR_MAX_CURRENT_A || hold_ms < MOTOR_COMMISSION_MOTION_SAMPLE_MS ||
+	    min_motion_deg <= 0.0f) {
+		shell_error(sh,
+			    "Expected 0 < start_a <= stop_a <= %.3f, step_a > 0, hold_ms >= %u, min_motion_deg > 0",
+			    (double)MOTOR_MAX_CURRENT_A, MOTOR_COMMISSION_MOTION_SAMPLE_MS);
+		return -ERANGE;
+	}
+
+	float32_t min_motion_rad = min_motion_deg * (PI_F32 / 180.0f);
+	shell_print(sh,
+		    "Motion threshold sweep: start=%.3f A stop=%.3f A step=%.3f A hold=%u ms min=%.3f deg",
+		    (double)start_a, (double)stop_a, (double)step_a, hold_ms,
+		    (double)min_motion_deg);
+
+	int ret = motor_commission_run_motion_threshold(sh, start_a, stop_a, step_a,
+							hold_ms, min_motion_rad);
+	const struct motor_commission_results *res = &g_motor_params->commission.results;
+	if (ret != 0 || !res->iq_move_valid) {
+		shell_error(sh,
+			    "Motion threshold failed (err %d): pos=%s neg=%s warn=%u err=%u",
+			    ret,
+			    res->iq_move_pos_valid ? "PASS" : "FAIL",
+			    res->iq_move_neg_valid ? "PASS" : "FAIL",
+			    res->iq_move_warning_count,
+			    res->iq_move_error_count);
+		return (ret != 0) ? ret : -ENODATA;
+	}
+
+	shell_print(sh,
+		    "Motion threshold result: pos=%.3f A neg=%.3f A recommended=%.3f A warn=%u err=%u",
+		    (double)res->iq_move_min_pos_a,
+		    (double)res->iq_move_min_neg_a,
+		    (double)res->iq_move_recommended_a,
+		    res->iq_move_warning_count,
+		    res->iq_move_error_count);
 	return 0;
 }
 
@@ -1049,6 +1383,34 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	float32_t max_velocity_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
 	float32_t iq_limit_default = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
 					    0.10f, MOTOR_MAX_CURRENT_A);
+	float32_t threshold_start_a = clampf(0.10f * MOTOR_MAX_CURRENT_A,
+					     0.02f,
+					     iq_limit_default);
+	float32_t threshold_stop_a = iq_limit_default;
+	float32_t threshold_step_a = MAX(0.01f,
+					 (threshold_stop_a - threshold_start_a) / 8.0f);
+
+	shell_print(sh,
+		    "Auto commission threshold sweep: start=%.3f A stop=%.3f A step=%.3f A",
+		    (double)threshold_start_a,
+		    (double)threshold_stop_a,
+		    (double)threshold_step_a);
+	int ret = motor_commission_run_motion_threshold(sh, threshold_start_a,
+							threshold_stop_a,
+							threshold_step_a,
+							250U,
+							2.0f * (PI_F32 / 180.0f));
+	if (ret != 0 || !g_motor_params->commission.results.iq_move_valid) {
+		g_motor_params->commission.auto_tune_last_error = (ret != 0) ? ret : -ENODATA;
+		shell_error(sh, "Auto commission failed during motion threshold stage (err %d)",
+			    g_motor_params->commission.auto_tune_last_error);
+		return g_motor_params->commission.auto_tune_last_error;
+	}
+
+	float32_t iq_move_recommended = g_motor_params->commission.results.iq_move_recommended_a;
+	iq_limit_default = clampf(MAX(iq_limit_default, 1.50f * iq_move_recommended),
+				  0.10f,
+				  MOTOR_MAX_CURRENT_A);
 
 	flux_cfg.max_speed_hz = clampf(max_velocity_hz * 0.25f, 3.0f, 20.0f);
 	flux_cfg.min_speed_hz = clampf(flux_cfg.max_speed_hz * 0.25f,
@@ -1060,7 +1422,9 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	flux_cfg.iq_limit_a = iq_limit_default;
 
 	mech_cfg.coast_speed_hz = clampf(flux_cfg.max_speed_hz * 0.5f, 2.0f, 10.0f);
-	mech_cfg.prbs_amp_a = clampf(0.35f * flux_cfg.iq_limit_a, 0.05f,
+	mech_cfg.prbs_amp_a = clampf(MAX(0.35f * flux_cfg.iq_limit_a,
+					 1.25f * iq_move_recommended),
+				     0.05f,
 				     flux_cfg.iq_limit_a);
 	mech_cfg.prbs_period_ms = 20U;
 	mech_cfg.duration_ms = 5000U;
@@ -1075,6 +1439,10 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	g_motor_params->commission.auto_tune_cfg = tune_cfg;
 
 	shell_print(sh, "Auto commission start:");
+	shell_print(sh, "  Motion threshold: pos=%.3f A neg=%.3f A rec=%.3f A",
+		    (double)g_motor_params->commission.results.iq_move_min_pos_a,
+		    (double)g_motor_params->commission.results.iq_move_min_neg_a,
+		    (double)g_motor_params->commission.results.iq_move_recommended_a);
 	shell_print(sh, "  Flux cfg: min=%.3f Hz max=%.3f Hz steps=%u settle=%u sample=%u iq=%.3f A",
 		    (double)flux_cfg.min_speed_hz, (double)flux_cfg.max_speed_hz, flux_cfg.steps,
 		    flux_cfg.settle_ms, flux_cfg.sample_ms, (double)flux_cfg.iq_limit_a);
@@ -1082,7 +1450,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)mech_cfg.coast_speed_hz, (double)mech_cfg.prbs_amp_a,
 		    mech_cfg.prbs_period_ms, mech_cfg.duration_ms);
 
-	int ret = motor_commission_auto_run_flux(sh, &flux_cfg);
+	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
 	if (ret != 0) {
 		g_motor_params->Id_setpoint_A = 0.0f;
 		g_motor_params->Iq_setpoint_A = 0.0f;

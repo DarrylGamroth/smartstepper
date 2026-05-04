@@ -1814,6 +1814,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission motion subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_motion,
+	SHELL_CMD_ARG(threshold, NULL,
+		      "Find min moving current <start_a> <stop_a> <step_a> <hold_ms> [min_motion_deg]",
+		      cmd_motor_commission_motion_threshold, 5, 1),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission encoder subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_encoder,
 	SHELL_CMD_ARG(run, NULL,
@@ -1845,6 +1853,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(clear, NULL, "Clear commissioning context and captured data", cmd_motor_commission_clear),
 	SHELL_CMD(abort, NULL, "Abort active commissioning run", cmd_motor_commission_abort),
 	SHELL_CMD(apply, NULL, "Apply valid commissioning estimates to active runtime params", cmd_motor_commission_apply),
+	SHELL_CMD(motion, &sub_motor_commission_motion, "Motion threshold commissioning", NULL),
 	SHELL_CMD(flux, &sub_motor_commission_flux, "Flux-linkage commissioning", NULL),
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
 	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Generated-sweep encoder mapping", NULL),

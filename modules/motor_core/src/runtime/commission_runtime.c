@@ -422,6 +422,9 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->mech_cfg.prbs_amp_a = 0.0f;
 	commission->mech_cfg.prbs_period_ms = 0U;
 	commission->mech_cfg.duration_ms = 0U;
+	commission->results.iq_move_min_pos_a = 0.0f;
+	commission->results.iq_move_min_neg_a = 0.0f;
+	commission->results.iq_move_recommended_a = 0.0f;
 	commission->results.psi_f_wb = 0.0f;
 	commission->results.psi_f_bias_v = 0.0f;
 	commission->results.psi_f_residual_rms_v = 0.0f;
@@ -438,6 +441,13 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.mapping_offset_ratio = 0.0f;
 	commission->results.mapping_pole_pairs_est = 0.0f;
 	commission->results.mapping_confidence = 0.0f;
+	commission->results.iq_move_pos_sample_count = 0U;
+	commission->results.iq_move_neg_sample_count = 0U;
+	commission->results.iq_move_warning_count = 0U;
+	commission->results.iq_move_error_count = 0U;
+	commission->results.iq_move_pos_valid = false;
+	commission->results.iq_move_neg_valid = false;
+	commission->results.iq_move_valid = false;
 	commission->results.psi_f_valid = false;
 	commission->results.mech_valid = false;
 	commission->results.mapping_direction_valid = false;
