@@ -130,7 +130,9 @@ Acceptance:
 
 Goal: estimate `J`, `B`, and `Tc`.
 
-Use `current_encoder` mode with controlled q-axis current excitation. This avoids velocity-loop dynamics contaminating the fit.
+Use `velocity_encoder` mode with conservative speed dithering. The velocity loop provides the excitation current while the commissioning capture records the actual measured `Iq`, encoder velocity, and encoder acceleration.
+
+Earlier direct-current PRBS excitation was rejected for this hardware because it produced harsh direction chatter and poor acceleration correlation. The velocity-loop method is smoother, keeps excitation bounded by the existing controller limits, and produced a valid fit on the AEAT hardware.
 
 Model:
 
@@ -140,9 +142,9 @@ Kt * Iq = J * alpha + B * omega + Tc * sign(omega) + T0
 
 Procedure:
 
-1. Move the rotor into a speed range above detent/stiction-dominated behavior.
-2. Apply bounded PRBS or square-wave `Iq` perturbations around a safe bias.
-3. Capture `Iq`, encoder velocity, and encoder acceleration.
+1. Enter `velocity_encoder` mode.
+2. Command a positive base speed with a small dither, then repeat with negative base speed.
+3. Capture actual `Iq`, encoder velocity, and encoder acceleration.
 4. Fit the linear model with normal equations.
 5. Reject samples near zero speed unless explicitly measuring Coulomb friction.
 
@@ -209,7 +211,8 @@ motor arm
 motor state mode current_encoder
 motor commission motion threshold ...
 motor commission flux run ...
-motor commission mech run ...
+motor state mode velocity_encoder
+motor commission mech run <base_hz> <dither_hz> <dither_period_ms> <duration_ms>
 motor commission auto status
 motor commission auto apply
 ```
@@ -262,3 +265,4 @@ Validation after applying gains:
 - 2026-05-04: Motion threshold results are stored in `motor_commission_results` and shown in `motor commission status`.
 - 2026-05-04: `motor commission auto run` now runs the motion threshold sweep first and uses the recommended moving current to choose flux/mechanical excitation currents.
 - 2026-05-04: Confirmed the mechanical estimator review fixes are already present: residual RMS uses `n - 4`, `sst` is clamped non-negative, and the SSE path documents use of the unmodified accumulated regressor.
+- 2026-05-04: Changed automatic mechanical identification to velocity-loop excitation (`velocity_encoder`) instead of direct-current PRBS. HIL on AEAT hardware passed: `psi_f=0.00145029 Wb`, `J=0.00000163 kgm2`, `B=0.00001863 Nm/(rad/s)`, `Tc=0.00164362 Nm`, mechanical `R2=0.9502`, and auto-tuned defaults were staged.

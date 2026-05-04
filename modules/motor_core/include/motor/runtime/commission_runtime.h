@@ -47,9 +47,9 @@ struct motor_commission_flux_config {
 };
 
 struct motor_commission_mech_config {
-	float32_t coast_speed_hz;
-	float32_t prbs_amp_a;
-	uint32_t prbs_period_ms;
+	float32_t base_speed_hz;
+	float32_t dither_speed_hz;
+	uint32_t dither_period_ms;
 	uint32_t duration_ms;
 };
 
@@ -93,6 +93,7 @@ struct motor_commission_results {
 	uint16_t iq_move_neg_sample_count;
 	uint16_t iq_move_warning_count;
 	uint16_t iq_move_error_count;
+	int8_t iq_to_mech_sign;
 	bool iq_move_pos_valid;
 	bool iq_move_neg_valid;
 	bool iq_move_valid;

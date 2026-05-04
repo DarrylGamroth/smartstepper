@@ -28,7 +28,6 @@
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
 #define MOTOR_COMMISSION_AUTO_POST_WAIT_MS 2500U
-#define MOTOR_COMMISSION_AUTO_SPINUP_MS 1200U
 #define MOTOR_COMMISSION_ENCODER_MAX_SAMPLES 512U
 #define MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS 3000U
@@ -494,6 +493,15 @@ static int motor_commission_run_motion_threshold(
 					     MAX(pos.threshold_a, neg.threshold_a) :
 					     0.0f;
 	res->iq_move_valid = pos.valid && neg.valid;
+	if (res->iq_move_valid &&
+	    pos.best_net_motion_rad > 0.0f && neg.best_net_motion_rad < 0.0f) {
+		res->iq_to_mech_sign = 1;
+	} else if (res->iq_move_valid &&
+		   pos.best_net_motion_rad < 0.0f && neg.best_net_motion_rad > 0.0f) {
+		res->iq_to_mech_sign = -1;
+	} else {
+		res->iq_to_mech_sign = 0;
+	}
 	res->iq_move_pos_sample_count = pos.sample_count;
 	res->iq_move_neg_sample_count = neg.sample_count;
 	res->iq_move_warning_count = pos.warning_count + neg.warning_count;
@@ -604,25 +612,7 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 		return ret;
 	}
 
-	motor_commission_set_velocity_target_hz(cfg->coast_speed_hz);
-	uint32_t spinup_start_ms = k_uptime_get_32();
-	while ((k_uptime_get_32() - spinup_start_ms) < MOTOR_COMMISSION_AUTO_SPINUP_MS) {
-		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
-			return -EFAULT;
-		}
-		motor_command_feed_watchdog(g_motor_params);
-		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
-	}
-
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
-	if (ret != 0) {
-		return ret;
-	}
-	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER,
-					     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
-	if (ret != 0) {
-		return ret;
-	}
+	motor_commission_set_velocity_target_hz(cfg->base_speed_hz);
 
 	struct motor_commission_runtime_ctx commission_ctx;
 	motor_commission_ctx_from_global(&commission_ctx);
@@ -633,29 +623,41 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 
 	uint32_t prbs_state = 0x5A5AA5A5u;
 	uint32_t next_tick_ms = k_uptime_get_32();
+	uint32_t run_start_ms = next_tick_ms;
 	while (g_motor_params->commission.active) {
 		uint32_t now_ms = k_uptime_get_32();
 		if ((int32_t)(now_ms - next_tick_ms) >= 0) {
 			prbs_state = motor_commission_prbs_next(prbs_state);
-			float32_t sign = (prbs_state & 1U) ? 1.0f : -1.0f;
-			g_motor_params->Id_setpoint_A = 0.0f;
-			g_motor_params->Iq_setpoint_A = sign * cfg->prbs_amp_a;
-			next_tick_ms += cfg->prbs_period_ms;
+			uint32_t elapsed_ms = now_ms - run_start_ms;
+			float32_t direction =
+				(elapsed_ms < (cfg->duration_ms / 2U)) ? 1.0f : -1.0f;
+			float32_t dither = (prbs_state & 1U) ? cfg->dither_speed_hz :
+							       -cfg->dither_speed_hz;
+			float32_t target_hz = direction * (cfg->base_speed_hz + dither);
+			motor_commission_set_velocity_target_hz(target_hz);
+			next_tick_ms += cfg->dither_period_ms;
 		}
 
 		if (g_motor_params->commission.stage == MOTOR_COMMISSION_STAGE_ABORTED) {
-			return -ECANCELED;
+			ret = -ECANCELED;
+			goto stop_current;
 		}
 		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
-			return -EFAULT;
+			ret = -EFAULT;
+			goto stop_current;
 		}
 
 		motor_command_feed_watchdog(g_motor_params);
 		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
 	}
 
+stop_current:
 	g_motor_params->Id_setpoint_A = 0.0f;
 	g_motor_params->Iq_setpoint_A = 0.0f;
+	motor_commission_set_velocity_target_hz(0.0f);
+	if (ret != 0) {
+		return ret;
+	}
 
 	ret = motor_commission_wait_for_capture_stop(MOTOR_COMMISSION_AUTO_POST_WAIT_MS);
 	if (ret != 0) {
@@ -689,8 +691,10 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 	if (g_motor_params->control_loop_count > ctx->start_loop_count) {
 		loops_done = g_motor_params->control_loop_count - ctx->start_loop_count;
 	}
-	if (loops_total > 0U && loops_done > loops_total) {
-		loops_done = loops_total;
+	if (loops_total == 0U) {
+		loops_done = 0U;
+	} else if (loops_done > loops_total) {
+		 loops_done = loops_total;
 	}
 
 	shell_print(sh, "Commission Status:");
@@ -718,6 +722,7 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    ctx->results.iq_move_neg_sample_count,
 		    ctx->results.iq_move_warning_count,
 		    ctx->results.iq_move_error_count);
+	shell_print(sh, "  Iq->mech sign: %d", ctx->results.iq_to_mech_sign);
 	shell_print(sh, "  Estimates:      psi_f=%s mech=%s",
 		    ctx->results.psi_f_valid ? "VALID" : "INVALID",
 		    ctx->results.mech_valid ? "VALID" : "INVALID");
@@ -864,10 +869,11 @@ int cmd_motor_commission_motion_threshold(const struct shell *sh, size_t argc, c
 	}
 
 	shell_print(sh,
-		    "Motion threshold result: pos=%.3f A neg=%.3f A recommended=%.3f A warn=%u err=%u",
+		    "Motion threshold result: pos=%.3f A neg=%.3f A recommended=%.3f A iq_to_mech_sign=%d warn=%u err=%u",
 		    (double)res->iq_move_min_pos_a,
 		    (double)res->iq_move_min_neg_a,
 		    (double)res->iq_move_recommended_a,
+		    res->iq_to_mech_sign,
 		    res->iq_move_warning_count,
 		    res->iq_move_error_count);
 	return 0;
@@ -997,7 +1003,7 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 {
 	if (argc != 5) {
 		shell_error(sh,
-			    "Usage: motor commission mech run <coast_hz> <prbs_amp_a> <prbs_period_ms> <duration_ms>");
+			    "Usage: motor commission mech run <base_hz> <dither_hz> <dither_period_ms> <duration_ms>");
 		return -EINVAL;
 	}
 	if (!g_motor_params) {
@@ -1006,9 +1012,9 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 	}
 
 	struct motor_commission_mech_config cfg = {0};
-	if (!shell_parse_finite_float(argv[1], &cfg.coast_speed_hz) ||
-	    !shell_parse_finite_float(argv[2], &cfg.prbs_amp_a) ||
-	    !shell_parse_u32(argv[3], &cfg.prbs_period_ms) ||
+	if (!shell_parse_finite_float(argv[1], &cfg.base_speed_hz) ||
+	    !shell_parse_finite_float(argv[2], &cfg.dither_speed_hz) ||
+	    !shell_parse_u32(argv[3], &cfg.dither_period_ms) ||
 	    !shell_parse_u32(argv[4], &cfg.duration_ms)) {
 		shell_error(sh, "Invalid mechanical commissioning arguments");
 		return -EINVAL;
@@ -1023,14 +1029,14 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 	}
 
 	(void)motor_api_request_online();
-	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 
 	shell_print(sh,
-		    "Mechanical commissioning started: coast=%.3f Hz, prbs_amp=%.3f A, prbs_period=%u ms, duration=%u ms",
-		    (double)cfg.coast_speed_hz, (double)cfg.prbs_amp_a, cfg.prbs_period_ms,
-		    cfg.duration_ms);
+		    "Mechanical commissioning started: base=%.3f Hz, dither=%.3f Hz, dither_period=%u ms, duration=%u ms",
+		    (double)cfg.base_speed_hz, (double)cfg.dither_speed_hz,
+		    cfg.dither_period_ms, cfg.duration_ms);
 	shell_print(sh,
-		    "Ensure control is armed and current excitation is applied; capture expects ONLINE_CURRENT_ENCODER.");
+		    "Capture expects ONLINE_VELOCITY_ENCODER; command velocity during the capture.");
 	return 0;
 }
 
@@ -1421,12 +1427,11 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	flux_cfg.sample_ms = 250U;
 	flux_cfg.iq_limit_a = iq_limit_default;
 
-	mech_cfg.coast_speed_hz = clampf(flux_cfg.max_speed_hz * 0.5f, 2.0f, 10.0f);
-	mech_cfg.prbs_amp_a = clampf(MAX(0.35f * flux_cfg.iq_limit_a,
-					 1.25f * iq_move_recommended),
-				     0.05f,
-				     flux_cfg.iq_limit_a);
-	mech_cfg.prbs_period_ms = 20U;
+	mech_cfg.base_speed_hz = clampf(flux_cfg.max_speed_hz * 0.45f, 2.0f, 8.0f);
+	mech_cfg.dither_speed_hz = clampf(0.25f * mech_cfg.base_speed_hz,
+					  0.5f,
+					  0.50f * mech_cfg.base_speed_hz);
+	mech_cfg.dither_period_ms = 300U;
 	mech_cfg.duration_ms = 5000U;
 
 	(void)motor_commission_tune_config_default(&tune_cfg,
@@ -1443,12 +1448,15 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->commission.results.iq_move_min_pos_a,
 		    (double)g_motor_params->commission.results.iq_move_min_neg_a,
 		    (double)g_motor_params->commission.results.iq_move_recommended_a);
+	shell_print(sh, "  Iq->mech sign: %d",
+		    g_motor_params->commission.results.iq_to_mech_sign);
 	shell_print(sh, "  Flux cfg: min=%.3f Hz max=%.3f Hz steps=%u settle=%u sample=%u iq=%.3f A",
 		    (double)flux_cfg.min_speed_hz, (double)flux_cfg.max_speed_hz, flux_cfg.steps,
 		    flux_cfg.settle_ms, flux_cfg.sample_ms, (double)flux_cfg.iq_limit_a);
-	shell_print(sh, "  Mech cfg: coast=%.3f Hz prbs_amp=%.3f A prbs_period=%u ms duration=%u ms",
-		    (double)mech_cfg.coast_speed_hz, (double)mech_cfg.prbs_amp_a,
-		    mech_cfg.prbs_period_ms, mech_cfg.duration_ms);
+	shell_print(sh, "  Mech cfg: base=%.3f Hz dither=%.3f Hz dither_period=%u ms duration=%u ms",
+		    (double)mech_cfg.base_speed_hz,
+		    (double)mech_cfg.dither_speed_hz,
+		    mech_cfg.dither_period_ms, mech_cfg.duration_ms);
 
 	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
 	if (ret != 0) {

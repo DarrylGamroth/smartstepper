@@ -293,8 +293,14 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			kt = derived_kt;
 		}
 	}
+	float32_t kt_fit = kt;
+	if (commission->expected_mode == MOTOR_COMMISSION_EXPECT_TORQUE &&
+	    res->iq_to_mech_sign < 0) {
+		kt_fit = -kt;
+	}
+
 	const struct motor_mech_id_config cfg = {
-		.kt_nm_per_a = kt,
+		.kt_nm_per_a = kt_fit,
 		.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
 		.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
 		.min_r2 = 0.0f,
@@ -318,6 +324,9 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	motor_mech_id_init(&estimator, &cfg);
 	for (uint32_t i = 0U; i < commission->sample_count; i++) {
 		const struct motor_commission_sample *s = &commission->samples[i];
+		if (fabsf(s->mech_speed_rad_s) < MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
+			continue;
+		}
 		(void)motor_mech_id_accumulate(&estimator, s->mech_speed_rad_s,
 					       s->mech_accel_rad_s2, s->iq_a);
 	}
@@ -361,7 +370,12 @@ static void motor_commission_validate_mapping_mech(struct motor_commission_runti
 
 		sum_iq2 += s->iq_a * s->iq_a;
 		sum_acc2 += s->mech_accel_rad_s2 * s->mech_accel_rad_s2;
-		sum_cross += s->iq_a * s->mech_accel_rad_s2;
+		float32_t signed_iq = s->iq_a;
+		if (commission->expected_mode == MOTOR_COMMISSION_EXPECT_TORQUE &&
+		    res->iq_to_mech_sign < 0) {
+			signed_iq = -signed_iq;
+		}
+		sum_cross += signed_iq * s->mech_accel_rad_s2;
 		count++;
 	}
 
@@ -418,9 +432,9 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->flux_cfg.settle_ms = 0U;
 	commission->flux_cfg.sample_ms = 0U;
 	commission->flux_cfg.iq_limit_a = 0.0f;
-	commission->mech_cfg.coast_speed_hz = 0.0f;
-	commission->mech_cfg.prbs_amp_a = 0.0f;
-	commission->mech_cfg.prbs_period_ms = 0U;
+	commission->mech_cfg.base_speed_hz = 0.0f;
+	commission->mech_cfg.dither_speed_hz = 0.0f;
+	commission->mech_cfg.dither_period_ms = 0U;
 	commission->mech_cfg.duration_ms = 0U;
 	commission->results.iq_move_min_pos_a = 0.0f;
 	commission->results.iq_move_min_neg_a = 0.0f;
@@ -445,6 +459,7 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.iq_move_neg_sample_count = 0U;
 	commission->results.iq_move_warning_count = 0U;
 	commission->results.iq_move_error_count = 0U;
+	commission->results.iq_to_mech_sign = 0;
 	commission->results.iq_move_pos_valid = false;
 	commission->results.iq_move_neg_valid = false;
 	commission->results.iq_move_valid = false;
@@ -574,16 +589,17 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	if (ctx == NULL || ctx->commission == NULL || cfg == NULL) {
 		return -EINVAL;
 	}
-	if (!isfinite(cfg->coast_speed_hz) || !isfinite(cfg->prbs_amp_a)) {
+	if (!isfinite(cfg->base_speed_hz) || !isfinite(cfg->dither_speed_hz)) {
 		return -EINVAL;
 	}
-	if (cfg->duration_ms == 0U || cfg->prbs_period_ms == 0U ||
-	    cfg->coast_speed_hz <= 0.0f || cfg->prbs_amp_a <= 0.0f) {
+	if (cfg->duration_ms == 0U || cfg->dither_period_ms == 0U ||
+	    cfg->base_speed_hz <= 0.0f || cfg->dither_speed_hz <= 0.0f ||
+	    cfg->dither_speed_hz >= cfg->base_speed_hz) {
 		return -EINVAL;
 	}
 
 	int ret = motor_commission_start_common(ctx, MOTOR_COMMISSION_MODE_MECH,
-						MOTOR_COMMISSION_EXPECT_TORQUE,
+						MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED,
 						cfg->duration_ms);
 	if (ret < 0) {
 		return ret;

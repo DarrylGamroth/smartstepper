@@ -1809,7 +1809,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_flux,
 /* motor commission mech subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
 	SHELL_CMD_ARG(run, NULL,
-		      "Run mechanical capture <coast_hz> <prbs_amp_a> <prbs_period_ms> <duration_ms>",
+		      "Run mechanical capture <base_hz> <dither_hz> <dither_period_ms> <duration_ms>",
 		      cmd_motor_commission_mech_run, 5, 0),
 	SHELL_SUBCMD_SET_END
 );
