@@ -24,7 +24,10 @@ properties:
   flux_linkage_uvphz:
     type: int
     required: true
-    description: Permanent magnet flux linkage in microvolt-seconds per Hz
+    description: >
+      Boot/fallback permanent magnet flux linkage in microvolt-seconds per Hz.
+      Commissioning should estimate and stage the runtime value before closed-loop
+      tuning is trusted.
 
   pole-pairs:
     type: int
@@ -39,7 +42,10 @@ properties:
   inertia-mgcm2:
     type: int
     required: true
-    description: Rotor inertia in milligram-cm²
+    description: >
+      Boot/fallback rotor/load inertia in milligram-cm². Commissioning should
+      estimate and stage the runtime value before velocity/position tuning is
+      trusted.
 
   max-speed-hz:
     type: int

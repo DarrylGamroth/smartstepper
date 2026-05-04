@@ -37,6 +37,8 @@
 #define MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS 80U
 #define MOTOR_COMMISSION_AUTO_MECH_RUNS 3U
 #define MOTOR_COMMISSION_AUTO_MECH_MAX_ATTEMPTS 5U
+#define MOTOR_COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE 1U
+#define MOTOR_COMMISSION_AUTO_MECH_ACCEL_MARGIN 1.25f
 #define MOTOR_COMMISSION_AUTO_MECH_VALIDATE_RMS_NM 0.005f
 
 static const float32_t motor_commission_mech_step_pattern[] = {
@@ -497,7 +499,7 @@ static int motor_commission_run_motion_threshold(
 	res->iq_move_min_pos_a = pos.valid ? pos.threshold_a : 0.0f;
 	res->iq_move_min_neg_a = neg.valid ? neg.threshold_a : 0.0f;
 	res->iq_move_recommended_a = (pos.valid && neg.valid) ?
-					     MAX(pos.threshold_a, neg.threshold_a) :
+					     fmaxf(pos.threshold_a, neg.threshold_a) :
 					     0.0f;
 	res->iq_move_valid = pos.valid && neg.valid;
 	if (res->iq_move_valid &&
@@ -700,7 +702,7 @@ static float32_t motor_commission_stddev(uint8_t count, float32_t sum, float32_t
 	float32_t n = (float32_t)count;
 	float32_t mean = sum / n;
 	float32_t variance = (sum2 / n) - (mean * mean);
-	return sqrtf(MAX(variance, 0.0f));
+	return sqrtf(fmaxf(variance, 0.0f));
 }
 
 static void motor_commission_mech_aggregate_add(
@@ -715,8 +717,8 @@ static void motor_commission_mech_aggregate_add(
 		agg->min_r2 = res->mech_r2;
 		agg->max_rms = res->mech_residual_rms_nm;
 	} else {
-		agg->min_r2 = MIN(agg->min_r2, res->mech_r2);
-		agg->max_rms = MAX(agg->max_rms, res->mech_residual_rms_nm);
+		agg->min_r2 = fminf(agg->min_r2, res->mech_r2);
+		agg->max_rms = fmaxf(agg->max_rms, res->mech_residual_rms_nm);
 	}
 
 	agg->count++;
@@ -757,11 +759,12 @@ static int motor_commission_mech_aggregate_finalize(
 	res->coulomb_friction_stddev_nm =
 		motor_commission_stddev(agg->count, agg->sum_tc, agg->sum_tc2);
 
-	float32_t j_cv = res->inertia_stddev_kgm2 / MAX(fabsf(res->inertia_kgm2), 1.0e-9f);
+	float32_t j_cv = res->inertia_stddev_kgm2 /
+			 fmaxf(fabsf(res->inertia_kgm2), 1.0e-9f);
 	float32_t b_cv = res->viscous_friction_stddev_nm_per_rad_s /
-			 MAX(fabsf(res->viscous_friction_nm_per_rad_s), 1.0e-9f);
+			 fmaxf(fabsf(res->viscous_friction_nm_per_rad_s), 1.0e-9f);
 	float32_t tc_cv = res->coulomb_friction_stddev_nm /
-			  MAX(fabsf(res->coulomb_friction_nm), 1.0e-9f);
+			  fmaxf(fabsf(res->coulomb_friction_nm), 1.0e-9f);
 	float32_t spread_penalty = clampf((0.50f * j_cv) + (0.25f * b_cv) +
 					  (0.25f * tc_cv),
 					  0.0f, 0.75f);
@@ -1553,8 +1556,8 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 					     0.02f,
 					     iq_limit_default);
 	float32_t threshold_stop_a = iq_limit_default;
-	float32_t threshold_step_a = MAX(0.01f,
-					 (threshold_stop_a - threshold_start_a) / 8.0f);
+	float32_t threshold_step_a =
+		fmaxf(0.01f, (threshold_stop_a - threshold_start_a) / 8.0f);
 
 	shell_print(sh,
 		    "Auto commission threshold sweep: start=%.3f A stop=%.3f A step=%.3f A",
@@ -1574,7 +1577,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	}
 
 	float32_t iq_move_recommended = g_motor_params->commission.results.iq_move_recommended_a;
-	iq_limit_default = clampf(MAX(iq_limit_default, 1.50f * iq_move_recommended),
+	iq_limit_default = clampf(fmaxf(iq_limit_default, 1.50f * iq_move_recommended),
 				  0.10f,
 				  MOTOR_MAX_CURRENT_A);
 
@@ -1587,21 +1590,37 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	flux_cfg.sample_ms = 250U;
 	flux_cfg.iq_limit_a = iq_limit_default;
 
-	mech_cfg.base_speed_hz = clampf(flux_cfg.max_speed_hz * 0.45f, 2.0f, 8.0f);
-	mech_cfg.dither_speed_hz = clampf(0.25f * mech_cfg.base_speed_hz,
+	float32_t mech_speed_upper_hz = clampf(max_velocity_hz * 0.70f, 4.0f, 20.0f);
+	mech_cfg.base_speed_hz = clampf(max_velocity_hz * 0.45f, 3.0f,
+					0.75f * mech_speed_upper_hz);
+	mech_cfg.dither_speed_hz = clampf(0.30f * mech_cfg.base_speed_hz,
 					  0.5f,
-					  0.50f * mech_cfg.base_speed_hz);
-	mech_cfg.dither_period_ms = 250U;
-	mech_cfg.duration_ms = MOTOR_COMMISSION_AUTO_MECH_RUNS *
+					  fmaxf(0.5f,
+						 mech_speed_upper_hz - mech_cfg.base_speed_hz));
+
+	float32_t max_accel_hz_s =
+		fmaxf(g_motor_params->profile_max_accel_rad_s2 / (2.0f * PI_F32), 1.0f);
+	float32_t half_cycle_ms =
+		(MOTOR_COMMISSION_AUTO_MECH_ACCEL_MARGIN * 2.0f * mech_speed_upper_hz *
+		 1000.0f) /
+		max_accel_hz_s;
+	mech_cfg.dither_period_ms =
+		(uint32_t)ceilf(half_cycle_ms /
+				(float32_t)ARRAY_SIZE(motor_commission_mech_step_pattern));
+	mech_cfg.dither_period_ms =
+		MAX(mech_cfg.dither_period_ms, 250U);
+	mech_cfg.duration_ms = MOTOR_COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE *
 			       2U * ARRAY_SIZE(motor_commission_mech_step_pattern) *
 			       mech_cfg.dither_period_ms;
 
 	(void)motor_commission_tune_config_default(&tune_cfg,
 						   (float32_t)MOTOR_POLE_PAIRS,
 						   1.0f / CONTROL_LOOP_FREQUENCY_HZ,
-						   MAX(MOTOR_MAX_CURRENT_A, 0.1f),
-						   MAX(g_motor_params->profile_max_velocity_rad_s, 1.0f),
-						   MAX(g_motor_params->profile_max_accel_rad_s2, 1.0f));
+						   fmaxf(MOTOR_MAX_CURRENT_A, 0.1f),
+						   fmaxf(g_motor_params->profile_max_velocity_rad_s,
+							  1.0f),
+						   fmaxf(g_motor_params->profile_max_accel_rad_s2,
+							  1.0f));
 	tune_cfg.iq_limit_a = flux_cfg.iq_limit_a;
 	g_motor_params->commission.auto_tune_cfg = tune_cfg;
 
@@ -1615,9 +1634,11 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	shell_print(sh, "  Flux cfg: min=%.3f Hz max=%.3f Hz steps=%u settle=%u sample=%u iq=%.3f A",
 		    (double)flux_cfg.min_speed_hz, (double)flux_cfg.max_speed_hz, flux_cfg.steps,
 		    flux_cfg.settle_ms, flux_cfg.sample_ms, (double)flux_cfg.iq_limit_a);
-	shell_print(sh, "  Mech cfg: base=%.3f Hz dither=%.3f Hz dither_period=%u ms duration=%u ms",
+	shell_print(sh,
+		    "  Mech cfg: base=%.3f Hz dither=%.3f Hz accel=%.3f Hz/s dither_period=%u ms duration=%u ms",
 		    (double)mech_cfg.base_speed_hz,
 		    (double)mech_cfg.dither_speed_hz,
+		    (double)max_accel_hz_s,
 		    mech_cfg.dither_period_ms, mech_cfg.duration_ms);
 
 	ret = motor_commission_auto_run_flux(sh, &flux_cfg);

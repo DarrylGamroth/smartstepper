@@ -21,6 +21,7 @@
 #define MOTOR_COMMISSION_MIN_SPEED_RAD_S (2.0f * PI_F32)
 #define MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S 0.5f
 #define MOTOR_COMMISSION_MIN_KT_NM_PER_A 1.0e-6f
+#define MOTOR_COMMISSION_VISCOUS_NEG_TOL_NM_PER_RAD_S 1.0e-6f
 #define MOTOR_COMMISSION_MAPPING_MIN_SPEED_RAD_S (2.0f * PI_F32)
 #define MOTOR_COMMISSION_MAPPING_MIN_IQ_A 0.03f
 #define MOTOR_COMMISSION_MAPPING_MIN_ACCEL_RAD_S2 0.5f
@@ -30,6 +31,7 @@
 #define MOTOR_COMMISSION_MAPPING_OFFSET_RATIO_MAX 0.50f
 #define MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX 0.15f
 #define MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ 80U
+#define MOTOR_COMMISSION_CAPTURE_TARGET_MAX_SAMPLES 480U
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
@@ -39,6 +41,20 @@ static inline uint32_t motor_commission_default_decimation_hz(float32_t control_
 			 MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ;
 
 	return MAX(decim, 1U);
+}
+
+static inline uint32_t motor_commission_decimation_for_capture(float32_t control_loop_frequency_hz,
+							      uint32_t duration_ms)
+{
+	uint32_t total_loops =
+		(uint32_t)fmaxf(1.0f,
+				(control_loop_frequency_hz * (float32_t)duration_ms) / 1000.0f);
+	uint32_t capacity_decim =
+		(total_loops + (MOTOR_COMMISSION_CAPTURE_TARGET_MAX_SAMPLES - 1U)) /
+		MOTOR_COMMISSION_CAPTURE_TARGET_MAX_SAMPLES;
+
+	return MAX(motor_commission_default_decimation_hz(control_loop_frequency_hz),
+		   MAX(capacity_decim, 1U));
 }
 
 static inline bool motor_commission_obs_matches_expected(
@@ -151,9 +167,10 @@ static void motor_commission_update_mapping_summary(const struct motor_commissio
 		conf_count++;
 	}
 	if (res->mapping_pole_pairs_valid) {
+		float32_t pole_pairs = (float32_t)MAX(ctx->pole_pairs, 1U);
 		float32_t rel_err = fabsf(res->mapping_pole_pairs_est -
 					  (float32_t)ctx->pole_pairs) /
-				    MAX((float32_t)ctx->pole_pairs, 1.0f);
+				    pole_pairs;
 		float32_t conf_pp = clampf(1.0f -
 						   (rel_err / MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX),
 					   0.0f, 1.0f);
@@ -251,7 +268,8 @@ static void motor_commission_validate_mapping_flux(struct motor_commission_runti
 	if (axis_count >= MOTOR_COMMISSION_MAPPING_MIN_FLUX_SAMPLES) {
 		float32_t id_rms = sqrtf(id_sq / (float32_t)axis_count);
 		float32_t iq_rms = sqrtf(iq_sq / (float32_t)axis_count);
-		float32_t ratio = id_rms / MAX(iq_rms, MOTOR_COMMISSION_MAPPING_MIN_IQ_A);
+		float32_t ratio = id_rms /
+				   fmaxf(iq_rms, MOTOR_COMMISSION_MAPPING_MIN_IQ_A);
 
 		res->mapping_offset_valid = isfinite(ratio);
 		if (res->mapping_offset_valid) {
@@ -263,8 +281,9 @@ static void motor_commission_validate_mapping_flux(struct motor_commission_runti
 	if (pole_count >= MOTOR_COMMISSION_MAPPING_MIN_FLUX_SAMPLES &&
 	    pole_weight_sum > 0.0f) {
 		float32_t pole_est = pole_weighted / pole_weight_sum;
+		float32_t pole_pairs = (float32_t)MAX(ctx->pole_pairs, 1U);
 		float32_t rel_err = fabsf(pole_est - (float32_t)ctx->pole_pairs) /
-				    MAX((float32_t)ctx->pole_pairs, 1.0f);
+				    pole_pairs;
 		res->mapping_pole_pairs_valid = isfinite(pole_est) && isfinite(rel_err);
 		if (res->mapping_pole_pairs_valid) {
 			res->mapping_pole_pairs_est = pole_est;
@@ -305,7 +324,7 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 		.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
 		.min_r2 = 0.0f,
 		.require_positive_inertia = true,
-		.require_nonnegative_viscous = true,
+		.require_nonnegative_viscous = false,
 	};
 
 	res->mech_valid = false;
@@ -342,10 +361,15 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	if (motor_mech_id_finalize(&estimator, &estimate) < 0) {
 		return;
 	}
+	if (estimate.viscous_friction_nm_per_rad_s <
+	    -MOTOR_COMMISSION_VISCOUS_NEG_TOL_NM_PER_RAD_S) {
+		return;
+	}
 
 	res->mech_sample_count = estimate.sample_count;
 	res->inertia_kgm2 = estimate.inertia_kgm2;
-	res->viscous_friction_nm_per_rad_s = estimate.viscous_friction_nm_per_rad_s;
+	res->viscous_friction_nm_per_rad_s =
+		fmaxf(estimate.viscous_friction_nm_per_rad_s, 0.0f);
 	res->coulomb_friction_nm = estimate.coulomb_friction_nm;
 	res->offset_friction_nm = estimate.offset_friction_nm;
 	res->mech_residual_rms_nm = estimate.residual_rms_nm;
@@ -497,8 +521,8 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 						   (float32_t)ctx->pole_pairs,
 						   1.0f / ctx->control_loop_frequency_hz,
 						   ctx->motor_max_current_a,
-						   MAX(ctx->profile_max_velocity_rad_s, 1.0f),
-						   MAX(ctx->profile_max_accel_rad_s2, 1.0f));
+						   fmaxf(ctx->profile_max_velocity_rad_s, 1.0f),
+						   fmaxf(ctx->profile_max_accel_rad_s2, 1.0f));
 	strncpy(commission->last_abort_reason, "none", sizeof(commission->last_abort_reason) - 1U);
 	commission->last_abort_reason[sizeof(commission->last_abort_reason) - 1U] = '\0';
 	motor_commission_reset_capture_state(commission);
@@ -543,11 +567,12 @@ static int motor_commission_start_common(struct motor_commission_runtime_ctx *ct
 	commission->expected_mode = expected_mode;
 	commission->start_loop_count = *ctx->control_loop_count;
 	commission->sample_decimation =
-		motor_commission_default_decimation_hz(ctx->control_loop_frequency_hz);
+		motor_commission_decimation_for_capture(ctx->control_loop_frequency_hz,
+							duration_ms);
 	commission->stop_loop_count = commission->start_loop_count +
-			       (uint32_t)MAX(1.0f, (ctx->control_loop_frequency_hz *
-						    (float32_t)duration_ms) /
-							   1000.0f);
+			       (uint32_t)fmaxf(1.0f, (ctx->control_loop_frequency_hz *
+						      (float32_t)duration_ms) /
+							     1000.0f);
 	strncpy(commission->last_abort_reason, "none", sizeof(commission->last_abort_reason) - 1U);
 	commission->last_abort_reason[sizeof(commission->last_abort_reason) - 1U] = '\0';
 

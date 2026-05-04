@@ -48,15 +48,16 @@
 		inductance-d-uh = <2903>;
 		inductance-q-uh = <2903>;
 		resistance-mohms = <2253>;
+		/* Boot/fallback only; commissioning estimates runtime psi_f/Kt. */
 		flux_linkage_uvphz = <17675>;
 		max-current-ma = <1500>;
 		/*
 		 * These are placeholders. Set from measured motor:
 		 * - pole-pairs
-		 * - inertia-mgcm2
 		 * - max-speed-hz
 		 */
 		pole-pairs = <50>;
+		/* Boot/fallback only; commissioning estimates runtime inertia. */
 		inertia-mgcm2 = <57000>;
 		max-speed-hz = <13>;
 	};
