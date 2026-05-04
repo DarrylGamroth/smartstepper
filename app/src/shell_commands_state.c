@@ -1654,6 +1654,38 @@ int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, cha
 #endif
 }
 
+int cmd_motor_encoder_protocol_detect(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+	shell_error(sh, "AEAT protocol detection requires the AEAT-9955 fast encoder driver");
+	return -ENOTSUP;
+#else
+	if (!device_is_ready(encoder1)) {
+		shell_error(sh, "encoder1 is not ready");
+		return -ENODEV;
+	}
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before protocol detection");
+		return -EBUSY;
+	}
+
+	enum aeat9955_fast_spi4_mode mode = AEAT9955_FAST_SPI4_16_PARITY;
+	int ret = aeat9955_fast_detect_spi4_mode(encoder1, &mode);
+	if (ret != 0) {
+		shell_error(sh, "Failed to detect AEAT SPI4 mode (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "AEAT-9955 detected protocol: %s",
+		    (mode == AEAT9955_FAST_SPI4_8_CRC16) ?
+			    "spi4-8-crc16" : "spi4-16-parity");
+	return 0;
+#endif
+}
+
 int cmd_motor_encoder_protocol_spi4_8_volatile(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);

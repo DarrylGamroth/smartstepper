@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(brcm_aeat9955_fast, CONFIG_LOG_DEFAULT_LEVEL);
@@ -27,9 +28,9 @@ LOG_MODULE_REGISTER(brcm_aeat9955_fast, CONFIG_LOG_DEFAULT_LEVEL);
 #define AEAT9955_FAST_SPI8_REG_READ_FRAME_LEN 4U
 #define AEAT9955_FAST_SPI8_REG_WRITE_FRAME_LEN 3U
 #define AEAT9955_FAST_REG_TIMEOUT_US 1000U
+#define AEAT9955_FAST_CFG_SETTLE_US 1000U
 #define AEAT9955_FAST_DEG_TO_RAD 0.017453292519943295769f
 #define AEAT9955_FAST_CRC16_INIT 0xFFFFU
-#define AEAT9955_FAST_CRC16_POLY 0x1021U
 
 /*
  * SPI4-8 is transported as 8-bit SPI words. At 18-bit single-turn resolution,
@@ -56,6 +57,16 @@ struct aeat9955_fast_data {
 	enum aeat9955_fast_spi4_mode spi4_mode;
 	bool sample_in_flight;
 	struct encoder_rt_stats stats;
+};
+
+static const struct rt_spi_config aeat9955_fast_spi16_transport = {
+	.cpol = false,
+	.cpha = true,
+};
+
+static const struct rt_spi_config aeat9955_fast_spi8_transport = {
+	.cpol = true,
+	.cpha = true,
 };
 
 static inline uint8_t aeat9955_fast_frame_len(enum aeat9955_fast_spi4_mode mode)
@@ -120,22 +131,34 @@ static uint32_t aeat9955_fast_get_bits_msb(const uint8_t *raw, uint16_t start_bi
 	return value;
 }
 
-static uint16_t aeat9955_fast_crc16_bits(const uint8_t *raw, uint16_t start_bit,
-					 uint16_t bit_count)
+static uint16_t aeat9955_fast_crc16_update_bits(uint16_t crc, uint8_t bits,
+						uint8_t bit_count)
 {
-	uint16_t crc = AEAT9955_FAST_CRC16_INIT;
-
-	for (uint16_t i = 0U; i < bit_count; i++) {
-		bool input_bit = aeat9955_fast_get_bit_msb(raw, start_bit + i) != 0U;
+	for (uint8_t i = 0U; i < bit_count; i++) {
+		bool input_bit = ((bits << i) & BIT(7)) != 0U;
 		bool crc_msb = (crc & 0x8000U) != 0U;
 
 		crc <<= 1;
 		if (crc_msb ^ input_bit) {
-			crc ^= AEAT9955_FAST_CRC16_POLY;
+			crc ^= CRC16_CCITT_POLY;
 		}
 	}
 
 	return crc;
+}
+
+static uint16_t aeat9955_fast_crc16_spi8_position(const uint8_t *raw)
+{
+	/*
+	 * The AEAT SPI4-8 safety frame is bit-packed for 18-bit position:
+	 * CRC input is position[17:0] + status[7:0] + sequence[7:0].
+	 * That is 34 bits starting at raw[1]. Use Zephyr's CCITT-FALSE
+	 * helper for the 32 byte-aligned bits, then feed the two residual
+	 * sequence-counter bits.
+	 */
+	uint16_t crc = crc16_ccitt(AEAT9955_FAST_CRC16_INIT, &raw[1], 4U);
+
+	return aeat9955_fast_crc16_update_bits(crc, raw[5], 2U);
 }
 
 static int aeat9955_fast_decode_spi16_position(
@@ -177,8 +200,7 @@ static int aeat9955_fast_decode_spi8_crc16_position(
 							 8U);
 	uint16_t received_crc = (uint16_t)aeat9955_fast_get_bits_msb(
 		raw, AEAT9955_FAST_SPI8_CRC_START_BIT, 16U);
-	uint16_t expected_crc = aeat9955_fast_crc16_bits(raw,
-		AEAT9955_FAST_SPI8_POS_START_BIT, AEAT9955_FAST_SPI8_CRC_INPUT_BITS);
+	uint16_t expected_crc = aeat9955_fast_crc16_spi8_position(raw);
 	bool crc_bad = received_crc != expected_crc;
 
 	if (position != NULL) {
@@ -498,14 +520,113 @@ static int aeat9955_fast_lock_level1_current_mode(const struct device *dev)
 		       aeat9955_fast_write_register_spi16(dev, AEAT9955_FAST_REG_UNLOCK, 0x00U);
 }
 
-int aeat9955_fast_read_register(const struct device *dev, uint8_t reg, uint8_t *value)
+static int aeat9955_fast_unlock_level2_default_current_mode(const struct device *dev)
+{
+	int ret = aeat9955_fast_unlock_level1_current_mode(dev);
+
+	if (ret != 0) {
+		return ret;
+	}
+	k_busy_wait(AEAT9955_FAST_CFG_SETTLE_US);
+
+	for (uint8_t reg = AEAT9955_FAST_REG_PASSCODE_0;
+	     reg <= AEAT9955_FAST_REG_PASSCODE_6; reg++) {
+		ret = aeat9955_fast_write_register(dev, reg, 0x00U);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+	k_busy_wait(AEAT9955_FAST_CFG_SETTLE_US);
+
+	return 0;
+}
+
+static int aeat9955_fast_set_transport_mode(const struct device *dev,
+					    enum aeat9955_fast_spi4_mode mode)
+{
+	const struct aeat9955_fast_config *cfg = dev->config;
+	const struct rt_spi_config *spi_cfg =
+		(mode == AEAT9955_FAST_SPI4_8_CRC16) ?
+			&aeat9955_fast_spi8_transport :
+			&aeat9955_fast_spi16_transport;
+
+	return rt_spi_configure(cfg->transport, spi_cfg);
+}
+
+static int aeat9955_fast_set_driver_transport_mode(
+	const struct device *dev, enum aeat9955_fast_spi4_mode mode)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	int ret = aeat9955_fast_set_transport_mode(dev, mode);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	data->spi4_mode = mode;
+	return 0;
+}
+
+static int aeat9955_fast_probe_mode_unlocked(const struct device *dev,
+					     enum aeat9955_fast_spi4_mode mode)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	uint8_t chip_id = 0U;
+	int ret = aeat9955_fast_set_transport_mode(dev, mode);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	data->spi4_mode = mode;
+	ret = (mode == AEAT9955_FAST_SPI4_8_CRC16) ?
+		      aeat9955_fast_read_register_spi8(dev, AEAT9955_FAST_REG_CHIP_ID,
+						       &chip_id) :
+		      aeat9955_fast_read_register_spi16(dev, AEAT9955_FAST_REG_CHIP_ID,
+							&chip_id);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return (chip_id == AEAT9955_FAST_CHIP_ID) ? 0 : -EIO;
+}
+
+static int aeat9955_fast_detect_mode_unlocked(const struct device *dev,
+					      enum aeat9955_fast_spi4_mode *mode)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	enum aeat9955_fast_spi4_mode original_mode = data->spi4_mode;
+	struct rt_spi_config original_spi = {0};
+	const struct aeat9955_fast_config *cfg = dev->config;
+
+	rt_spi_get_config(cfg->transport, &original_spi);
+
+	if (aeat9955_fast_probe_mode_unlocked(dev,
+					      AEAT9955_FAST_SPI4_16_PARITY) == 0) {
+		if (mode != NULL) {
+			*mode = AEAT9955_FAST_SPI4_16_PARITY;
+		}
+		return 0;
+	}
+
+	if (aeat9955_fast_probe_mode_unlocked(dev,
+					      AEAT9955_FAST_SPI4_8_CRC16) == 0) {
+		if (mode != NULL) {
+			*mode = AEAT9955_FAST_SPI4_8_CRC16;
+		}
+		return 0;
+	}
+
+	(void)rt_spi_configure(cfg->transport, &original_spi);
+	data->spi4_mode = original_mode;
+	return -EIO;
+}
+
+static int aeat9955_fast_check_idle(const struct device *dev)
 {
 	struct aeat9955_fast_data *data = dev->data;
 	unsigned int key;
 
-	if (value == NULL) {
-		return -EINVAL;
-	}
 	if (k_is_in_isr()) {
 		return -EWOULDBLOCK;
 	}
@@ -516,6 +637,22 @@ int aeat9955_fast_read_register(const struct device *dev, uint8_t reg, uint8_t *
 		return -EBUSY;
 	}
 	irq_unlock(key);
+
+	return 0;
+}
+
+int aeat9955_fast_read_register(const struct device *dev, uint8_t reg, uint8_t *value)
+{
+	struct aeat9955_fast_data *data = dev->data;
+	int ret;
+
+	if (value == NULL) {
+		return -EINVAL;
+	}
+	ret = aeat9955_fast_check_idle(dev);
+	if (ret != 0) {
+		return ret;
+	}
 
 	return (data->spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) ?
 		       aeat9955_fast_read_register_spi8(dev, reg, value) :
@@ -525,18 +662,12 @@ int aeat9955_fast_read_register(const struct device *dev, uint8_t reg, uint8_t *
 int aeat9955_fast_write_register(const struct device *dev, uint8_t reg, uint8_t value)
 {
 	struct aeat9955_fast_data *data = dev->data;
-	unsigned int key;
+	int ret;
 
-	if (k_is_in_isr()) {
-		return -EWOULDBLOCK;
+	ret = aeat9955_fast_check_idle(dev);
+	if (ret != 0) {
+		return ret;
 	}
-
-	key = irq_lock();
-	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
-		irq_unlock(key);
-		return -EBUSY;
-	}
-	irq_unlock(key);
 
 	return (data->spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) ?
 		       aeat9955_fast_write_register_spi8(dev, reg, value) :
@@ -564,144 +695,156 @@ int aeat9955_fast_set_spi4_mode_runtime(const struct device *dev,
 					enum aeat9955_fast_spi4_mode mode)
 {
 	struct aeat9955_fast_data *data = dev->data;
-	unsigned int key;
+	int ret;
 
 	if (mode != AEAT9955_FAST_SPI4_16_PARITY &&
 	    mode != AEAT9955_FAST_SPI4_8_CRC16) {
 		return -EINVAL;
 	}
 
-	key = irq_lock();
-	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
-		irq_unlock(key);
-		return -EBUSY;
+	ret = aeat9955_fast_check_idle(dev);
+	if (ret != 0) {
+		return ret;
 	}
 	data->spi4_mode = mode;
-	irq_unlock(key);
 
 	return 0;
 }
 
-int aeat9955_fast_configure_spi4_8_crc16_volatile(const struct device *dev)
+int aeat9955_fast_detect_spi4_mode(const struct device *dev,
+				   enum aeat9955_fast_spi4_mode *mode)
+{
+	int ret;
+
+	if (mode == NULL) {
+		return -EINVAL;
+	}
+
+	ret = aeat9955_fast_check_idle(dev);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return aeat9955_fast_detect_mode_unlocked(dev, mode);
+}
+
+int aeat9955_fast_configure_runtime_mode(const struct device *dev,
+					 enum aeat9955_fast_spi4_mode target_mode)
 {
 	struct aeat9955_fast_data *data = dev->data;
+	enum aeat9955_fast_spi4_mode current_mode = AEAT9955_FAST_SPI4_16_PARITY;
 	uint8_t reg0 = 0U;
 	uint8_t reg7 = 0U;
 	uint8_t reg9 = 0U;
-	unsigned int key;
 	int ret;
 
-	if (k_is_in_isr()) {
-		return -EWOULDBLOCK;
+	if (target_mode != AEAT9955_FAST_SPI4_16_PARITY &&
+	    target_mode != AEAT9955_FAST_SPI4_8_CRC16) {
+		return -EINVAL;
 	}
 
-	key = irq_lock();
-	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
-		irq_unlock(key);
-		return -EBUSY;
+	ret = aeat9955_fast_check_idle(dev);
+	if (ret != 0) {
+		return ret;
 	}
-	irq_unlock(key);
 
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0, &reg0);
+	ret = aeat9955_fast_detect_mode_unlocked(dev, &current_mode);
+	if (ret != 0) {
+		return ret;
+	}
+	if (current_mode == target_mode) {
+		return aeat9955_fast_set_driver_transport_mode(dev, target_mode);
+	}
+
+	if (target_mode == AEAT9955_FAST_SPI4_8_CRC16) {
+		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0, &reg0);
+		if (ret == 0) {
+			ret = aeat9955_fast_read_register(dev,
+							  AEAT9955_FAST_REG_CONFIG0_SPI4,
+							  &reg7);
+		}
+		if (ret == 0) {
+			ret = aeat9955_fast_read_register(dev,
+							  AEAT9955_FAST_REG_CONFIG1_PSEL,
+							  &reg9);
+		}
+		if (ret != 0) {
+			return ret;
+		}
+
+		ret = aeat9955_fast_unlock_level2_default_current_mode(dev);
+		if (ret != 0) {
+			return ret;
+		}
+
+		reg0 |= AEAT9955_FAST_CONFIG0_SAFETY_BIT |
+			AEAT9955_FAST_CONFIG0_CRC_SELECT |
+			AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF;
+		reg9 &= (uint8_t)~AEAT9955_FAST_CONFIG1_PSEL_BIT;
+
+		ret = aeat9955_fast_write_register(dev, AEAT9955_FAST_REG_CONFIG0, reg0);
+		if (ret == 0) {
+			ret = aeat9955_fast_write_register(dev,
+							  AEAT9955_FAST_REG_CONFIG1_PSEL,
+							  reg9);
+		}
+		if (ret != 0) {
+			return ret;
+		}
+		k_busy_wait(AEAT9955_FAST_CFG_SETTLE_US);
+
+		uint8_t verify_reg0 = 0U;
+		uint8_t verify_reg9 = 0U;
+		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0,
+						  &verify_reg0);
+		if (ret == 0) {
+			ret = aeat9955_fast_read_register(dev,
+							  AEAT9955_FAST_REG_CONFIG1_PSEL,
+							  &verify_reg9);
+		}
+		if (ret != 0 ||
+		    ((verify_reg0 & (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
+				     AEAT9955_FAST_CONFIG0_CRC_SELECT |
+				     AEAT9955_FAST_CONFIG0_CRC_INIT_MASK)) !=
+		     (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
+		      AEAT9955_FAST_CONFIG0_CRC_SELECT |
+		      AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF)) ||
+		    ((verify_reg9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) != 0U)) {
+			(void)aeat9955_fast_lock_level1_current_mode(dev);
+			return ret != 0 ? ret : -EIO;
+		}
+
+		reg7 = (reg7 & (uint8_t)~AEAT9955_FAST_CONFIG0_SPI4_MODE_MASK) |
+		       AEAT9955_FAST_CONFIG0_SPI4_MODE_8;
+		ret = aeat9955_fast_write_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4,
+						   reg7);
+		if (ret != 0) {
+			return ret;
+		}
+		k_busy_wait(AEAT9955_FAST_CFG_SETTLE_US);
+
+		ret = aeat9955_fast_set_driver_transport_mode(dev,
+							      AEAT9955_FAST_SPI4_8_CRC16);
+		if (ret != 0) {
+			data->spi4_mode = AEAT9955_FAST_SPI4_16_PARITY;
+			return ret;
+		}
+
+		uint8_t chip_id = 0U;
+		ret = aeat9955_fast_read_register_spi8(dev, AEAT9955_FAST_REG_CHIP_ID,
+						       &chip_id);
+		if (ret != 0 || chip_id != AEAT9955_FAST_CHIP_ID) {
+			return ret != 0 ? ret : -EIO;
+		}
+
+		return 0;
+	}
+
+	ret = aeat9955_fast_unlock_level2_default_current_mode(dev);
 	if (ret != 0) {
 		return ret;
 	}
 	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4, &reg7);
-	if (ret != 0) {
-		return ret;
-	}
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG1_PSEL, &reg9);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = aeat9955_fast_unlock_level1_current_mode(dev);
-	if (ret != 0) {
-		return ret;
-	}
-
-	reg0 |= AEAT9955_FAST_CONFIG0_SAFETY_BIT |
-		AEAT9955_FAST_CONFIG0_CRC_SELECT |
-		AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF;
-	reg9 &= (uint8_t)~AEAT9955_FAST_CONFIG1_PSEL_BIT;
-	reg7 = (reg7 & (uint8_t)~AEAT9955_FAST_CONFIG0_SPI4_MODE_MASK) |
-	       AEAT9955_FAST_CONFIG0_SPI4_MODE_8;
-
-	ret = aeat9955_fast_write_register(dev, AEAT9955_FAST_REG_CONFIG0, reg0);
-	if (ret != 0) {
-		return ret;
-	}
-	ret = aeat9955_fast_write_register(dev, AEAT9955_FAST_REG_CONFIG1_PSEL, reg9);
-	if (ret != 0) {
-		return ret;
-	}
-
-	uint8_t verify_reg0 = 0U;
-	uint8_t verify_reg9 = 0U;
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0, &verify_reg0);
-	if (ret != 0) {
-		(void)aeat9955_fast_lock_level1_current_mode(dev);
-		return ret;
-	}
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG1_PSEL, &verify_reg9);
-	if (ret != 0) {
-		(void)aeat9955_fast_lock_level1_current_mode(dev);
-		return ret;
-	}
-	if (((verify_reg0 & (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
-			    AEAT9955_FAST_CONFIG0_CRC_SELECT |
-			    AEAT9955_FAST_CONFIG0_CRC_INIT_MASK)) !=
-	     (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
-	      AEAT9955_FAST_CONFIG0_CRC_SELECT |
-	      AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF)) ||
-	    ((verify_reg9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) != 0U)) {
-		(void)aeat9955_fast_lock_level1_current_mode(dev);
-		return -EIO;
-	}
-
-	ret = aeat9955_fast_write_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4, reg7);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_8_CRC16);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = aeat9955_fast_lock_level1_current_mode(dev);
-	if (ret != 0) {
-		(void)aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_16_PARITY);
-		return ret;
-	}
-
-	return 0;
-}
-
-int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev)
-{
-	struct aeat9955_fast_data *data = dev->data;
-	uint8_t reg7 = 0U;
-	unsigned int key;
-	int ret;
-
-	if (k_is_in_isr()) {
-		return -EWOULDBLOCK;
-	}
-
-	key = irq_lock();
-	if (data->mode == ENCODER_RT_MODE_REALTIME || data->sample_in_flight) {
-		irq_unlock(key);
-		return -EBUSY;
-	}
-	irq_unlock(key);
-
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4, &reg7);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = aeat9955_fast_unlock_level1_current_mode(dev);
 	if (ret != 0) {
 		return ret;
 	}
@@ -712,47 +855,36 @@ int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev)
 	if (ret != 0) {
 		return ret;
 	}
+	k_busy_wait(AEAT9955_FAST_CFG_SETTLE_US);
 
-	ret = aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_16_PARITY);
+	ret = aeat9955_fast_set_driver_transport_mode(dev,
+						      AEAT9955_FAST_SPI4_16_PARITY);
 	if (ret != 0) {
+		data->spi4_mode = AEAT9955_FAST_SPI4_8_CRC16;
 		return ret;
 	}
 
-	ret = aeat9955_fast_lock_level1_current_mode(dev);
-	if (ret != 0) {
-		(void)aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_8_CRC16);
-		return ret;
-	}
-
-	uint8_t verify_reg0 = 0U;
-	uint8_t verify_reg7 = 0U;
-	uint8_t verify_reg9 = 0U;
-	ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0, &verify_reg0);
-	if (ret == 0) {
-		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG0_SPI4,
-						  &verify_reg7);
-	}
-	if (ret == 0) {
-		ret = aeat9955_fast_read_register(dev, AEAT9955_FAST_REG_CONFIG1_PSEL,
-						  &verify_reg9);
-	}
-	if (ret != 0 ||
-	    (verify_reg0 & (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
-			    AEAT9955_FAST_CONFIG0_CRC_SELECT |
-			    AEAT9955_FAST_CONFIG0_CRC_INIT_MASK)) !=
-		    (AEAT9955_FAST_CONFIG0_SAFETY_BIT |
-		     AEAT9955_FAST_CONFIG0_CRC_SELECT |
-		     AEAT9955_FAST_CONFIG0_CRC_INIT_FFFF) ||
-	    (verify_reg7 & AEAT9955_FAST_CONFIG0_SPI4_MODE_MASK) !=
-		    AEAT9955_FAST_CONFIG0_SPI4_MODE_16 ||
-	    (verify_reg9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) != 0U ||
-	    verify_reg7 == AEAT9955_FAST_REG_CONFIG0_SPI4 ||
-	    verify_reg9 == AEAT9955_FAST_REG_CONFIG1_PSEL) {
-		(void)aeat9955_fast_set_spi4_mode_runtime(dev, AEAT9955_FAST_SPI4_8_CRC16);
+	uint8_t chip_id = 0U;
+	ret = aeat9955_fast_read_register_spi16(dev, AEAT9955_FAST_REG_CHIP_ID,
+						&chip_id);
+	if (ret != 0 || chip_id != AEAT9955_FAST_CHIP_ID) {
+		(void)aeat9955_fast_set_driver_transport_mode(dev,
+							      AEAT9955_FAST_SPI4_8_CRC16);
 		return ret != 0 ? ret : -EIO;
 	}
 
+	(void)aeat9955_fast_lock_level1_current_mode(dev);
 	return 0;
+}
+
+int aeat9955_fast_configure_spi4_8_crc16_volatile(const struct device *dev)
+{
+	return aeat9955_fast_configure_runtime_mode(dev, AEAT9955_FAST_SPI4_8_CRC16);
+}
+
+int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev)
+{
+	return aeat9955_fast_configure_runtime_mode(dev, AEAT9955_FAST_SPI4_16_PARITY);
 }
 
 int aeat9955_fast_read_position_raw(const struct device *dev, uint8_t *raw,

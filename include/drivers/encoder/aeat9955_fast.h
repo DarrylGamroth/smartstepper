@@ -33,8 +33,13 @@ enum aeat9955_fast_spi4_mode {
 #define AEAT9955_FAST_REG_CONFIG0_SPI4 0x07U
 #define AEAT9955_FAST_REG_CONFIG1_PSEL 0x09U
 #define AEAT9955_FAST_REG_UNLOCK       0x10U
+#define AEAT9955_FAST_REG_PASSCODE_0   0x18U
+#define AEAT9955_FAST_REG_PASSCODE_6   0x1EU
+#define AEAT9955_FAST_REG_CHIP_ID      0x2BU
 #define AEAT9955_FAST_REG_POS          0x3FU
 #define AEAT9955_FAST_REG_ERROR_STATUS 0x29U
+
+#define AEAT9955_FAST_CHIP_ID 0x32U
 
 #define AEAT9955_FAST_CONFIG0_SAFETY_BIT     0x80U
 #define AEAT9955_FAST_CONFIG0_CRC_SELECT     0x40U
@@ -60,6 +65,10 @@ int aeat9955_fast_get_spi4_mode(const struct device *dev,
 				enum aeat9955_fast_spi4_mode *mode);
 int aeat9955_fast_set_spi4_mode_runtime(const struct device *dev,
 					enum aeat9955_fast_spi4_mode mode);
+int aeat9955_fast_detect_spi4_mode(const struct device *dev,
+				   enum aeat9955_fast_spi4_mode *mode);
+int aeat9955_fast_configure_runtime_mode(const struct device *dev,
+					 enum aeat9955_fast_spi4_mode target_mode);
 int aeat9955_fast_configure_spi4_8_crc16_volatile(const struct device *dev);
 int aeat9955_fast_configure_spi4_16_parity_volatile(const struct device *dev);
 int aeat9955_fast_read_position_raw(const struct device *dev, uint8_t *raw,

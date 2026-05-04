@@ -42,6 +42,7 @@ int cmd_motor_encoder_reg_write(const struct shell *sh, size_t argc, char **argv
 int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_spi4_8_volatile(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_spi4_16_volatile(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_protocol_detect(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_driver_spi4_8(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_driver_spi4_16(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, char **argv);
