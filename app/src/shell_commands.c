@@ -763,6 +763,11 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 			    (double)g_motor_params->live.velocity_dob_iq_ff_a,
 			    (double)g_motor_params->live.velocity_dob_residual_rad_s);
 	}
+	shell_print(sh, "  Detent FF:  %s gain=%.3f limit=%.4f A live=%.5f A",
+		    g_motor_params->detent_map_cfg.enabled ? "ENABLED" : "DISABLED",
+		    (double)g_motor_params->detent_map_cfg.gain,
+		    (double)g_motor_params->detent_map_cfg.iq_ff_limit_a,
+		    (double)g_motor_params->live.detent_iq_ff_a);
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
 
 	return 0;

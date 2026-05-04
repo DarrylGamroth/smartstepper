@@ -19,6 +19,7 @@
 #include "motor/control/mpr.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
+#include "motor/compensation/detent_map.h"
 
 struct motor_outer_loop_runtime_ctx {
 	uint8_t outer_loop_mode;
@@ -58,6 +59,9 @@ struct motor_outer_loop_runtime_ctx {
 	float32_t *live_velocity_dob_iq_ff_a;
 	float32_t *live_velocity_dob_disturbance_nm;
 	float32_t *live_velocity_dob_residual_rad_s;
+	struct motor_detent_map_config *detent_map_cfg;
+	struct motor_detent_map_state *detent_map_state;
+	float32_t *live_detent_iq_ff_a;
 };
 
 struct motor_outer_loop_inputs {

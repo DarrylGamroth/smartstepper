@@ -29,6 +29,7 @@
 #include "motor/control/mpr.h"
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
+#include "motor/compensation/detent_map.h"
 #include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback_quality.h"
 #include "motor/math/prbs.h"
@@ -44,6 +45,7 @@
 #define MOTOR_ENCODER_CAPTURE_MAX_SAMPLES 512U
 #define MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES 512U
 #define MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES 256U
+#define MOTOR_DETENT_MAP_BINS 256U
 
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
 #define PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL 1U
@@ -265,6 +267,7 @@ struct motor_live_telemetry_ctx {
 	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */
 	float32_t velocity_dob_disturbance_nm; /* Estimated lumped disturbance torque */
 	float32_t velocity_dob_residual_rad_s; /* Observer speed residual */
+	float32_t detent_iq_ff_a;        /* Position-periodic detent feedforward current */
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;
 	float32_t Id_A;
@@ -390,6 +393,9 @@ struct motor_parameters {
 	struct motor_mpr_position_state position_mpr_state; /* Position MPR runtime */
 	struct motor_dob_config velocity_dob_cfg;  /* Velocity disturbance observer tuning */
 	struct motor_dob_state velocity_dob_state; /* Velocity disturbance observer runtime */
+	struct motor_detent_map_config detent_map_cfg; /* Position-periodic Iq feedforward */
+	struct motor_detent_map_state detent_map_state; /* Detent map runtime */
+	float32_t detent_map_iq_table_a[MOTOR_DETENT_MAP_BINS]; /* One mechanical revolution */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;

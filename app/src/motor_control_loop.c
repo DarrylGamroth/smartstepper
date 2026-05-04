@@ -327,6 +327,7 @@ static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_
 	ctx->viscous_friction_nm_per_rad_s_active =
 		params->viscous_friction_nm_per_rad_s_active;
 	ctx->coulomb_friction_nm_active = params->coulomb_friction_nm_active;
+	ctx->live_detent_iq_ff_a = &params->live.detent_iq_ff_a;
 }
 
 static inline void motor_current_ref_policy_ctx_refresh(struct motor_current_ref_policy_ctx *ctx,

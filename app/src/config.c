@@ -129,6 +129,9 @@ void config_init_runtime_adapters(struct motor_parameters *params)
 		.live_velocity_dob_iq_ff_a = &params->live.velocity_dob_iq_ff_a,
 		.live_velocity_dob_disturbance_nm = &params->live.velocity_dob_disturbance_nm,
 		.live_velocity_dob_residual_rad_s = &params->live.velocity_dob_residual_rad_s,
+		.detent_map_cfg = &params->detent_map_cfg,
+		.detent_map_state = &params->detent_map_state,
+		.live_detent_iq_ff_a = &params->live.detent_iq_ff_a,
 	};
 
 	params->rt_adapters.current_ref_policy = (struct motor_current_ref_policy_ctx){

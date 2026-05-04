@@ -45,6 +45,10 @@ enum motor_param_id {
 	PARAM_ID_VELOCITY_DOB_OBSERVER_GAIN_NM_PER_RAD_S,
 	PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM,
 	PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A,
+	PARAM_ID_DETENT_FF_ENABLE,
+	PARAM_ID_DETENT_FF_GAIN,
+	PARAM_ID_DETENT_FF_IQ_LIMIT_A,
+	PARAM_ID_DETENT_FF_PHASE_ADVANCE_BINS,
 	PARAM_ID_POSITION_MPR_Q_POSITION,
 	PARAM_ID_POSITION_MPR_Q_VELOCITY_FF,
 	PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY,
@@ -81,6 +85,10 @@ static const char *const motor_param_names[PARAM_ID_COUNT] = {
 		"velocity_dob_observer_gain_nm_per_rad_s",
 	[PARAM_ID_VELOCITY_DOB_TORQUE_LIMIT_NM] = "velocity_dob_torque_limit_nm",
 	[PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A] = "velocity_dob_iq_ff_limit_a",
+	[PARAM_ID_DETENT_FF_ENABLE] = "detent_ff_enable",
+	[PARAM_ID_DETENT_FF_GAIN] = "detent_ff_gain",
+	[PARAM_ID_DETENT_FF_IQ_LIMIT_A] = "detent_ff_iq_limit_a",
+	[PARAM_ID_DETENT_FF_PHASE_ADVANCE_BINS] = "detent_ff_phase_advance_bins",
 	[PARAM_ID_POSITION_MPR_Q_POSITION] = "position_mpr_q_position",
 	[PARAM_ID_POSITION_MPR_Q_VELOCITY_FF] = "position_mpr_q_velocity_ff",
 	[PARAM_ID_POSITION_MPR_R_DELTA_VELOCITY] = "position_mpr_r_delta_velocity",
@@ -198,6 +206,18 @@ static int motor_param_get_value(const struct motor_parameters *params, uint8_t 
 		return 0;
 	case PARAM_ID_VELOCITY_DOB_IQ_FF_LIMIT_A:
 		*value = params->velocity_dob_cfg.iq_ff_limit_a;
+		return 0;
+	case PARAM_ID_DETENT_FF_ENABLE:
+		*value = params->detent_map_cfg.enabled ? 1.0f : 0.0f;
+		return 0;
+	case PARAM_ID_DETENT_FF_GAIN:
+		*value = params->detent_map_cfg.gain;
+		return 0;
+	case PARAM_ID_DETENT_FF_IQ_LIMIT_A:
+		*value = params->detent_map_cfg.iq_ff_limit_a;
+		return 0;
+	case PARAM_ID_DETENT_FF_PHASE_ADVANCE_BINS:
+		*value = (float32_t)params->detent_map_cfg.phase_advance_bins;
 		return 0;
 	case PARAM_ID_POSITION_MPR_Q_POSITION:
 		*value = params->position_mpr_cfg.q_position;
@@ -850,6 +870,43 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->velocity_dob_cfg.iq_ff_limit_a = value;
 		LOG_DBG("Updated velocity_dob_iq_ff_limit_a = %.6f", (double)value);
+		break;
+	case PARAM_ID_DETENT_FF_ENABLE:
+		if (value < 0.0f || value > 1.0f) {
+			LOG_ERR("Rejected detent_ff_enable outside [0,1]");
+			break;
+		}
+		params->detent_map_cfg.enabled = (value >= 0.5f);
+		motor_detent_map_reset(&params->detent_map_state);
+		params->live.detent_iq_ff_a = 0.0f;
+		LOG_DBG("Updated detent_ff_enable = %u",
+			params->detent_map_cfg.enabled ? 1U : 0U);
+		break;
+	case PARAM_ID_DETENT_FF_GAIN:
+		if (value < 0.0f) {
+			LOG_ERR("Rejected detent_ff_gain < 0");
+			break;
+		}
+		params->detent_map_cfg.gain = value;
+		LOG_DBG("Updated detent_ff_gain = %.6f", (double)value);
+		break;
+	case PARAM_ID_DETENT_FF_IQ_LIMIT_A:
+		if (value < 0.0f || value > params->velocity_cl_iq_limit_A) {
+			LOG_ERR("Rejected detent_ff_iq_limit_a outside [0, velocity limit]");
+			break;
+		}
+		params->detent_map_cfg.iq_ff_limit_a = value;
+		LOG_DBG("Updated detent_ff_iq_limit_a = %.6f", (double)value);
+		break;
+	case PARAM_ID_DETENT_FF_PHASE_ADVANCE_BINS:
+		if (value < -(float32_t)MOTOR_DETENT_MAP_BINS ||
+		    value > (float32_t)MOTOR_DETENT_MAP_BINS) {
+			LOG_ERR("Rejected detent_ff_phase_advance_bins outside +/- table length");
+			break;
+		}
+		params->detent_map_cfg.phase_advance_bins = (int16_t)value;
+		LOG_DBG("Updated detent_ff_phase_advance_bins = %d",
+			params->detent_map_cfg.phase_advance_bins);
 		break;
 	case PARAM_ID_POSITION_MPR_Q_POSITION:
 		if (value < 0.0f ||

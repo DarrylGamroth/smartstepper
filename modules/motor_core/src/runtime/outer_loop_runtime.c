@@ -154,6 +154,9 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_hold_on_bad_feedback(stru
 	*ctx->live_velocity_dob_iq_ff_a = 0.0f;
 	*ctx->live_velocity_dob_disturbance_nm = 0.0f;
 	*ctx->live_velocity_dob_residual_rad_s = 0.0f;
+	if (ctx->live_detent_iq_ff_a != NULL) {
+		*ctx->live_detent_iq_ff_a = 0.0f;
+	}
 }
 
 static MOTOR_OUTER_LOOP_NOINLINE bool motor_outer_loop_velocity_mpr_step(struct motor_outer_loop_runtime_ctx *ctx,
@@ -323,12 +326,52 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_dob_step(struct 
 #endif
 }
 
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_detent_ff_step(
+	struct motor_outer_loop_runtime_ctx *ctx,
+	const struct motor_outer_loop_inputs *in,
+	struct motor_outer_loop_outputs *out)
+{
+	if (ctx->detent_map_cfg == NULL ||
+	    ctx->detent_map_state == NULL ||
+	    ctx->live_detent_iq_ff_a == NULL ||
+	    !ctx->detent_map_cfg->enabled) {
+		if (ctx->live_detent_iq_ff_a != NULL) {
+			*ctx->live_detent_iq_ff_a = 0.0f;
+		}
+		return;
+	}
+
+	if (!ctx->detent_map_state->initialized &&
+	    motor_detent_map_init(ctx->detent_map_cfg, ctx->detent_map_state) != 0) {
+		*ctx->live_detent_iq_ff_a = 0.0f;
+		return;
+	}
+
+	float32_t iq_ff_a = 0.0f;
+	int ret = motor_detent_map_step_fast(ctx->detent_map_cfg,
+					     ctx->detent_map_state,
+					     in->position_mech_rad,
+					     &iq_ff_a);
+	if (ret != 0) {
+		motor_detent_map_reset(ctx->detent_map_state);
+		iq_ff_a = 0.0f;
+	}
+
+	*ctx->live_detent_iq_ff_a = iq_ff_a;
+	out->iq_ref_a = clampf(out->iq_ref_a + iq_ff_a,
+			       -ctx->velocity_cl_iq_limit_a,
+			       ctx->velocity_cl_iq_limit_a);
+}
+
 static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct motor_outer_loop_runtime_ctx *ctx,
 					   const struct motor_outer_loop_inputs *in,
 					   struct motor_outer_loop_outputs *out,
 					   bool velocity_loop_update)
 {
 	if (!in->velocity_active) {
+		if (ctx->live_detent_iq_ff_a != NULL) {
+			*ctx->live_detent_iq_ff_a = 0.0f;
+		}
 		return;
 	}
 
@@ -364,6 +407,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct moto
 	motor_outer_loop_velocity_dob_step(ctx, in, out,
 					   torque_gain_nm_per_a,
 					   iq_cmd_pre_dob_a);
+	motor_outer_loop_detent_ff_step(ctx, in, out);
 }
 
 int motor_outer_loop_runtime_step(struct motor_outer_loop_runtime_ctx *ctx,

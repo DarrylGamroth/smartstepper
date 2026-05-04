@@ -644,6 +644,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->velocity_dob_cfg.torque_limit_nm = params->torque_gain_nm_per_a_active *
 						   params->velocity_cl_iq_limit_A;
 	motor_dob_reset(&params->velocity_dob_state, 0.0f);
+	params->detent_map_cfg = (struct motor_detent_map_config){
+		.enabled = false,
+		.table_iq_a = params->detent_map_iq_table_a,
+		.table_len = MOTOR_DETENT_MAP_BINS,
+		.phase_advance_bins = 0,
+		.gain = 1.0f,
+		.iq_ff_limit_a = 0.0f,
+	};
+	motor_detent_map_clear(&params->detent_map_cfg);
+	motor_detent_map_reset(&params->detent_map_state);
 	params->live.velocity_target_rad_s = 0.0f;
 	params->live.velocity_ref_rad_s = 0.0f;
 	params->live.velocity_filtered_rad_s = 0.0f;
@@ -681,6 +691,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
+	params->live.detent_iq_ff_a = 0.0f;
 	params->Rs_measured_ohm = MOTOR_RESISTANCE_OHM;
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
 	params->R_over_L_measured =

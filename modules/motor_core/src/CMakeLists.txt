@@ -13,6 +13,7 @@ function(motor_core_configure_target target_name)
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/estimation
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/protection
 		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/calibration
+		${CMAKE_CURRENT_SOURCE_DIR}/../include/motor/compensation
 		PRIVATE
 		${APPLICATION_SOURCE_DIR}/include
 	)
@@ -72,6 +73,7 @@ add_library(motor_core_rt STATIC
 	control/position_regulator.c
 	control/velocity_regulator.c
 	control/current_ref_policy_core.c
+	compensation/detent_map.c
 )
 motor_core_configure_target(motor_core_rt)
 

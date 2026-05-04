@@ -131,6 +131,8 @@ int motor_api_request_commission(void);
  *       velocity_mpr_max_delta_iq_a, velocity_mpr_disturbance_ki_nm_per_rad_s,
  *       velocity_dob_enable, velocity_dob_observer_gain_nm_per_rad_s,
  *       velocity_dob_torque_limit_nm, velocity_dob_iq_ff_limit_a,
+ *       detent_ff_enable, detent_ff_gain, detent_ff_iq_limit_a,
+ *       detent_ff_phase_advance_bins,
  *       position_mpr_q_position, position_mpr_q_velocity_ff,
  *       position_mpr_r_delta_velocity, position_mpr_horizon,
  *       position_mpr_max_delta_velocity_rad_s,
