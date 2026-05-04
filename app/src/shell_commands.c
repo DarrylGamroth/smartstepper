@@ -1844,6 +1844,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 		  cmd_motor_commission_auto_status),
 	SHELL_CMD(apply, NULL, "Apply staged auto-tune defaults to active runtime parameters",
 		  cmd_motor_commission_auto_apply),
+	SHELL_CMD_ARG(validate, NULL,
+		      "Apply staged tune and run velocity_encoder validation [max_hz] [hold_ms]",
+		      cmd_motor_commission_auto_validate, 1, 2),
 	SHELL_SUBCMD_SET_END
 );
 

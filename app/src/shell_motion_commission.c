@@ -40,9 +40,18 @@
 #define MOTOR_COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE 1U
 #define MOTOR_COMMISSION_AUTO_MECH_ACCEL_MARGIN 1.25f
 #define MOTOR_COMMISSION_AUTO_MECH_VALIDATE_RMS_NM 0.005f
+#define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_MAX_HZ 5.0f
+#define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HZ_CAP 20.0f
+#define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS 2000U
+#define MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS 500U
+#define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS 10000U
 
 static const float32_t motor_commission_mech_step_pattern[] = {
 	-1.0f, 0.0f, 1.0f, -0.5f,
+};
+
+static const float32_t motor_commission_validate_step_scale[] = {
+	0.2f, 0.6f, 1.0f, -0.2f, -0.6f, -1.0f, 0.0f,
 };
 
 static struct motor_encoder_map_detect_sample encoder_detect_samples[
@@ -194,6 +203,40 @@ static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 				   g_motor_params->profile_max_velocity_rad_s);
 
 	traj_set_target_value(&g_motor_params->traj_velocity, limited);
+}
+
+static int motor_commission_wait_ms_or_fault(uint32_t hold_ms)
+{
+	uint32_t start_ms = k_uptime_get_32();
+
+	while ((k_uptime_get_32() - start_ms) < hold_ms) {
+		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+			return -EFAULT;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
+	}
+
+	return 0;
+}
+
+static void motor_commission_print_velocity_validation_sample(const struct shell *sh,
+							     float32_t target_hz)
+{
+	float32_t ref_hz = g_motor_params->live.velocity_ref_rad_s / (2.0f * PI_F32);
+	float32_t meas_hz = g_motor_params->live.velocity_filtered_rad_s / (2.0f * PI_F32);
+	float32_t err_hz = target_hz - meas_hz;
+
+	shell_print(sh,
+		    "  target=%7.3f Hz ref=%7.3f Hz meas=%7.3f Hz err=%7.3f Hz Iq=%.4f A Id=%.4f A warn=%u err=%u",
+		    (double)target_hz,
+		    (double)ref_hz,
+		    (double)meas_hz,
+		    (double)err_hz,
+		    (double)g_motor_params->live.Iq_A,
+		    (double)g_motor_params->live.Id_A,
+		    g_motor_params->live.encoder_sample_warning,
+		    g_motor_params->live.encoder_sample_error);
 }
 
 static void motor_commission_encoder_clear_result(void)
@@ -1502,6 +1545,110 @@ int cmd_motor_commission_auto_apply(const struct shell *sh, size_t argc, char **
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Auto-tuned parameters applied to active runtime configuration");
 	return 0;
+}
+
+int cmd_motor_commission_auto_validate(const struct shell *sh, size_t argc, char **argv)
+{
+	float32_t max_hz = MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_MAX_HZ;
+	uint32_t hold_ms = MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS;
+
+	if (argc > 3) {
+		shell_error(sh, "Usage: motor commission auto validate [max_hz] [hold_ms]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.complete) {
+		shell_error(sh, "Calibration is not complete; run calibration first");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before validation");
+		return -EACCES;
+	}
+	if (argc >= 2 && !shell_parse_finite_float(argv[1], &max_hz)) {
+		shell_error(sh, "max_hz must be a finite number");
+		return -EINVAL;
+	}
+	if (argc >= 3 && !shell_parse_u32(argv[2], &hold_ms)) {
+		shell_error(sh, "hold_ms must be an integer");
+		return -EINVAL;
+	}
+	if (!isfinite(max_hz) || max_hz <= 0.0f) {
+		shell_error(sh, "max_hz must be positive");
+		return -EINVAL;
+	}
+	hold_ms = CLAMP(hold_ms,
+			MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS,
+			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
+
+	float32_t profile_max_hz =
+		g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
+	float32_t limited_max_hz =
+		clampf(max_hz, 0.1f, fminf(profile_max_hz,
+					    MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HZ_CAP));
+
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	int ret = motor_commission_apply_staged_auto_tune(&commission_ctx);
+	if (ret == -ENOENT) {
+		shell_error(sh, "No staged auto-tune result to validate");
+		return ret;
+	}
+	if (ret < 0) {
+		shell_error(sh, "Failed to apply staged auto-tune before validation (err %d)",
+			    ret);
+		return ret;
+	}
+
+	/* Validate the conservative PI path first. DOB/MPR can be enabled after this passes. */
+	(void)motor_api_set_param("outer_loop_mode", (float32_t)MOTOR_OUTER_LOOP_MODE_PI);
+	(void)motor_api_set_param("velocity_dob_enable", 0.0f);
+
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	if (ret != 0) {
+		shell_error(sh, "Failed to request velocity_encoder mode (err %d)", ret);
+		return ret;
+	}
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
+					     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		shell_error(sh, "Failed to enter velocity_encoder mode (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh,
+		    "Auto validation: applied staged tune, PI outer loop, DOB disabled, max=%.3f Hz hold=%u ms",
+		    (double)limited_max_hz, hold_ms);
+	shell_print(sh,
+		    "  active: psi_f=%.8f Wb Kt=%.8f Nm/A J=%.8f kgm2 B=%.8f Tc=%.8f",
+		    (double)g_motor_params->flux_linkage_wb_active,
+		    (double)motor_torque_gain_resolve_active(g_motor_params),
+		    (double)g_motor_params->inertia_kgm2_active,
+		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active,
+		    (double)g_motor_params->coulomb_friction_nm_active);
+
+	for (uint32_t i = 0U; i < ARRAY_SIZE(motor_commission_validate_step_scale); i++) {
+		float32_t target_hz = limited_max_hz * motor_commission_validate_step_scale[i];
+		motor_commission_set_velocity_target_hz(target_hz);
+		motor_command_feed_watchdog(g_motor_params);
+		ret = motor_commission_wait_ms_or_fault(hold_ms);
+		motor_commission_print_velocity_validation_sample(sh, target_hz);
+		if (ret != 0) {
+			shell_error(sh, "Validation stopped by motor fault (err %d)", ret);
+			goto stop_velocity;
+		}
+	}
+
+stop_velocity:
+	motor_commission_set_velocity_target_hz(0.0f);
+	motor_command_feed_watchdog(g_motor_params);
+	if (ret == 0) {
+		shell_print(sh, "Auto validation complete; velocity target returned to 0 Hz");
+	}
+	return ret;
 }
 
 int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **argv)
