@@ -571,6 +571,16 @@ void motor_state_align_pos_inject_entry(void *obj)
 				     BIT(MOTOR_FEATURE_PI_CONTROL));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 
+	/*
+	 * ALIGN defines the base commutation frame.  The generated alignment
+	 * vector must therefore start from electrical zero, not from a previous
+	 * observer offset left over from an earlier calibration/commissioning
+	 * run.
+	 */
+	params->observer_alignment_offset_rad = 0.0f;
+	params->observer_elec_trim_rad = 0.0f;
+	angle_observer_set_offset(&params->observer, 0.0f);
+
 	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	angle_gen_set_angle(&params->angle_gen, 0.0f);
