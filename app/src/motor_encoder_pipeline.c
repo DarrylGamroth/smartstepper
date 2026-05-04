@@ -240,11 +240,13 @@ int motor_encoder_pipeline_request_sample(void)
 		return -ESHUTDOWN;
 	}
 
+#ifndef MOTOR_ENCODER_PIPELINE_FAST_AEAT
 	if (atomic_get(&motor_encoder_read_in_flight_count) >=
 	    MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT) {
 		atomic_inc(&motor_encoder_request_busy_count);
 		return -EALREADY;
 	}
+#endif
 
 #ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
 	int ret = encoder_rt_request_sample(motor_encoder_rt_dev);
@@ -264,7 +266,13 @@ int motor_encoder_pipeline_request_sample(void)
 	}
 #endif
 
+#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+	if (atomic_get(&motor_encoder_read_in_flight_count) == 0) {
+		atomic_inc(&motor_encoder_read_in_flight_count);
+	}
+#else
 	atomic_inc(&motor_encoder_read_in_flight_count);
+#endif
 	atomic_inc(&motor_encoder_request_ok_count);
 	return 0;
 }

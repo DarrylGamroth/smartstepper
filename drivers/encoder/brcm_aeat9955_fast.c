@@ -16,7 +16,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/sys/crc.h>
 #include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(brcm_aeat9955_fast, CONFIG_LOG_DEFAULT_LEVEL);
@@ -31,6 +30,7 @@ LOG_MODULE_REGISTER(brcm_aeat9955_fast, CONFIG_LOG_DEFAULT_LEVEL);
 #define AEAT9955_FAST_CFG_SETTLE_US 1000U
 #define AEAT9955_FAST_DEG_TO_RAD 0.017453292519943295769f
 #define AEAT9955_FAST_CRC16_INIT 0xFFFFU
+#define AEAT9955_FAST_CRC16_POLY 0x1021U
 
 /*
  * SPI4-8 is transported as 8-bit SPI words. At 18-bit single-turn resolution,
@@ -140,7 +140,7 @@ static uint16_t aeat9955_fast_crc16_update_bits(uint16_t crc, uint8_t bits,
 
 		crc <<= 1;
 		if (crc_msb ^ input_bit) {
-			crc ^= CRC16_CCITT_POLY;
+			crc ^= AEAT9955_FAST_CRC16_POLY;
 		}
 	}
 
@@ -151,14 +151,20 @@ static uint16_t aeat9955_fast_crc16_spi8_position(const uint8_t *raw)
 {
 	/*
 	 * The AEAT SPI4-8 safety frame is bit-packed for 18-bit position:
-	 * CRC input is position[17:0] + status[7:0] + sequence[7:0].
-	 * That is 34 bits starting at raw[1]. Use Zephyr's CCITT-FALSE
-	 * helper for the 32 byte-aligned bits, then feed the two residual
-	 * sequence-counter bits.
+	 * CRC input is position[17:0] + status[7:0] + sequence[7:0], exactly
+	 * 34 bits starting after the echoed operation code. Keep this bitwise
+	 * instead of mixing byte helpers with partial trailing bits.
 	 */
-	uint16_t crc = crc16_ccitt(AEAT9955_FAST_CRC16_INIT, &raw[1], 4U);
+	uint16_t crc = AEAT9955_FAST_CRC16_INIT;
 
-	return aeat9955_fast_crc16_update_bits(crc, raw[5], 2U);
+	for (uint8_t i = 0U; i < AEAT9955_FAST_SPI8_CRC_INPUT_BITS; i++) {
+		uint8_t bit = aeat9955_fast_get_bit_msb(
+			raw, AEAT9955_FAST_SPI8_POS_START_BIT + i);
+
+		crc = aeat9955_fast_crc16_update_bits(crc, (uint8_t)(bit << 7), 1U);
+	}
+
+	return crc;
 }
 
 static int aeat9955_fast_decode_spi16_position(
@@ -228,13 +234,14 @@ static int aeat9955_fast_decode_spi8_crc16_position(
 
 static int aeat9955_fast_set_mode(const struct device *dev, enum encoder_rt_mode mode)
 {
+	const struct aeat9955_fast_config *cfg = dev->config;
 	struct aeat9955_fast_data *data = dev->data;
 
 	if (mode > ENCODER_RT_MODE_DIAGNOSTIC) {
 		return -EINVAL;
 	}
 
-	if (data->sample_in_flight && mode != data->mode) {
+	if ((data->sample_in_flight || rt_spi_busy(cfg->transport)) && mode != data->mode) {
 		return -EBUSY;
 	}
 
@@ -250,12 +257,6 @@ static int aeat9955_fast_request_sample(const struct device *dev)
 	uint8_t frame_len = aeat9955_fast_frame_len(data->spi4_mode);
 	int ret;
 
-	if (data->sample_in_flight) {
-		data->stats.busy_count++;
-		return -EALREADY;
-	}
-	data->sample_in_flight = true;
-
 	aeat9955_fast_prepare_position_frame(tx, data->spi4_mode);
 	const struct rt_spi_transfer frame = {
 		.tx = tx,
@@ -264,7 +265,6 @@ static int aeat9955_fast_request_sample(const struct device *dev)
 
 	ret = rt_spi_request(cfg->transport, &frame);
 	if (ret != 0) {
-		data->sample_in_flight = false;
 		if (ret == -EBUSY) {
 			data->stats.busy_count++;
 		} else {
@@ -273,6 +273,7 @@ static int aeat9955_fast_request_sample(const struct device *dev)
 		return (ret == -EBUSY) ? -EALREADY : ret;
 	}
 
+	data->sample_in_flight = true;
 	data->stats.request_count++;
 	return 0;
 }

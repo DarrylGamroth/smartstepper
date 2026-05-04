@@ -87,7 +87,7 @@
 	aeat9955: aeat9955@0 {
 		compatible = "brcm,aeat-9955-fast";
 		reg = <0>;
-		pipeline-delay-samples = <1>;
+		pipeline-delay-samples = <0>;
 		spi4-mode = "spi4-8-crc16";
 		status = "okay";
 	};
