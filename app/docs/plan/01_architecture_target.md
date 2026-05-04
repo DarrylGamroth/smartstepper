@@ -31,7 +31,7 @@
 ## ISR Stage Contract
 
 1. `Collect`
-- inputs: ADC raw sample frame, encoder pipeline completion, runtime cfg snapshot.
+- inputs: ADC raw sample frame, encoder acquisition completion, runtime cfg snapshot.
 - outputs: `motor_collect_frame`.
 
 2. `Process`

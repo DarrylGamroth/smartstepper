@@ -79,8 +79,8 @@ static void motor_encoder_control_set_reason(char *reason, size_t reason_len,
 	(void)snprintf(reason, reason_len, "%s", text);
 }
 
-static bool motor_encoder_control_pipeline_has_stale_errors(
-	const struct motor_encoder_pipeline_stats *stats)
+static bool motor_encoder_control_acquisition_has_stale_errors(
+	const struct motor_encoder_acquisition_stats *stats)
 {
 	return stats->request_error != 0U ||
 	       stats->collect_transport_error != 0U ||
@@ -92,7 +92,7 @@ static bool motor_encoder_control_pipeline_has_stale_errors(
 static int motor_encoder_control_get_status_internal(
 	const struct motor_parameters *params,
 	bool check_registers,
-	bool allow_active_pipeline,
+	bool allow_active_acquisition,
 	struct motor_encoder_control_status *status,
 	char *reason,
 	size_t reason_len)
@@ -103,14 +103,14 @@ static int motor_encoder_control_get_status_internal(
 	}
 
 	memset(status, 0, sizeof(*status));
-	motor_encoder_pipeline_get_stats(&status->pipeline_stats);
+	motor_encoder_acquisition_get_stats(&status->acquisition_stats);
 
 	status->device_ready = device_is_ready(encoder1);
 	status->mapping_complete = params->calibration.encoder_mapping_complete;
-	status->pipeline_idle = !motor_encoder_pipeline_is_enabled() &&
-				!motor_encoder_pipeline_is_busy();
+	status->acquisition_idle = !motor_encoder_acquisition_is_enabled() &&
+				!motor_encoder_acquisition_is_busy();
 	status->injection_disabled =
-		motor_encoder_pipeline_get_test_inject_mode() == MOTOR_ENCODER_TEST_INJECT_NONE;
+		motor_encoder_acquisition_get_test_inject_mode() == MOTOR_ENCODER_TEST_INJECT_NONE;
 	status->protocol_ok = true;
 
 	if (!status->device_ready) {
@@ -122,9 +122,9 @@ static int motor_encoder_control_get_status_internal(
 						 "encoder mapping has not been applied");
 		return 0;
 	}
-	if (!status->pipeline_idle && !allow_active_pipeline) {
+	if (!status->acquisition_idle && !allow_active_acquisition) {
 		motor_encoder_control_set_reason(reason, reason_len,
-						 "encoder pipeline is active or busy");
+						 "encoder acquisition is active or busy");
 		return 0;
 	}
 	if (!status->injection_disabled) {
@@ -132,10 +132,10 @@ static int motor_encoder_control_get_status_internal(
 						 "encoder fault injection is enabled");
 		return 0;
 	}
-	if (!allow_active_pipeline &&
-	    motor_encoder_control_pipeline_has_stale_errors(&status->pipeline_stats)) {
+	if (!allow_active_acquisition &&
+	    motor_encoder_control_acquisition_has_stale_errors(&status->acquisition_stats)) {
 		motor_encoder_control_set_reason(reason, reason_len,
-						 "encoder pipeline has uncleared hard errors");
+						 "encoder acquisition has uncleared hard errors");
 		return 0;
 	}
 
@@ -192,12 +192,12 @@ static int motor_encoder_control_get_status_internal(
 
 	status->ready = status->device_ready &&
 			status->mapping_complete &&
-			(status->pipeline_idle || allow_active_pipeline) &&
+			(status->acquisition_idle || allow_active_acquisition) &&
 			status->injection_disabled &&
 			status->protocol_ok &&
-			(allow_active_pipeline ||
-			 !motor_encoder_control_pipeline_has_stale_errors(
-				 &status->pipeline_stats));
+			(allow_active_acquisition ||
+			 !motor_encoder_control_acquisition_has_stale_errors(
+				 &status->acquisition_stats));
 	if (status->ready) {
 		motor_encoder_control_set_reason(reason, reason_len, "ready");
 	}
@@ -243,13 +243,13 @@ bool motor_encoder_control_ready_for_transition(const struct motor_parameters *p
 		return true;
 	}
 
-	bool allow_active_pipeline =
+	bool allow_active_acquisition =
 		motor_encoder_control_mode_requires_encoder(current_state);
 	struct motor_encoder_control_status status = {0};
 	int ret = motor_encoder_control_get_status_internal(params,
 							    check_registers &&
-								    !allow_active_pipeline,
-							    allow_active_pipeline,
+								    !allow_active_acquisition,
+							    allow_active_acquisition,
 							    &status, reason,
 							    reason_len);
 	return ret == 0 && status.ready;

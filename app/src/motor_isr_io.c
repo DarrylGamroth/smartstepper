@@ -22,7 +22,7 @@
 #include "motor_states.h"
 #include "motor_state_utils.h"
 #include "config.h"
-#include "motor_encoder_pipeline.h"
+#include "motor_encoder_acquisition.h"
 #include "motor/runtime/keepalive_policy.h"
 #include "motor/protection/interlocks.h"
 #include "motor/motion/motion_profile.h"
@@ -142,10 +142,10 @@ static void motor_adc_stage_collect(struct motor_parameters *params,
 	/* Publish policy then always collect once to drain any completed CQE/buffer,
 	 * even if encoder reads were just disabled this cycle.
 	 */
-	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
+	motor_encoder_acquisition_set_enabled(encoder_sampling_enabled);
 
 	struct motor_encoder_sample sample = {0};
-	int ret = motor_encoder_pipeline_collect(&sample);
+	int ret = motor_encoder_acquisition_collect(&sample);
 
 	encoder_sample.enabled = encoder_enabled;
 	if (encoder_sampling_enabled) {
@@ -313,9 +313,9 @@ void encoder1_callback(const struct device *dev, uint32_t channel,
 	bool encoder_sampling_enabled =
 		encoder_enabled || encoder_capture_enabled || encoder_raw_trace_enabled;
 
-	motor_encoder_pipeline_set_enabled(encoder_sampling_enabled);
+	motor_encoder_acquisition_set_enabled(encoder_sampling_enabled);
 	if (encoder_sampling_enabled) {
-		int ret = motor_encoder_pipeline_request_sample();
+		int ret = motor_encoder_acquisition_request_sample();
 		if (ret < 0 && ret != -EALREADY) {
 			params->encoder_fault_counter++;
 		}

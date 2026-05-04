@@ -30,7 +30,7 @@ extern const struct gpio_dt_spec trig;
  * 
  * This is the primary motor control interrupt handler that runs at the control
  * loop frequency (typically 10-20 kHz). The callback follows explicit stages:
- * - Collect: input sampling and encoder pipeline drain
+ * - Collect: input sampling and encoder acquisition drain
  * - Process: control-loop/state processing
  * - Apply: PWM output update
  * - Telemetry: ISR timing/performance accounting

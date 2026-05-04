@@ -24,7 +24,7 @@
 #include "motor/calibration/encoder_map_detect.h"
 #include "motor/observers/angle_observer.h"
 #include "motor_torque.h"
-#include "motor_encoder_pipeline.h"
+#include "motor_encoder_acquisition.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
@@ -387,7 +387,7 @@ static void motor_commission_encoder_trace_force_on(
 
 	/* Generated/open-loop modes do not normally request encoder samples.
 	 * Raw-trace enable is the existing ISR-safe telemetry gate that asks the
-	 * encoder pipeline to sample without changing the commutation policy.
+	 * encoder acquisition to sample without changing the commutation policy.
 	 */
 	g_motor_params->encoder_raw_trace.enabled = true;
 	g_motor_params->encoder_raw_trace.decimation = 1U;
@@ -1526,7 +1526,7 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		    encoder_detect_result.encoder_error_count,
 		    ret);
 		if (encoder_detect_result.valid) {
-			motor_encoder_pipeline_reset_stats();
+			motor_encoder_acquisition_reset_stats();
 			shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
 		}
 

@@ -29,7 +29,7 @@ The new path should solve the transport determinism problem. It will not by itse
 Layering:
 
 ```text
-motor control ISR / encoder pipeline
+motor control ISR / encoder acquisition
         |
         v
 realtime encoder API
@@ -284,7 +284,7 @@ Behavior:
 - Use a bounded thread-context `rt_spi_transceive()` helper for register
   transactions.
 - Poll/bounded-wait only from thread or deferred work context.
-- Return `-EBUSY` if realtime mode owns the encoder pipeline.
+- Return `-EBUSY` if realtime mode owns the encoder acquisition.
 - Never call register helpers from the control ISR.
 
 The existing AEAT attribute implementation may be used as a reference, but do
@@ -464,7 +464,7 @@ Keep motor-shell diagnostics available:
 - fallback to legacy sensor-driver overlays when sensor shell comparison is
   required.
 
-Add fast path into the motor encoder pipeline:
+Add fast path into the motor encoder acquisition:
 
 ```text
 timer/direct encoder trigger ISR
@@ -536,7 +536,7 @@ The fast path must obey:
 - HIL smoke result:
   - `motor encoder alarm` returned `Raw status: 0x60`.
   - boot calibration completed.
-  - encoder pipeline after ALIGN reported request `ok=809`, collect `ok=809`,
+  - encoder acquisition after ALIGN reported request `ok=809`, collect `ok=809`,
     transport/frame/parity errors all zero, status warnings `306`.
 
 ### Phase 0: Requirements and Register Audit
@@ -658,7 +658,7 @@ Validation:
   protocol implementation.
 - Add motor-shell diagnostics for fast-driver status and selected register
   reads.
-- Wire into motor encoder pipeline behind devicetree selection.
+- Wire into motor encoder acquisition behind devicetree selection.
 
 Validation:
 
@@ -714,7 +714,7 @@ Validation:
 
 - Implement MT6835 frame preparation.
 - Reuse CRC/status decode.
-- Wire into motor encoder pipeline.
+- Wire into motor encoder acquisition.
 - Implement realtime encoder API.
 
 Validation:

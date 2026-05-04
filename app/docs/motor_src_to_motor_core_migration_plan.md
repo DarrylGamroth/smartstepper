@@ -55,7 +55,7 @@ Move candidates:
 
 Keep in app:
 - `app/src/motor_isr_io.c`
-- `app/src/motor_encoder_pipeline.c`
+- `app/src/motor_encoder_acquisition.c`
 - `app/src/motor_states*.c`
 - `app/src/motor_control_api.c`
 - `app/src/motor_hardware.c`
@@ -136,13 +136,13 @@ DEV=/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 motor state status
 motor safety status
 motor info live
-motor encoder pipeline stats
+motor encoder acquisition stats
 ```
 Result snapshot:
 - `State=IDLE`, `Error=NONE`, `Armed=NO`
 - `Timeout count=0`, `Timeout latch=CLEAR`
 - `Max telemetry runtime baseline`: `Encoder faults=0`, `warn=0`, `err=0`
-- Encoder RTIO pipeline counters: `request ok=0`, `collect empty=822651`, `transport/frame/parity/status errors=0`
+- Encoder acquisition counters: `request ok=0`, `collect empty=822651`, `transport/frame/parity/status errors=0`
 
 ## Phase 1: Move Outer-Loop Runtime
 
@@ -205,7 +205,7 @@ Notes:
 
 Tasks:
 1. Move observer input selection, quality propagation, and stale accounting to core.
-2. Keep RTIO collect/request path in app (`motor_encoder_pipeline.c`, ISR callback).
+2. Keep RTIO collect/request path in app (`motor_encoder_acquisition.c`, ISR callback).
 3. Expose a compact core API:
 - `encoder_runtime_update(...)`
 - `encoder_capture_pack(...)`
@@ -412,7 +412,7 @@ Implemented:
   - `modules/motor_core/src/runtime/motor_core_step.c`
 
 4. Verified app-side ownership boundaries:
-- `app/src` now contains orchestration/glue modules only (`state machine`, `ISR I/O`, `hardware`, `shell`, `API`, `telemetry`, `encoder pipeline`).
+- `app/src` now contains orchestration/glue modules only (`state machine`, `ISR I/O`, `hardware`, `shell`, `API`, `telemetry`, `encoder acquisition`).
 - Migrated reusable runtime algorithms remain only in `modules/motor_core/src`.
 
 Validation:

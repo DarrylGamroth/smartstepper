@@ -24,7 +24,7 @@ target_sources(app PRIVATE
 	src/shell_motion_commission.c
 	src/motor_control_api.c
 	src/motor_encoder_control.c
-	src/motor_encoder_pipeline.c
+	src/motor_encoder_acquisition.c
 	src/motor_control_telemetry.c
 	src/motor_control_loop.c
 	src/motor_isr_io.c

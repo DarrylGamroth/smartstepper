@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "motor_encoder_pipeline.h"
+#include "motor_encoder_acquisition.h"
 
 #include <errno.h>
 #include <math.h>
@@ -18,7 +18,7 @@
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
 #include <drivers/encoder_rt.h>
-#define MOTOR_ENCODER_PIPELINE_FAST_AEAT 1
+#define MOTOR_ENCODER_ACQUISITION_FAST_AEAT 1
 
 static const struct device *const motor_encoder_rt_dev = DEVICE_DT_GET(DT_ALIAS(encoder1));
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -67,11 +67,11 @@ static inline void encoder_inject_frame_fault(uint8_t *buffer)
 #error "Unsupported encoder type for encoder1 alias"
 #endif
 
-#ifndef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+#ifndef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
 SENSOR_DT_READ_IODEV(motor_encoder_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(motor_encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
 #endif
-static atomic_t motor_encoder_pipeline_enabled;
+static atomic_t motor_encoder_acquisition_enabled;
 static atomic_t motor_encoder_read_in_flight_count;
 static atomic_t motor_encoder_request_ok_count;
 static atomic_t motor_encoder_request_busy_count;
@@ -102,7 +102,7 @@ static uint8_t motor_encoder_consecutive_glitches;
  * hardware. Keep only one request in flight until the SPI backend path is
  * proven safe for queued ISR-rate submissions.
  */
-#define MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT 1
+#define MOTOR_ENCODER_ACQUISITION_MAX_INFLIGHT 1
 
 static inline void motor_encoder_inflight_decrement(void)
 {
@@ -122,7 +122,7 @@ static inline float32_t motor_encoder_wrap_delta_deg(float32_t delta_deg)
 	return delta_deg;
 }
 
-static bool motor_encoder_pipeline_angle_glitch(float32_t angle_deg)
+static bool motor_encoder_acquisition_angle_glitch(float32_t angle_deg)
 {
 	if (!isfinite(angle_deg)) {
 		return true;
@@ -154,22 +154,22 @@ static bool motor_encoder_pipeline_angle_glitch(float32_t angle_deg)
 	return true;
 }
 
-void motor_encoder_pipeline_set_enabled(bool enabled)
+void motor_encoder_acquisition_set_enabled(bool enabled)
 {
-	atomic_set(&motor_encoder_pipeline_enabled, enabled ? 1 : 0);
+	atomic_set(&motor_encoder_acquisition_enabled, enabled ? 1 : 0);
 }
 
-bool motor_encoder_pipeline_is_enabled(void)
+bool motor_encoder_acquisition_is_enabled(void)
 {
-	return atomic_get(&motor_encoder_pipeline_enabled) != 0;
+	return atomic_get(&motor_encoder_acquisition_enabled) != 0;
 }
 
-bool motor_encoder_pipeline_is_busy(void)
+bool motor_encoder_acquisition_is_busy(void)
 {
 	return atomic_get(&motor_encoder_read_in_flight_count) != 0;
 }
 
-void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats)
+void motor_encoder_acquisition_get_stats(struct motor_encoder_acquisition_stats *stats)
 {
 	if (stats == NULL) {
 		return;
@@ -197,7 +197,7 @@ void motor_encoder_pipeline_get_stats(struct motor_encoder_pipeline_stats *stats
 		(uint32_t)atomic_get(&motor_encoder_collect_frame_glitch_error_count);
 }
 
-void motor_encoder_pipeline_reset_stats(void)
+void motor_encoder_acquisition_reset_stats(void)
 {
 	atomic_set(&motor_encoder_request_ok_count, 0);
 	atomic_set(&motor_encoder_request_busy_count, 0);
@@ -218,7 +218,7 @@ void motor_encoder_pipeline_reset_stats(void)
 	motor_encoder_consecutive_glitches = 0U;
 }
 
-void motor_encoder_pipeline_set_test_inject_mode(enum motor_encoder_test_inject_mode mode)
+void motor_encoder_acquisition_set_test_inject_mode(enum motor_encoder_test_inject_mode mode)
 {
 	if ((mode < MOTOR_ENCODER_TEST_INJECT_NONE) ||
 	    (mode > MOTOR_ENCODER_TEST_INJECT_FRAME)) {
@@ -228,27 +228,27 @@ void motor_encoder_pipeline_set_test_inject_mode(enum motor_encoder_test_inject_
 	atomic_set(&motor_encoder_test_inject_mode, (atomic_val_t)mode);
 }
 
-enum motor_encoder_test_inject_mode motor_encoder_pipeline_get_test_inject_mode(void)
+enum motor_encoder_test_inject_mode motor_encoder_acquisition_get_test_inject_mode(void)
 {
 	return (enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
 }
 
-int motor_encoder_pipeline_request_sample(void)
+int motor_encoder_acquisition_request_sample(void)
 {
-	if (!motor_encoder_pipeline_is_enabled()) {
+	if (!motor_encoder_acquisition_is_enabled()) {
 		atomic_inc(&motor_encoder_request_disabled_count);
 		return -ESHUTDOWN;
 	}
 
-#ifndef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+#ifndef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
 	if (atomic_get(&motor_encoder_read_in_flight_count) >=
-	    MOTOR_ENCODER_PIPELINE_MAX_INFLIGHT) {
+	    MOTOR_ENCODER_ACQUISITION_MAX_INFLIGHT) {
 		atomic_inc(&motor_encoder_request_busy_count);
 		return -EALREADY;
 	}
 #endif
 
-#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
 	int ret = encoder_rt_request_sample(motor_encoder_rt_dev);
 	if (ret == -EALREADY || ret == -EBUSY) {
 		atomic_inc(&motor_encoder_request_busy_count);
@@ -266,7 +266,7 @@ int motor_encoder_pipeline_request_sample(void)
 	}
 #endif
 
-#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
 	if (atomic_get(&motor_encoder_read_in_flight_count) == 0) {
 		atomic_inc(&motor_encoder_read_in_flight_count);
 	}
@@ -277,8 +277,8 @@ int motor_encoder_pipeline_request_sample(void)
 	return 0;
 }
 
-#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
-static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *sample)
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+static int motor_encoder_acquisition_collect_fast(struct motor_encoder_sample *sample)
 {
 	struct encoder_rt_sample enc_sample = {0};
 	int ret = encoder_rt_collect_sample(motor_encoder_rt_dev, &enc_sample);
@@ -323,7 +323,7 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 	}
 
 	if (ret == 0 && !sample->error &&
-	    motor_encoder_pipeline_angle_glitch(sample->angle_deg)) {
+	    motor_encoder_acquisition_angle_glitch(sample->angle_deg)) {
 		sample->error = true;
 		atomic_inc(&motor_encoder_collect_frame_glitch_error_count);
 	}
@@ -349,7 +349,7 @@ static int motor_encoder_pipeline_collect_fast(struct motor_encoder_sample *samp
 	return 0;
 }
 #else
-static int motor_encoder_pipeline_decode_buffer(uint8_t *buf, struct motor_encoder_sample *sample)
+static int motor_encoder_acquisition_decode_buffer(uint8_t *buf, struct motor_encoder_sample *sample)
 {
 	enum motor_encoder_test_inject_mode inject_mode =
 		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
@@ -375,7 +375,7 @@ static int motor_encoder_pipeline_decode_buffer(uint8_t *buf, struct motor_encod
 	}
 
 	if (decode_ret == 0 && !sample->error &&
-	    motor_encoder_pipeline_angle_glitch(sample->angle_deg)) {
+	    motor_encoder_acquisition_angle_glitch(sample->angle_deg)) {
 		sample->error = true;
 		atomic_inc(&motor_encoder_collect_frame_glitch_error_count);
 	}
@@ -394,7 +394,7 @@ static int motor_encoder_pipeline_decode_buffer(uint8_t *buf, struct motor_encod
 	return 0;
 }
 
-static int motor_encoder_pipeline_collect_rtio(struct motor_encoder_sample *sample)
+static int motor_encoder_acquisition_collect_rtio(struct motor_encoder_sample *sample)
 {
 	struct rtio_cqe *cqe = rtio_cqe_consume(&motor_encoder_rtio_ctx);
 	if (cqe == NULL) {
@@ -435,14 +435,14 @@ static int motor_encoder_pipeline_collect_rtio(struct motor_encoder_sample *samp
 		return -EIO;
 	}
 
-	int decode_ret = motor_encoder_pipeline_decode_buffer(buf, sample);
+	int decode_ret = motor_encoder_acquisition_decode_buffer(buf, sample);
 	rtio_release_buffer(&motor_encoder_rtio_ctx, buf, buf_len);
 
 	return decode_ret;
 }
 #endif
 
-int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
+int motor_encoder_acquisition_collect(struct motor_encoder_sample *sample)
 {
 	struct motor_encoder_sample scratch = {0};
 	if (sample == NULL) {
@@ -451,9 +451,9 @@ int motor_encoder_pipeline_collect(struct motor_encoder_sample *sample)
 
 	memset(sample, 0, sizeof(*sample));
 
-#ifdef MOTOR_ENCODER_PIPELINE_FAST_AEAT
-	return motor_encoder_pipeline_collect_fast(sample);
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+	return motor_encoder_acquisition_collect_fast(sample);
 #else
-	return motor_encoder_pipeline_collect_rtio(sample);
+	return motor_encoder_acquisition_collect_rtio(sample);
 #endif
 }

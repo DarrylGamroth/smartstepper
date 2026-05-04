@@ -22,7 +22,7 @@
 #include "motor/runtime/control_policy.h"
 #include "motor_hardware.h"
 #include "motor_encoder_control.h"
-#include "motor_encoder_pipeline.h"
+#include "motor_encoder_acquisition.h"
 #include "config.h"
 #include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
@@ -1211,9 +1211,9 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    g_motor_params->live.encoder_last_status,
 		    g_motor_params->live.encoder_sample_warning ? "SET" : "CLEAR",
 		    g_motor_params->live.encoder_sample_error ? "SET" : "CLEAR");
-	shell_print(sh, "  Enc pipeline:   %s, %s",
-		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
-		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
+	shell_print(sh, "  Enc acquisition:   %s, %s",
+		    motor_encoder_acquisition_is_enabled() ? "enabled" : "disabled",
+		    motor_encoder_acquisition_is_busy() ? "busy" : "idle");
 	shell_print(sh, "  Enc flag count: warn=%u err=%u",
 		    g_motor_params->encoder_warning_count,
 		    g_motor_params->encoder_error_count);
@@ -1276,16 +1276,16 @@ int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-/* motor encoder pipeline */
-int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
+/* motor encoder acquisition */
+int cmd_motor_encoder_acquisition(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	struct motor_encoder_pipeline_stats stats = {0};
-	motor_encoder_pipeline_get_stats(&stats);
+	struct motor_encoder_acquisition_stats stats = {0};
+	motor_encoder_acquisition_get_stats(&stats);
 	enum motor_encoder_test_inject_mode inject_mode =
-		motor_encoder_pipeline_get_test_inject_mode();
+		motor_encoder_acquisition_get_test_inject_mode();
 	const char *inject_label = "none";
 	if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
 		inject_label = "status";
@@ -1293,10 +1293,10 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 		inject_label = "frame";
 	}
 
-	shell_print(sh, "Encoder pipeline:");
+	shell_print(sh, "Encoder acquisition:");
 	shell_print(sh, "  State:    %s, %s",
-		    motor_encoder_pipeline_is_enabled() ? "enabled" : "disabled",
-		    motor_encoder_pipeline_is_busy() ? "busy" : "idle");
+		    motor_encoder_acquisition_is_enabled() ? "enabled" : "disabled",
+		    motor_encoder_acquisition_is_busy() ? "busy" : "idle");
 	shell_print(sh, "  Inject:   %s", inject_label);
 	shell_print(sh, "  Request:  ok=%u busy=%u disabled=%u error=%u",
 		    stats.request_ok, stats.request_busy,
@@ -1315,26 +1315,26 @@ int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-/* motor encoder pipeline_reset */
-int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char **argv)
+/* motor encoder acquisition_reset */
+int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	motor_encoder_pipeline_reset_stats();
-	shell_print(sh, "Encoder pipeline counters reset");
+	motor_encoder_acquisition_reset_stats();
+	shell_print(sh, "Encoder acquisition counters reset");
 	return 0;
 }
 
-/* motor encoder pipeline_inject [none|status|frame] */
-int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char **argv)
+/* motor encoder acquisition_inject [none|status|frame] */
+int cmd_motor_encoder_acquisition_inject(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc > 2U) {
-		shell_error(sh, "Usage: motor encoder pipeline_inject [none|status|frame]");
+		shell_error(sh, "Usage: motor encoder acquisition_inject [none|status|frame]");
 		return -EINVAL;
 	}
 
-	enum motor_encoder_test_inject_mode mode = motor_encoder_pipeline_get_test_inject_mode();
+	enum motor_encoder_test_inject_mode mode = motor_encoder_acquisition_get_test_inject_mode();
 
 	if (argc == 1U) {
 		const char *label = "none";
@@ -1344,7 +1344,7 @@ int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char 
 		} else if (mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
 			label = "frame";
 		}
-		shell_print(sh, "Encoder pipeline inject mode: %s", label);
+		shell_print(sh, "Encoder acquisition inject mode: %s", label);
 		return 0;
 	}
 
@@ -1359,8 +1359,8 @@ int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char 
 		return -EINVAL;
 	}
 
-	motor_encoder_pipeline_set_test_inject_mode(mode);
-	shell_print(sh, "Encoder pipeline inject mode set: %s", argv[1]);
+	motor_encoder_acquisition_set_test_inject_mode(mode);
+	shell_print(sh, "Encoder acquisition inject mode set: %s", argv[1]);
 	return 0;
 }
 
@@ -1389,7 +1389,7 @@ int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char *
 	shell_print(sh, "  Reason:          %s", reason);
 	shell_print(sh, "  Device ready:    %s", status.device_ready ? "YES" : "NO");
 	shell_print(sh, "  Mapping applied: %s", status.mapping_complete ? "YES" : "NO");
-	shell_print(sh, "  Pipeline idle:   %s", status.pipeline_idle ? "YES" : "NO");
+	shell_print(sh, "  Acquisition idle:   %s", status.acquisition_idle ? "YES" : "NO");
 	shell_print(sh, "  Injection off:   %s", status.injection_disabled ? "YES" : "NO");
 	shell_print(sh, "  Protocol ok:     %s", status.protocol_ok ? "YES" : "NO");
 	if (status.protocol_checked) {
@@ -1400,22 +1400,22 @@ int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char *
 	if (status.protocol_error != 0) {
 		shell_print(sh, "  Protocol error:  %d", status.protocol_error);
 	}
-	shell_print(sh, "  Pipeline req:    ok=%u busy=%u disabled=%u error=%u",
-		    status.pipeline_stats.request_ok,
-		    status.pipeline_stats.request_busy,
-		    status.pipeline_stats.request_disabled,
-		    status.pipeline_stats.request_error);
-	shell_print(sh, "  Pipeline collect: ok=%u pending=%u empty=%u error=%u",
-		    status.pipeline_stats.collect_ok,
-		    status.pipeline_stats.collect_pending,
-		    status.pipeline_stats.collect_empty,
-		    status.pipeline_stats.collect_error);
-	shell_print(sh, "  Pipeline errors: transport=%u parity=%u crc=%u glitch=%u status=%u",
-		    status.pipeline_stats.collect_transport_error,
-		    status.pipeline_stats.collect_frame_parity_error,
-		    status.pipeline_stats.collect_frame_crc_error,
-		    status.pipeline_stats.collect_frame_glitch_error,
-		    status.pipeline_stats.collect_frame_status_error);
+	shell_print(sh, "  Acquisition req:    ok=%u busy=%u disabled=%u error=%u",
+		    status.acquisition_stats.request_ok,
+		    status.acquisition_stats.request_busy,
+		    status.acquisition_stats.request_disabled,
+		    status.acquisition_stats.request_error);
+	shell_print(sh, "  Acquisition collect: ok=%u pending=%u empty=%u error=%u",
+		    status.acquisition_stats.collect_ok,
+		    status.acquisition_stats.collect_pending,
+		    status.acquisition_stats.collect_empty,
+		    status.acquisition_stats.collect_error);
+	shell_print(sh, "  Acquisition errors: transport=%u parity=%u crc=%u glitch=%u status=%u",
+		    status.acquisition_stats.collect_transport_error,
+		    status.acquisition_stats.collect_frame_parity_error,
+		    status.acquisition_stats.collect_frame_crc_error,
+		    status.acquisition_stats.collect_frame_glitch_error,
+		    status.acquisition_stats.collect_frame_status_error);
 
 	return 0;
 }
@@ -1586,7 +1586,7 @@ int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  SPI4 mode:       %s",
 		    (spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) ?
 			    "spi4-8-crc16" : "spi4-16-parity");
-	shell_print(sh, "  Pipeline delay:  %u samples", encoder_rt_get_pipeline_delay(encoder1));
+	shell_print(sh, "  Transport delay:  %u samples", encoder_rt_get_pipeline_delay(encoder1));
 	shell_print(sh, "  Request:         ok=%u busy=%u disabled=%u error=%u",
 		    stats.request_count, stats.busy_count,
 		    stats.disabled_count, stats.request_error_count);
@@ -1639,7 +1639,7 @@ int cmd_motor_encoder_reg_read(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "encoder1 is not ready");
 		return -ENODEV;
 	}
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before register reads");
 		return -EBUSY;
 	}
@@ -1681,7 +1681,7 @@ int cmd_motor_encoder_reg_write(const struct shell *sh, size_t argc, char **argv
 		shell_error(sh, "encoder1 is not ready");
 		return -ENODEV;
 	}
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before register writes");
 		return -EBUSY;
 	}
@@ -1749,7 +1749,7 @@ int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char 
 	}
 #endif
 
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_print(sh, "  Registers:   unavailable while realtime sampling is active");
 		return 0;
 	}
@@ -1800,7 +1800,7 @@ int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, cha
 		shell_error(sh, "rtspi0 is not ready");
 		return -ENODEV;
 	}
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before changing SPI mode");
 		return -EBUSY;
 	}
@@ -1841,7 +1841,7 @@ int cmd_motor_encoder_protocol_detect(const struct shell *sh, size_t argc, char 
 		shell_error(sh, "encoder1 is not ready");
 		return -ENODEV;
 	}
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before protocol detection");
 		return -EBUSY;
 	}
@@ -1869,7 +1869,7 @@ int cmd_motor_encoder_protocol_spi4_8_volatile(const struct shell *sh, size_t ar
 	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
 	return -ENOTSUP;
 #else
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before changing AEAT protocol");
 		return -EBUSY;
 	}
@@ -1894,7 +1894,7 @@ int cmd_motor_encoder_protocol_spi4_16_volatile(const struct shell *sh, size_t a
 	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
 	return -ENOTSUP;
 #else
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before changing AEAT protocol");
 		return -EBUSY;
 	}
@@ -1919,7 +1919,7 @@ int cmd_motor_encoder_protocol_driver_spi4_8(const struct shell *sh, size_t argc
 	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
 	return -ENOTSUP;
 #else
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before changing driver mode");
 		return -EBUSY;
 	}
@@ -1944,7 +1944,7 @@ int cmd_motor_encoder_protocol_driver_spi4_16(const struct shell *sh, size_t arg
 	shell_error(sh, "AEAT protocol control requires the AEAT-9955 fast encoder driver");
 	return -ENOTSUP;
 #else
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before changing driver mode");
 		return -EBUSY;
 	}
@@ -1969,7 +1969,7 @@ int cmd_motor_encoder_protocol_raw_position(const struct shell *sh, size_t argc,
 	shell_error(sh, "AEAT raw position requires the AEAT-9955 fast encoder driver");
 	return -ENOTSUP;
 #else
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before raw position read");
 		return -EBUSY;
 	}
@@ -2011,7 +2011,7 @@ int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char
 		shell_error(sh, "Usage: motor encoder protocol raw_reg <addr>");
 		return -EINVAL;
 	}
-	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {
 		shell_error(sh, "disable realtime encoder sampling before raw register read");
 		return -EBUSY;
 	}

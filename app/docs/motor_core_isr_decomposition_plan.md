@@ -200,7 +200,7 @@ Stage names above are conceptual. Helper/function naming is implementation-defin
 
 ### Stage contract details
 
-1. `Collect`: read ADC, drain encoder pipeline, normalize input status, fetch coherent runtime snapshot, and advance trigger bookkeeping.
+1. `Collect`: read ADC, drain encoder acquisition, normalize input status, fetch coherent runtime snapshot, and advance trigger bookkeeping.
 2. `Process`: run observer chain, reference chain, interlock gating, protection checks (flag-only), and current-loop chain, then produce compact actuator command and status outputs.
 3. `Apply`: commit PWM output from command object and execute protection actions (fault latch/disable path) from `Process` fault flags.
 4. `Telemetry`:

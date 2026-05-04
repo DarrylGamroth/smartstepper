@@ -50,9 +50,9 @@ int cmd_motor_encoder_protocol_driver_spi4_16(const struct shell *sh, size_t arg
 int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_raw_position(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_pipeline(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_pipeline_reset(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_pipeline_inject(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition_inject(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv);

@@ -11,12 +11,12 @@
 #include <stdint.h>
 
 #include "motor_states.h"
-#include "motor_encoder_pipeline.h"
+#include "motor_encoder_acquisition.h"
 
 struct motor_encoder_control_status {
 	bool device_ready;
 	bool mapping_complete;
-	bool pipeline_idle;
+	bool acquisition_idle;
 	bool injection_disabled;
 	bool protocol_checked;
 	bool protocol_ok;
@@ -25,7 +25,7 @@ struct motor_encoder_control_status {
 	uint8_t config0;
 	uint8_t config7;
 	uint8_t config9;
-	struct motor_encoder_pipeline_stats pipeline_stats;
+	struct motor_encoder_acquisition_stats acquisition_stats;
 };
 
 bool motor_encoder_control_mode_requires_encoder(enum motor_state state);

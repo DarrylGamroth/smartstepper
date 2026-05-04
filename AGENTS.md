@@ -219,13 +219,13 @@ motor commission encoder clear
 - The command drives `velocity_generated`, samples generated electrical phase
   and raw encoder angle, and reports direction, offset, residuals, warnings,
   and errors.
-- Warning status is reported separately; parity/transport/sample errors reject
-  the staged result.
+- Warning status is reported separately; a small bounded number of rejected
+  parity/transport/sample errors is tolerated when the fit quality remains high.
 - If the result is invalid with low measured motion, increase the generated
   sweep current/speed or debug open-loop motion first. The command intentionally
   leaves runtime parameters unchanged unless `apply` is run after a valid result.
 - AEAT-9955 HIL evidence shows parity-clean implausible angle jumps can occur.
-  The encoder pipeline has a `glitch` counter in `motor encoder pipeline status`
+  The encoder acquisition path has a `glitch` counter in `motor encoder acquisition`
   and rejects jumps above the ISR plausibility threshold before the observer uses
   them.
 
