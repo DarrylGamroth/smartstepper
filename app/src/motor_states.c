@@ -1057,6 +1057,13 @@ static enum smf_state_result motor_state_error_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_CLEAR_ERROR:
+		if (params->profile_max_velocity_rad_s <= 0.0f) {
+			LOG_INF("Error cleared before controller init completed, retrying initialization");
+			params->last_error_code = ERROR_NONE;
+			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_HW_INIT]);
+			return SMF_EVENT_HANDLED;
+		}
+
 		LOG_INF("Error cleared, transitioning to IDLE");
 		params->last_error_code = ERROR_NONE;
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
