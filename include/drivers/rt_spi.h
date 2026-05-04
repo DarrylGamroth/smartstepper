@@ -52,6 +52,11 @@ struct rt_spi_stats {
 	uint32_t max_transaction_cycles;
 };
 
+struct rt_spi_config {
+	bool cpol;
+	bool cpha;
+};
+
 typedef int (*rt_spi_request_api)(const struct device *dev,
 				  const struct rt_spi_transfer *transfer);
 typedef int (*rt_spi_collect_api)(const struct device *dev,
@@ -65,6 +70,10 @@ typedef void (*rt_spi_abort_api)(const struct device *dev);
 typedef void (*rt_spi_stats_api)(const struct device *dev,
 				 struct rt_spi_stats *stats);
 typedef void (*rt_spi_reset_stats_api)(const struct device *dev);
+typedef int (*rt_spi_configure_api)(const struct device *dev,
+				    const struct rt_spi_config *config);
+typedef void (*rt_spi_get_config_api)(const struct device *dev,
+				      struct rt_spi_config *config);
 
 __subsystem struct rt_spi_driver_api {
 	rt_spi_request_api request;
@@ -74,6 +83,8 @@ __subsystem struct rt_spi_driver_api {
 	rt_spi_abort_api abort;
 	rt_spi_stats_api get_stats;
 	rt_spi_reset_stats_api reset_stats;
+	rt_spi_configure_api configure;
+	rt_spi_get_config_api get_config;
 };
 
 static inline int rt_spi_request(const struct device *dev,
@@ -129,6 +140,22 @@ static inline void rt_spi_reset_stats(const struct device *dev)
 	const struct rt_spi_driver_api *api = dev->api;
 
 	api->reset_stats(dev);
+}
+
+static inline int rt_spi_configure(const struct device *dev,
+				   const struct rt_spi_config *config)
+{
+	const struct rt_spi_driver_api *api = dev->api;
+
+	return api->configure(dev, config);
+}
+
+static inline void rt_spi_get_config(const struct device *dev,
+				     struct rt_spi_config *config)
+{
+	const struct rt_spi_driver_api *api = dev->api;
+
+	api->get_config(dev, config);
 }
 
 #ifdef __cplusplus

@@ -52,6 +52,8 @@ struct rt_spi_stm32_config {
 struct rt_spi_stm32_data {
 	volatile bool active;
 	volatile bool sample_ready;
+	bool cpol;
+	bool cpha;
 	uint8_t tx[RT_SPI_MAX_FRAME_BYTES];
 	uint8_t rx[RT_SPI_MAX_FRAME_BYTES];
 	uint8_t sample_raw[RT_SPI_MAX_FRAME_BYTES];
@@ -185,6 +187,12 @@ static void rt_spi_stm32_publish(const struct device *dev, uint16_t flags)
 		data->stats.max_transaction_cycles = elapsed_cycles;
 	}
 	irq_unlock(key);
+}
+
+static void rt_spi_stm32_apply_clock_mode(SPI_TypeDef *spi, bool cpol, bool cpha)
+{
+	LL_SPI_SetClockPolarity(spi, cpol ? LL_SPI_POLARITY_HIGH : LL_SPI_POLARITY_LOW);
+	LL_SPI_SetClockPhase(spi, cpha ? LL_SPI_PHASE_2EDGE : LL_SPI_PHASE_1EDGE);
 }
 
 static int rt_spi_stm32_request(const struct device *dev,
@@ -417,6 +425,51 @@ static void rt_spi_stm32_reset_stats(const struct device *dev)
 	irq_unlock(key);
 }
 
+static int rt_spi_stm32_configure_runtime(const struct device *dev,
+					  const struct rt_spi_config *config)
+{
+	const struct rt_spi_stm32_config *cfg = dev->config;
+	struct rt_spi_stm32_data *data = dev->data;
+	SPI_TypeDef *spi = cfg->spi;
+	unsigned int key;
+
+	if (config == NULL) {
+		return -EINVAL;
+	}
+
+	key = irq_lock();
+	if (data->active || data->sample_ready) {
+		data->stats.busy_count++;
+		irq_unlock(key);
+		return -EBUSY;
+	}
+
+	rt_spi_stm32_disable_irqs(spi);
+	LL_SPI_Disable(spi);
+	rt_spi_stm32_apply_clock_mode(spi, config->cpol, config->cpha);
+	data->cpol = config->cpol;
+	data->cpha = config->cpha;
+	irq_unlock(key);
+
+	return 0;
+}
+
+static void rt_spi_stm32_get_config(const struct device *dev,
+				    struct rt_spi_config *config)
+{
+	struct rt_spi_stm32_data *data = dev->data;
+	unsigned int key;
+
+	if (config == NULL) {
+		return;
+	}
+
+	key = irq_lock();
+	config->cpol = data->cpol;
+	config->cpha = data->cpha;
+	irq_unlock(key);
+}
+
 static void rt_spi_stm32_isr(const struct device *dev)
 {
 	const struct rt_spi_stm32_config *cfg = dev->config;
@@ -496,8 +549,7 @@ static int rt_spi_stm32_configure(const struct device *dev)
 
 	LL_SPI_Disable(spi);
 	LL_SPI_SetBaudRatePrescaler(spi, scaler[br]);
-	LL_SPI_SetClockPolarity(spi, cfg->cpol ? LL_SPI_POLARITY_HIGH : LL_SPI_POLARITY_LOW);
-	LL_SPI_SetClockPhase(spi, cfg->cpha ? LL_SPI_PHASE_2EDGE : LL_SPI_PHASE_1EDGE);
+	rt_spi_stm32_apply_clock_mode(spi, cfg->cpol, cfg->cpha);
 	LL_SPI_SetTransferDirection(spi, LL_SPI_FULL_DUPLEX);
 	LL_SPI_SetTransferBitOrder(spi, LL_SPI_MSB_FIRST);
 	LL_SPI_DisableCRC(spi);
@@ -528,6 +580,7 @@ static int rt_spi_stm32_configure(const struct device *dev)
 static int rt_spi_stm32_init(const struct device *dev)
 {
 	const struct rt_spi_stm32_config *cfg = dev->config;
+	struct rt_spi_stm32_data *data = dev->data;
 	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 	int ret;
 
@@ -566,6 +619,8 @@ static int rt_spi_stm32_init(const struct device *dev)
 	if (ret != 0) {
 		return ret;
 	}
+	data->cpol = cfg->cpol;
+	data->cpha = cfg->cpha;
 
 	cfg->irq_config(dev);
 	return 0;
@@ -579,6 +634,8 @@ static const struct rt_spi_driver_api rt_spi_stm32_api = {
 	.abort = rt_spi_stm32_abort,
 	.get_stats = rt_spi_stm32_get_stats,
 	.reset_stats = rt_spi_stm32_reset_stats,
+	.configure = rt_spi_stm32_configure_runtime,
+	.get_config = rt_spi_stm32_get_config,
 };
 
 #define RT_SPI_STM32_SPI_NODE(inst) DT_DRV_INST(inst)

@@ -41,6 +41,13 @@
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 0
 #endif
 
+#if MOTOR_ENCODER_IS_AEAT9955_FAST && DT_NODE_EXISTS(DT_ALIAS(rtspi0))
+#define MOTOR_ENCODER_HAS_RTSPI 1
+static const struct device *const encoder_rtspi = DEVICE_DT_GET(DT_ALIAS(rtspi0));
+#else
+#define MOTOR_ENCODER_HAS_RTSPI 0
+#endif
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
 
@@ -1556,6 +1563,17 @@ int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char 
 	shell_print(sh, "  Driver mode: %s",
 		    (mode == AEAT9955_FAST_SPI4_8_CRC16) ?
 			    "spi4-8-crc16" : "spi4-16-parity");
+#if MOTOR_ENCODER_HAS_RTSPI
+	if (device_is_ready(encoder_rtspi)) {
+		struct rt_spi_config spi_cfg = {0};
+
+		rt_spi_get_config(encoder_rtspi, &spi_cfg);
+		shell_print(sh, "  SPI mode:    CPOL=%u CPHA=%u",
+			    spi_cfg.cpol ? 1U : 0U, spi_cfg.cpha ? 1U : 0U);
+	} else {
+		shell_print(sh, "  SPI mode:    rtspi0 not ready");
+	}
+#endif
 
 	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
 		shell_print(sh, "  Registers:   unavailable while realtime sampling is active");
@@ -1588,6 +1606,50 @@ int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char 
 		    reg9,
 		    (reg9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) ? 1U : 0U);
 
+	return 0;
+#endif
+}
+
+int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, char **argv)
+{
+#if !MOTOR_ENCODER_HAS_RTSPI
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_error(sh, "runtime SPI mode control requires rtspi0");
+	return -ENOTSUP;
+#else
+	if (argc != 3U) {
+		shell_error(sh, "Usage: motor encoder protocol spi_mode <cpol 0|1> <cpha 0|1>");
+		return -EINVAL;
+	}
+	if (!device_is_ready(encoder_rtspi)) {
+		shell_error(sh, "rtspi0 is not ready");
+		return -ENODEV;
+	}
+	if (motor_encoder_pipeline_is_enabled() || motor_encoder_pipeline_is_busy()) {
+		shell_error(sh, "disable realtime encoder sampling before changing SPI mode");
+		return -EBUSY;
+	}
+
+	bool cpol = false;
+	bool cpha = false;
+	if (!shell_parse_bool01(argv[1], &cpol) || !shell_parse_bool01(argv[2], &cpha)) {
+		shell_error(sh, "cpol and cpha must be 0 or 1");
+		return -EINVAL;
+	}
+
+	const struct rt_spi_config spi_cfg = {
+		.cpol = cpol,
+		.cpha = cpha,
+	};
+	int ret = rt_spi_configure(encoder_rtspi, &spi_cfg);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set RT SPI mode (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "RT SPI mode set to CPOL=%u CPHA=%u",
+		    cpol ? 1U : 0U, cpha ? 1U : 0U);
 	return 0;
 #endif
 }

@@ -26,12 +26,11 @@
 		current-loop-bandwidth-hz = <150>;
 		offset-pole-hz = <300>;
 		/*
-		 * Closed-loop commutation requires +1 on this wiring. The older
-		 * -1 setting matched generated-angle diagnostic direction, but made
-		 * encoder-current mode snap to a holding point instead of producing
-		 * sustained q-axis torque.
+		 * AEAT-9955 positive direction is clockwise looking from the back
+		 * of the motor. The motor/front convention used by the controller
+		 * therefore requires inversion.
 		 */
-		encoder-direction-sign = <1>;
+		encoder-direction-sign = <(-1)>;
 		/*
 		 * This hybrid stepper did not reliably move to the commanded
 		 * alignment vector at 67 mA. 150 mA caused an overcurrent during
