@@ -121,6 +121,30 @@ Run one unit test suite (example):
 - Baud rate: `115200`
 - Use this serial shell to run HIL commands against the actual motor hardware
   (state transitions, current/velocity/position modes, commissioning, and safety checks).
+- Prefer the telnet shell for command automation when Ethernet/DHCP is
+  available. Use UART for boot logs, recovery, and fallback.
+
+## Telnet Shell
+
+- The firmware enables the Zephyr telnet shell when the network stack is built.
+- Prefer telnet over UART for HIL command automation because it avoids UART RX
+  ring overruns when logs are active or commands are sent quickly.
+- Get the DHCP address from boot logs. Recent HIL evidence used:
+
+```text
+10.0.0.171
+```
+
+- Recommended interactive command:
+
+```bash
+telnet 10.0.0.171
+```
+
+- For automation, keep a single persistent telnet session open and pace commands
+  by waiting for response/prompt boundaries.
+- If the DHCP address is unknown or telnet is unavailable, fall back to the
+  persistent UART workflow below.
 
 ### Reliable Serial Workflow (Important)
 
