@@ -1844,7 +1844,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_encoder,
 /* motor commission detent subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
 	SHELL_CMD_ARG(run, NULL,
-		      "Run detent feedforward capture <mech_hz> <cycles> [sample_ms]",
+		      "Run detent feedforward capture <mech_hz> <cycles> [decimation]",
 		      cmd_motor_commission_detent_run, 3, 1),
 	SHELL_CMD(status, NULL, "Show staged detent feedforward table",
 		  cmd_motor_commission_detent_status),

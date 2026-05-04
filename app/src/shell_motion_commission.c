@@ -45,9 +45,9 @@
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS 2000U
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS 500U
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS 10000U
-#define MOTOR_COMMISSION_DETENT_DEFAULT_SAMPLE_MS 2U
-#define MOTOR_COMMISSION_DETENT_MIN_SAMPLE_MS 1U
-#define MOTOR_COMMISSION_DETENT_MAX_SAMPLE_MS 50U
+#define MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION 1U
+#define MOTOR_COMMISSION_DETENT_MIN_DECIMATION 1U
+#define MOTOR_COMMISSION_DETENT_MAX_DECIMATION 128U
 #define MOTOR_COMMISSION_DETENT_MIN_BIN_COVERAGE_MPU 650U
 #define MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN 2U
 #define MOTOR_COMMISSION_DETENT_MAX_RUN_MS 60000U
@@ -75,7 +75,7 @@ struct motor_commission_detent_result {
 	uint16_t min_bin_count;
 	uint16_t max_bin_count;
 	uint32_t run_ms;
-	uint32_t sample_ms;
+	uint32_t decimation;
 	float32_t speed_hz;
 	float32_t cycles;
 	float32_t min_iq_ff_a;
@@ -1518,36 +1518,40 @@ static void motor_commission_detent_clear_staged(void)
 	memset(&detent_result, 0, sizeof(detent_result));
 }
 
-static bool motor_commission_detent_sample_valid(void)
+static void motor_commission_detent_capture_reset(float32_t kt_nm_per_a, uint32_t decimation)
 {
-	uint8_t quality = g_motor_params->live.position_quality_flags;
+	struct motor_detent_capture_ctx *cap = &g_motor_params->detent_capture;
 
-	return (quality & MOTOR_FEEDBACK_QUALITY_VALID) != 0U &&
-	       (quality & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U &&
-	       (quality & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U &&
-	       g_motor_params->live.encoder_sample_error == 0U &&
-	       isfinite(g_motor_params->live.position_rad) &&
-	       isfinite(g_motor_params->live.velocity_filtered_rad_s) &&
-	       isfinite(g_motor_params->live.acceleration_rad_s2) &&
-	       isfinite(g_motor_params->live.Iq_ref_A);
+	cap->active = false;
+	memset(cap->sum_iq_a, 0, sizeof(cap->sum_iq_a));
+	memset(cap->bin_counts, 0, sizeof(cap->bin_counts));
+	cap->decimation = decimation;
+	cap->decimation_counter = 0U;
+	cap->sample_count = 0U;
+	cap->rejected_samples = 0U;
+	cap->kt_nm_per_a = kt_nm_per_a;
+	cap->inertia_kgm2 = g_motor_params->inertia_kgm2_active;
+	cap->viscous_friction_nm_per_rad_s =
+		g_motor_params->viscous_friction_nm_per_rad_s_active;
+	cap->coulomb_friction_nm = g_motor_params->coulomb_friction_nm_active;
 }
 
-static uint16_t motor_commission_detent_bin_from_angle(float32_t mech_angle_rad)
+static void motor_commission_detent_capture_enable(void)
 {
-	float32_t wrapped = wrap_rad_2pi(mech_angle_rad);
-	float32_t scaled = wrapped * ((float32_t)MOTOR_DETENT_MAP_BINS / (2.0f * PI_F32));
-	uint16_t bin = (uint16_t)floorf(scaled);
+	struct motor_detent_capture_ctx *cap = &g_motor_params->detent_capture;
 
-	return (bin >= MOTOR_DETENT_MAP_BINS) ? 0U : bin;
+	cap->decimation_counter = 0U;
+	cap->active = true;
+}
+
+static void motor_commission_detent_capture_disable(void)
+{
+	g_motor_params->detent_capture.active = false;
 }
 
 static int motor_commission_detent_collect_pass(float32_t target_hz,
 						uint32_t settle_ms,
-						uint32_t collect_ms,
-						uint32_t sample_ms,
-						float32_t kt_nm_per_a,
-						float32_t *sum_iq,
-						uint16_t *count)
+						uint32_t collect_ms)
 {
 	motor_commission_set_velocity_target_hz(target_hz);
 	motor_command_feed_watchdog(g_motor_params);
@@ -1557,48 +1561,11 @@ static int motor_commission_detent_collect_pass(float32_t target_hz,
 		return ret;
 	}
 
-	uint32_t start_ms = k_uptime_get_32();
-	while ((k_uptime_get_32() - start_ms) < collect_ms) {
-		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
-			return -EFAULT;
-		}
+	motor_commission_detent_capture_enable();
+	ret = motor_commission_wait_ms_or_fault(collect_ms);
+	motor_commission_detent_capture_disable();
 
-		k_msleep(sample_ms);
-		motor_command_feed_watchdog(g_motor_params);
-
-		if (!motor_commission_detent_sample_valid()) {
-			detent_result.rejected_samples++;
-			continue;
-		}
-
-		float32_t omega = g_motor_params->live.velocity_filtered_rad_s;
-		if (fabsf(omega) < 0.1f) {
-			detent_result.rejected_samples++;
-			continue;
-		}
-
-		float32_t sign_term = (omega >= 0.0f) ? 1.0f : -1.0f;
-		float32_t model_torque_nm =
-			(g_motor_params->inertia_kgm2_active *
-			 g_motor_params->live.acceleration_rad_s2) +
-			(g_motor_params->viscous_friction_nm_per_rad_s_active * omega) +
-			(g_motor_params->coulomb_friction_nm_active * sign_term);
-		float32_t residual_iq_a = g_motor_params->live.Iq_ref_A -
-					  (model_torque_nm / kt_nm_per_a);
-		if (!isfinite(residual_iq_a)) {
-			detent_result.rejected_samples++;
-			continue;
-		}
-
-		uint16_t bin = motor_commission_detent_bin_from_angle(g_motor_params->live.position_rad);
-		sum_iq[bin] += residual_iq_a;
-		if (count[bin] != UINT16_MAX) {
-			count[bin]++;
-		}
-		detent_result.sample_count++;
-	}
-
-	return 0;
+	return ret;
 }
 
 static int motor_commission_detent_finalize(const float32_t *sum_iq,
@@ -1607,6 +1574,9 @@ static int motor_commission_detent_finalize(const float32_t *sum_iq,
 	if (sum_iq == NULL || count == NULL) {
 		return -EINVAL;
 	}
+
+	detent_result.sample_count = g_motor_params->detent_capture.sample_count;
+	detent_result.rejected_samples = g_motor_params->detent_capture.rejected_samples;
 
 	float32_t sum_abs = 0.0f;
 	float32_t sum_sq = 0.0f;
@@ -1666,7 +1636,7 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 {
 	if (argc != 3 && argc != 4) {
 		shell_error(sh,
-			    "Usage: motor commission detent run <mech_hz> <cycles> [sample_ms]");
+			    "Usage: motor commission detent run <mech_hz> <cycles> [decimation]");
 		return -EINVAL;
 	}
 	if (!g_motor_params) {
@@ -1693,10 +1663,10 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 
 	float32_t speed_hz = 0.0f;
 	float32_t cycles = 0.0f;
-	uint32_t sample_ms = MOTOR_COMMISSION_DETENT_DEFAULT_SAMPLE_MS;
+	uint32_t decimation = MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION;
 	if (!shell_parse_finite_float(argv[1], &speed_hz) ||
 	    !shell_parse_finite_float(argv[2], &cycles) ||
-	    (argc == 4 && !shell_parse_u32(argv[3], &sample_ms))) {
+	    (argc == 4 && !shell_parse_u32(argv[3], &decimation))) {
 		shell_error(sh, "Invalid argument");
 		return -EINVAL;
 	}
@@ -1709,12 +1679,12 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "mech_hz exceeds profile max %.3f Hz", (double)max_hz);
 		return -ERANGE;
 	}
-	sample_ms = CLAMP(sample_ms,
-			  MOTOR_COMMISSION_DETENT_MIN_SAMPLE_MS,
-			  MOTOR_COMMISSION_DETENT_MAX_SAMPLE_MS);
+	decimation = CLAMP(decimation,
+			    MOTOR_COMMISSION_DETENT_MIN_DECIMATION,
+			    MOTOR_COMMISSION_DETENT_MAX_DECIMATION);
 
 	float32_t collect_ms_f = (cycles / speed_hz) * 1000.0f;
-	if (!isfinite(collect_ms_f) || collect_ms_f < (float32_t)sample_ms ||
+	if (!isfinite(collect_ms_f) || collect_ms_f < 1.0f ||
 	    collect_ms_f > (float32_t)MOTOR_COMMISSION_DETENT_MAX_RUN_MS) {
 		shell_error(sh, "Capture duration per direction invalid or above %u ms",
 			    MOTOR_COMMISSION_DETENT_MAX_RUN_MS);
@@ -1739,6 +1709,7 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	uint8_t saved_outer_loop = g_motor_params->outer_loop_mode;
 
 	motor_commission_detent_clear_staged();
+	motor_commission_detent_capture_reset(kt, decimation);
 
 	g_motor_params->detent_map_cfg.enabled = false;
 	g_motor_params->velocity_dob_cfg.enabled = false;
@@ -1758,17 +1729,12 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh,
-		    "Detent capture: speed=%.3f Hz cycles=%.2f sample=%u ms settle=%u ms",
-		    (double)speed_hz, (double)cycles, sample_ms, settle_ms);
+		    "Detent capture: speed=%.3f Hz cycles=%.2f decimation=%u settle=%u ms",
+		    (double)speed_hz, (double)cycles, decimation, settle_ms);
 
-	ret = motor_commission_detent_collect_pass(speed_hz, settle_ms, collect_ms,
-						   sample_ms, kt, detent_result.table_iq_a,
-						   detent_result.bin_counts);
+	ret = motor_commission_detent_collect_pass(speed_hz, settle_ms, collect_ms);
 	if (ret == 0) {
-		ret = motor_commission_detent_collect_pass(-speed_hz, settle_ms, collect_ms,
-							   sample_ms, kt,
-							   detent_result.table_iq_a,
-							   detent_result.bin_counts);
+		ret = motor_commission_detent_collect_pass(-speed_hz, settle_ms, collect_ms);
 	}
 
 	motor_commission_set_velocity_target_hz(0.0f);
@@ -1777,13 +1743,14 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	if (ret == 0) {
 		detent_result.speed_hz = speed_hz;
 		detent_result.cycles = cycles;
-		detent_result.sample_ms = sample_ms;
+		detent_result.decimation = decimation;
 		detent_result.run_ms = 2U * collect_ms;
-		ret = motor_commission_detent_finalize(detent_result.table_iq_a,
-						       detent_result.bin_counts);
+		ret = motor_commission_detent_finalize(g_motor_params->detent_capture.sum_iq_a,
+						       g_motor_params->detent_capture.bin_counts);
 	}
 
 restore_runtime:
+	motor_commission_detent_capture_disable();
 	motor_commission_set_velocity_target_hz(0.0f);
 	g_motor_params->detent_map_cfg.enabled = saved_detent_enable;
 	g_motor_params->velocity_dob_cfg.enabled = saved_dob_enable;
@@ -1794,6 +1761,8 @@ restore_runtime:
 	motor_command_feed_watchdog(g_motor_params);
 
 	if (ret != 0) {
+		detent_result.sample_count = g_motor_params->detent_capture.sample_count;
+		detent_result.rejected_samples = g_motor_params->detent_capture.rejected_samples;
 		shell_error(sh,
 			    "Detent capture failed (err %d): samples=%u rejected=%u bins=%u/%u",
 			    ret, detent_result.sample_count, detent_result.rejected_samples,
@@ -1835,11 +1804,11 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    (double)g_motor_params->live.detent_iq_ff_a,
 		    g_motor_params->detent_map_state.last_index);
 	shell_print(sh, "  Staged:    %s", detent_result.valid ? "YES" : "NO");
-	shell_print(sh, "  Capture:   speed=%.3f Hz cycles=%.2f run=%u ms sample=%u ms",
+	shell_print(sh, "  Capture:   speed=%.3f Hz cycles=%.2f run=%u ms decimation=%u",
 		    (double)detent_result.speed_hz,
 		    (double)detent_result.cycles,
 		    detent_result.run_ms,
-		    detent_result.sample_ms);
+		    detent_result.decimation);
 	shell_print(sh, "  Samples:   accepted=%u rejected=%u bins=%u/%u minN=%u maxN=%u",
 		    detent_result.sample_count,
 		    detent_result.rejected_samples,
@@ -1918,6 +1887,7 @@ int cmd_motor_commission_detent_clear(const struct shell *sh, size_t argc, char 
 	}
 
 	motor_commission_detent_clear_staged();
+	motor_commission_detent_capture_reset(0.0f, MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION);
 	g_motor_params->detent_map_cfg.enabled = false;
 	g_motor_params->detent_map_cfg.gain = 1.0f;
 	g_motor_params->detent_map_cfg.iq_ff_limit_a = 0.0f;

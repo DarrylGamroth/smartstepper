@@ -47,6 +47,20 @@
 #define MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES 256U
 #define MOTOR_DETENT_MAP_BINS 256U
 
+struct motor_detent_capture_ctx {
+	bool active;
+	uint32_t decimation;
+	uint32_t decimation_counter;
+	uint32_t sample_count;
+	uint32_t rejected_samples;
+	float32_t kt_nm_per_a;
+	float32_t inertia_kgm2;
+	float32_t viscous_friction_nm_per_rad_s;
+	float32_t coulomb_friction_nm;
+	float32_t sum_iq_a[MOTOR_DETENT_MAP_BINS];
+	uint16_t bin_counts[MOTOR_DETENT_MAP_BINS];
+};
+
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
 #define PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL 1U
 
@@ -396,6 +410,7 @@ struct motor_parameters {
 	struct motor_detent_map_config detent_map_cfg; /* Position-periodic Iq feedforward */
 	struct motor_detent_map_state detent_map_state; /* Detent map runtime */
 	float32_t detent_map_iq_table_a[MOTOR_DETENT_MAP_BINS]; /* One mechanical revolution */
+	struct motor_detent_capture_ctx detent_capture; /* ISR-rate commissioning accumulator */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;

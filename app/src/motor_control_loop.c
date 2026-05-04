@@ -588,6 +588,66 @@ static inline void motor_control_step_finalize(struct motor_parameters *params,
 	}
 }
 
+static inline uint16_t motor_detent_capture_bin_from_angle(float32_t mech_angle_rad)
+{
+	float32_t wrapped = wrap_rad_2pi(mech_angle_rad);
+	float32_t scaled = wrapped * ((float32_t)MOTOR_DETENT_MAP_BINS / (2.0f * PI_F32));
+	uint16_t bin = (uint16_t)floorf(scaled);
+
+	return (bin >= MOTOR_DETENT_MAP_BINS) ? 0U : bin;
+}
+
+static inline void motor_control_step_detent_capture(
+	struct motor_parameters *params,
+	const struct motor_feedback_ref *feedback_ref,
+	const struct motor_current_ref *current_ref)
+{
+	struct motor_detent_capture_ctx *cap = &params->detent_capture;
+
+	if (!cap->active) {
+		return;
+	}
+
+	uint32_t decimation = (cap->decimation == 0U) ? 1U : cap->decimation;
+	cap->decimation_counter++;
+	if (cap->decimation_counter < decimation) {
+		return;
+	}
+	cap->decimation_counter = 0U;
+
+	float32_t omega = feedback_ref->velocity_filtered_rad_s;
+	if ((feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U ||
+	    feedback_ref->error ||
+	    fabsf(omega) < 0.1f ||
+	    !isfinite(feedback_ref->position_rad) ||
+	    !isfinite(feedback_ref->acceleration_rad_s2) ||
+	    !isfinite(current_ref->iq_ref_a) ||
+	    !isfinite(cap->kt_nm_per_a) ||
+	    cap->kt_nm_per_a <= 0.0f) {
+		cap->rejected_samples++;
+		return;
+	}
+
+	float32_t sign_term = (omega >= 0.0f) ? 1.0f : -1.0f;
+	float32_t model_torque_nm =
+		(cap->inertia_kgm2 * feedback_ref->acceleration_rad_s2) +
+		(cap->viscous_friction_nm_per_rad_s * omega) +
+		(cap->coulomb_friction_nm * sign_term);
+	float32_t residual_iq_a = current_ref->iq_ref_a - (model_torque_nm / cap->kt_nm_per_a);
+
+	if (!isfinite(residual_iq_a)) {
+		cap->rejected_samples++;
+		return;
+	}
+
+	uint16_t bin = motor_detent_capture_bin_from_angle(feedback_ref->position_rad);
+	if (cap->bin_counts[bin] != UINT16_MAX) {
+		cap->sum_iq_a[bin] += residual_iq_a;
+		cap->bin_counts[bin]++;
+		cap->sample_count++;
+	}
+}
+
 static inline void motor_control_measurements_from_encoder(
 	struct motor_control_measurements *meas,
 	const struct motor_encoder_stage_result *enc_stage)
@@ -1177,6 +1237,8 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	params->live.velocity_filtered_rad_s = feedback_ref->velocity_filtered_rad_s;
 	params->live.velocity_target_rad_s = motion_ref->velocity_target_rad_s;
 	params->live.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;
+
+	motor_control_step_detent_capture(params, feedback_ref, current_ref);
 
 	params->live.Id_ref_A = current_ref->id_ref_a;
 	params->live.Iq_ref_A = current_ref->iq_ref_a;

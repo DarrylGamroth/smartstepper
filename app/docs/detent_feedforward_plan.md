@@ -87,7 +87,7 @@ validated table.
 Commands:
 
 ```text
-motor commission detent run <mech_hz> <cycles> [sample_ms]
+motor commission detent run <mech_hz> <cycles> [decimation]
 motor commission detent status
 motor commission detent apply [enable] [gain] [limit_a]
 motor commission detent clear
@@ -96,17 +96,16 @@ motor commission detent clear
 Capture strategy:
 
 - run slow `velocity_encoder` motion in both directions,
-- record mechanical angle and controller effort,
+- accumulate mechanical-angle bins in the control ISR,
 - subtract model feedforward terms (`J*alpha`, `B*omega`, `Tc*sign(omega)`),
 - average forward/reverse bins to reduce viscous/friction bias,
 - reject bins with encoder errors/glitches,
-- smooth table,
 - stage result before applying.
 
 Implemented command syntax:
 
 ```text
-motor commission detent run <mech_hz> <cycles> [sample_ms]
+motor commission detent run <mech_hz> <cycles> [decimation]
 motor commission detent status
 motor commission detent apply [enable] [gain] [limit_a]
 motor commission detent clear
@@ -114,8 +113,9 @@ motor commission detent clear
 
 The `run` command temporarily disables detent feedforward and DOB, forces the
 PI velocity path, enters `velocity_encoder`, and stages a table without changing
-the active runtime table. `apply 1` copies the staged table into runtime and
-enables it.
+the active runtime table. Capture accumulation runs in the ISR at control-loop
+rate; optional `decimation` reduces ISR capture load and defaults to `1`.
+`apply 1` copies the staged table into runtime and enables it.
 
 ## Phase 5: Validation
 
