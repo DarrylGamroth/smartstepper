@@ -1267,36 +1267,58 @@ static inline bool adc_stm32_inj_check_and_clear_overrun(ADC_TypeDef *adc)
 	return false;
 }
 
-static inline void adc_stm32_fpu_context_save(void)
-{
 #if defined(CONFIG_CPU_HAS_FPU) && defined(CONFIG_FP_HARDABI)
+struct adc_stm32_fpu_context {
+	uint32_t s[32];
+	uint32_t fpscr;
+	uint32_t control;
+	uint32_t fpccr;
+};
+
+static inline void adc_stm32_fpu_context_save(struct adc_stm32_fpu_context *ctx)
+{
 	/* The injected ADC callback runs the FPU-heavy motor-control loop from
-	 * a zero-latency direct ISR. Do not rely on Zephyr's thread FPU sharing
-	 * or Cortex-M lazy stacking for this path; preserve the complete FP
-	 * register file used by FPv5-D16 plus FPSCR explicitly.
+	 * a zero-latency direct ISR. Preserve the complete FP register file
+	 * used by FPv5-D16 plus the FP control state explicitly, then restore
+	 * CONTROL.FPCA exactly on exit so ISR-only FP use does not make the
+	 * interrupted thread look like an FP user.
 	 */
-	__asm__ volatile(
-		"vmrs r0, fpscr\n"
-		"push {r0, r1}\n"
-		"vpush {s0-s31}\n"
-		:
-		:
-		: "memory", "r0", "r1");
-#endif
+	ctx->control = __get_CONTROL();
+	ctx->fpccr = FPU->FPCCR;
+
+	uint32_t fpscr;
+
+	__asm__ volatile("vstmia %1, {s0-s31}\n"
+			 "vmrs %0, fpscr\n"
+			 : "=r"(fpscr)
+			 : "r"(ctx->s)
+			 : "memory");
+	ctx->fpscr = fpscr;
 }
 
-static inline void adc_stm32_fpu_context_restore(void)
+static inline void adc_stm32_fpu_context_restore(const struct adc_stm32_fpu_context *ctx)
 {
-#if defined(CONFIG_CPU_HAS_FPU) && defined(CONFIG_FP_HARDABI)
-	__asm__ volatile(
-		"vpop {s0-s31}\n"
-		"pop {r0, r1}\n"
-		"vmsr fpscr, r0\n"
-		:
-		:
-		: "memory", "r0", "r1");
-#endif
+	uint32_t fpscr = ctx->fpscr;
+
+	__asm__ volatile("vldmia %0, {s0-s31}\n"
+			 "vmsr fpscr, %1\n"
+			 :
+			 : "r"(ctx->s), "r"(fpscr)
+			 : "memory");
+	FPU->FPCCR = ctx->fpccr;
+	__set_CONTROL(ctx->control);
+	__DSB();
+	__ISB();
 }
+
+#define ADC_STM32_ISR_FPU_CONTEXT_DECL() struct adc_stm32_fpu_context fpu_ctx
+#define ADC_STM32_ISR_FPU_CONTEXT_SAVE() adc_stm32_fpu_context_save(&fpu_ctx)
+#define ADC_STM32_ISR_FPU_CONTEXT_RESTORE() adc_stm32_fpu_context_restore(&fpu_ctx)
+#else
+#define ADC_STM32_ISR_FPU_CONTEXT_DECL()
+#define ADC_STM32_ISR_FPU_CONTEXT_SAVE()
+#define ADC_STM32_ISR_FPU_CONTEXT_RESTORE()
+#endif
 
 /* Debug helper function to process ADC conversions */
 static inline void adc_stm32_process_injected_conversions(const struct device *dev,
@@ -1345,9 +1367,10 @@ static inline void adc_stm32_process_injected_conversions(const struct device *d
                                                                                                    \
 		/* Check JEOS flag */                                                              \
 		if (LL_ADC_IsActiveFlag_JEOS(adc)) {                                               \
-			adc_stm32_fpu_context_save();                                             \
+			ADC_STM32_ISR_FPU_CONTEXT_DECL();                                        \
+			ADC_STM32_ISR_FPU_CONTEXT_SAVE();                                        \
 			adc_stm32_process_injected_conversions(dev, adc, data, config);            \
-			adc_stm32_fpu_context_restore();                                          \
+			ADC_STM32_ISR_FPU_CONTEXT_RESTORE();                                     \
 		}                                                                                  \
                                                                                                    \
 		return 0;                                                                          \

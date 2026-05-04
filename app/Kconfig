@@ -72,6 +72,16 @@ config MOTOR_OUTER_LOOP_MPR
 	  Enables SpinTAC-style model predictive regulators for the velocity and
 	  position outer loops. Disable to use legacy PI outer loops.
 
+config MOTOR_OUTER_LOOP_MPR_RUNTIME_DEFAULT
+	bool "Default runtime outer loop to MPR"
+	depends on MOTOR_OUTER_LOOP_MPR
+	default n
+	help
+	  Selects MPR as the boot-time runtime outer-loop mode. Leave this
+	  disabled for bring-up and uncommissioned hardware so encoder velocity
+	  modes start with the simpler PI regulator. MPR can still be enabled at
+	  runtime with motor params set outer_loop_mode 1.
+
 config MOTOR_VELOCITY_DOB
 	bool "Enable velocity disturbance observer"
 	default y
@@ -79,6 +89,16 @@ config MOTOR_VELOCITY_DOB
 	  Enables the velocity-loop disturbance observer and Iq feedforward
 	  compensation path. Disable this in minimal builds to remove DOB work
 	  from the ISR outer-loop path.
+
+config MOTOR_VELOCITY_DOB_RUNTIME_DEFAULT
+	bool "Default runtime velocity DOB to enabled"
+	depends on MOTOR_VELOCITY_DOB
+	default n
+	help
+	  Selects whether the velocity disturbance observer is enabled at boot.
+	  Leave this disabled until mechanical parameters and observer gains are
+	  commissioned. DOB can still be enabled at runtime with
+	  motor velocity dob enable 1.
 
 config MOTOR_ISR_COMMISSION_CAPTURE
 	bool "Enable ISR commissioning capture updates"

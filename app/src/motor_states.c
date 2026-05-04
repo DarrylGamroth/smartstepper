@@ -637,7 +637,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
 	params->torque_gain_nm_per_a_active =
 		motor_torque_gain_from_flux(params->flux_linkage_wb_active);
-	params->velocity_dob_cfg.enabled = true;
+	params->velocity_dob_cfg.enabled = VELOCITY_DOB_DEFAULT_ENABLED;
 	params->velocity_dob_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_dob_cfg.observer_gain_nm_per_rad_s = 0.02f;
 	params->velocity_dob_cfg.iq_ff_limit_a = params->velocity_cl_iq_limit_A;

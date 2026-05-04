@@ -115,11 +115,14 @@ void motor_control_telemetry_store_encoder_raw_trace(
 		&params->encoder_raw_trace.samples[idx];
 	memset(sample, 0, sizeof(*sample));
 
+	float32_t raw_angle_rad = raw_sample->angle_deg * (PI_F32 / 180.0f);
+	float32_t control_angle_rad = control_fb->angle_control_deg * (PI_F32 / 180.0f);
+
 	sample->control_loop_count = params->rt_fast.control_loop_count;
-	sample->raw_angle_deg = raw_sample->angle_deg;
-	sample->raw_angle_rad = raw_sample->angle_deg * (PI_F32 / 180.0f);
+	sample->raw_angle_rad = raw_angle_rad;
+	sample->raw_angle_deg = raw_angle_rad * (180.0f / PI_F32);
 	sample->control_angle_deg = control_fb->angle_control_deg;
-	sample->control_angle_rad = control_fb->angle_control_deg * (PI_F32 / 180.0f);
+	sample->control_angle_rad = control_angle_rad;
 	sample->generated_mech_rad = control_fb->generated_mech_rad;
 	sample->generated_elec_rad = control_fb->generated_elec_rad;
 	sample->observer_input_rad = control_fb->observer_input_rad;

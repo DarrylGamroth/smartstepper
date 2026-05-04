@@ -278,7 +278,9 @@ static bool motor_encoder_raw_trace_sample_clean(
 	       !sample->sample_error &&
 	       !sample->sample_io_fault &&
 	       (sample->raw_angle_rad == sample->raw_angle_rad) &&
-	       fabsf(sample->raw_angle_rad) <= 1.0e6f;
+	       fabsf(sample->raw_angle_rad) <= 1.0e6f &&
+	       (sample->control_angle_rad == sample->control_angle_rad) &&
+	       fabsf(sample->control_angle_rad) <= 1.0e6f;
 }
 
 static bool motor_encoder_capture_sample_clean(
@@ -383,6 +385,68 @@ static float32_t motor_encoder_avg_velocity_hz(float32_t delta_rad,
 	}
 
 	return delta_rad / (2.0f * PI_F32 * dt_s);
+}
+
+static inline float32_t motor_encoder_trace_deg(float32_t angle_rad)
+{
+	return angle_rad * (180.0f / PI_F32);
+}
+
+static int32_t motor_encoder_deg_to_mdeg(double angle_deg)
+{
+	if (!isfinite(angle_deg)) {
+		return 0;
+	}
+	if (angle_deg >= 2147483.647) {
+		return INT32_MAX;
+	}
+	if (angle_deg <= -2147483.648) {
+		return INT32_MIN;
+	}
+	return (int32_t)lrint(angle_deg * 1000.0);
+}
+
+static int32_t motor_encoder_rad_to_mdeg(float32_t angle_rad)
+{
+	return motor_encoder_deg_to_mdeg((double)motor_encoder_trace_deg(angle_rad));
+}
+
+static double motor_encoder_wrap_delta_deg(double delta_deg)
+{
+	while (delta_deg > 180.0) {
+		delta_deg -= 360.0;
+	}
+	while (delta_deg <= -180.0) {
+		delta_deg += 360.0;
+	}
+
+	return delta_deg;
+}
+
+static double motor_encoder_avg_velocity_hz_deg(double delta_deg,
+						uint32_t first_loop,
+						uint32_t last_loop)
+{
+	if (last_loop <= first_loop) {
+		return 0.0;
+	}
+
+	double dt_s = (double)(last_loop - first_loop) /
+		      (double)CONTROL_LOOP_FREQUENCY_HZ;
+	if (dt_s <= 0.0) {
+		return 0.0;
+	}
+
+	return delta_deg / (360.0 * dt_s);
+}
+
+static int32_t motor_encoder_avg_velocity_mhz_deg(double delta_deg,
+						  uint32_t first_loop,
+						  uint32_t last_loop)
+{
+	return motor_encoder_deg_to_mdeg(motor_encoder_avg_velocity_hz_deg(delta_deg,
+									    first_loop,
+									    last_loop));
 }
 
 static inline void motor_zero_control_targets(struct motor_parameters *params)
@@ -2090,16 +2154,17 @@ int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **
 	const struct motor_encoder_raw_trace_sample *first = NULL;
 	const struct motor_encoder_raw_trace_sample *prev = NULL;
 	const struct motor_encoder_raw_trace_sample *last = NULL;
-	float32_t raw_delta_rad = 0.0f;
-	float32_t ctrl_delta_rad = 0.0f;
-	float32_t min_raw_deg = 0.0f;
-	float32_t max_raw_deg = 0.0f;
+	double raw_delta_deg = 0.0;
+	double ctrl_delta_deg = 0.0;
+	double min_raw_deg = 0.0;
+	double max_raw_deg = 0.0;
 	uint32_t clean_count = 0U;
 	uint32_t fresh_count = 0U;
 	uint32_t warn_count = 0U;
 	uint32_t err_count = 0U;
 	uint32_t io_count = 0U;
 	uint32_t enabled_count = 0U;
+	uint32_t delta_drop_count = 0U;
 	uint8_t status_or = 0U;
 	uint8_t status_and = 0xFFU;
 
@@ -2123,14 +2188,38 @@ int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **
 
 		if (first == NULL) {
 			first = sample;
-			min_raw_deg = sample->raw_angle_deg;
-			max_raw_deg = sample->raw_angle_deg;
+			min_raw_deg = (double)motor_encoder_trace_deg(sample->raw_angle_rad);
+			max_raw_deg = min_raw_deg;
 		} else {
-			raw_delta_rad += wrap_rad_pi(sample->raw_angle_rad - prev->raw_angle_rad);
-			ctrl_delta_rad += wrap_rad_pi(sample->control_angle_rad -
-						      prev->control_angle_rad);
-			min_raw_deg = MIN(min_raw_deg, sample->raw_angle_deg);
-			max_raw_deg = MAX(max_raw_deg, sample->raw_angle_deg);
+			double sample_raw_deg =
+				(double)motor_encoder_trace_deg(sample->raw_angle_rad);
+			double prev_raw_deg =
+				(double)motor_encoder_trace_deg(prev->raw_angle_rad);
+			double sample_ctrl_deg =
+				(double)motor_encoder_trace_deg(sample->control_angle_rad);
+			double prev_ctrl_deg =
+				(double)motor_encoder_trace_deg(prev->control_angle_rad);
+			double raw_step_deg = motor_encoder_wrap_delta_deg(sample_raw_deg -
+									   prev_raw_deg);
+			double ctrl_step_deg = motor_encoder_wrap_delta_deg(sample_ctrl_deg -
+									    prev_ctrl_deg);
+
+			if (!isfinite(raw_step_deg)) {
+				delta_drop_count++;
+			} else {
+				raw_delta_deg += raw_step_deg;
+			}
+			if (!isfinite(ctrl_step_deg)) {
+				delta_drop_count++;
+			} else {
+				ctrl_delta_deg += ctrl_step_deg;
+			}
+			if (sample_raw_deg < min_raw_deg) {
+				min_raw_deg = sample_raw_deg;
+			}
+			if (sample_raw_deg > max_raw_deg) {
+				max_raw_deg = sample_raw_deg;
+			}
 		}
 		clean_count++;
 		prev = sample;
@@ -2146,25 +2235,25 @@ int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **
 			    first->control_loop_count, last->control_loop_count,
 			    last->control_loop_count - first->control_loop_count,
 			    clean_count);
-		shell_print(sh, "  Raw first/last: %.3f -> %.3f deg",
-			    (double)first->raw_angle_deg, (double)last->raw_angle_deg);
-		shell_print(sh, "  Raw delta:    %.3f deg, avg %.4f Hz",
-			    (double)(raw_delta_rad * 180.0f / PI_F32),
-			    (double)motor_encoder_avg_velocity_hz(raw_delta_rad,
-								  first->control_loop_count,
-								  last->control_loop_count));
-		shell_print(sh, "  Ctrl delta:   %.3f deg, avg %.4f Hz",
-			    (double)(ctrl_delta_rad * 180.0f / PI_F32),
-			    (double)motor_encoder_avg_velocity_hz(ctrl_delta_rad,
-								  first->control_loop_count,
-								  last->control_loop_count));
-		shell_print(sh, "  Raw min/max:  %.3f / %.3f deg",
-			    (double)min_raw_deg, (double)max_raw_deg);
+		shell_print(sh, "  Raw first/last: %d -> %d mdeg",
+			    motor_encoder_rad_to_mdeg(first->raw_angle_rad),
+			    motor_encoder_rad_to_mdeg(last->raw_angle_rad));
+		shell_print(sh, "  Raw delta:    %d mdeg, avg %d mHz",
+			    motor_encoder_deg_to_mdeg(raw_delta_deg),
+			    motor_encoder_avg_velocity_mhz_deg(raw_delta_deg,
+							       first->control_loop_count,
+							       last->control_loop_count));
+		shell_print(sh, "  Ctrl delta:   %d mdeg, avg %d mHz",
+			    motor_encoder_deg_to_mdeg(ctrl_delta_deg),
+			    motor_encoder_avg_velocity_mhz_deg(ctrl_delta_deg,
+							       first->control_loop_count,
+							       last->control_loop_count));
 	} else {
 		shell_print(sh, "  Clean span:   none");
 	}
 	shell_print(sh, "  Counts:       clean=%u fresh=%u ctrl_en=%u warn=%u err=%u io=%u",
 		    clean_count, fresh_count, enabled_count, warn_count, err_count, io_count);
+	shell_print(sh, "  Delta drops:  %u", delta_drop_count);
 	shell_print(sh, "  Status bits:  or=0x%02X and=0x%02X first=0x%02X last=0x%02X",
 		    status_or, status_and,
 		    g_motor_params->encoder_raw_trace.samples[oldest_idx].status,
@@ -2206,23 +2295,20 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "Raw trace dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop src raw_deg raw_rad ctrl_deg ctrl_rad gen_mech gen_elec obs_in_rad q fresh warn err io status ctrl_en");
+		    "idx loop src raw_mdeg ctrl_mdeg gen_mech_mdeg gen_elec_mdeg q fresh warn err io status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *sample =
 			&g_motor_params->encoder_raw_trace.samples[idx];
 		shell_print(sh,
-			    "%u %u %s %.3f %.6f %.3f %.6f %.6f %.6f %.6f 0x%02X %u %u %u %u 0x%02X %u",
+			    "%u %u %u %d %d %d %d 0x%02X %u %u %u %u 0x%02X %u",
 			    i,
 			    sample->control_loop_count,
-			    motor_encoder_input_source_to_string(sample->input_source),
-			    (double)sample->raw_angle_deg,
-			    (double)sample->raw_angle_rad,
-			    (double)sample->control_angle_deg,
-			    (double)sample->control_angle_rad,
-			    (double)sample->generated_mech_rad,
-			    (double)sample->generated_elec_rad,
-			    (double)sample->observer_input_rad,
+			    sample->input_source,
+			    motor_encoder_rad_to_mdeg(sample->raw_angle_rad),
+			    motor_encoder_deg_to_mdeg((double)sample->control_angle_deg),
+			    motor_encoder_rad_to_mdeg(sample->generated_mech_rad),
+			    motor_encoder_rad_to_mdeg(sample->generated_elec_rad),
 			    sample->quality_flags,
 			    sample->sample_fresh,
 			    sample->sample_warning,
