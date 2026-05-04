@@ -1841,6 +1841,21 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_encoder,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission detent subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
+	SHELL_CMD_ARG(run, NULL,
+		      "Run detent feedforward capture <mech_hz> <cycles> [sample_ms]",
+		      cmd_motor_commission_detent_run, 3, 1),
+	SHELL_CMD(status, NULL, "Show staged detent feedforward table",
+		  cmd_motor_commission_detent_status),
+	SHELL_CMD_ARG(apply, NULL,
+		      "Apply staged detent table [enable] [gain] [limit_a]",
+		      cmd_motor_commission_detent_apply, 1, 3),
+	SHELL_CMD(clear, NULL, "Clear staged and runtime detent feedforward table",
+		  cmd_motor_commission_detent_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission auto subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 	SHELL_CMD_ARG(run, NULL, "Run identify+tune workflow [apply]",
@@ -1865,6 +1880,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(flux, &sub_motor_commission_flux, "Flux-linkage commissioning", NULL),
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
 	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Generated-sweep encoder mapping", NULL),
+	SHELL_CMD(detent, &sub_motor_commission_detent, "Detent feedforward commissioning", NULL),
 	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),
 	SHELL_SUBCMD_SET_END
 );

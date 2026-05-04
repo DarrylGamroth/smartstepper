@@ -19,6 +19,10 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_clear(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_detent_apply(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_detent_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_apply(const struct shell *sh, size_t argc, char **argv);
