@@ -1570,6 +1570,7 @@ int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char
 	g_motor_params->observer_elec_trim_rad = 0.0f;
 	angle_observer_set_offset(&g_motor_params->observer,
 				  g_motor_params->observer_alignment_offset_rad);
+	g_motor_params->calibration.encoder_mapping_complete = true;
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Encoder mapping applied: sign=%d offset=%.4f deg mechanical",
@@ -1726,6 +1727,11 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "Control is disarmed; run 'motor arm' first");
 		return -EACCES;
 	}
+	if (!g_motor_params->calibration.encoder_mapping_complete) {
+		shell_error(sh,
+			    "Encoder mapping has not been applied; run 'motor commission encoder run ...' and 'motor commission encoder apply' first");
+		return -EACCES;
+	}
 	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
 		shell_error(sh, "Motor is in ERROR state; clear error first");
 		return -EFAULT;
@@ -1807,6 +1813,10 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	motor_dob_reset(&g_motor_params->velocity_dob_state,
 			g_motor_params->live.velocity_rad_s);
 
+	ret = motor_api_request_online();
+	if (ret != 0) {
+		goto restore_runtime;
+	}
 	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		goto restore_runtime;

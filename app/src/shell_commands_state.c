@@ -804,6 +804,8 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    motor_calibration_mode_to_string(g_motor_params->calibration.mode));
 	shell_print(sh, "  Commissioned: %s",
 		    g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
+	shell_print(sh, "  Enc mapped:   %s",
+		    g_motor_params->calibration.encoder_mapping_complete ? "YES" : "NO");
 	shell_print(sh, "  Online mode:  %s",
 		    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
 	shell_print(sh, "  Enc dir sign: %d",

@@ -743,6 +743,29 @@ static inline bool motor_encoder_required_feedback_valid(
 	       stale_count <= stale_limit;
 }
 
+static inline bool motor_encoder_required_feedback_sane(
+	const struct motor_control_policy *policy,
+	const struct motor_feedback_ref *feedback_ref,
+	float32_t profile_max_velocity_rad_s)
+{
+	if (policy == NULL || feedback_ref == NULL || !policy->encoder_required_for_control) {
+		return true;
+	}
+
+	if (!isfinite(feedback_ref->velocity_filtered_rad_s)) {
+		return false;
+	}
+
+	/* The encoder observer is safety-critical for encoder-commutated modes.
+	 * If it reports speed beyond the configured motion envelope, stop before
+	 * the outer loop can chase a corrupt estimate.
+	 */
+	float32_t max_expected_rad_s =
+		fmaxf(profile_max_velocity_rad_s * 1.10f, 2.0f * PI_F32);
+
+	return fabsf(feedback_ref->velocity_filtered_rad_s) <= max_expected_rad_s;
+}
+
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct motor_parameters *params,
 					     uint32_t mode_flags,
 					     const q31_t *values,
@@ -1324,6 +1347,11 @@ void motor_control_loop_step(struct motor_parameters *params,
 	if (!motor_encoder_required_feedback_valid(&ctx->policy, feedback_ref,
 						  params->live.position_stale_count,
 						  ENCODER_FAULT_THRESHOLD)) {
+		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
+		goto isr_done;
+	}
+	if (!motor_encoder_required_feedback_sane(&ctx->policy, feedback_ref,
+						 params->profile_max_velocity_rad_s)) {
 		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}

@@ -710,6 +710,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->calibration.complete = false;
 	params->calibration.running = false;
 	params->calibration.commissioning_complete = false;
+	params->calibration.encoder_mapping_complete = false;
 	params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 	params->calibration.align_sample_retries = 0U;
 	{

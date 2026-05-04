@@ -190,6 +190,7 @@ struct motor_calibration_ctx {
 	bool complete;  /* True if calibration has been run successfully */
 	bool running;   /* True while calibration/commissioning state machine is active */
 	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
+	bool encoder_mapping_complete; /* True once generated-sweep encoder mapping has been applied */
 	uint8_t mode;   /* MOTOR_CALIBRATION_MODE_* for active sequence */
 	uint8_t requested_online_mode; /* Requested ONLINE submode when entering ONLINE */
 	uint8_t align_sample_retries;     /* Retry count for runtime ALIGN sample window */
