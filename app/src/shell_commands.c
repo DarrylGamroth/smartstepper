@@ -1858,7 +1858,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
 
 /* motor commission auto subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
-	SHELL_CMD_ARG(run, NULL, "Run identify+tune workflow [apply]",
+	SHELL_CMD_ARG(run, NULL, "Plan or run identify+tune workflow [slow|confirm] [apply]",
 		      cmd_motor_commission_auto_run, 1, 1),
 	SHELL_CMD(status, NULL, "Show staged auto-tune defaults and reject flags",
 		  cmd_motor_commission_auto_status),

@@ -40,11 +40,24 @@
 #define MOTOR_COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE 1U
 #define MOTOR_COMMISSION_AUTO_MECH_ACCEL_MARGIN 1.25f
 #define MOTOR_COMMISSION_AUTO_MECH_VALIDATE_RMS_NM 0.005f
+#define MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MAX_HZ 3.0f
+#define MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MIN_HZ 0.5f
+#define MOTOR_COMMISSION_AUTO_NORMAL_MECH_MAX_HZ 3.0f
+#define MOTOR_COMMISSION_AUTO_NORMAL_MECH_BASE_HZ 1.5f
+#define MOTOR_COMMISSION_AUTO_NORMAL_MECH_DITHER_HZ 0.5f
+#define MOTOR_COMMISSION_AUTO_SLOW_FLUX_MAX_HZ 0.75f
+#define MOTOR_COMMISSION_AUTO_SLOW_FLUX_MIN_HZ 0.25f
+#define MOTOR_COMMISSION_AUTO_SLOW_MECH_MAX_HZ 1.0f
+#define MOTOR_COMMISSION_AUTO_SLOW_MECH_BASE_HZ 0.5f
+#define MOTOR_COMMISSION_AUTO_SLOW_MECH_DITHER_HZ 0.15f
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_MAX_HZ 5.0f
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HZ_CAP 20.0f
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS 2000U
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS 500U
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS 10000U
+#define MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ 1.0f
+#define MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A 0.15f
+#define MOTOR_COMMISSION_DETENT_SAFE_GAIN_SPEED_HZ 1.0f
 #define MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MIN_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MAX_DECIMATION 128U
@@ -88,6 +101,14 @@ struct motor_commission_detent_result {
 };
 
 static struct motor_commission_detent_result detent_result;
+
+struct motor_commission_velocity_gain_restore {
+	float32_t kp_a_per_rad_s;
+	float32_t ki_a_per_rad;
+	float32_t iq_limit_a;
+	float32_t i_term_a;
+	bool valid;
+};
 
 static int motor_post_mode_change(enum motor_state target_mode)
 {
@@ -231,6 +252,61 @@ static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 				   g_motor_params->profile_max_velocity_rad_s);
 
 	traj_set_target_value(&g_motor_params->traj_velocity, limited);
+}
+
+static int motor_commission_apply_detent_velocity_gains(
+	float32_t speed_hz,
+	struct motor_commission_velocity_gain_restore *restore)
+{
+	if (g_motor_params == NULL || restore == NULL) {
+		return -EINVAL;
+	}
+
+	float32_t iq_limit_a = fminf(MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A,
+				     0.50f * MOTOR_MAX_CURRENT_A);
+	iq_limit_a = fmaxf(iq_limit_a, 0.02f);
+	float32_t gain_speed_rad_s =
+		2.0f * PI_F32 * fmaxf(speed_hz, MOTOR_COMMISSION_DETENT_SAFE_GAIN_SPEED_HZ);
+	float32_t kp = iq_limit_a / gain_speed_rad_s;
+	float32_t ki = 2.0f * kp;
+
+	restore->kp_a_per_rad_s = g_motor_params->velocity_cl_kp_A_per_rad_s;
+	restore->ki_a_per_rad = g_motor_params->velocity_cl_ki_A_per_rad;
+	restore->iq_limit_a = g_motor_params->velocity_cl_iq_limit_A;
+	restore->i_term_a = g_motor_params->velocity_cl_i_term_A;
+	restore->valid = true;
+
+	int ret = motor_api_set_param("velocity_cl_kp_A_per_rad_s", kp);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_set_param("velocity_cl_ki_A_per_rad", ki);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_set_param("velocity_cl_iq_limit_A", iq_limit_a);
+	if (ret != 0) {
+		return ret;
+	}
+	g_motor_params->velocity_cl_i_term_A = 0.0f;
+	motor_velocity_regulator_reset(&g_motor_params->velocity_reg_state, 0.0f);
+
+	return 0;
+}
+
+static void motor_commission_restore_velocity_gains(
+	const struct motor_commission_velocity_gain_restore *restore)
+{
+	if (g_motor_params == NULL || restore == NULL || !restore->valid) {
+		return;
+	}
+
+	(void)motor_api_set_param("velocity_cl_kp_A_per_rad_s", restore->kp_a_per_rad_s);
+	(void)motor_api_set_param("velocity_cl_ki_A_per_rad", restore->ki_a_per_rad);
+	(void)motor_api_set_param("velocity_cl_iq_limit_A", restore->iq_limit_a);
+	g_motor_params->velocity_cl_i_term_A = restore->i_term_a;
+	motor_velocity_regulator_reset(&g_motor_params->velocity_reg_state,
+				       restore->i_term_a);
 }
 
 static int motor_commission_wait_ms_or_fault(uint32_t hold_ms)
@@ -1655,12 +1731,6 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "Motor is in ERROR state; clear error first");
 		return -EFAULT;
 	}
-	if (!g_motor_params->commission.auto_tune_applied) {
-		shell_error(sh,
-			    "Detent capture requires applied auto-tune; run 'motor commission auto run' then 'motor commission auto apply' or 'motor commission auto validate' first");
-		return -EACCES;
-	}
-
 	float32_t speed_hz = 0.0f;
 	float32_t cycles = 0.0f;
 	uint32_t decimation = MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION;
@@ -1673,6 +1743,11 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	if (speed_hz <= 0.0f || cycles <= 0.0f) {
 		shell_error(sh, "mech_hz and cycles must be positive");
 		return -EINVAL;
+	}
+	if (speed_hz > MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ) {
+		shell_error(sh, "detent capture speed is limited to %.3f Hz",
+			    (double)MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ);
+		return -ERANGE;
 	}
 	float32_t max_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
 	if (speed_hz > max_hz) {
@@ -1707,9 +1782,16 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	bool saved_detent_enable = g_motor_params->detent_map_cfg.enabled;
 	bool saved_dob_enable = g_motor_params->velocity_dob_cfg.enabled;
 	uint8_t saved_outer_loop = g_motor_params->outer_loop_mode;
+	struct motor_commission_velocity_gain_restore velocity_restore = {0};
 
 	motor_commission_detent_clear_staged();
 	motor_commission_detent_capture_reset(kt, decimation);
+	int ret = motor_commission_apply_detent_velocity_gains(speed_hz, &velocity_restore);
+	if (ret != 0) {
+		motor_commission_restore_velocity_gains(&velocity_restore);
+		shell_error(sh, "Failed to apply detent velocity gains (err %d)", ret);
+		return ret;
+	}
 
 	g_motor_params->detent_map_cfg.enabled = false;
 	g_motor_params->velocity_dob_cfg.enabled = false;
@@ -1718,7 +1800,7 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	motor_dob_reset(&g_motor_params->velocity_dob_state,
 			g_motor_params->live.velocity_rad_s);
 
-	int ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		goto restore_runtime;
 	}
@@ -1729,8 +1811,11 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh,
-		    "Detent capture: speed=%.3f Hz cycles=%.2f decimation=%u settle=%u ms",
-		    (double)speed_hz, (double)cycles, decimation, settle_ms);
+		    "Detent capture: speed=%.3f Hz cycles=%.2f decimation=%u settle=%u ms safe_vel(kp=%.5f ki=%.5f iq=%.3f)",
+		    (double)speed_hz, (double)cycles, decimation, settle_ms,
+		    (double)g_motor_params->velocity_cl_kp_A_per_rad_s,
+		    (double)g_motor_params->velocity_cl_ki_A_per_rad,
+		    (double)g_motor_params->velocity_cl_iq_limit_A);
 
 	ret = motor_commission_detent_collect_pass(speed_hz, settle_ms, collect_ms);
 	if (ret == 0) {
@@ -1755,6 +1840,7 @@ restore_runtime:
 	g_motor_params->detent_map_cfg.enabled = saved_detent_enable;
 	g_motor_params->velocity_dob_cfg.enabled = saved_dob_enable;
 	g_motor_params->outer_loop_mode = saved_outer_loop;
+	motor_commission_restore_velocity_gains(&velocity_restore);
 	motor_detent_map_reset(&g_motor_params->detent_map_state);
 	motor_dob_reset(&g_motor_params->velocity_dob_state,
 			g_motor_params->live.velocity_rad_s);
@@ -2066,27 +2152,99 @@ stop_velocity:
 	return ret;
 }
 
+static void motor_commission_auto_print_usage(const struct shell *sh)
+{
+	shell_error(sh,
+		    "Usage: motor commission auto run [slow|confirm] [apply]");
+}
+
 int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **argv)
 {
 	bool apply_on_success = false;
+	bool execute_motion = false;
+	bool slow_profile = false;
 
-	if (argc == 2) {
-		if (strcmp(argv[1], "apply") == 0 || strcmp(argv[1], "1") == 0 ||
-		    strcmp(argv[1], "true") == 0) {
+	if (argc > 3) {
+		motor_commission_auto_print_usage(sh);
+		return -EINVAL;
+	}
+	for (size_t i = 1U; i < argc; i++) {
+		if (strcmp(argv[i], "slow") == 0) {
+			execute_motion = true;
+			slow_profile = true;
+		} else if (strcmp(argv[i], "confirm") == 0) {
+			execute_motion = true;
+			slow_profile = false;
+		} else if (strcmp(argv[i], "apply") == 0 || strcmp(argv[i], "1") == 0 ||
+			   strcmp(argv[i], "true") == 0) {
 			apply_on_success = true;
 		} else {
-			shell_error(sh, "Usage: motor commission auto run [apply]");
+			motor_commission_auto_print_usage(sh);
 			return -EINVAL;
 		}
-	} else if (argc != 1) {
-		shell_error(sh, "Usage: motor commission auto run [apply]");
-		return -EINVAL;
+	}
+	if (apply_on_success && !execute_motion) {
+		shell_error(sh, "Refusing implicit motion. Use 'run slow apply' or 'run confirm apply'.");
+		return -EACCES;
 	}
 
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
+	float32_t max_velocity_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
+	if (!isfinite(max_velocity_hz) || max_velocity_hz < 0.10f) {
+		max_velocity_hz = MOTOR_MAX_SPEED_HZ;
+	}
+	float32_t flux_cap_hz = slow_profile ?
+					MOTOR_COMMISSION_AUTO_SLOW_FLUX_MAX_HZ :
+					MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MAX_HZ;
+	float32_t flux_min_req_hz = slow_profile ?
+					    MOTOR_COMMISSION_AUTO_SLOW_FLUX_MIN_HZ :
+					    MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MIN_HZ;
+	float32_t mech_cap_hz = slow_profile ?
+					MOTOR_COMMISSION_AUTO_SLOW_MECH_MAX_HZ :
+					MOTOR_COMMISSION_AUTO_NORMAL_MECH_MAX_HZ;
+	float32_t mech_base_req_hz = slow_profile ?
+					     MOTOR_COMMISSION_AUTO_SLOW_MECH_BASE_HZ :
+					     MOTOR_COMMISSION_AUTO_NORMAL_MECH_BASE_HZ;
+	float32_t mech_dither_req_hz = slow_profile ?
+					       MOTOR_COMMISSION_AUTO_SLOW_MECH_DITHER_HZ :
+					       MOTOR_COMMISSION_AUTO_NORMAL_MECH_DITHER_HZ;
+	float32_t planned_flux_max_hz = fminf(max_velocity_hz, flux_cap_hz);
+	float32_t planned_flux_min_hz =
+		fminf(flux_min_req_hz, fmaxf(0.05f, 0.50f * planned_flux_max_hz));
+	float32_t planned_mech_upper_hz = fminf(max_velocity_hz, mech_cap_hz);
+	float32_t planned_mech_base_hz =
+		fminf(mech_base_req_hz, fmaxf(0.05f, 0.75f * planned_mech_upper_hz));
+	float32_t planned_mech_dither_hz =
+		fminf(mech_dither_req_hz,
+		       fmaxf(0.0f, planned_mech_upper_hz - planned_mech_base_hz));
+	float32_t planned_iq_limit_a = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
+					      0.10f, MOTOR_MAX_CURRENT_A);
+
+	if (planned_flux_max_hz < 0.10f || planned_mech_upper_hz < 0.10f) {
+		shell_error(sh, "Profile max velocity is too low for auto commissioning");
+		return -ERANGE;
+	}
+	if (!execute_motion) {
+		shell_print(sh, "Auto commission plan only; no motion started.");
+		shell_print(sh, "  Slow profile:  flux %.3f..%.3f Hz, mech base %.3f Hz dither %.3f Hz",
+			    (double)fminf(MOTOR_COMMISSION_AUTO_SLOW_FLUX_MIN_HZ,
+					  0.50f * MOTOR_COMMISSION_AUTO_SLOW_FLUX_MAX_HZ),
+			    (double)MOTOR_COMMISSION_AUTO_SLOW_FLUX_MAX_HZ,
+			    (double)MOTOR_COMMISSION_AUTO_SLOW_MECH_BASE_HZ,
+			    (double)MOTOR_COMMISSION_AUTO_SLOW_MECH_DITHER_HZ);
+		shell_print(sh, "  Confirm profile: flux %.3f..%.3f Hz, mech base %.3f Hz dither %.3f Hz",
+			    (double)MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MIN_HZ,
+			    (double)MOTOR_COMMISSION_AUTO_NORMAL_FLUX_MAX_HZ,
+			    (double)MOTOR_COMMISSION_AUTO_NORMAL_MECH_BASE_HZ,
+			    (double)MOTOR_COMMISSION_AUTO_NORMAL_MECH_DITHER_HZ);
+		shell_print(sh,
+			    "Run 'motor commission auto run slow' for bounded bring-up, or 'motor commission auto run confirm' for the higher-speed profile.");
+		return 0;
+	}
+
 	struct motor_commission_runtime_ctx commission_ctx;
 	motor_commission_ctx_from_global(&commission_ctx);
 	if (motor_commission_is_active(&commission_ctx)) {
@@ -2111,9 +2269,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	struct motor_commission_flux_config flux_cfg = {0};
 	struct motor_commission_mech_config mech_cfg = {0};
 	struct motor_commission_tune_config tune_cfg = {0};
-	float32_t max_velocity_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
-	float32_t iq_limit_default = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
-					    0.10f, MOTOR_MAX_CURRENT_A);
+	float32_t iq_limit_default = planned_iq_limit_a;
 	float32_t threshold_start_a = clampf(0.10f * MOTOR_MAX_CURRENT_A,
 					     0.02f,
 					     iq_limit_default);
@@ -2143,22 +2299,16 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 				  0.10f,
 				  MOTOR_MAX_CURRENT_A);
 
-	flux_cfg.max_speed_hz = clampf(max_velocity_hz * 0.25f, 3.0f, 20.0f);
-	flux_cfg.min_speed_hz = clampf(flux_cfg.max_speed_hz * 0.25f,
-				       1.0f,
-				       flux_cfg.max_speed_hz - 0.5f);
-	flux_cfg.steps = 6U;
-	flux_cfg.settle_ms = 250U;
-	flux_cfg.sample_ms = 250U;
+	flux_cfg.max_speed_hz = planned_flux_max_hz;
+	flux_cfg.min_speed_hz = planned_flux_min_hz;
+	flux_cfg.steps = slow_profile ? 4U : 5U;
+	flux_cfg.settle_ms = slow_profile ? 500U : 400U;
+	flux_cfg.sample_ms = slow_profile ? 500U : 400U;
 	flux_cfg.iq_limit_a = iq_limit_default;
 
-	float32_t mech_speed_upper_hz = clampf(max_velocity_hz * 0.70f, 4.0f, 20.0f);
-	mech_cfg.base_speed_hz = clampf(max_velocity_hz * 0.45f, 3.0f,
-					0.75f * mech_speed_upper_hz);
-	mech_cfg.dither_speed_hz = clampf(0.30f * mech_cfg.base_speed_hz,
-					  0.5f,
-					  fmaxf(0.5f,
-						 mech_speed_upper_hz - mech_cfg.base_speed_hz));
+	float32_t mech_speed_upper_hz = planned_mech_upper_hz;
+	mech_cfg.base_speed_hz = planned_mech_base_hz;
+	mech_cfg.dither_speed_hz = planned_mech_dither_hz;
 
 	float32_t max_accel_hz_s =
 		fmaxf(g_motor_params->profile_max_accel_rad_s2 / (2.0f * PI_F32), 1.0f);
@@ -2170,7 +2320,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		(uint32_t)ceilf(half_cycle_ms /
 				(float32_t)ARRAY_SIZE(motor_commission_mech_step_pattern));
 	mech_cfg.dither_period_ms =
-		MAX(mech_cfg.dither_period_ms, 250U);
+		MAX(mech_cfg.dither_period_ms, slow_profile ? 1000U : 500U);
 	mech_cfg.duration_ms = MOTOR_COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE *
 			       2U * ARRAY_SIZE(motor_commission_mech_step_pattern) *
 			       mech_cfg.dither_period_ms;
@@ -2186,7 +2336,8 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	tune_cfg.iq_limit_a = flux_cfg.iq_limit_a;
 	g_motor_params->commission.auto_tune_cfg = tune_cfg;
 
-	shell_print(sh, "Auto commission start:");
+	shell_print(sh, "Auto commission start (%s profile):",
+		    slow_profile ? "slow" : "confirmed");
 	shell_print(sh, "  Motion threshold: pos=%.3f A neg=%.3f A rec=%.3f A",
 		    (double)g_motor_params->commission.results.iq_move_min_pos_a,
 		    (double)g_motor_params->commission.results.iq_move_min_neg_a,

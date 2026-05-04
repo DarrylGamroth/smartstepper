@@ -218,7 +218,12 @@ motor commission auto status
 motor commission auto apply
 ```
 
-The existing `motor commission auto run [apply]` should become the high-level wrapper, but it should internally run the threshold step before choosing flux/mech excitation currents.
+The existing `motor commission auto run` is the high-level wrapper. It is
+plan-only by default and must not move the motor without an explicit profile:
+`motor commission auto run slow [apply]` for bounded bring-up, or
+`motor commission auto run confirm [apply]` for the higher-speed profile. The
+wrapper internally runs the threshold step before choosing flux/mech excitation
+currents.
 
 ## Phase 6: HIL Validation
 
@@ -272,3 +277,8 @@ Validation after applying gains:
 - 2026-05-04: Increased automatic mechanical identification speed coverage from the earlier conservative `8 Hz` cap to a profile-derived speed span. On the AEAT `50 Hz` profile this initially produced `base=15.000 Hz`, `dither=4.500 Hz`, and step targets of approximately `10.5, 15.0, 19.5, 12.75 Hz` in each direction. HIL passed with `warn=0`, `err=0`, validation residual `0.000580 Nm`, and final aggregate `psi_f=0.00144095 Wb`, `J=0.00000135 kgm2`, `B=0.00001566 Nm/(rad/s)`, `Tc=0.00182773 Nm`, confidence `0.69`.
 - 2026-05-04: Updated automatic mechanical step dwell to account for the configured velocity acceleration limit. The earlier `250 ms` dwell was too short for a `10 Hz/s` ramp to reverse between roughly `+20 Hz` and `-20 Hz`, causing visibly longer forward motion than reverse motion. The automatic flow now derives dwell from acceleration with a margin and runs one full symmetric forward/reverse cycle per capture.
 - 2026-05-04: Added duration-aware commissioning capture decimation so longer symmetric mechanical captures do not overflow the fixed 512-sample buffer. HIL with `base=15.000 Hz`, `dither=4.500 Hz`, `dither_period=1250 ms`, and `duration=10000 ms` passed: `stored=479/512`, decimation `417`, `warn=0`, `err=0`, validation residual `0.000452 Nm`, and final aggregate `psi_f=0.00140529 Wb`, `J=0.00000236 kgm2`, `B=0.00000317 Nm/(rad/s)`, `Tc=0.00207911 Nm`, confidence `0.75`.
+- 2026-05-04: After HIL showed the profile-derived `15 Hz` mechanical
+  excitation was too aggressive for bring-up, changed `motor commission auto
+  run` to be plan-only by default. Added explicit `slow` and `confirm` motion
+  profiles, with hard caps of `0.75 Hz` flux / `0.5 Hz` mechanical-base for
+  slow bring-up and `3 Hz` flux / `1.5 Hz` mechanical-base for confirmed runs.

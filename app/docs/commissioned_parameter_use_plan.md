@@ -33,9 +33,14 @@ motor state calibrate
 motor safety timeout 0
 motor arm
 motor commission auto run
+motor commission auto run slow
 motor commission auto validate
 motor safety timeout 1000
 ```
+
+`motor commission auto run` is plan-only and does not move the motor. Use
+`motor commission auto run slow` for bounded bring-up. The higher-speed profile
+requires the explicit command `motor commission auto run confirm`.
 
 Optional validation arguments:
 
@@ -56,4 +61,3 @@ motor commission auto validate 5 2000
 - Measured velocity has the expected sign for each command.
 - Current remains within the staged velocity current limit.
 - Motion sounds smooth enough to proceed to longer velocity-loop testing.
-

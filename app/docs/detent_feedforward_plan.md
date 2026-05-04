@@ -115,6 +115,9 @@ The `run` command temporarily disables detent feedforward and DOB, forces the
 PI velocity path, enters `velocity_encoder`, and stages a table without changing
 the active runtime table. Capture accumulation runs in the ISR at control-loop
 rate; optional `decimation` reduces ISR capture load and defaults to `1`.
+The command applies a temporary conservative velocity PI preset for capture and
+restores the previous velocity gains afterward, so it does not depend on the
+full auto-commission workflow. Detent capture speed is hard-limited to `1 Hz`.
 `apply 1` copies the staged table into runtime and enables it.
 
 ## Phase 5: Validation
