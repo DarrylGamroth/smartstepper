@@ -35,6 +35,13 @@
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_MOTION_MIN_SAMPLES 4U
 #define MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS 80U
+#define MOTOR_COMMISSION_AUTO_MECH_RUNS 3U
+#define MOTOR_COMMISSION_AUTO_MECH_MAX_ATTEMPTS 5U
+#define MOTOR_COMMISSION_AUTO_MECH_VALIDATE_RMS_NM 0.005f
+
+static const float32_t motor_commission_mech_step_pattern[] = {
+	-1.0f, 0.0f, 1.0f, -0.5f,
+};
 
 static struct motor_encoder_map_detect_sample encoder_detect_samples[
 	MOTOR_COMMISSION_ENCODER_MAX_SAMPLES];
@@ -514,14 +521,6 @@ static int motor_commission_run_motion_threshold(
 	return 0;
 }
 
-static uint32_t motor_commission_prbs_next(uint32_t state)
-{
-	state ^= (state << 13);
-	state ^= (state >> 17);
-	state ^= (state << 5);
-	return state;
-}
-
 static inline void motor_commission_ctx_from_global(struct motor_commission_runtime_ctx *ctx)
 {
 	motor_commission_runtime_ctx_init(ctx, g_motor_params);
@@ -600,7 +599,8 @@ static int motor_commission_auto_run_flux(const struct shell *sh,
 }
 
 static int motor_commission_auto_run_mech(const struct shell *sh,
-					  const struct motor_commission_mech_config *cfg)
+					  const struct motor_commission_mech_config *cfg,
+					  bool require_fit)
 {
 	int ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
@@ -621,21 +621,25 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 		return ret;
 	}
 
-	uint32_t prbs_state = 0x5A5AA5A5u;
-	uint32_t next_tick_ms = k_uptime_get_32();
-	uint32_t run_start_ms = next_tick_ms;
+	const uint32_t pattern_len = ARRAY_SIZE(motor_commission_mech_step_pattern);
+	const uint32_t one_direction_steps = pattern_len;
+	const uint32_t full_cycle_steps = 2U * one_direction_steps;
+	uint32_t run_start_ms = k_uptime_get_32();
+	uint32_t last_step = UINT32_MAX;
 	while (g_motor_params->commission.active) {
 		uint32_t now_ms = k_uptime_get_32();
-		if ((int32_t)(now_ms - next_tick_ms) >= 0) {
-			prbs_state = motor_commission_prbs_next(prbs_state);
-			uint32_t elapsed_ms = now_ms - run_start_ms;
-			float32_t direction =
-				(elapsed_ms < (cfg->duration_ms / 2U)) ? 1.0f : -1.0f;
-			float32_t dither = (prbs_state & 1U) ? cfg->dither_speed_hz :
-							       -cfg->dither_speed_hz;
+		uint32_t elapsed_ms = now_ms - run_start_ms;
+		uint32_t step = elapsed_ms / cfg->dither_period_ms;
+		if (step != last_step) {
+			uint32_t cycle_step = step % full_cycle_steps;
+			float32_t direction = (cycle_step < one_direction_steps) ? 1.0f : -1.0f;
+			uint32_t pattern_index = cycle_step % pattern_len;
+			float32_t dither =
+				motor_commission_mech_step_pattern[pattern_index] *
+				cfg->dither_speed_hz;
 			float32_t target_hz = direction * (cfg->base_speed_hz + dither);
 			motor_commission_set_velocity_target_hz(target_hz);
-			next_tick_ms += cfg->dither_period_ms;
+			last_step = step;
 		}
 
 		if (g_motor_params->commission.stage == MOTOR_COMMISSION_STAGE_ABORTED) {
@@ -663,12 +667,158 @@ stop_current:
 	if (ret != 0) {
 		return ret;
 	}
-	if (!g_motor_params->commission.results.mech_valid) {
+	if (require_fit && !g_motor_params->commission.results.mech_valid) {
 		return -ERANGE;
 	}
 
 	shell_print(sh, "  Mech excitation complete");
 	return 0;
+}
+
+struct motor_commission_mech_aggregate {
+	uint8_t count;
+	uint32_t sample_count;
+	float32_t sum_j;
+	float32_t sum_j2;
+	float32_t sum_b;
+	float32_t sum_b2;
+	float32_t sum_tc;
+	float32_t sum_tc2;
+	float32_t sum_t0;
+	float32_t sum_rms;
+	float32_t sum_r2;
+	float32_t min_r2;
+	float32_t max_rms;
+};
+
+static float32_t motor_commission_stddev(uint8_t count, float32_t sum, float32_t sum2)
+{
+	if (count < 2U) {
+		return 0.0f;
+	}
+
+	float32_t n = (float32_t)count;
+	float32_t mean = sum / n;
+	float32_t variance = (sum2 / n) - (mean * mean);
+	return sqrtf(MAX(variance, 0.0f));
+}
+
+static void motor_commission_mech_aggregate_add(
+	struct motor_commission_mech_aggregate *agg,
+	const struct motor_commission_results *res)
+{
+	if (agg == NULL || res == NULL || !res->mech_valid) {
+		return;
+	}
+
+	if (agg->count == 0U) {
+		agg->min_r2 = res->mech_r2;
+		agg->max_rms = res->mech_residual_rms_nm;
+	} else {
+		agg->min_r2 = MIN(agg->min_r2, res->mech_r2);
+		agg->max_rms = MAX(agg->max_rms, res->mech_residual_rms_nm);
+	}
+
+	agg->count++;
+	agg->sample_count += res->mech_sample_count;
+	agg->sum_j += res->inertia_kgm2;
+	agg->sum_j2 += res->inertia_kgm2 * res->inertia_kgm2;
+	agg->sum_b += res->viscous_friction_nm_per_rad_s;
+	agg->sum_b2 += res->viscous_friction_nm_per_rad_s *
+		       res->viscous_friction_nm_per_rad_s;
+	agg->sum_tc += res->coulomb_friction_nm;
+	agg->sum_tc2 += res->coulomb_friction_nm * res->coulomb_friction_nm;
+	agg->sum_t0 += res->offset_friction_nm;
+	agg->sum_rms += res->mech_residual_rms_nm;
+	agg->sum_r2 += res->mech_r2;
+}
+
+static int motor_commission_mech_aggregate_finalize(
+	const struct motor_commission_mech_aggregate *agg,
+	struct motor_commission_results *res)
+{
+	if (agg == NULL || res == NULL || agg->count == 0U) {
+		return -ENODATA;
+	}
+
+	float32_t n = (float32_t)agg->count;
+	res->mech_capture_count = agg->count;
+	res->inertia_kgm2 = agg->sum_j / n;
+	res->viscous_friction_nm_per_rad_s = agg->sum_b / n;
+	res->coulomb_friction_nm = agg->sum_tc / n;
+	res->offset_friction_nm = agg->sum_t0 / n;
+	res->mech_residual_rms_nm = agg->sum_rms / n;
+	res->mech_r2 = agg->sum_r2 / n;
+	res->mech_sample_count = (uint16_t)MIN(agg->sample_count / agg->count, UINT16_MAX);
+	res->inertia_stddev_kgm2 =
+		motor_commission_stddev(agg->count, agg->sum_j, agg->sum_j2);
+	res->viscous_friction_stddev_nm_per_rad_s =
+		motor_commission_stddev(agg->count, agg->sum_b, agg->sum_b2);
+	res->coulomb_friction_stddev_nm =
+		motor_commission_stddev(agg->count, agg->sum_tc, agg->sum_tc2);
+
+	float32_t j_cv = res->inertia_stddev_kgm2 / MAX(fabsf(res->inertia_kgm2), 1.0e-9f);
+	float32_t b_cv = res->viscous_friction_stddev_nm_per_rad_s /
+			 MAX(fabsf(res->viscous_friction_nm_per_rad_s), 1.0e-9f);
+	float32_t tc_cv = res->coulomb_friction_stddev_nm /
+			  MAX(fabsf(res->coulomb_friction_nm), 1.0e-9f);
+	float32_t spread_penalty = clampf((0.50f * j_cv) + (0.25f * b_cv) +
+					  (0.25f * tc_cv),
+					  0.0f, 0.75f);
+	res->mech_confidence = clampf(res->mech_r2, 0.0f, 1.0f) * (1.0f - spread_penalty);
+	res->mech_valid = isfinite(res->inertia_kgm2) && res->inertia_kgm2 > 0.0f &&
+			  isfinite(res->viscous_friction_nm_per_rad_s) &&
+			  res->viscous_friction_nm_per_rad_s >= 0.0f &&
+			  isfinite(res->coulomb_friction_nm) &&
+			  res->coulomb_friction_nm >= 0.0f &&
+			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f;
+	return res->mech_valid ? 0 : -ERANGE;
+}
+
+static int motor_commission_mech_validate_fit(
+	const struct motor_commission_results *fit,
+	float32_t *rms_nm,
+	uint16_t *sample_count)
+{
+	if (fit == NULL || rms_nm == NULL || sample_count == NULL ||
+	    !fit->psi_f_valid || !fit->mech_valid) {
+		return -EINVAL;
+	}
+
+	float32_t kt = motor_torque_gain_from_flux_pole_pairs(fit->psi_f_wb,
+							      MOTOR_POLE_PAIRS);
+	if (!isfinite(kt) || kt <= 0.0f) {
+		return -EINVAL;
+	}
+
+	float32_t sum_sq = 0.0f;
+	uint32_t count = 0U;
+	for (uint32_t i = 0U; i < g_motor_params->commission.sample_count; i++) {
+		const struct motor_commission_sample *s = &g_motor_params->commission.samples[i];
+		if (!isfinite(s->mech_speed_rad_s) || !isfinite(s->mech_accel_rad_s2) ||
+		    !isfinite(s->iq_a) || fabsf(s->mech_speed_rad_s) < 0.5f) {
+			continue;
+		}
+
+		float32_t sign_term = (s->mech_speed_rad_s >= 0.0f) ? 1.0f : -1.0f;
+		float32_t predicted_nm =
+			(fit->inertia_kgm2 * s->mech_accel_rad_s2) +
+			(fit->viscous_friction_nm_per_rad_s * s->mech_speed_rad_s) +
+			(fit->coulomb_friction_nm * sign_term) +
+			fit->offset_friction_nm;
+		float32_t measured_nm = kt * s->iq_a;
+		float32_t err = measured_nm - predicted_nm;
+		sum_sq += err * err;
+		count++;
+	}
+
+	if (count < 32U) {
+		return -ENODATA;
+	}
+
+	*rms_nm = sqrtf(sum_sq / (float32_t)count);
+	*sample_count = (uint16_t)MIN(count, UINT16_MAX);
+	return isfinite(*rms_nm) ? 0 : -ERANGE;
 }
 
 int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv)
@@ -739,6 +889,16 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)ctx->results.mech_residual_rms_nm,
 		    (double)ctx->results.mech_r2,
 		    ctx->results.mech_sample_count);
+	shell_print(sh, "  Mech repeat:    runs=%u conf=%.2f Jstd=%.8f Bstd=%.8f Tcstd=%.8f",
+		    ctx->results.mech_capture_count,
+		    (double)ctx->results.mech_confidence,
+		    (double)ctx->results.inertia_stddev_kgm2,
+		    (double)ctx->results.viscous_friction_stddev_nm_per_rad_s,
+		    (double)ctx->results.coulomb_friction_stddev_nm);
+	shell_print(sh, "  Mech validate:  %s rms=%.6f Nm -> %s",
+		    ctx->results.mech_validation_valid ? "YES" : "NO",
+		    (double)ctx->results.mech_validation_residual_rms_nm,
+		    ctx->results.mech_validation_pass ? "PASS" : "FAIL");
 	shell_print(sh, "  Mapping:        valid=%s pass=%s confidence=%.2f",
 		    ctx->results.mapping_valid ? "YES" : "NO",
 		    ctx->results.mapping_pass ? "YES" : "NO",
@@ -1431,8 +1591,10 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	mech_cfg.dither_speed_hz = clampf(0.25f * mech_cfg.base_speed_hz,
 					  0.5f,
 					  0.50f * mech_cfg.base_speed_hz);
-	mech_cfg.dither_period_ms = 300U;
-	mech_cfg.duration_ms = 5000U;
+	mech_cfg.dither_period_ms = 250U;
+	mech_cfg.duration_ms = MOTOR_COMMISSION_AUTO_MECH_RUNS *
+			       2U * ARRAY_SIZE(motor_commission_mech_step_pattern) *
+			       mech_cfg.dither_period_ms;
 
 	(void)motor_commission_tune_config_default(&tune_cfg,
 						   (float32_t)MOTOR_POLE_PAIRS,
@@ -1488,27 +1650,112 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 				    "FAIL");
 	}
 
-	ret = motor_commission_auto_run_mech(sh, &mech_cfg);
-	if (ret != 0) {
-		g_motor_params->Id_setpoint_A = 0.0f;
-		g_motor_params->Iq_setpoint_A = 0.0f;
-		if (g_motor_params->commission.active) {
-			struct motor_commission_runtime_ctx commission_ctx;
-			motor_commission_ctx_from_global(&commission_ctx);
-			motor_commission_abort(&commission_ctx, "auto mech failed");
+	struct motor_commission_mech_aggregate mech_agg = {0};
+	for (uint32_t attempt = 0U;
+	     attempt < MOTOR_COMMISSION_AUTO_MECH_MAX_ATTEMPTS &&
+	     mech_agg.count < MOTOR_COMMISSION_AUTO_MECH_RUNS;
+	     attempt++) {
+		ret = motor_commission_auto_run_mech(sh, &mech_cfg, true);
+		if (ret != 0) {
+			if (ret == -ERANGE) {
+				shell_print(sh,
+					    "  Mech attempt %u/%u rejected by fit quality",
+					    (unsigned int)(attempt + 1U),
+					    (unsigned int)MOTOR_COMMISSION_AUTO_MECH_MAX_ATTEMPTS);
+				continue;
+			}
+
+			g_motor_params->Id_setpoint_A = 0.0f;
+			g_motor_params->Iq_setpoint_A = 0.0f;
+			if (g_motor_params->commission.active) {
+				struct motor_commission_runtime_ctx commission_ctx;
+				motor_commission_ctx_from_global(&commission_ctx);
+				motor_commission_abort(&commission_ctx, "auto mech failed");
+			}
+			g_motor_params->commission.auto_tune_last_error = ret;
+			shell_error(sh, "Auto commission failed during mechanical stage (err %d)",
+				    ret);
+			return ret;
 		}
+
+		const struct motor_commission_results *mech_res =
+			&g_motor_params->commission.results;
+		motor_commission_mech_aggregate_add(&mech_agg, mech_res);
+		shell_print(sh,
+			    "  Mech run %u/%u attempt %u: J=%.8f B=%.8f Tc=%.8f R2=%.4f rms=%.5f N=%u",
+			    (unsigned int)mech_agg.count,
+			    (unsigned int)MOTOR_COMMISSION_AUTO_MECH_RUNS,
+			    (unsigned int)(attempt + 1U),
+			    (double)mech_res->inertia_kgm2,
+			    (double)mech_res->viscous_friction_nm_per_rad_s,
+			    (double)mech_res->coulomb_friction_nm,
+			    (double)mech_res->mech_r2,
+			    (double)mech_res->mech_residual_rms_nm,
+			    mech_res->mech_sample_count);
+	}
+
+	if (mech_agg.count < MOTOR_COMMISSION_AUTO_MECH_RUNS) {
+		g_motor_params->commission.auto_tune_last_error = -ERANGE;
+		shell_error(sh, "Auto commission only accepted %u/%u mechanical runs",
+			    mech_agg.count,
+			    MOTOR_COMMISSION_AUTO_MECH_RUNS);
+		return -ERANGE;
+	}
+
+	ret = motor_commission_mech_aggregate_finalize(&mech_agg,
+						       &g_motor_params->commission.results);
+	if (ret != 0 || !g_motor_params->commission.results.mech_valid) {
+		g_motor_params->commission.auto_tune_last_error = (ret != 0) ? ret : -ERANGE;
+		shell_error(sh, "Auto commission failed to aggregate mechanical runs (err %d)",
+			    g_motor_params->commission.auto_tune_last_error);
+		return g_motor_params->commission.auto_tune_last_error;
+	}
+
+	struct motor_commission_results aggregate_results = g_motor_params->commission.results;
+	ret = motor_commission_auto_run_mech(sh, &mech_cfg, false);
+	if (ret != 0) {
+		g_motor_params->commission.results = aggregate_results;
 		g_motor_params->commission.auto_tune_last_error = ret;
-		shell_error(sh, "Auto commission failed during mechanical stage (err %d)", ret);
+		shell_error(sh, "Auto commission failed during mechanical validation (err %d)",
+			    ret);
 		return ret;
 	}
 
-	shell_print(sh, "  Mech result: J=%.8f B=%.8f Tc=%.8f R2=%.4f rms=%.5f N=%u",
+	float32_t validation_rms_nm = 0.0f;
+	uint16_t validation_samples = 0U;
+	ret = motor_commission_mech_validate_fit(&aggregate_results,
+						 &validation_rms_nm,
+						 &validation_samples);
+	aggregate_results.mech_validation_valid = (ret == 0);
+	aggregate_results.mech_validation_residual_rms_nm =
+		(ret == 0) ? validation_rms_nm : 0.0f;
+	aggregate_results.mech_validation_pass =
+		(ret == 0) &&
+		(validation_rms_nm <= MOTOR_COMMISSION_AUTO_MECH_VALIDATE_RMS_NM);
+	g_motor_params->commission.results = aggregate_results;
+	if (!g_motor_params->commission.results.mech_validation_pass) {
+		g_motor_params->commission.auto_tune_last_error = (ret != 0) ? ret : -ERANGE;
+		shell_error(sh,
+			    "Auto commission mechanical validation failed (err %d rms=%.6f Nm N=%u)",
+			    g_motor_params->commission.auto_tune_last_error,
+			    (double)validation_rms_nm,
+			    validation_samples);
+		return g_motor_params->commission.auto_tune_last_error;
+	}
+
+	shell_print(sh, "  Mech aggregate: runs=%u J=%.8f+/-%.8f B=%.8f+/-%.8f Tc=%.8f+/-%.8f R2=%.4f conf=%.2f",
+		    g_motor_params->commission.results.mech_capture_count,
 		    (double)g_motor_params->commission.results.inertia_kgm2,
+		    (double)g_motor_params->commission.results.inertia_stddev_kgm2,
 		    (double)g_motor_params->commission.results.viscous_friction_nm_per_rad_s,
+		    (double)g_motor_params->commission.results.viscous_friction_stddev_nm_per_rad_s,
 		    (double)g_motor_params->commission.results.coulomb_friction_nm,
+		    (double)g_motor_params->commission.results.coulomb_friction_stddev_nm,
 		    (double)g_motor_params->commission.results.mech_r2,
-		    (double)g_motor_params->commission.results.mech_residual_rms_nm,
-		    g_motor_params->commission.results.mech_sample_count);
+		    (double)g_motor_params->commission.results.mech_confidence);
+	shell_print(sh, "  Mech validation: rms=%.6f Nm N=%u -> PASS",
+		    (double)g_motor_params->commission.results.mech_validation_residual_rms_nm,
+		    validation_samples);
 	if (g_motor_params->commission.results.mapping_direction_valid) {
 		shell_print(sh, "  Mech mapping: direction=%s corr=%.4f",
 			    g_motor_params->commission.results.mapping_direction_pass ?

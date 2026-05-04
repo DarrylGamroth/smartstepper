@@ -84,7 +84,13 @@ struct motor_commission_results {
 	float32_t offset_friction_nm;
 	float32_t mech_residual_rms_nm;
 	float32_t mech_r2;
+	float32_t inertia_stddev_kgm2;
+	float32_t viscous_friction_stddev_nm_per_rad_s;
+	float32_t coulomb_friction_stddev_nm;
+	float32_t mech_validation_residual_rms_nm;
+	float32_t mech_confidence;
 	uint16_t mech_sample_count;
+	uint8_t mech_capture_count;
 	float32_t mapping_direction_corr;
 	float32_t mapping_offset_ratio;
 	float32_t mapping_pole_pairs_est;
@@ -99,6 +105,8 @@ struct motor_commission_results {
 	bool iq_move_valid;
 	bool psi_f_valid;
 	bool mech_valid;
+	bool mech_validation_valid;
+	bool mech_validation_pass;
 	bool mapping_direction_valid;
 	bool mapping_direction_pass;
 	bool mapping_offset_valid;

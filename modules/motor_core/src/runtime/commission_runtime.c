@@ -316,6 +316,14 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	res->offset_friction_nm = 0.0f;
 	res->mech_residual_rms_nm = 0.0f;
 	res->mech_r2 = 0.0f;
+	res->inertia_stddev_kgm2 = 0.0f;
+	res->viscous_friction_stddev_nm_per_rad_s = 0.0f;
+	res->coulomb_friction_stddev_nm = 0.0f;
+	res->mech_validation_residual_rms_nm = 0.0f;
+	res->mech_confidence = 0.0f;
+	res->mech_capture_count = 0U;
+	res->mech_validation_valid = false;
+	res->mech_validation_pass = false;
 
 	if (!isfinite(kt) || fabsf(kt) < MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
 		return;
@@ -450,7 +458,13 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.offset_friction_nm = 0.0f;
 	commission->results.mech_residual_rms_nm = 0.0f;
 	commission->results.mech_r2 = 0.0f;
+	commission->results.inertia_stddev_kgm2 = 0.0f;
+	commission->results.viscous_friction_stddev_nm_per_rad_s = 0.0f;
+	commission->results.coulomb_friction_stddev_nm = 0.0f;
+	commission->results.mech_validation_residual_rms_nm = 0.0f;
+	commission->results.mech_confidence = 0.0f;
 	commission->results.mech_sample_count = 0U;
+	commission->results.mech_capture_count = 0U;
 	commission->results.mapping_direction_corr = 0.0f;
 	commission->results.mapping_offset_ratio = 0.0f;
 	commission->results.mapping_pole_pairs_est = 0.0f;
@@ -465,6 +479,8 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.iq_move_valid = false;
 	commission->results.psi_f_valid = false;
 	commission->results.mech_valid = false;
+	commission->results.mech_validation_valid = false;
+	commission->results.mech_validation_pass = false;
 	commission->results.mapping_direction_valid = false;
 	commission->results.mapping_direction_pass = false;
 	commission->results.mapping_offset_valid = false;
@@ -614,6 +630,14 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	ctx->commission->results.offset_friction_nm = 0.0f;
 	ctx->commission->results.mech_residual_rms_nm = 0.0f;
 	ctx->commission->results.mech_r2 = 0.0f;
+	ctx->commission->results.inertia_stddev_kgm2 = 0.0f;
+	ctx->commission->results.viscous_friction_stddev_nm_per_rad_s = 0.0f;
+	ctx->commission->results.coulomb_friction_stddev_nm = 0.0f;
+	ctx->commission->results.mech_validation_residual_rms_nm = 0.0f;
+	ctx->commission->results.mech_confidence = 0.0f;
+	ctx->commission->results.mech_capture_count = 0U;
+	ctx->commission->results.mech_validation_valid = false;
+	ctx->commission->results.mech_validation_pass = false;
 	ctx->commission->results.mapping_direction_valid = false;
 	ctx->commission->results.mapping_direction_pass = false;
 	ctx->commission->results.mapping_direction_corr = 0.0f;

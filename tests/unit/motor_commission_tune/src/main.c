@@ -117,7 +117,7 @@ ZTEST(motor_commission_tune, test_accepts_and_produces_positive_gains)
 	zassert_true(out.velocity_ki_a_per_rad > 0.0f, NULL);
 	zassert_true(out.position_kp_rad_s_per_rad > 0.0f, NULL);
 	zassert_true(out.position_ki_rad_s2_per_rad > 0.0f, NULL);
-	zassert_true(out.velocity_dob_enable, NULL);
+	zassert_false(out.velocity_dob_enable, NULL);
 	zassert_true(out.velocity_dob_torque_limit_nm > 0.0f, NULL);
 }
 

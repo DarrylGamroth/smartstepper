@@ -130,9 +130,9 @@ Acceptance:
 
 Goal: estimate `J`, `B`, and `Tc`.
 
-Use `velocity_encoder` mode with conservative speed dithering. The velocity loop provides the excitation current while the commissioning capture records the actual measured `Iq`, encoder velocity, and encoder acceleration.
+Use `velocity_encoder` mode with conservative deterministic speed steps. The velocity loop provides the excitation current while the commissioning capture records the actual measured `Iq`, encoder velocity, and encoder acceleration.
 
-Earlier direct-current PRBS excitation was rejected for this hardware because it produced harsh direction chatter and poor acceleration correlation. The velocity-loop method is smoother, keeps excitation bounded by the existing controller limits, and produced a valid fit on the AEAT hardware.
+Earlier direct-current PRBS excitation was rejected for this hardware because it produced harsh direction chatter and poor acceleration correlation. The velocity-loop method is smoother, keeps excitation bounded by the existing controller limits, and produced a valid fit on the AEAT hardware. Deterministic steps are preferred over PRBS for this low-order model because the fit needs clean positive/negative speed and acceleration coverage, not broadband response data.
 
 Model:
 
@@ -143,10 +143,11 @@ Kt * Iq = J * alpha + B * omega + Tc * sign(omega) + T0
 Procedure:
 
 1. Enter `velocity_encoder` mode.
-2. Command a positive base speed with a small dither, then repeat with negative base speed.
-3. Capture actual `Iq`, encoder velocity, and encoder acceleration.
-4. Fit the linear model with normal equations.
-5. Reject samples near zero speed unless explicitly measuring Coulomb friction.
+2. Command a fixed stepped sequence around a base speed, then repeat with negative base speed.
+3. Repeat the full sequence several times and fit each capture independently.
+4. Average accepted `J`, `B`, and `Tc` estimates and report standard deviation/confidence.
+5. Run a separate validation capture and compare predicted torque against measured `Kt * Iq`.
+6. Reject samples near zero speed unless explicitly measuring Coulomb friction.
 
 Outputs:
 
@@ -195,7 +196,7 @@ Ki = omega_position^2
 Rules:
 
 - Stage values first.
-- Do not auto-enable DOB by default.
+- Do not auto-enable DOB by default. Stage DOB limits for later manual enable/validation.
 - Do not auto-enable MPR by default.
 - Apply only after explicit operator command.
 - Record tune source and fit quality with the staged values.
@@ -266,3 +267,5 @@ Validation after applying gains:
 - 2026-05-04: `motor commission auto run` now runs the motion threshold sweep first and uses the recommended moving current to choose flux/mechanical excitation currents.
 - 2026-05-04: Confirmed the mechanical estimator review fixes are already present: residual RMS uses `n - 4`, `sst` is clamped non-negative, and the SSE path documents use of the unmodified accumulated regressor.
 - 2026-05-04: Changed automatic mechanical identification to velocity-loop excitation (`velocity_encoder`) instead of direct-current PRBS. HIL on AEAT hardware passed: `psi_f=0.00145029 Wb`, `J=0.00000163 kgm2`, `B=0.00001863 Nm/(rad/s)`, `Tc=0.00164362 Nm`, mechanical `R2=0.9502`, and auto-tuned defaults were staged.
+- 2026-05-04: Replaced PRBS mechanical dither with deterministic speed steps, added three-run mechanical averaging, added a separate validation capture, added fit spread/confidence reporting, and changed auto-tune to stage DOB disabled by default.
+- 2026-05-04: HIL validation of the multi-run flow passed on AEAT hardware. One mechanical attempt was rejected as an outlier, 3/5 allowed attempts were accepted, validation residual was `0.000565 Nm`, and final aggregate was `psi_f=0.00145023 Wb`, `J=0.00000141 kgm2`, `B=0.00001643 Nm/(rad/s)`, `Tc=0.00178841 Nm`, confidence `0.65`.

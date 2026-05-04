@@ -220,7 +220,8 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 		clampf(cfg->profile_max_accel_rad_s2 * cfg->dt_s,
 		       0.001f, cfg->profile_max_velocity_rad_s);
 
-	out->velocity_dob_enable = true;
+	/* Stage DOB limits from the fit, but leave DOB disabled until the PI loops are validated. */
+	out->velocity_dob_enable = false;
 	out->velocity_dob_observer_gain_nm_per_rad_s =
 		clampf(0.01f + (0.001f * velocity_bw_hz), 0.01f, 0.05f);
 	out->velocity_dob_iq_ff_limit_a = clampf(iq_limit * 0.40f, 0.05f, iq_limit);
