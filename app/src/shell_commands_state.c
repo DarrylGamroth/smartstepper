@@ -650,7 +650,7 @@ int cmd_motor_state_calibrate(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argv);
 	
 	if (motor_api_request_calibrate() == 0) {
-		shell_print(sh, "Boot calibration sequence started");
+		shell_print(sh, "Boot current-offset calibration started");
 		return 0;
 	} else {
 		shell_error(sh, "Failed to start calibration");
@@ -1136,7 +1136,7 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Obs off raw:    %.6f rad bits=0x%08X",
 		    (double)obs_offset_rad,
 		    motor_shell_f32_bits(obs_offset_rad));
-	shell_print(sh, "  Align offset:   %.3f deg",
+	shell_print(sh, "  Encoder offset: %.3f deg",
 		    motor_shell_rad_to_deg(align_offset_rad));
 	shell_print(sh, "  Enc raw:        %.3f deg (%.6f rad)",
 		    (double)enc_raw_deg,
@@ -1389,7 +1389,7 @@ int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "Encoder electrical trim: %.3f deg (mechanical equivalent: %.4f deg)",
 			    trim_deg,
 			    trim_deg / (double)MOTOR_POLE_PAIRS);
-		shell_print(sh, "Observer base offset (ALIGN): %.3f deg mechanical",
+		shell_print(sh, "Observer base offset: %.3f deg mechanical",
 			    base_mech_offset_deg);
 		shell_print(sh, "Observer active offset: %.3f deg mechanical",
 			    active_mech_offset_deg);

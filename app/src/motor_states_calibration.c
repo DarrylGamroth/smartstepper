@@ -91,6 +91,26 @@ static inline enum motor_state motor_resolve_requested_online_mode(const struct 
 	return mode;
 }
 
+static inline enum smf_state_result
+motor_boot_calibration_complete(struct motor_parameters *params)
+{
+	enum motor_state online_mode = motor_resolve_requested_online_mode(params);
+
+	LOG_INF("Boot calibration complete: current offsets measured");
+	LOG_INF("Encoder commutation offset is not set by boot calibration; run generated-sweep encoder commissioning before encoder-control modes");
+	smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
+	return SMF_EVENT_HANDLED;
+}
+
+static inline enum smf_state_result
+motor_commissioning_identification_complete(struct motor_parameters *params)
+{
+	LOG_INF("Commissioning identification complete: R/L and Rs measured");
+	LOG_INF("Encoder commutation offset requires explicit generated-sweep encoder commissioning");
+	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
+	return SMF_EVENT_HANDLED;
+}
+
 typedef int (*motor_calibration_finalize_fn_t)(struct motor_parameters *params);
 
 static inline enum smf_state_result
@@ -158,7 +178,7 @@ void motor_state_calibration_exit(void *obj)
 		LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
 		LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
 		LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
-		LOG_INF("  Align offset: %.3f deg",
+		LOG_INF("  Encoder offset: %.3f deg",
 			(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)));
 		params->calibration.complete = true;
 		if (commissioning) {
@@ -214,7 +234,7 @@ enum smf_state_result motor_state_offset_meas_run(void *obj)
 		if (params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
 		} else {
-			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ALIGN]);
+			return motor_boot_calibration_complete(params);
 		}
 		return SMF_EVENT_HANDLED;
 	}
@@ -396,9 +416,16 @@ static int motor_calibration_finalize_rs(struct motor_parameters *params)
 enum smf_state_result motor_state_rs_est_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	return motor_calibration_timeout_finalize_or_fault(params,
-							  MOTOR_STATE_ALIGN,
-							  motor_calibration_finalize_rs);
+	if (!motor_calibration_state_timeout_elapsed(params)) {
+		return SMF_EVENT_PROPAGATE;
+	}
+
+	if (motor_calibration_finalize_rs(params) != 0) {
+		motor_calibration_post_hardware_break(params);
+		return SMF_EVENT_HANDLED;
+	}
+
+	return motor_commissioning_identification_complete(params);
 }
 
 void motor_state_rs_est_exit(void *obj)
