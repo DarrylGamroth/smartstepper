@@ -990,12 +990,24 @@ static int aeat9955_fast_init(const struct device *dev)
 {
 	const struct aeat9955_fast_config *cfg = dev->config;
 	struct aeat9955_fast_data *data = dev->data;
+	int ret;
 
 	if (!device_is_ready(cfg->transport)) {
 		return -ENODEV;
 	}
 
-	data->spi4_mode = cfg->initial_spi4_mode;
+	data->mode = ENCODER_RT_MODE_DISABLED;
+	data->sample_in_flight = false;
+	data->spi4_mode = AEAT9955_FAST_SPI4_16_PARITY;
+
+	ret = aeat9955_fast_configure_runtime_mode(dev, cfg->initial_spi4_mode);
+	if (ret != 0) {
+		LOG_ERR("failed to configure AEAT-9955 runtime SPI4 mode %d: %d",
+			cfg->initial_spi4_mode, ret);
+		return ret;
+	}
+
+	LOG_INF("configured AEAT-9955 runtime SPI4 mode %d", cfg->initial_spi4_mode);
 
 	return 0;
 }

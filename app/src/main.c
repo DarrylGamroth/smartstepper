@@ -16,7 +16,6 @@
 #include "motor_isr.h"
 #include "motor_hardware.h"
 #include "motor_control_api.h"
-#include "motor_encoder_pipeline.h"
 #include "config.h"
 #include "shell_commands.h"
 
@@ -29,11 +28,6 @@ int main(void)
 
 	/* Set shell access to motor parameters */
 	shell_set_motor_params(params);
-
-	int ret = motor_encoder_pipeline_configure_startup();
-	if (ret < 0) {
-		LOG_ERR("Encoder startup configuration failed: %d", ret);
-	}
 
 	/* Create and start state machine thread */
 	motor_sm_thread_run();

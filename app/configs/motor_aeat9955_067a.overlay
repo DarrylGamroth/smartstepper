@@ -88,6 +88,7 @@
 		compatible = "brcm,aeat-9955-fast";
 		reg = <0>;
 		pipeline-delay-samples = <1>;
+		spi4-mode = "spi4-8-crc16";
 		status = "okay";
 	};
 };

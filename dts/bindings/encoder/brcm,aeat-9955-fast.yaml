@@ -25,6 +25,6 @@ properties:
       - "spi4-16-parity"
       - "spi4-8-crc16"
     description: |
-      Runtime protocol expected when the driver starts. Use "spi4-16-parity"
-      for factory-default AEAT-9955 devices. Use "spi4-8-crc16" only after
-      the encoder has been deliberately configured to SPI4-8 safety mode.
+      Desired runtime protocol. The driver detects the current volatile AEAT
+      protocol during init and switches the device to this mode before normal
+      sampling starts. The EEPROM is not programmed.

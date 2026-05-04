@@ -46,16 +46,6 @@ enum motor_encoder_test_inject_mode {
 };
 
 /**
- * @brief Configure the encoder transport/protocol for normal runtime use.
- *
- * This is a thread-context startup hook. It must run before the state machine
- * enables ISR sampling. Non-specialized encoder backends return success.
- *
- * @return 0 on success, or a negative errno when startup configuration failed.
- */
-int motor_encoder_pipeline_configure_startup(void);
-
-/**
  * @brief Enable or disable async encoder read requests.
  *
  * When disabled, request calls are rejected with -ESHUTDOWN. Completion
