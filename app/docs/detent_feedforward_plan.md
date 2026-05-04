@@ -87,7 +87,7 @@ validated table.
 Commands:
 
 ```text
-motor commission detent run <mech_hz> <cycles> [decimation]
+motor commission detent run <mech_hz> <cycles> [decimation] [iq_limit_a]
 motor commission detent status
 motor commission detent apply [enable] [gain] [limit_a]
 motor commission detent clear
@@ -105,7 +105,7 @@ Capture strategy:
 Implemented command syntax:
 
 ```text
-motor commission detent run <mech_hz> <cycles> [decimation]
+motor commission detent run <mech_hz> <cycles> [decimation] [iq_limit_a]
 motor commission detent status
 motor commission detent apply [enable] [gain] [limit_a]
 motor commission detent clear
@@ -118,6 +118,8 @@ rate; optional `decimation` reduces ISR capture load and defaults to `1`.
 The command applies a temporary conservative velocity PI preset for capture and
 restores the previous velocity gains afterward, so it does not depend on the
 full auto-commission workflow. Detent capture speed is hard-limited to `1 Hz`.
+The optional `iq_limit_a` controls the temporary velocity-loop current limit and
+is bounded by the motor devicetree max current.
 `apply 1` copies the staged table into runtime and enables it.
 
 ## Phase 5: Validation

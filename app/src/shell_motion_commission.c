@@ -256,15 +256,14 @@ static void motor_commission_set_velocity_target_hz(float32_t target_hz)
 
 static int motor_commission_apply_detent_velocity_gains(
 	float32_t speed_hz,
+	float32_t iq_limit_a,
 	struct motor_commission_velocity_gain_restore *restore)
 {
 	if (g_motor_params == NULL || restore == NULL) {
 		return -EINVAL;
 	}
 
-	float32_t iq_limit_a = fminf(MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A,
-				     0.50f * MOTOR_MAX_CURRENT_A);
-	iq_limit_a = fmaxf(iq_limit_a, 0.02f);
+	iq_limit_a = clampf(iq_limit_a, 0.02f, MOTOR_MAX_CURRENT_A);
 	float32_t gain_speed_rad_s =
 		2.0f * PI_F32 * fmaxf(speed_hz, MOTOR_COMMISSION_DETENT_SAFE_GAIN_SPEED_HZ);
 	float32_t kp = iq_limit_a / gain_speed_rad_s;
@@ -1710,9 +1709,9 @@ static int motor_commission_detent_finalize(const float32_t *sum_iq,
 
 int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 3 && argc != 4) {
+	if (argc < 3 || argc > 5) {
 		shell_error(sh,
-			    "Usage: motor commission detent run <mech_hz> <cycles> [decimation]");
+			    "Usage: motor commission detent run <mech_hz> <cycles> [decimation] [iq_limit_a]");
 		return -EINVAL;
 	}
 	if (!g_motor_params) {
@@ -1734,9 +1733,11 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	float32_t speed_hz = 0.0f;
 	float32_t cycles = 0.0f;
 	uint32_t decimation = MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION;
+	float32_t capture_iq_limit_a = MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A;
 	if (!shell_parse_finite_float(argv[1], &speed_hz) ||
 	    !shell_parse_finite_float(argv[2], &cycles) ||
-	    (argc == 4 && !shell_parse_u32(argv[3], &decimation))) {
+	    (argc >= 4 && !shell_parse_u32(argv[3], &decimation)) ||
+	    (argc >= 5 && !shell_parse_finite_float(argv[4], &capture_iq_limit_a))) {
 		shell_error(sh, "Invalid argument");
 		return -EINVAL;
 	}
@@ -1747,6 +1748,11 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	if (speed_hz > MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ) {
 		shell_error(sh, "detent capture speed is limited to %.3f Hz",
 			    (double)MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ);
+		return -ERANGE;
+	}
+	if (capture_iq_limit_a <= 0.0f || capture_iq_limit_a > MOTOR_MAX_CURRENT_A) {
+		shell_error(sh, "iq_limit_a must be within (0, %.3f] A",
+			    (double)MOTOR_MAX_CURRENT_A);
 		return -ERANGE;
 	}
 	float32_t max_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
@@ -1786,7 +1792,8 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 
 	motor_commission_detent_clear_staged();
 	motor_commission_detent_capture_reset(kt, decimation);
-	int ret = motor_commission_apply_detent_velocity_gains(speed_hz, &velocity_restore);
+	int ret = motor_commission_apply_detent_velocity_gains(speed_hz, capture_iq_limit_a,
+							       &velocity_restore);
 	if (ret != 0) {
 		motor_commission_restore_velocity_gains(&velocity_restore);
 		shell_error(sh, "Failed to apply detent velocity gains (err %d)", ret);
