@@ -253,32 +253,34 @@ int drv8328_reset_fault(const struct device *dev)
 
     LOG_INF("Resetting DRV8328 fault");
 
-    /* Generate fault reset pulse: high-to-low-to-high transition */
-    /* Duration: 1-1.2μs as per datasheet section 8.4.3 */
+    /* Generate nSLEEP reset pulse. gpio_pin_set_dt() uses logical active
+     * levels from devicetree; the smartstepper boards declare nSLEEP
+     * GPIO_ACTIVE_LOW, so logical 1 drives the physical pin low.
+     */
 
-    /* Ensure sleep pin is high first */
+    /* Ensure nSLEEP is inactive first. */
     ret = gpio_pin_set_dt(&config->sleep_gpio, 0);
     if (ret < 0)
     {
-        LOG_ERR("Failed to set sleep GPIO high: %d", ret);
+        LOG_ERR("Failed to set nSLEEP inactive: %d", ret);
         return ret;
     }
 
-    /* Pull sleep pin low for fault reset pulse */
+    /* Pulse nSLEEP active to reset the latched fault. */
     ret = gpio_pin_set_dt(&config->sleep_gpio, 1);
     if (ret < 0)
     {
-        LOG_ERR("Failed to pull sleep GPIO low: %d", ret);
+        LOG_ERR("Failed to pulse nSLEEP active: %d", ret);
         return ret;
     }
 
     k_busy_wait(1);
 
-    /* Pull sleep pin high to complete reset pulse */
+    /* Return nSLEEP to inactive/awake state. */
     ret = gpio_pin_set_dt(&config->sleep_gpio, 0);
     if (ret < 0)
     {
-        LOG_ERR("Failed to set sleep GPIO high: %d", ret);
+        LOG_ERR("Failed to set nSLEEP inactive: %d", ret);
         return ret;
     }
 

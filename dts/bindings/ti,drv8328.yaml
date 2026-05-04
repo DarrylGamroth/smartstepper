@@ -43,9 +43,8 @@ properties:
   sleep-gpios:
     type: phandle-array
     description: |
-      nSLEEP control pin (active high).
-      When low, device enters sleep mode.
-      Used for fault reset via low pulse.
+      nSLEEP control pin. Use GPIO_ACTIVE_LOW for the normal DRV8328
+      active-low nSLEEP signal. Used for fault reset via an active pulse.
 
   fault-gpios:
     type: phandle-array

@@ -194,6 +194,15 @@ static inline void motor_force_safe_pwm_outputs(void)
 	mcpwm_stm32_set_duty_cycle_2phase_f32(pwm8, 0.5f, 0.5f);
 }
 
+static void motor_reset_gate_driver_faults_before_enable(struct motor_parameters *params)
+{
+	int ret = motor_hardware_reset_gate_driver_faults_masked(params);
+
+	if (ret < 0) {
+		LOG_WRN("Gate-driver fault reset failed: %d", ret);
+	}
+}
+
 static inline void motor_reset_control_runtime(struct motor_parameters *params)
 {
 	params->Id_setpoint_A = 0.0f;
@@ -890,6 +899,7 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 			enum motor_state online_mode =
 				motor_resolve_requested_online_mode(params);
 			LOG_INF("ONLINE request received, transitioning to ONLINE");
+			motor_reset_gate_driver_faults_before_enable(params);
 			smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 			return SMF_EVENT_HANDLED;
 		}
@@ -940,6 +950,7 @@ static void motor_state_prepare_online_entry(void *obj)
 	/* Ensure a clean bumpless restart after any fault or mode transition. */
 	motor_reset_control_runtime(params);
 	motor_force_safe_pwm_outputs();
+	motor_reset_gate_driver_faults_before_enable(params);
 
 	/* Enable gate driver channels - motor now energized */
 	drv8328_enable_channel(gate_driver_a, 0);
@@ -1061,12 +1072,14 @@ static enum smf_state_result motor_state_error_run(void *obj)
 		if (params->profile_max_velocity_rad_s <= 0.0f) {
 			LOG_INF("Error cleared before controller init completed, retrying initialization");
 			params->last_error_code = ERROR_NONE;
+			motor_reset_gate_driver_faults_before_enable(params);
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_HW_INIT]);
 			return SMF_EVENT_HANDLED;
 		}
 
 		LOG_INF("Error cleared, transitioning to IDLE");
 		params->last_error_code = ERROR_NONE;
+		motor_reset_gate_driver_faults_before_enable(params);
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 		return SMF_EVENT_HANDLED;
 

@@ -29,6 +29,8 @@ int cmd_motor_disarm(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_safety_timeout(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_safety_pet(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_gate_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_gate_reset(const struct shell *sh, size_t argc, char **argv);
 
 /* Info and encoder diagnostics commands */
 int cmd_motor_info_config(const struct shell *sh, size_t argc, char **argv);

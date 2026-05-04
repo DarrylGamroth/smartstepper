@@ -43,6 +43,40 @@ int motor_hardware_init_gpio(void);
 int motor_hardware_check_devices(void);
 
 /**
+ * @brief Pulse DRV8328 nSLEEP pins to clear latched gate-driver faults.
+ *
+ * This uses k_usleep/k_busy_wait internally through the DRV8328 driver, so it
+ * must only be called from thread/shell context, never from a zero-latency ISR.
+ *
+ * @return 0 if both gate drivers were reset, negative error code otherwise
+ */
+int motor_hardware_reset_gate_driver_faults(void);
+
+/**
+ * @brief Clear latched DRV8328 faults while masking MCPWM break callbacks.
+ *
+ * Use this when recovering from an expected DRV8328 nSLEEP pulse. The pulse can
+ * assert the timer break input, so the MCPWM break callbacks are disabled during
+ * the reset and restored afterward with the supplied user data.
+ *
+ * @param break_user_data user data to restore on the MCPWM break callbacks
+ * @return 0 if both gate drivers were reset, negative error code otherwise
+ */
+int motor_hardware_reset_gate_driver_faults_masked(void *break_user_data);
+
+/**
+ * @brief Read cached DRV8328 fault state for both gate drivers.
+ *
+ * The current board does not route nFAULT into devicetree, so these values only
+ * reflect faults reported through the driver callback path when available.
+ *
+ * @param fault_a set true when gate driver A has a cached fault
+ * @param fault_b set true when gate driver B has a cached fault
+ * @return 0 on success, negative error code otherwise
+ */
+int motor_hardware_get_gate_driver_faults(bool *fault_a, bool *fault_b);
+
+/**
  * @brief Control photo interruptor emitter enable GPIO
  *
  * @param enable true to drive enable pin active, false to drive inactive

@@ -9,6 +9,8 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/devicetree.h>
+#include <drivers/mcpwm.h>
+#include <drivers/gate_driver/ti_drv8328.h>
 
 #include "motor_hardware.h"
 #include "motor_isr.h"
@@ -92,6 +94,59 @@ int motor_hardware_check_devices(void)
 	}
 
 	return 0;
+}
+
+int motor_hardware_reset_gate_driver_faults(void)
+{
+	int ret_a = drv8328_reset_fault(gate_driver_a);
+	int ret_b = drv8328_reset_fault(gate_driver_b);
+
+	if (ret_a < 0) {
+		return ret_a;
+	}
+
+	return ret_b;
+}
+
+int motor_hardware_reset_gate_driver_faults_masked(void *break_user_data)
+{
+	int ret_mask_a = mcpwm_set_break_callback(pwm1, NULL, NULL);
+	int ret_mask_b = mcpwm_set_break_callback(pwm8, NULL, NULL);
+
+	int ret_reset = motor_hardware_reset_gate_driver_faults();
+
+	int ret_restore_a = mcpwm_set_break_callback(pwm1, gate_driver_a_break_callback,
+						     break_user_data);
+	int ret_restore_b = mcpwm_set_break_callback(pwm8, gate_driver_b_break_callback,
+						     break_user_data);
+
+	if (ret_mask_a < 0) {
+		return ret_mask_a;
+	}
+	if (ret_mask_b < 0) {
+		return ret_mask_b;
+	}
+	if (ret_reset < 0) {
+		return ret_reset;
+	}
+	if (ret_restore_a < 0) {
+		return ret_restore_a;
+	}
+	return ret_restore_b;
+}
+
+int motor_hardware_get_gate_driver_faults(bool *fault_a, bool *fault_b)
+{
+	if (fault_a == NULL || fault_b == NULL) {
+		return -EINVAL;
+	}
+
+	int ret = drv8328_get_fault_status(gate_driver_a, fault_a);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return drv8328_get_fault_status(gate_driver_b, fault_b);
 }
 
 int motor_hardware_set_photo_interruptor_enable(bool enable)

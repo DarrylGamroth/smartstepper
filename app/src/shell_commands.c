@@ -1787,6 +1787,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_safety,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor gate-driver subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_gate,
+	SHELL_CMD(status, NULL, "Show gate-driver cached fault status", cmd_motor_gate_status),
+	SHELL_CMD(reset, NULL, "Pulse DRV8328 nSLEEP to clear latched faults", cmd_motor_gate_reset),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor fault snapshot subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault_snapshot,
 	SHELL_CMD_ARG(start, NULL, "Start fault snapshot capture [decimation]",
@@ -1895,6 +1902,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(arm, NULL, "Arm torque-producing control output", cmd_motor_arm),
 	SHELL_CMD(disarm, NULL, "Disarm control output and request IDLE", cmd_motor_disarm),
 	SHELL_CMD(safety, &sub_motor_safety, "Safety interlock and timeout", NULL),
+	SHELL_CMD(gate, &sub_motor_gate, "Gate-driver diagnostics/recovery", NULL),
 	SHELL_CMD(fault, &sub_motor_fault, "Fault diagnostics", NULL),
 	SHELL_CMD(info, &sub_motor_info, "Motor information", NULL),
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
