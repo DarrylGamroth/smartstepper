@@ -8,11 +8,15 @@
 #include <errno.h>
 #include <math.h>
 #include <string.h>
+#include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 
 #include "motor/math/math_constants.h"
+
+LOG_MODULE_REGISTER(motor_encoder_pipeline, CONFIG_APP_LOG_LEVEL);
 
 /* Include encoder-specific headers based on devicetree */
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
@@ -152,6 +156,27 @@ static bool motor_encoder_pipeline_angle_glitch(float32_t angle_deg)
 	}
 
 	return true;
+}
+
+int motor_encoder_pipeline_configure_startup(void)
+{
+#if defined(MOTOR_ENCODER_PIPELINE_FAST_AEAT)
+	if (!device_is_ready(motor_encoder_rt_dev)) {
+		LOG_ERR("AEAT-9955 fast encoder device is not ready");
+		return -ENODEV;
+	}
+
+	int ret = aeat9955_fast_configure_runtime_mode(motor_encoder_rt_dev,
+						       AEAT9955_FAST_SPI4_8_CRC16);
+	if (ret < 0) {
+		LOG_ERR("Failed to configure AEAT-9955 for SPI4-8 CRC16: %d", ret);
+		return ret;
+	}
+
+	LOG_INF("AEAT-9955 configured for SPI4-8 CRC16 runtime sampling");
+#endif
+
+	return 0;
 }
 
 void motor_encoder_pipeline_set_enabled(bool enabled)
