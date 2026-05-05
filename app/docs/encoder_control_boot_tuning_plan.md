@@ -103,3 +103,7 @@ motor position target <nearby absolute deg>
   - `+Iq=0.060 A` validation produced positive control-coordinate motion.
   - one run observed `warn=1 err=1` during the short validation pulse, so the validation path now uses the same small error budget as mapping and reports the counts.
 - HIL `velocity_encoder` with the first retuned safe defaults showed the original profile-max-speed-based gains were too small, then the higher gains saturated and oscillated. Safe defaults were reduced to use a `0.060 A` current limit and a low-speed gain point. Further closed-loop velocity tuning is still required on hardware.
+- `motor velocity gains defaults <safe|nominal>` and `motor position gains defaults <safe|nominal>` now prefer commissioned `psi_f/J/B/Kt` model gains when valid identification data or applied auto-tune data exists. The commands print `source=model` when those values are used and `source=empirical` when falling back to bring-up heuristics.
+- HIL command smoke test after flash, before identification data existed:
+  - `motor velocity gains defaults safe`: `source=empirical`, `Kp=0.00955`, `Ki=0.00955`, `Iq limit=0.060 A`.
+  - `motor position gains defaults safe`: `source=empirical`.

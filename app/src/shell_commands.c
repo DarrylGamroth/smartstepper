@@ -20,6 +20,7 @@
 #include "motor_torque.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
+#include "motor/runtime/commission_tune.h"
 #include "shell_commands_motion.h"
 #include "shell_commands_commission.h"
 #include "shell_commands_state.h"
@@ -78,6 +79,10 @@ enum motor_gains_profile {
 #define VELOCITY_DEFAULT_NOMINAL_IQ_LIMIT_A 0.120f
 #define VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A 0.060f
 #define VELOCITY_DEFAULT_GAIN_SPEED_HZ 0.50f
+#define VELOCITY_MODEL_SAFE_BW_HZ 0.25f
+#define VELOCITY_MODEL_NOMINAL_BW_HZ 0.50f
+#define POSITION_MODEL_SAFE_BW_RATIO 0.10f
+#define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
 #define POSITION_TARGET_MIN_DURATION_S 0.20f
 
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
@@ -139,6 +144,75 @@ static void motor_compute_safe_outer_gains(const struct motor_parameters *params
 	*vel_ki = *vel_kp;
 	*pos_kp *= 0.5f;
 	*pos_ki *= 0.1f;
+}
+
+static int motor_compute_model_outer_gains(const struct motor_parameters *params,
+					   enum motor_gains_profile profile,
+					   float *vel_kp, float *vel_ki,
+					   float *vel_iq_limit,
+					   float *pos_kp, float *pos_ki)
+{
+	if (params == NULL || vel_kp == NULL || vel_ki == NULL ||
+	    vel_iq_limit == NULL || pos_kp == NULL || pos_ki == NULL) {
+		return -EINVAL;
+	}
+
+	const struct motor_commission_results *res = &params->commission.results;
+	bool have_identified_model = res->psi_f_valid && res->mech_valid;
+	bool have_applied_tune = params->commission.auto_tune_applied &&
+				 params->commission.auto_tune_staged.accepted;
+	if (!have_identified_model && !have_applied_tune) {
+		return -ENOENT;
+	}
+
+	float j = have_identified_model ? res->inertia_kgm2 : params->inertia_kgm2_active;
+	float b = have_identified_model ? res->viscous_friction_nm_per_rad_s :
+					  params->viscous_friction_nm_per_rad_s_active;
+	float kt = have_identified_model ?
+			   motor_torque_gain_from_flux_pole_pairs(res->psi_f_wb, MOTOR_POLE_PAIRS) :
+			   motor_torque_gain_resolve_active(params);
+	if (!isfinite(j) || j <= 0.0f || !isfinite(b) || b < 0.0f ||
+	    !isfinite(kt) || kt <= 0.0f) {
+		return -ERANGE;
+	}
+
+	float move_iq_a = (res->iq_move_valid || res->iq_move_pos_valid) ?
+				  res->iq_move_recommended_a :
+				  0.0f;
+	float iq_base = (profile == MOTOR_GAINS_PROFILE_SAFE) ?
+				VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A :
+				VELOCITY_DEFAULT_NOMINAL_IQ_LIMIT_A;
+	float iq_scale = (profile == MOTOR_GAINS_PROFILE_SAFE) ? 1.0f : 1.5f;
+	float iq_limit = fmaxf(iq_base, iq_scale * move_iq_a);
+	iq_limit = clampf(iq_limit, 0.04f,
+			  fminf(MOTOR_MAX_CURRENT_A,
+				(profile == MOTOR_GAINS_PROFILE_SAFE) ? 0.12f :
+									  (0.25f * MOTOR_MAX_CURRENT_A)));
+
+	float velocity_bw_hz = (profile == MOTOR_GAINS_PROFILE_SAFE) ?
+				       VELOCITY_MODEL_SAFE_BW_HZ :
+				       VELOCITY_MODEL_NOMINAL_BW_HZ;
+	float zeta = OUTER_LOOP_ZETA_DEFAULT;
+	float omega = 2.0f * PI_F32 * velocity_bw_hz;
+	float kp_num = (2.0f * zeta * omega * j) - b;
+	float kp = kp_num / kt;
+	float ki = (omega * omega * j) / kt;
+	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
+		return -ERANGE;
+	}
+
+	float pos_ratio = (profile == MOTOR_GAINS_PROFILE_SAFE) ?
+				  POSITION_MODEL_SAFE_BW_RATIO :
+				  POSITION_MODEL_NOMINAL_BW_RATIO;
+	float pos_bw_hz = velocity_bw_hz * pos_ratio;
+	float pos_omega = 2.0f * PI_F32 * pos_bw_hz;
+
+	*vel_kp = kp;
+	*vel_ki = ki;
+	*vel_iq_limit = iq_limit;
+	*pos_kp = 2.0f * zeta * pos_omega;
+	*pos_ki = pos_omega * pos_omega;
+	return 0;
 }
 
 static int motor_apply_velocity_gains(float kp, float ki, float iq_limit)
@@ -897,15 +971,21 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		float iq_limit = 0.0f;
 		float pos_kp_dummy = 0.0f;
 		float pos_ki_dummy = 0.0f;
-		if (profile == MOTOR_GAINS_PROFILE_SAFE) {
+		const char *source = "model";
+		int ret = motor_compute_model_outer_gains(g_motor_params, profile, &kp, &ki,
+							  &iq_limit, &pos_kp_dummy,
+							  &pos_ki_dummy);
+		if (ret != 0 && profile == MOTOR_GAINS_PROFILE_SAFE) {
 			motor_compute_safe_outer_gains(g_motor_params, &kp, &ki, &iq_limit,
 						      &pos_kp_dummy, &pos_ki_dummy);
-		} else {
+			source = "empirical";
+		} else if (ret != 0) {
 			motor_compute_nominal_outer_gains(g_motor_params, &kp, &ki, &iq_limit,
 							 &pos_kp_dummy, &pos_ki_dummy);
+			source = "empirical";
 		}
 
-		int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
+		ret = motor_apply_velocity_gains(kp, ki, iq_limit);
 		if (ret != 0) {
 			shell_error(sh, "Failed to apply velocity defaults (err %d)", ret);
 			return ret;
@@ -913,8 +993,9 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Velocity %s defaults applied: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+			    "Velocity %s defaults applied (source=%s): Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
 			    (profile == MOTOR_GAINS_PROFILE_SAFE) ? "safe" : "nominal",
+			    source,
 			    (double)kp, (double)ki, (double)iq_limit);
 		return 0;
 	}
@@ -1360,15 +1441,21 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		float vel_iq_dummy = 0.0f;
 		float kp = 0.0f;
 		float ki = 0.0f;
-		if (profile == MOTOR_GAINS_PROFILE_SAFE) {
+		const char *source = "model";
+		int ret = motor_compute_model_outer_gains(g_motor_params, profile,
+							  &vel_kp_dummy, &vel_ki_dummy,
+							  &vel_iq_dummy, &kp, &ki);
+		if (ret != 0 && profile == MOTOR_GAINS_PROFILE_SAFE) {
 			motor_compute_safe_outer_gains(g_motor_params, &vel_kp_dummy, &vel_ki_dummy,
 						      &vel_iq_dummy, &kp, &ki);
-		} else {
+			source = "empirical";
+		} else if (ret != 0) {
 			motor_compute_nominal_outer_gains(g_motor_params, &vel_kp_dummy, &vel_ki_dummy,
 							 &vel_iq_dummy, &kp, &ki);
+			source = "empirical";
 		}
 
-		int ret = motor_apply_position_gains(kp, ki);
+		ret = motor_apply_position_gains(kp, ki);
 		if (ret != 0) {
 			shell_error(sh, "Failed to apply position defaults (err %d)", ret);
 			return ret;
@@ -1376,8 +1463,9 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Position %s defaults applied: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+			    "Position %s defaults applied (source=%s): Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
 			    (profile == MOTOR_GAINS_PROFILE_SAFE) ? "safe" : "nominal",
+			    source,
 			    (double)kp, (double)ki);
 		return 0;
 	}
