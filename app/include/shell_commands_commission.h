@@ -17,6 +17,7 @@ int cmd_motor_commission_motion_threshold(const struct shell *sh, size_t argc, c
 int cmd_motor_commission_flux_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_encoder_robust(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_clear(const struct shell *sh, size_t argc, char **argv);

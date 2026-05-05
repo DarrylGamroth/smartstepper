@@ -1681,6 +1681,103 @@ static int motor_commission_encoder_run_generated_sweep(
 	return ret;
 }
 
+static void motor_commission_encoder_result_combine_bidirectional(
+	const struct motor_encoder_map_detect_result *forward,
+	const struct motor_encoder_map_detect_result *reverse,
+	struct motor_encoder_map_detect_result *out)
+{
+	*out = *forward;
+
+	float32_t sin_sum = sinf(forward->offset_elec_rad) + sinf(reverse->offset_elec_rad);
+	float32_t cos_sum = cosf(forward->offset_elec_rad) + cosf(reverse->offset_elec_rad);
+	if (fabsf(sin_sum) > 1.0e-6f || fabsf(cos_sum) > 1.0e-6f) {
+		out->offset_elec_rad = wrap_rad_pi(atan2f(sin_sum, cos_sum));
+		out->offset_mech_rad = wrap_rad_pi(out->offset_elec_rad / (float32_t)MOTOR_POLE_PAIRS);
+	}
+
+	out->direction_corr = 0.5f * (forward->direction_corr + reverse->direction_corr);
+	out->direction_residual_rad = fmaxf(forward->direction_residual_rad,
+					    reverse->direction_residual_rad);
+	out->offset_residual_rad = fmaxf(forward->offset_residual_rad,
+					 reverse->offset_residual_rad);
+	out->mech_motion_rad = forward->mech_motion_rad + reverse->mech_motion_rad;
+	out->sample_count = forward->sample_count + reverse->sample_count;
+	out->rejected_samples = forward->rejected_samples + reverse->rejected_samples;
+	out->encoder_error_count = forward->encoder_error_count + reverse->encoder_error_count;
+	out->encoder_warning_count =
+		forward->encoder_warning_count + reverse->encoder_warning_count;
+
+	float32_t offset_delta =
+		fabsf(wrap_rad_pi(forward->offset_elec_rad - reverse->offset_elec_rad));
+	bool compatible = forward->valid && reverse->valid &&
+			  forward->direction_sign == reverse->direction_sign &&
+			  offset_delta <= 0.50f;
+
+	out->direction_valid = compatible && forward->direction_valid && reverse->direction_valid;
+	out->offset_valid = compatible && forward->offset_valid && reverse->offset_valid;
+	out->ratio_valid = forward->ratio_valid && reverse->ratio_valid;
+	out->valid = compatible;
+}
+
+static int motor_commission_encoder_run_robust_sweep(
+	const struct shell *sh,
+	const struct motor_commission_encoder_sweep_config *sweep,
+	bool bidirectional,
+	bool print_apply_hint)
+{
+	struct motor_encoder_map_detect_result forward = {0};
+	struct motor_encoder_map_detect_result reverse = {0};
+
+	int ret = motor_commission_encoder_run_generated_sweep(sh, sweep, false);
+	forward = encoder_detect_result;
+	if (ret != 0 || !forward.valid || !bidirectional) {
+		if (print_apply_hint && encoder_detect_result.valid) {
+			shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
+		}
+		return ret;
+	}
+
+	struct motor_commission_encoder_sweep_config reverse_sweep = *sweep;
+	reverse_sweep.mech_hz = -reverse_sweep.mech_hz;
+	k_msleep(MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
+	ret = motor_commission_encoder_run_generated_sweep(sh, &reverse_sweep, false);
+	reverse = encoder_detect_result;
+	if (ret != 0 || !reverse.valid) {
+		encoder_detect_result = forward;
+		encoder_detect_result_valid = forward.valid;
+		shell_error(sh, "Reverse encoder mapping sweep failed (err %d)", ret);
+		return (ret != 0) ? ret : -ERANGE;
+	}
+
+	motor_commission_encoder_result_combine_bidirectional(&forward, &reverse,
+							      &encoder_detect_result);
+	encoder_detect_result_valid = encoder_detect_result.valid;
+	shell_print(sh,
+		    "Robust encoder mapping combined: valid=%s dir=%d corr=%.4f off_mech=%.3f deg off_elec=%.3f deg",
+		    encoder_detect_result.valid ? "YES" : "NO",
+		    encoder_detect_result.direction_sign,
+		    (double)encoder_detect_result.direction_corr,
+		    (double)(encoder_detect_result.offset_mech_rad * 180.0f / PI_F32),
+		    (double)(encoder_detect_result.offset_elec_rad * 180.0f / PI_F32));
+	shell_print(sh,
+		    "  combined: offset_res=%.4f rad dir_res=%.4f rad motion=%.3f deg samples=%u rejected=%u warn=%u err=%u",
+		    (double)encoder_detect_result.offset_residual_rad,
+		    (double)encoder_detect_result.direction_residual_rad,
+		    (double)(encoder_detect_result.mech_motion_rad * 180.0f / PI_F32),
+		    encoder_detect_result.sample_count,
+		    encoder_detect_result.rejected_samples,
+		    encoder_detect_result.encoder_warning_count,
+		    encoder_detect_result.encoder_error_count);
+
+	if (!encoder_detect_result.valid) {
+		return -ERANGE;
+	}
+	if (print_apply_hint) {
+		shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
+	}
+	return 0;
+}
+
 static float32_t motor_commission_encoder_commutation_offset_mech_rad(void)
 {
 	/* Generated-sweep encoder mapping uses Id d-axis excitation, so the
@@ -1721,6 +1818,45 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 	}
 
 	return motor_commission_encoder_run_generated_sweep(sh, &sweep, true);
+}
+
+int cmd_motor_commission_encoder_robust(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 4 || argc > 5) {
+		shell_error(sh,
+			    "Usage: motor commission encoder robust <current_a> <mech_hz> <cycles> [bidirectional]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.complete) {
+		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before encoder detect");
+		return -EACCES;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	struct motor_commission_encoder_sweep_config sweep = {0};
+	int ret = motor_commission_encoder_parse_required_sweep(sh, argv, &sweep);
+	if (ret != 0) {
+		return ret;
+	}
+
+	bool bidirectional = argc == 5 && strcmp(argv[4], "bidirectional") == 0;
+	if (argc == 5 && !bidirectional) {
+		shell_error(sh, "Optional fourth argument must be 'bidirectional'");
+		return -EINVAL;
+	}
+
+	return motor_commission_encoder_run_robust_sweep(sh, &sweep, bidirectional, true);
 }
 
 int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv)
@@ -1943,7 +2079,15 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "Failed to arm control output (err %d)", ret);
 		return ret;
 	}
-	ret = motor_commission_encoder_run_generated_sweep(sh, &sweep, false);
+	ret = motor_commission_encoder_run_robust_sweep(sh, &sweep, false, false);
+	if (ret != 0 && motor_api_get_state() != MOTOR_STATE_ERROR) {
+		shell_warn(sh, "Encoder mapping sweep failed once (err %d), retrying", ret);
+		motor_commission_encoder_stop_generated();
+		motor_commission_motion_stop_current();
+		motor_encoder_acquisition_reset_stats();
+		k_msleep(MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
+		ret = motor_commission_encoder_run_robust_sweep(sh, &sweep, false, false);
+	}
 	if (ret != 0) {
 		shell_error(sh, "Encoder mapping sweep failed (err %d)", ret);
 		return ret;
