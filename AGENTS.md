@@ -196,7 +196,7 @@ podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/
 ## Encoder Direction Mapping
 
 - AEAT-9955 and MT6835 motor profile overlays use
-  `encoder-direction-sign = <1>` for closed-loop commutation.
+  `encoder-direction-sign = <(-1)>` for closed-loop commutation.
 - Files:
   - `app/configs/motor_aeat9955_067a.overlay`
   - `app/configs/motor_mt6835_2a.overlay`
@@ -236,6 +236,9 @@ motor commission encoder clear
 - If the result is invalid with low measured motion, increase the generated
   sweep current/speed or debug open-loop motion first. The command intentionally
   leaves runtime parameters unchanged unless `apply` is run after a valid result.
+- The application supports the fast `encoder_rt` path only for encoder control.
+  Motor profile overlays should alias `encoder1` to the fast encoder child; do
+  not add a separate `rtspi0` alias.
 - AEAT-9955 HIL evidence shows parity-clean implausible angle jumps can occur.
   The encoder acquisition path has a `glitch` counter in `motor encoder acquisition`
   and rejects jumps above the ISR plausibility threshold before the observer uses
@@ -245,11 +248,15 @@ motor commission encoder clear
 
 - The AEAT-9955 may be usable for coarse before/after motion telemetry even
   when it is not good enough for closed-loop commutation.
-- For generated-angle modes such as `velocity_generated` and `position_generated`, use the
-  Zephyr sensor shell to sample it before and after a move:
+- For generated-angle modes such as `velocity_generated` and `position_generated`, use
+  the project encoder trace commands to sample it before and after a move:
 
 ```text
-sensor get aeat9955@0
+motor encoder trace clear
+motor encoder trace start 100
+motor position target 30
+motor encoder trace stop
+motor encoder trace summary
 ```
 
 - Do not treat this as proof that the AEAT-9955 is safe as the FOC angle

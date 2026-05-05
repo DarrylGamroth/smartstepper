@@ -87,7 +87,7 @@ void motor_encoder_acquisition_abort(void);
  *
  * @return 0 when a new read was queued, -EALREADY if a read is already in
  * flight, -ESHUTDOWN when disabled, or a negative errno from
- * sensor_read_async_mempool().
+ * the encoder_rt backend.
  */
 int motor_encoder_acquisition_request_sample(void);
 
@@ -95,7 +95,7 @@ int motor_encoder_acquisition_request_sample(void);
  * @brief Collect one completed async encoder sample if available.
  *
  * Call this from the control ISR every cycle, even when reads are disabled.
- * This guarantees RTIO CQEs and buffers are released promptly.
+ * This guarantees the low-latency encoder transport state is drained promptly.
  *
  * @param sample Output sample structure
  * @return 0 when a fresh sample is returned, -EAGAIN when a read is still in

@@ -6,7 +6,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sensor.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <math.h>
@@ -40,20 +39,15 @@
 #define MOTOR_ENCODER_IS_AEAT9955 0
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 0
 #define MOTOR_ENCODER_IS_FAST 1
-#elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
-#include <drivers/sensor/brcm_aeat9955.h>
-#define MOTOR_ENCODER_IS_AEAT9955 1
-#define MOTOR_ENCODER_IS_AEAT9955_FAST 0
-#define MOTOR_ENCODER_IS_FAST 0
 #else
 #define MOTOR_ENCODER_IS_AEAT9955 0
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 0
 #define MOTOR_ENCODER_IS_FAST 0
 #endif
 
-#if MOTOR_ENCODER_IS_FAST && DT_NODE_EXISTS(DT_ALIAS(rtspi0))
+#if MOTOR_ENCODER_IS_FAST
 #define MOTOR_ENCODER_HAS_RTSPI 1
-static const struct device *const encoder_rtspi = DEVICE_DT_GET(DT_ALIAS(rtspi0));
+static const struct device *const encoder_rtspi = DEVICE_DT_GET(DT_PARENT(DT_ALIAS(encoder1)));
 #else
 #define MOTOR_ENCODER_HAS_RTSPI 0
 #endif
@@ -475,10 +469,10 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 	params->position_target_rad = wrap_rad_2pi(params->live.position_rad);
 }
 
-#if IS_ENABLED(CONFIG_ENCODER_MAGNET_CHECK_ON_ARM) || MOTOR_ENCODER_IS_AEAT9955
+#if IS_ENABLED(CONFIG_ENCODER_MAGNET_CHECK_ON_ARM) || MOTOR_ENCODER_IS_AEAT9955_FAST
 static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, bool *mlo_out)
 {
-#if !MOTOR_ENCODER_IS_AEAT9955
+#if !MOTOR_ENCODER_IS_AEAT9955_FAST
 	ARG_UNUSED(status_out);
 	ARG_UNUSED(mhi_out);
 	ARG_UNUSED(mlo_out);
@@ -488,7 +482,6 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 		return -ENODEV;
 	}
 
-#if MOTOR_ENCODER_IS_AEAT9955_FAST
 	uint8_t status = 0U;
 	int ret = aeat9955_fast_read_register(encoder1, AEAT9955_FAST_REG_ERROR_STATUS, &status);
 	if (ret < 0) {
@@ -506,41 +499,6 @@ static int motor_encoder_read_aeat_alarm(uint8_t *status_out, bool *mhi_out, boo
 	}
 
 	return 0;
-#else
-	struct sensor_value raw = {0};
-	struct sensor_value mhi = {0};
-	struct sensor_value mlo = {0};
-
-	int ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-				  (enum sensor_attribute)AEAT9955_ATTR_ERROR_STATUS, &raw);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_HIGH, &mhi);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = sensor_attr_get(encoder1, SENSOR_CHAN_ROTATION,
-			      (enum sensor_attribute)AEAT9955_ATTR_ALARM_MAGNET_LOW, &mlo);
-	if (ret < 0) {
-		return ret;
-	}
-
-	if (status_out) {
-		*status_out = (uint8_t)(raw.val1 & 0xFF);
-	}
-	if (mhi_out) {
-		*mhi_out = (mhi.val1 != 0);
-	}
-	if (mlo_out) {
-		*mlo_out = (mlo.val1 != 0);
-	}
-
-	return 0;
-#endif
 #endif
 }
 #endif
@@ -1760,7 +1718,7 @@ int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char 
 		shell_print(sh, "  SPI mode:    CPOL=%u CPHA=%u",
 			    spi_cfg.cpol ? 1U : 0U, spi_cfg.cpha ? 1U : 0U);
 	} else {
-		shell_print(sh, "  SPI mode:    rtspi0 not ready");
+		shell_print(sh, "  SPI mode:    encoder RT SPI transport not ready");
 	}
 #endif
 
@@ -1804,7 +1762,7 @@ int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, cha
 #if !MOTOR_ENCODER_HAS_RTSPI
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	shell_error(sh, "runtime SPI mode control requires rtspi0");
+	shell_error(sh, "runtime SPI mode control requires encoder RT SPI transport");
 	return -ENOTSUP;
 #else
 	if (argc != 3U) {
@@ -1812,7 +1770,7 @@ int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, cha
 		return -EINVAL;
 	}
 	if (!device_is_ready(encoder_rtspi)) {
-		shell_error(sh, "rtspi0 is not ready");
+		shell_error(sh, "encoder RT SPI transport is not ready");
 		return -ENODEV;
 	}
 	if (motor_encoder_acquisition_is_enabled() || motor_encoder_acquisition_is_busy()) {

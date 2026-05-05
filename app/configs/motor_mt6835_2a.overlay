@@ -14,7 +14,6 @@
 	aliases {
 		/* Use integrated MT6835 fast frontend for control-loop encoder input. */
 		encoder1 = &mt6835;
-		rtspi0 = &spi2;
 	};
 
 	user_parameters: user_parameters {
@@ -24,8 +23,8 @@
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
 		offset-pole-hz = <300>;
-		/* Start conservative; verify direction with velocity_generated capture. */
-		encoder-direction-sign = <1>;
+		/* MT6835 positive direction convention is inverted from controller positive motion. */
+		encoder-direction-sign = <(-1)>;
 		align-current-ma = <200>;
 		align-duration-ms = <100>;
 		brake-current-ma = <1500>;

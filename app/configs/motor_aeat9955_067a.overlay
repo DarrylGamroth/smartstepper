@@ -13,9 +13,9 @@
 
 / {
 	aliases {
+		/delete-property/ encoder0;
 		/* Use AEAT-9955 fast frontend for control-loop encoder input. */
 		encoder1 = &aeat9955;
-		rtspi0 = &spi3;
 	};
 
 	user_parameters: user_parameters {
