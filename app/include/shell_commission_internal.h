@@ -14,6 +14,7 @@
 
 #include "config.h"
 #include "motor_states.h"
+#include "motor/runtime/commission_runtime.h"
 #include "motor_control_telemetry.h"
 
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
@@ -50,6 +51,13 @@ struct motor_commission_encoder_trace_guard {
 int motor_post_mode_change(enum motor_state target_mode);
 int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms);
 int motor_commission_wait_ms_or_fault(uint32_t hold_ms);
+void motor_commission_ctx_from_global(struct motor_commission_runtime_ctx *ctx);
+int motor_commission_run_motion_threshold(const struct shell *sh,
+					  float32_t start_a,
+					  float32_t stop_a,
+					  float32_t step_a,
+					  uint32_t hold_ms,
+					  float32_t min_motion_rad);
 void motor_commission_set_velocity_target_hz(float32_t target_hz);
 void motor_commission_motion_stop_current(void);
 int motor_commission_request_idle_disarmed(void);
