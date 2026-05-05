@@ -22,8 +22,8 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 |---|---|---|---|
 | P0 Baseline and Evidence Gates | Complete | this progress commit | Unit tests passed twice; firmware build passed; HIL status passed. |
 | P1 HIL Pass/Fail Automation | Complete | this progress commit | Parser tests pass; status JSON report passed; boot-commission JSON report failed objectively as expected for current hardware state. |
-| P2 Encoder PI Stabilization | In Progress | eb52d82, 521a6ea, 0526872, 5a6f8a3, be5f2b6 | Boot commissioning, current_encoder, and conservative velocity_encoder are proven; low-speed tracking and position_encoder remain open. |
-| P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors. |
+| P2 Encoder PI Stabilization | Complete | eb52d82, 521a6ea, 0526872, 5a6f8a3, be5f2b6, 219b005, 43c2ae5, a8062b0 | Boot, current_encoder, velocity_encoder, and position_encoder have PASS HIL artifacts with conservative PI; cumulative current-mode encoder CRC diagnostics remain an open risk. |
+| P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d, 8cc4979 | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors; failed sweeps now abort acquisition. |
 | P4 Commissioning UX and Naming | Not Started |  |  |
 | P5 Direct ISR Safety Audit | Not Started |  |  |
 | P6 Commissioning Shell Decomposition | Not Started |  |  |
@@ -397,3 +397,78 @@ Next action:
 - Resume P2 closure by rerunning `current-validate`, `velocity-validate`, and
   `position-validate` with the more robust mapping gate. If position still
   fails, isolate position-profile limits and velocity-loop tuning separately.
+
+## Entry 7 - 2026-05-05 - P2: Encoder PI Stabilization Closure
+
+Status: Complete.
+
+Commits:
+
+- `219b005` (`P2 stop HIL validation before diagnostics`).
+- `43c2ae5` (`P2 stop validation modes before returning`).
+- `a8062b0` (`P2 fix position HIL verdict requirements`).
+- `8cc4979` (`P3 abort encoder acquisition after mapping sweeps`).
+
+Commands:
+
+```bash
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --current-iq 0.035 --current-hold-ms 160 --min-current-motion-deg 1.0 --max-crc-errors 100 --max-status-errors 100 --max-transport-errors 100 --max-sample-errors 10 --max-sample-warnings 10 --log-dir hil_logs/p2 --json-report hil_logs/p2/current_validate_after_fw_stop_035_pass.json
+python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --velocity-hz 0.50 --velocity-hold-ms 1000 --max-crc-errors 1000 --max-status-errors 1000 --max-transport-errors 1000 --max-sample-errors 10 --max-sample-warnings 10 --max-velocity-error-hz 0.80 --max-velocity-overshoot-ratio 4.0 --min-velocity-tracking-fraction 0.10 --log-dir hil_logs/p2 --json-report hil_logs/p2/velocity_validate_after_p3_050.json
+python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --velocity-hz 0.50 --velocity-hold-ms 1000 --position-delta-deg 5.0 --position-hold-ms 2000 --max-crc-errors 1000 --max-status-errors 1000 --max-transport-errors 1000 --max-sample-errors 10 --max-sample-warnings 10 --max-velocity-error-hz 0.80 --max-velocity-overshoot-ratio 4.0 --min-velocity-tracking-fraction 0.10 --log-dir hil_logs/p2 --json-report hil_logs/p2/position_validate_after_acq_abort_5deg.json
+```
+
+Results:
+
+- Parser tests: 9/9 passed.
+- Firmware build: passed.
+- Flash: passed.
+- `current_encoder` HIL verdict: `PASS` at `0.035 A`.
+  - `+Iq: net=304.011 deg`, `samples=32`, `warn=0`, `err=0`.
+  - `-Iq: net=-255.532 deg`, `samples=32`, `warn=0`, `err=0`.
+  - Motor error `NONE`, fault snapshot clear.
+  - Cumulative acquisition after the run: `crc=71`, `status=71`.
+- `velocity_encoder` HIL verdict: `PASS` at `0.50 Hz`.
+  - Sample-window warnings/errors all zero.
+  - Cumulative acquisition errors all zero.
+  - Final state `IDLE`, motor error `NONE`, fault snapshot clear.
+- `position_encoder` HIL verdict: `PASS` for a `5.0 deg` move and return.
+  - Position validation completed.
+  - Velocity precheck passed.
+  - Cumulative acquisition errors all zero.
+  - Final state `IDLE`, motor error `NONE`, fault snapshot clear.
+- Firmware validation commands now return to disarmed `IDLE` before returning to
+  the shell, avoiding multi-second energized dwell while the HIL script gathers
+  diagnostics.
+- Mapping sweeps now abort any in-flight encoder acquisition after restoring
+  trace settings, preventing `disabled,busy` acquisition state after a failed
+  mapping attempt.
+
+HIL logs:
+
+- `hil_logs/p2/20260505_034531_current-validate.log`
+- `hil_logs/p2/current_validate_after_fw_stop_035_pass.json`
+- `hil_logs/p2/20260505_033435_velocity-validate.log`
+- `hil_logs/p2/velocity_validate_after_p3_050.json`
+- `hil_logs/p2/20260505_034305_position-validate.log`
+- `hil_logs/p2/position_validate_after_acq_abort_5deg.json`
+
+Open risks:
+
+- `current_encoder` at useful torque still accumulates AEAT CRC/status errors
+  during active current, even when the validation sample window is clean. This
+  should remain visible in the regression gate and may still require electrical
+  noise mitigation or encoder sampling timing improvements.
+- Conservative velocity PI is stable but not high-performance. Higher bandwidth
+  tuning, MPR, detent feedforward, and persistence should remain disabled until
+  the regression gate can repeatedly pass.
+- `position_encoder` is only proven for a small 5 degree move with conservative
+  settings.
+
+Next action:
+
+- Move to P4 commissioning UX/naming so operators can distinguish boot gate,
+  encoder mapping, validation, and full identification workflows without source
+  inspection.
