@@ -33,7 +33,6 @@
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
 #define MOTOR_COMMISSION_STANDARD_IDENT_TIMEOUT_MS 20000U
-#define MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A 0.250f
 
 #define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
@@ -210,17 +209,17 @@ static void motor_commission_restore_timeout(uint32_t timeout_ms)
 static void motor_commission_apply_auto_iq_floor(void)
 {
 	if (g_motor_params == NULL ||
-	    g_motor_params->velocity_cl_iq_limit_A >= MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A) {
+	    g_motor_params->velocity_cl_iq_limit_A >= COMMISSION_STANDARD_MIN_AUTO_IQ_A) {
 		return;
 	}
 
-	g_motor_params->velocity_cl_iq_limit_A = MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
-	g_motor_params->velocity_mpr_cfg.iq_limit_a = MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
+	g_motor_params->velocity_cl_iq_limit_A = COMMISSION_STANDARD_MIN_AUTO_IQ_A;
+	g_motor_params->velocity_mpr_cfg.iq_limit_a = COMMISSION_STANDARD_MIN_AUTO_IQ_A;
 	if (g_motor_params->velocity_dob_cfg.iq_ff_limit_a <= 0.0f ||
 	    g_motor_params->velocity_dob_cfg.iq_ff_limit_a >
-		    MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A) {
+		    COMMISSION_STANDARD_MIN_AUTO_IQ_A) {
 		g_motor_params->velocity_dob_cfg.iq_ff_limit_a =
-			MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
+			COMMISSION_STANDARD_MIN_AUTO_IQ_A;
 	}
 }
 

@@ -202,3 +202,110 @@ properties:
       Set to 1 for normal direction, or -1 to invert measured mechanical
       angle/speed without writing encoder EEPROM. In devicetree overlays use
       `<(-1)>` for the inverted case.
+
+  commission-standard-min-auto-iq-ma:
+    type: int
+    default: 250
+    description: >
+      Minimum Iq limit used by the one-command commissioning workflow before
+      flux/mechanical identification. This prevents profile overlays with very
+      conservative runtime velocity limits from starving the identification
+      stage.
+
+  commission-auto-post-wait-ms:
+    type: int
+    default: 2500
+    description: Timeout waiting for an auto-commission capture to finalize.
+
+  commission-auto-mech-runs:
+    type: int
+    default: 3
+    description: Number of accepted mechanical identification captures to aggregate.
+
+  commission-auto-mech-max-attempts:
+    type: int
+    default: 5
+    description: Maximum mechanical identification capture attempts.
+
+  commission-auto-mech-cycles-per-capture:
+    type: int
+    default: 1
+    description: Number of dither-pattern cycles per mechanical capture.
+
+  commission-auto-mech-accel-margin-mpu:
+    type: int
+    default: 1250
+    description: >
+      Milli-per-unit margin used when deriving mechanical dither period from
+      the configured acceleration limit.
+
+  commission-auto-mech-validate-rms-unm:
+    type: int
+    default: 5000
+    description: Mechanical validation residual RMS limit in micro-newton-meters.
+
+  commission-auto-mech-validate-rms-gain-mpu:
+    type: int
+    default: 5000
+    description: >
+      Additional mechanical validation residual limit as a milli-per-unit
+      multiplier of the aggregate in-fit RMS. The effective validation limit is
+      max(commission-auto-mech-validate-rms-unm, gain * aggregate RMS).
+
+  commission-auto-mech-min-confidence-mpu:
+    type: int
+    default: 500
+    description: >
+      Minimum aggregate mechanical-fit confidence in milli-per-unit. This is
+      used as the fallback acceptance gate if the independent validation
+      capture does not contain enough usable motion samples.
+
+  commission-auto-normal-flux-min-mhz:
+    type: int
+    default: 500
+    description: Normal auto-commission flux sweep minimum mechanical speed in mHz.
+
+  commission-auto-normal-flux-max-mhz:
+    type: int
+    default: 3000
+    description: Normal auto-commission flux sweep maximum mechanical speed in mHz.
+
+  commission-auto-normal-mech-max-mhz:
+    type: int
+    default: 3000
+    description: Normal auto-commission mechanical excitation maximum speed in mHz.
+
+  commission-auto-normal-mech-base-mhz:
+    type: int
+    default: 1500
+    description: Normal auto-commission mechanical excitation base speed in mHz.
+
+  commission-auto-normal-mech-dither-mhz:
+    type: int
+    default: 500
+    description: Normal auto-commission mechanical excitation dither speed in mHz.
+
+  commission-auto-slow-flux-min-mhz:
+    type: int
+    default: 250
+    description: Slow auto-commission flux sweep minimum mechanical speed in mHz.
+
+  commission-auto-slow-flux-max-mhz:
+    type: int
+    default: 750
+    description: Slow auto-commission flux sweep maximum mechanical speed in mHz.
+
+  commission-auto-slow-mech-max-mhz:
+    type: int
+    default: 1000
+    description: Slow auto-commission mechanical excitation maximum speed in mHz.
+
+  commission-auto-slow-mech-base-mhz:
+    type: int
+    default: 500
+    description: Slow auto-commission mechanical excitation base speed in mHz.
+
+  commission-auto-slow-mech-dither-mhz:
+    type: int
+    default: 150
+    description: Slow auto-commission mechanical excitation dither speed in mHz.

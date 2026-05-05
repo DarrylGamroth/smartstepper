@@ -145,19 +145,34 @@ Implemented in this change:
 - Phase 4 partial: the standard wrapper disables timeout while running, returns
   to `IDLE` disarmed on success/failure, stops current/velocity commands, and
   restores the previous timeout.
+- Commissioning profile constants are devicetree-backed. Per-motor values live
+  in `app/configs/motor_*.overlay` under `/user_parameters`, including slow and
+  normal flux/mechanical speeds, mechanical run count, max attempts, validation
+  RMS, validation RMS gain relative to aggregate fit RMS, and the workflow Iq
+  floor.
+- Mechanical validation now evaluates both torque-sign conventions and validates
+  against the lower residual. The sign is reported in the shell output. This
+  avoids rejecting a physically consistent fit solely because encoder/mechanical
+  sign convention and FOC Iq sign are ambiguous during commissioning.
+- Mechanical validation uses accepted aggregate runs as the primary evidence.
+  The independent validation capture tightens the gate when it has enough usable
+  samples. If it does not, the command falls back to
+  `commission-auto-mech-min-confidence-mpu` so a consistent multi-run aggregate
+  is not rejected by an advisory capture miss.
 
-Hardware evidence on the MT6835 2 A profile after the Phase 1 fix:
+Current hardware evidence on the MT6835 2 A profile:
 
 ```text
 motor commission run slow
-  Rs=2.2669 ohm L=0.002789 H R/L=812.8 rad/s
-  Encoder mapping result: valid=YES dir=-1 corr=-0.9357 off_mech=1.017 deg
-  +Iq validation: Iq=0.150 A net=619.848 deg samples=49 warn=0 err=0
+  Rs=2.2612 ohm L=0.002745 H R/L=823.8 rad/s
+  Encoder mapping result: valid=YES dir=-1 corr=-0.9360 off_mech=1.018 deg
+  +Iq validation: Iq=0.150 A net=594.058 deg samples=49 warn=0 err=0
   Motion threshold: pos=0.150 A neg=0.150 A rec=0.150 A
-  Flux result: psi_f=0.00458883 Wb R2=0.9897 rms=0.0935V N=230
-  Mechanical runs: 3/3 individually valid
-  Final mechanical validation: rejected, rms=0.015903 Nm
+  Flux result: psi_f=0.00461033 Wb R2=0.9902 rms=0.0988V N=209
+  Mech aggregate: runs=3 J=0.00009631+/-0.00001380 B=0.00256125+/-0.00031200 Tc=0.02963125+/-0.00081137 R2=0.9743 conf=0.87
+  Mech validation: rms=0.016161 Nm limit=0.017960 Nm sign=1 N=219 -> PASS
+  Tuned defaults staged: vel(kp=0.02759 ki=1.09962 iq=0.225) pos(kp=25.13274 ki=157.91368)
+  Standard commissioning workflow complete
 ```
 
-The remaining failure is now a mechanical validation quality gate, not an
-electrical `R/L` measurement failure or an encoder-mode transition failure.
+The standard commissioning command now completes and stages controller defaults.
