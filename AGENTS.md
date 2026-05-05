@@ -303,3 +303,30 @@ Execution rules:
 3. Include validation commands, summarized results, HIL log paths, and open
    risks in the progress log.
 4. Use telnet HIL automation when Ethernet shell is available.
+
+## Regression Gate
+
+- Non-HIL gate:
+
+```bash
+scripts/checks/run_non_hil_gate.sh wonderful_goldberg
+```
+
+- HIL status gate after flash:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.171
+```
+
+- Live-motion gate when validating runtime motor behavior:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.171 --live
+```
+
+- Velocity/position encoder gates are currently known unstable and should be run
+  explicitly when tuning those loops:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.171 --live --include-velocity
+```
