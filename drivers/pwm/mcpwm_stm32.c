@@ -292,14 +292,12 @@ static void mcpwm_stm32_brk_isr(const struct device *dev)
 	if (LL_TIM_IsActiveFlag_BRK(timer)) {
 		LL_TIM_ClearFlag_BRK(timer);
 		break_occurred = true;
-		LOG_ERR("PWM break fault detected on timer %p", timer);
 	}
 
 #if defined(IS_TIM_BKIN2_INSTANCE)
 	if (IS_TIM_BKIN2_INSTANCE(timer) && LL_TIM_IsActiveFlag_BRK2(timer)) {
 		LL_TIM_ClearFlag_BRK2(timer);
 		break_occurred = true;
-		LOG_ERR("PWM break2 fault detected on timer %p", timer);
 	}
 #endif
 

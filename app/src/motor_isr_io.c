@@ -14,7 +14,6 @@
 #include <zephyr/timing/timing.h>
 #include <zephyr/sys/atomic.h>
 #include <drivers/pwm/mcpwm_stm32.h>
-#include <drivers/gate_driver/ti_drv8328.h>
 
 #include "motor_control_loop.h"
 #include "motor_control_api.h"
@@ -238,29 +237,37 @@ static void motor_adc_stage_telemetry(struct motor_parameters *params,
 void gate_driver_a_break_callback(const struct device *dev, void *user_data)
 {
 	ARG_UNUSED(dev);
-	ARG_UNUSED(user_data);
+	struct motor_parameters *params = (struct motor_parameters *)user_data;
 
 	/* Hardware has already disabled PWM via break input
 	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault).
 	 */
-	drv8328_disable_all_channels(gate_driver_a);
-
-	/* Post error after driver handles disable all channels. */
-	motor_api_post_error(ERROR_HARDWARE_BREAK);
+	if (params != NULL) {
+		atomic_set(&params->control_armed, 0);
+	}
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_ERROR,
+		.error_code = ERROR_HARDWARE_BREAK,
+	};
+	(void)motor_api_enqueue_event_from_isr(&evt);
 }
 
 void gate_driver_b_break_callback(const struct device *dev, void *user_data)
 {
 	ARG_UNUSED(dev);
-	ARG_UNUSED(user_data);
+	struct motor_parameters *params = (struct motor_parameters *)user_data;
 
 	/* Hardware has already disabled PWM via break input
 	 * This interrupt fires when BKIN pin goes active (overcurrent, external fault).
 	 */
-	drv8328_disable_all_channels(gate_driver_b);
-
-	/* Post error after driver handles disable all channels. */
-	motor_api_post_error(ERROR_HARDWARE_BREAK);
+	if (params != NULL) {
+		atomic_set(&params->control_armed, 0);
+	}
+	struct motor_event evt = {
+		.type = MOTOR_EVENT_ERROR,
+		.error_code = ERROR_HARDWARE_BREAK,
+	};
+	(void)motor_api_enqueue_event_from_isr(&evt);
 }
 
 void adc_callback(const struct device *dev, const q31_t *values,
