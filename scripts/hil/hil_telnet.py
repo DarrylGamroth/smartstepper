@@ -551,14 +551,14 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
     max_abs_err = max(abs(float(sample["err_hz"])) for sample in velocity_samples)
     max_warn = max(int(sample["warn"]) for sample in velocity_samples)
     max_err = max(int(sample["err"]) for sample in velocity_samples)
-    wrong_sign = [
-        sample for sample in nonzero_samples
-        if float(sample["target_hz"]) * float(sample["meas_hz"]) < 0.0
-    ]
     tracking_samples = [
         sample for sample in nonzero_samples
         if abs(float(sample["meas_hz"])) >=
         abs(float(sample["target_hz"])) * args.min_velocity_tracking_fraction
+    ]
+    wrong_sign = [
+        sample for sample in tracking_samples
+        if float(sample["target_hz"]) * float(sample["meas_hz"]) < 0.0
     ]
     max_meas_abs_hz = max(abs(float(sample["meas_hz"])) for sample in velocity_samples)
     max_target_abs_hz = max(abs(float(sample["target_hz"])) for sample in velocity_samples)

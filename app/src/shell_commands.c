@@ -77,7 +77,7 @@ enum motor_gains_profile {
 #define POSITION_TO_VELOCITY_BW_RATIO_MAX 0.2f
 #define VELOCITY_STATUS_TRACK_TOL_HZ 0.2f
 #define VELOCITY_DEFAULT_NOMINAL_IQ_LIMIT_A 0.120f
-#define VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A 0.060f
+#define VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A 0.040f
 #define VELOCITY_DEFAULT_GAIN_SPEED_HZ 0.50f
 #define VELOCITY_MODEL_SAFE_BW_HZ 0.25f
 #define VELOCITY_MODEL_NOMINAL_BW_HZ 0.50f
@@ -154,8 +154,8 @@ static void motor_compute_safe_outer_gains(const struct motor_parameters *params
 	*vel_iq_limit = clampf(safe_limit, 0.04f,
 			       fminf(MOTOR_MAX_CURRENT_A, 0.12f));
 	float gain_speed_rad_s = 2.0f * PI_F32 * VELOCITY_DEFAULT_GAIN_SPEED_HZ;
-	*vel_kp = 0.5f * (*vel_iq_limit) / gain_speed_rad_s;
-	*vel_ki = *vel_kp;
+	*vel_kp = 0.75f * (*vel_iq_limit) / gain_speed_rad_s;
+	*vel_ki = 2.0f * (*vel_kp);
 	*pos_kp *= 0.5f;
 	*pos_ki *= 0.1f;
 }

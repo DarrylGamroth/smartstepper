@@ -626,11 +626,16 @@ static void motor_state_ctrl_init_entry(void *obj)
 		(float32_t)params->velocity_loop_decimation / CONTROL_LOOP_FREQUENCY_HZ;
 	float32_t position_loop_dt_s =
 		(float32_t)params->position_loop_decimation / CONTROL_LOOP_FREQUENCY_HZ;
+	/* Conservative boot defaults: enough current to verify encoder velocity
+	 * control without saturating the hybrid-stepper rotor into oscillation.
+	 * Higher-bandwidth gains should come from commissioning or explicit shell
+	 * tuning once the encoder path is proven.
+	 */
 	params->velocity_cl_iq_limit_A =
-		clampf(0.12f, 0.04f, fminf(MOTOR_MAX_CURRENT_A, 0.25f * MOTOR_MAX_CURRENT_A));
+		clampf(0.04f, 0.02f, fminf(MOTOR_MAX_CURRENT_A, 0.25f * MOTOR_MAX_CURRENT_A));
 	params->velocity_cl_kp_A_per_rad_s =
 		(0.75f * params->velocity_cl_iq_limit_A) / (2.0f * PI_F32 * 0.50f);
-	params->velocity_cl_ki_A_per_rad = params->velocity_cl_kp_A_per_rad_s;
+	params->velocity_cl_ki_A_per_rad = 2.0f * params->velocity_cl_kp_A_per_rad_s;
 	params->position_cl_kp_rad_s_per_rad = params->profile_max_velocity_rad_s / PI_F32;
 	params->position_cl_ki_rad_s2_per_rad = 0.5f * params->position_cl_kp_rad_s_per_rad;
 	params->velocity_cl_i_term_A = 0.0f;
