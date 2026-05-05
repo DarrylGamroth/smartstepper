@@ -22,6 +22,7 @@ target_sources(app PRIVATE
 	src/shell_motion_sequence.c
 	src/shell_motion_chopper_calib.c
 	src/shell_motion_commission.c
+	src/shell_commission_detent.c
 	src/shell_commission_validate.c
 	src/motor_control_api.c
 	src/motor_encoder_control.c
