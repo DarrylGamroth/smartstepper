@@ -102,6 +102,13 @@ static inline bool motor_is_align_active_state(uint32_t mode_flags)
 	return motor_is_align_injection_state(mode_flags) || motor_is_align_sample_state(mode_flags);
 }
 
+static inline bool motor_calibration_owns_angle_generator(uint32_t mode_flags)
+{
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
+	       motor_is_align_active_state(mode_flags);
+}
+
 static inline enum motor_control_policy_mode
 motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
@@ -943,7 +950,12 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	}
 
-	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN) {
+	/* Calibration states preconfigure angle_gen in their entry actions.  In
+	 * particular, ROVERL_MEAS depends on a fixed rotating excitation; replacing
+	 * that velocity with the online motion reference collapses L estimation.
+	 */
+	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN &&
+	    !motor_calibration_owns_angle_generator(mode_flags)) {
 		angle_gen_set_velocity(&params->angle_gen, motion_ref->velocity_ref_rad_s);
 	}
 

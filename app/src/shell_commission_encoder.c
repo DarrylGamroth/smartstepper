@@ -31,8 +31,8 @@
 #define MOTOR_COMMISSION_BOOT_DEFAULT_CURRENT_A 0.150f
 #define MOTOR_COMMISSION_BOOT_DEFAULT_MECH_HZ 0.100f
 #define MOTOR_COMMISSION_BOOT_DEFAULT_CYCLES 1.0f
-#define MOTOR_COMMISSION_BOOT_VALIDATE_MAX_IQ_A 0.060f
-#define MOTOR_COMMISSION_BOOT_VALIDATE_HOLD_MS 80U
+#define MOTOR_COMMISSION_BOOT_VALIDATE_MAX_IQ_A 0.150f
+#define MOTOR_COMMISSION_BOOT_VALIDATE_HOLD_MS 250U
 #define MOTOR_COMMISSION_BOOT_VALIDATE_MIN_MOTION_DEG 0.5f
 static struct motor_encoder_map_detect_sample encoder_detect_samples[
 	MOTOR_COMMISSION_ENCODER_MAX_SAMPLES];
@@ -558,11 +558,19 @@ static int motor_commission_validate_positive_iq_motion(const struct shell *sh,
 	float32_t min_motion_rad =
 		MOTOR_COMMISSION_BOOT_VALIDATE_MIN_MOTION_DEG * (PI_F32 / 180.0f);
 
-	int ret = motor_api_request_online();
+	int ret = motor_commission_request_idle_disarmed();
 	if (ret != 0) {
 		return ret;
 	}
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	ret = cmd_motor_arm(sh, 0, NULL);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = cmd_motor_state_mode_current_encoder(sh, 0, NULL);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_request_online();
 	if (ret != 0) {
 		return ret;
 	}

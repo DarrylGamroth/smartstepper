@@ -9,6 +9,7 @@
 #include <zephyr/shell/shell.h>
 
 int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_abort(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_apply(const struct shell *sh, size_t argc, char **argv);

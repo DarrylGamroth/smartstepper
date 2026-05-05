@@ -32,6 +32,8 @@
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
+#define MOTOR_COMMISSION_STANDARD_IDENT_TIMEOUT_MS 20000U
+#define MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A 0.250f
 
 #define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
@@ -161,6 +163,195 @@ int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms)
 	}
 
 	return -ETIMEDOUT;
+}
+
+static int motor_commission_wait_for_state_commission(uint32_t timeout_ms)
+{
+	uint32_t start_ms = k_uptime_get_32();
+	bool observed_commission = false;
+
+	while ((k_uptime_get_32() - start_ms) < timeout_ms) {
+		int state = motor_api_get_state();
+		if (state == MOTOR_STATE_ERROR) {
+			return -EFAULT;
+		}
+		if (g_motor_params != NULL &&
+		    (g_motor_params->calibration.running ||
+		     g_motor_params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING)) {
+			observed_commission = true;
+		}
+		if (g_motor_params != NULL &&
+		    observed_commission &&
+		    g_motor_params->calibration.commissioning_complete &&
+		    !g_motor_params->calibration.running &&
+		    state == MOTOR_STATE_IDLE) {
+			return 0;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
+	}
+
+	return -ETIMEDOUT;
+}
+
+static void motor_commission_restore_timeout(uint32_t timeout_ms)
+{
+	if (g_motor_params == NULL) {
+		return;
+	}
+
+	g_motor_params->command_timeout_ms = timeout_ms;
+	if (timeout_ms == 0U) {
+		g_motor_params->command_timeout_latched = false;
+	}
+	motor_command_feed_watchdog(g_motor_params);
+}
+
+static void motor_commission_apply_auto_iq_floor(void)
+{
+	if (g_motor_params == NULL ||
+	    g_motor_params->velocity_cl_iq_limit_A >= MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A) {
+		return;
+	}
+
+	g_motor_params->velocity_cl_iq_limit_A = MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
+	g_motor_params->velocity_mpr_cfg.iq_limit_a = MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
+	if (g_motor_params->velocity_dob_cfg.iq_ff_limit_a <= 0.0f ||
+	    g_motor_params->velocity_dob_cfg.iq_ff_limit_a >
+		    MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A) {
+		g_motor_params->velocity_dob_cfg.iq_ff_limit_a =
+			MOTOR_COMMISSION_STANDARD_MIN_AUTO_IQ_LIMIT_A;
+	}
+}
+
+static void motor_commission_standard_cleanup(uint32_t saved_timeout_ms)
+{
+	if (g_motor_params != NULL) {
+		motor_commission_motion_stop_current();
+		motor_commission_set_velocity_target_hz(0.0f);
+		g_motor_params->calibration.requested_online_mode =
+			MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+	}
+	(void)motor_commission_request_idle_disarmed();
+	motor_commission_restore_timeout(saved_timeout_ms);
+}
+
+static void motor_commission_run_usage(const struct shell *sh)
+{
+	shell_error(sh, "Usage: motor commission run [slow|confirm] [apply]");
+}
+
+int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
+{
+	bool confirm_profile = false;
+	bool apply_on_success = false;
+
+	if (argc > 3U) {
+		motor_commission_run_usage(sh);
+		return -EINVAL;
+	}
+	for (size_t i = 1U; i < argc; i++) {
+		if (strcmp(argv[i], "slow") == 0) {
+			confirm_profile = false;
+		} else if (strcmp(argv[i], "confirm") == 0) {
+			confirm_profile = true;
+		} else if (strcmp(argv[i], "apply") == 0 ||
+			   strcmp(argv[i], "1") == 0 ||
+			   strcmp(argv[i], "true") == 0) {
+			apply_on_success = true;
+		} else {
+			motor_commission_run_usage(sh);
+			return -EINVAL;
+		}
+	}
+
+	if (g_motor_params == NULL) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	const uint32_t saved_timeout_ms = g_motor_params->command_timeout_ms;
+	g_motor_params->command_timeout_ms = 0U;
+	g_motor_params->command_timeout_latched = false;
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "Standard commissioning workflow started (%s%s)",
+		    confirm_profile ? "confirm" : "slow",
+		    apply_on_success ? ", apply" : "");
+	shell_print(sh, "[0/4] Reset to safe idle and clear stale commissioning data");
+	int ret = motor_commission_request_idle_disarmed();
+	if (ret != 0) {
+		shell_error(sh, "Failed to enter IDLE before commissioning (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	ret = cmd_motor_commission_clear(sh, 0, NULL);
+	if (ret != 0) {
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		ret = motor_api_clear_error();
+		if (ret != 0) {
+			shell_error(sh, "Failed to clear error state (err %d)", ret);
+			motor_commission_standard_cleanup(saved_timeout_ms);
+			return ret;
+		}
+	}
+
+	shell_print(sh, "[1/4] Electrical identification: current offsets, R/L, Rs");
+	ret = motor_api_request_commission();
+	if (ret != 0) {
+		shell_error(sh, "Failed to request state commissioning (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	ret = motor_commission_wait_for_state_commission(
+		MOTOR_COMMISSION_STANDARD_IDENT_TIMEOUT_MS);
+	if (ret != 0) {
+		shell_error(sh, "Electrical identification failed/timed out (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	shell_print(sh, "  Rs=%.4f ohm L=%.6f H R/L=%.1f rad/s",
+		    (double)g_motor_params->Rs_measured_ohm,
+		    (double)g_motor_params->Ls_measured_H,
+		    (double)g_motor_params->R_over_L_measured);
+
+	shell_print(sh, "[2/4] Encoder commutation mapping and current smoke test");
+	char *boot_argv[] = { "boot" };
+	ret = cmd_motor_commission_boot(sh, ARRAY_SIZE(boot_argv), boot_argv);
+	if (ret != 0) {
+		shell_error(sh, "Encoder boot commissioning failed (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+
+	shell_print(sh, "[3/4] Flux and mechanical identification");
+	motor_commission_apply_auto_iq_floor();
+	ret = cmd_motor_arm(sh, 0, NULL);
+	if (ret != 0) {
+		shell_error(sh, "Failed to arm before auto commissioning (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	char *auto_argv[3] = {
+		"run",
+		confirm_profile ? "confirm" : "slow",
+		"apply",
+	};
+	size_t auto_argc = apply_on_success ? 3U : 2U;
+	ret = cmd_motor_commission_auto_run(sh, auto_argc, auto_argv);
+	if (ret != 0) {
+		shell_error(sh, "Auto identify/tune failed (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+
+	shell_print(sh, "[4/4] Return to safe idle");
+	motor_commission_standard_cleanup(saved_timeout_ms);
+	shell_print(sh, "Standard commissioning workflow complete");
+	return 0;
 }
 
 
@@ -367,16 +558,24 @@ int motor_commission_run_motion_threshold(
 	uint32_t hold_ms,
 	float32_t min_motion_rad)
 {
-	int ret = motor_api_request_online();
+	int ret = motor_commission_request_idle_disarmed();
 	if (ret != 0) {
 		return ret;
 	}
 
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	ret = cmd_motor_arm(sh, 0, NULL);
 	if (ret != 0) {
 		return ret;
 	}
 
+	ret = cmd_motor_state_mode_current_encoder(sh, 0, NULL);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_api_request_online();
+	if (ret != 0) {
+		return ret;
+	}
 	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER,
 					     MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
 	if (ret != 0) {

@@ -2542,6 +2542,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_validate,
 
 /* motor commission subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
+	SHELL_CMD_ARG(run, NULL, "Run standard restart commissioning workflow [slow|confirm] [apply]",
+		      cmd_motor_commission_run, 1, 2),
 	SHELL_CMD(status, NULL, "Show commissioning status and capture stats", cmd_motor_commission_status),
 	SHELL_CMD(clear, NULL, "Clear commissioning context and captured data", cmd_motor_commission_clear),
 	SHELL_CMD(abort, NULL, "Abort active commissioning run", cmd_motor_commission_abort),
