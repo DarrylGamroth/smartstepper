@@ -29,7 +29,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P6 Commissioning Shell Decomposition | Complete | 7b24b9a, 8d3b207, 9205084, cb0a070 | Commissioning shell split into validation, detent, encoder/boot, and auto workflow files; build/parser tests pass; HIL command/status checks pass. |
 | P7 Control Kernel Extraction | Complete | b6e939d | Control kernel extracted into `motor_core`; full unit tests pass; firmware build/flash pass; HIL status pass. |
 | P8 TI-Style Fast Block Discipline | Complete | 344d254 | ISR fast-block audit added; PI regulator fast paths are header-inline; full unit tests/build/status HIL pass; velocity HIL still fails due tuning/control behavior. |
-| P9 Persistence Readiness | Not Started |  |  |
+| P9 Persistence Readiness | Complete | b9af9b2 | Versioned persistence schema/helper added; no storage/autoload enabled; full tests/build/status HIL pass. |
 | P10 Regression Gate | Not Started |  |  |
 
 ## Completion Gate
@@ -889,3 +889,62 @@ Next action:
 
 - Start P9 persistence readiness while keeping velocity_encoder tuning and HIL
   threshold semantics as explicit open risks for P10/regression gating.
+
+## Entry 17 - 2026-05-05 - P9: Persistence Readiness
+
+Status: Complete.
+
+Commit: `b9af9b2` (`P9 define persistence schema readiness`).
+
+Commands:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+./tests/run_unit_tests.sh wonderful_goldberg
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p9 --json-report hil_logs/p9/status_after_p9_persistence_schema.json
+```
+
+Results:
+
+- Rewrote `app/docs/settings_persistence_plan.md` to match the current safety
+  policy: persistence is schema-ready only, with no EEPROM writes and no boot
+  autoload enabled.
+- Added `motor_persistent_config_v1` schema in `motor_core` with groups for
+  current offsets, encoder mapping, motor model, controller defaults, and detent
+  metadata.
+- Added validity flags so future apply code can consume only proven groups.
+- Added prepare/validate helpers with payload CRC32.
+- Kept CRC local to the non-ISR persistence helper to avoid enabling Zephyr CRC
+  subsystem solely for readiness code.
+- Added `chopper.motor_persistent_config.unit` tests for header population,
+  payload corruption rejection, header mismatch rejection, and NULL handling.
+- Focused persistence unit test: 1/1 scenario passed, 4/4 test cases passed.
+- Full unit test run: 31/31 scenarios passed, 263/263 test cases passed.
+- Firmware build: passed.
+- Flash using the J-Link runner: passed.
+- HIL status verdict: `PASS`; motor error `NONE`, fault snapshot clear, encoder
+  acquisition counters within thresholds.
+- HIL after flash showed `Enc mapped: NO`, proving this phase did not enable
+  persistence autoload.
+
+HIL logs:
+
+- `hil_logs/p9/20260505_044530_status.log`
+- `hil_logs/p9/status_after_p9_persistence_schema.json`
+
+Open risks:
+
+- No persistence backend is implemented yet. This is intentional until the HIL
+  gate is stable.
+- Velocity encoder validation remains below acceptance, so autoload must stay
+  disabled.
+- Future storage implementation still needs a two-slot or Settings-backed
+  rollback strategy and shell preview/apply commands.
+
+Next action:
+
+- Start P10 regression gate: document and script the repeatable unit/build/HIL
+  checks, including which current failures are release blockers versus known
+  open control-tuning risks.
