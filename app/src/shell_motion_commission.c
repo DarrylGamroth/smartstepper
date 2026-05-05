@@ -86,6 +86,7 @@ static struct motor_encoder_map_detect_result encoder_detect_result;
 static bool encoder_detect_result_valid;
 static uint32_t encoder_detect_duration_ms;
 static uint32_t encoder_detect_sample_period_ms;
+static float32_t encoder_detect_current_a;
 
 struct motor_commission_detent_result {
 	bool valid;
@@ -399,6 +400,7 @@ static void motor_commission_encoder_clear_result(void)
 	encoder_detect_result_valid = false;
 	encoder_detect_duration_ms = 0U;
 	encoder_detect_sample_period_ms = 0U;
+	encoder_detect_current_a = 0.0f;
 }
 
 static void motor_commission_encoder_stop_generated(void)
@@ -1491,6 +1493,7 @@ static int motor_commission_encoder_run_generated_sweep(
 
 	encoder_detect_duration_ms = duration_ms;
 	encoder_detect_sample_period_ms = sample_period_ms;
+	encoder_detect_current_a = sweep->current_a;
 
 	struct motor_commission_encoder_trace_guard trace_guard;
 	motor_commission_encoder_trace_force_on(&trace_guard);
@@ -1594,6 +1597,22 @@ static int motor_commission_encoder_run_generated_sweep(
 	return ret;
 }
 
+static float32_t motor_commission_encoder_commutation_offset_mech_rad(void)
+{
+	float32_t excitation_sign = (encoder_detect_current_a >= 0.0f) ? 1.0f : -1.0f;
+	/* The generated sweep drives Id=0, Iq!=0. With the inverse Park
+	 * convention used by the current loop, that excites a stator vector
+	 * +/-90 electrical degrees from the generated reference angle. Convert
+	 * the detected generated-reference offset into the rotor d-axis offset
+	 * required for encoder-commutated FOC.
+	 */
+	float32_t commutation_elec_offset_rad =
+		wrap_rad_pi(encoder_detect_result.offset_elec_rad +
+			    excitation_sign * (0.5f * PI_F32));
+
+	return wrap_rad_pi(commutation_elec_offset_rad / (float32_t)MOTOR_POLE_PAIRS);
+}
+
 int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc != 4) {
@@ -1635,6 +1654,7 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 	shell_print(sh, "  Staged valid:   %s", encoder_detect_result_valid ? "YES" : "NO");
 	shell_print(sh, "  Duration/sample:%u ms / %u ms",
 		    encoder_detect_duration_ms, encoder_detect_sample_period_ms);
+	shell_print(sh, "  Excitation:     Iq=%.3f A", (double)encoder_detect_current_a);
 	shell_print(sh, "  Valid:          %s", encoder_detect_result.valid ? "YES" : "NO");
 	shell_print(sh, "  Direction:      sign=%d valid=%s corr=%.4f residual=%.4f rad",
 		    encoder_detect_result.direction_sign,
@@ -1646,6 +1666,13 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 		    (double)(encoder_detect_result.offset_mech_rad * 180.0f / PI_F32),
 		    (double)(encoder_detect_result.offset_elec_rad * 180.0f / PI_F32),
 		    (double)encoder_detect_result.offset_residual_rad);
+	if (encoder_detect_result_valid && encoder_detect_result.valid) {
+		float32_t commutation_offset_rad =
+			motor_commission_encoder_commutation_offset_mech_rad();
+		shell_print(sh,
+			    "  FOC offset:      mech=%.4f deg (includes Iq-axis +90/-90 electrical correction)",
+			    (double)(commutation_offset_rad * 180.0f / PI_F32));
+	}
 	shell_print(sh, "  Ratio:          %.4f valid=%s",
 		    (double)encoder_detect_result.ratio,
 		    encoder_detect_result.ratio_valid ? "YES" : "NO");
@@ -1672,14 +1699,15 @@ static int motor_commission_encoder_apply_staged(const struct shell *sh)
 	g_motor_params->encoder_direction_sign =
 		(encoder_detect_result.direction_sign >= 0) ? 1 : -1;
 	g_motor_params->observer_alignment_offset_rad =
-		wrap_rad_pi(encoder_detect_result.offset_mech_rad);
+		motor_commission_encoder_commutation_offset_mech_rad();
 	g_motor_params->observer_elec_trim_rad = 0.0f;
 	angle_observer_set_offset(&g_motor_params->observer,
 				  g_motor_params->observer_alignment_offset_rad);
 	g_motor_params->calibration.encoder_mapping_complete = true;
 	motor_command_feed_watchdog(g_motor_params);
 
-	shell_print(sh, "Encoder mapping applied: sign=%d offset=%.4f deg mechanical",
+	shell_print(sh,
+		    "Encoder mapping applied: sign=%d commutation_offset=%.4f deg mechanical",
 		    g_motor_params->encoder_direction_sign,
 		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
 	return 0;
@@ -1779,7 +1807,7 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh,
-		    "Boot commissioning complete: sign=%d offset=%.4f deg mechanical",
+		    "Boot commissioning complete: sign=%d commutation_offset=%.4f deg mechanical",
 		    g_motor_params->encoder_direction_sign,
 		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
 	return 0;

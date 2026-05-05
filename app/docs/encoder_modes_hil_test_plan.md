@@ -422,16 +422,71 @@ Pass criteria:
 
 | Test | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Boot commissioning | pending | | |
-| Phase 0 generated sanity | pending | | |
-| Phase 1 current_encoder entry | pending | | |
-| Phase 1 current_encoder signed current | pending | | |
-| Phase 2 velocity_encoder low-speed steps | pending | | |
-| Phase 2 velocity_encoder direction | pending | | |
-| Phase 3 position_encoder hold | pending | | |
-| Phase 3 position_encoder small moves | pending | | |
-| Phase 4 transitions | pending | | |
-| Phase 5 fault/recovery | pending | | |
+| Boot commissioning | pass | `motor commission boot 0.15 0.10 1` valid; direction `-1`; corrected commutation offset `0.202 deg`; `control_status Ready: YES`. | Apply path now converts generated-reference offset to FOC commutation offset with `+/-90 electrical` Iq-axis correction. |
+| Phase 0 generated sanity | pass | `velocity_generated`, `Iq=0.10 A`, `target=0.5 Hz`; raw trace clean (`warn=0 err=0 io=0`). | Trace overran because it was left running beyond the motion interval; clean window was still valid. |
+| Phase 1 current_encoder entry | pass | Entered `ONLINE_CURRENT_ENCODER`; `Iq=0.03/0.06 A` tracked current with no faults and clean trace. | Mode entry disarms control, so test sequence must arm after mode entry. |
+| Phase 1 current_encoder signed current | pass | `Iq=+0.04/-0.04 A` tracked with no state fault; `Iq=0.15 A` moved after commutation-offset correction. | Before the `+90 electrical` correction, `Iq=0.15 A` produced essentially no motion despite clean current tracking. |
+| Phase 2 velocity_encoder low-speed steps | partial pass | Entered `ONLINE_VELOCITY_ENCODER`; target `0.25 Hz` produced motion after correction; encoder trace clean at stop. | Safe gains integrate too slowly; nominal gains overshot to roughly `0.5-0.7 Hz`. Needs velocity tuning and anti-windup/zero-target behavior review. |
+| Phase 2 velocity_encoder direction | partial pass | Positive target produced positive measured velocity after correction. | Reverse target not run after correction because velocity tuning still needs cleanup. |
+| Phase 3 position_encoder hold | pass | Entered `ONLINE_POSITION_ENCODER`; hold target near current position stayed stable with small position error. | Uses safe position/velocity gains and decimation. |
+| Phase 3 position_encoder small moves | fail | Commanding `237 deg` from about `232 deg` caused a large transient/overshoot and high velocity command. | Position loop is not ready for moves; likely needs target semantics, profile limiting, and gain/limit review. |
+| Phase 4 transitions | partial pass | IDLE to current/velocity/position encoder entries completed after acquisition counters were cleared. | High-speed current test latched AEAT CRC/status errors; `motor encoder acquisition_reset` was required before re-entering encoder modes. |
+| Phase 5 fault/recovery | partial pass | `motor disarm` and `motor state idle` recovered from test exits; no hard faults observed. | Did not intentionally inject faults or require `motor gate reset` in this run. |
+
+## Execution Log
+
+### 2026-05-04 HIL Run
+
+Build and flash:
+
+```text
+west build --build-dir /workspace/build/chopper/smartstepper_v2
+west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip
+```
+
+Initial boot commissioning passed with the old apply behavior:
+
+- offsets: `Ia=2.9956`, `Ib=2.9988`
+- mapping: valid, direction `-1`, generated-reference offset `-1.587 deg`
+- control readiness: `Ready: YES`
+
+`current_encoder` before correction:
+
+- `Iq=0.03/0.06 A`: current tracked, no faults, no motion.
+- `Iq=0.15 A`: current tracked at about `0.154 A`, no faults, essentially no
+  motion.
+- Encoder trace remained clean.
+- Conclusion: encoder transport was not the blocker; the applied offset was not
+  the FOC rotor d-axis offset.
+
+Manual trim experiment:
+
+- Applied `motor encoder trim 90`.
+- `current_encoder`, `Iq=0.15 A` produced immediate motion, roughly `6 Hz`
+  mechanical in the raw trace.
+- Conclusion: generated-sweep mapping needs `+90 electrical degrees` correction
+  for positive `Iq` excitation.
+
+After implementing automatic correction:
+
+- boot command result: valid, direction `-1`, generated-reference offset
+  `-1.598 deg mechanical`, corrected commutation offset `0.202 deg mechanical`.
+- `current_encoder`, `Iq=0.15 A`: produced motion, confirming corrected
+  commutation offset.
+- `velocity_encoder`: entered and moved with positive target; nominal gains
+  overshot, safe gains were sluggish.
+- `position_encoder`: hold passed; small absolute move failed with large
+  transient/overshoot.
+
+Open issues from this run:
+
+1. Tune `velocity_encoder` gains/limits now that the commutation offset is
+   correct.
+2. Review velocity PI I-term behavior when target returns to zero.
+3. Review `position_encoder` command semantics and profile limiting before
+   allowing direct small moves.
+4. Investigate AEAT CRC/status errors during faster `current_encoder` spin; they
+   were not present in the slow commissioning sweep or stationary encoder modes.
 
 ## Recommended Execution Order
 

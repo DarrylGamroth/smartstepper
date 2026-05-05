@@ -27,7 +27,10 @@ Defaults:
 - `cycles = 1.0`
 
 The command prints progress for each stage and fails fast on state, calibration,
-encoder acquisition, or mapping-quality errors.
+encoder acquisition, or mapping-quality errors. Applying the mapping converts
+the generated-sweep reference offset into the FOC commutation offset by adding
+the expected `Iq` excitation phase correction (`+/-90 electrical degrees`,
+depending on sweep current sign).
 
 ## Implementation Plan
 
@@ -74,6 +77,15 @@ encoder acquisition, or mapping-quality errors.
     mechanical offset `-1.584 deg`, 500 accepted samples, 0 rejected,
     0 warnings, 0 errors.
   - Post-check: `motor encoder control_status` reported `Ready: YES`.
+- 2026-05-04 follow-up HIL found the raw generated-reference offset was not a
+  valid FOC commutation offset by itself. `current_encoder` at `0.15 A` produced
+  no motion until `+90 electrical degrees` trim was applied. The apply path now
+  includes that `Iq`-axis phase correction automatically. Re-test:
+  - `motor commission boot 0.15 0.10 1`: valid, direction `-1`,
+    generated-reference offset `-1.598 deg mechanical`, corrected commutation
+    offset `0.202 deg mechanical`.
+  - `current_encoder` at `Iq=0.15 A`: produced motion, confirming the corrected
+    commutation offset.
 
 ## Operating Notes
 
