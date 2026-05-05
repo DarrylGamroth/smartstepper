@@ -230,6 +230,80 @@ Encoder Control Readiness:
         velocity = next(check for check in report.checks if check.name == "velocity_validation")
         self.assertGreater(velocity.values["overshoot_ratio"], 3.0)
 
+    def test_encoder_robust_passes_with_valid_mapping_and_apply(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor commission encoder robust 0.150 0.050 1.000 bidirectional",
+                """
+Encoder mapping result: valid=YES dir=-1 corr=-0.9852 off_mech=0.209 deg off_elec=10.452 deg
+Robust encoder mapping combined: valid=YES dir=-1 corr=-0.9849 off_mech=0.210 deg off_elec=10.500 deg
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission encoder status",
+                """
+Encoder Mapping Detect:
+  Staged valid:   YES
+  Valid:          YES
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission encoder apply",
+                "Encoder mapping applied: sign=-1 commutation_offset=0.2100 deg mechanical\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder control_status",
+                """
+Encoder Control Readiness:
+  Ready:           YES
+  Mapping applied: YES
+  Protocol ok:     YES
+  Acquisition errors: transport=0 parity=0 crc=0 glitch=0 status=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("encoder-robust"), results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+
+    def test_encoder_robust_fails_without_apply(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor commission encoder robust 0.150 0.050 1.000",
+                "Encoder mapping result: valid=YES dir=-1 corr=-0.9852 off_mech=0.209 deg off_elec=10.452 deg\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission encoder apply",
+                "No valid staged encoder mapping result\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("encoder-robust"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        apply_check = next(
+            check for check in report.checks
+            if check.name == "encoder_robust_mapping_applied"
+        )
+        self.assertEqual(apply_check.status, "FAIL")
+
 
 if __name__ == "__main__":
     unittest.main()

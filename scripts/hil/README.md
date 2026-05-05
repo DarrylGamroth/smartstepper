@@ -16,6 +16,7 @@ python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion
 python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion
+python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-trace-open-loop --yes-live-motion
 ```
@@ -45,6 +46,14 @@ python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion \
   --boot-current 0.15 --boot-hz 0.05 --cycles 1 \
   --velocity-pi-kp 0.100 --velocity-pi-ki 0.250 --velocity-pi-iq-limit 0.120 \
   --velocity-hz 0.05 --velocity-hold-ms 1000
+```
+
+Use the robust encoder-mapping scenario to test only generated-sweep mapping
+and apply, without running current/velocity/position validation afterward:
+
+```bash
+python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
+  --boot-current 0.15 --boot-hz 0.05 --cycles 1 --bidirectional
 ```
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file

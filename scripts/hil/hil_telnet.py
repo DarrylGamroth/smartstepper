@@ -259,6 +259,36 @@ def scenario_encoder_validate(args: argparse.Namespace) -> list[ShellCommand]:
     return cmds
 
 
+def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
+    duration_s = max(
+        10.0,
+        (float(args.cycles) / max(abs(float(args.boot_hz)), 0.001)) *
+        (2.0 if args.bidirectional else 1.0) + 15.0,
+    )
+    suffix = " bidirectional" if args.bidirectional else ""
+    return [
+        ShellCommand("motor state status"),
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 0"),
+        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        ShellCommand("motor arm", timeout_s=2.0),
+        ShellCommand(
+            f"motor commission encoder robust {args.boot_current:.3f} "
+            f"{args.boot_hz:.3f} {args.cycles:.3f}{suffix}",
+            timeout_s=duration_s,
+        ),
+        ShellCommand("motor commission encoder status", timeout_s=3.0),
+        ShellCommand("motor commission encoder apply", timeout_s=3.0),
+        ShellCommand("motor encoder control_status", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor state status", timeout_s=3.0),
+    ]
+
+
 def _optional_velocity_pi_commands(args: argparse.Namespace) -> list[ShellCommand]:
     if args.velocity_pi_kp is None and args.velocity_pi_ki is None:
         return []
@@ -372,6 +402,7 @@ SCENARIOS = {
     "status": (scenario_status, False),
     "boot-commission": (scenario_boot_commission, True),
     "current-validate": (scenario_current_validate, True),
+    "encoder-robust": (scenario_encoder_robust, True),
     "encoder-validate": (scenario_encoder_validate, True),
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
     "position-validate": (scenario_position_validate, True),
@@ -595,6 +626,27 @@ def _evaluate_position_validation(checks: list[VerdictCheck],
            "Position validation completion text not found")
 
 
+def _evaluate_encoder_robust(checks: list[VerdictCheck],
+                             results: Sequence[ShellResult]) -> None:
+    robust_response = _last_response(results, "motor commission encoder robust")
+    status_response = _last_response(results, "motor commission encoder status")
+    apply_response = _last_response(results, "motor commission encoder apply")
+    response = "\n".join((robust_response, status_response, apply_response))
+
+    mapping_valid = (
+        "Robust encoder mapping combined: valid=YES" in response or
+        "Encoder mapping result: valid=YES" in response or
+        re.search(r"^\s*Valid:\s+YES\b", status_response, re.MULTILINE) is not None
+    )
+    mapping_applied = "Encoder mapping applied:" in apply_response
+    _check(checks, "encoder_robust_mapping_valid", mapping_valid,
+           "Robust encoder mapping produced a valid staged result" if mapping_valid
+           else "Robust encoder mapping did not produce a valid staged result")
+    _check(checks, "encoder_robust_mapping_applied", mapping_applied,
+           "Robust encoder mapping applied" if mapping_applied
+           else "Robust encoder mapping was not applied")
+
+
 def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                      log_path: Path | None) -> ScenarioReport:
     checks: list[VerdictCheck] = []
@@ -675,6 +727,7 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                    {"protocol_ok": bool(protocol)})
         elif args.scenario in (
             "current-validate",
+            "encoder-robust",
             "encoder-validate",
             "velocity-validate",
             "position-validate",
@@ -705,6 +758,9 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         complete = "Boot commissioning complete" in text
         _check(checks, "boot_commission_complete", complete,
                "Boot commissioning completed" if complete else "Boot commissioning completion text not found")
+
+    if args.scenario == "encoder-robust":
+        _evaluate_encoder_robust(checks, results)
 
     if args.scenario in ("current-validate", "encoder-validate", "position-validate"):
         _evaluate_current_validation(args, checks, results)
@@ -775,6 +831,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--boot-current", type=float, default=0.15)
     parser.add_argument("--boot-hz", type=float, default=0.05)
     parser.add_argument("--cycles", type=float, default=1.0)
+    parser.add_argument("--bidirectional", action="store_true",
+                        help="Use forward+reverse generated sweeps for encoder-robust.")
     parser.add_argument("--current-iq", type=float, default=0.03)
     parser.add_argument("--current-hold-ms", type=int, default=160)
     parser.add_argument("--velocity-hz", type=float, default=0.05)
