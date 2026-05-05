@@ -26,7 +26,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d, 8cc4979 | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors; failed sweeps now abort acquisition. |
 | P4 Commissioning UX and Naming | Complete | fae3054 | Commissioning command help clarified; boot/mapping/validation commands print prerequisites and next steps; help/status HIL captured. |
 | P5 Direct ISR Safety Audit | Complete | 943081b | Break callbacks now use ISR ring only; ISR audit doc added; build/status/boot HIL pass. |
-| P6 Commissioning Shell Decomposition | Not Started |  |  |
+| P6 Commissioning Shell Decomposition | Complete | 7b24b9a, 8d3b207, 9205084, cb0a070 | Commissioning shell split into validation, detent, encoder/boot, and auto workflow files; build/parser tests pass; HIL command/status checks pass. |
 | P7 Control Kernel Extraction | Not Started |  |  |
 | P8 TI-Style Fast Block Discipline | Not Started |  |  |
 | P9 Persistence Readiness | Not Started |  |  |
@@ -701,3 +701,47 @@ Open risks:
 Next action:
 
 - Continue P6 by splitting the auto-tune workflow and/or the flux/mechanical identification workflow.
+
+## Entry 14 - 2026-05-05 - P6: Commissioning Auto Workflow Split
+
+Status: Complete.
+
+Commit: `cb0a070` (`P6 split commissioning auto workflow`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 3 --log-dir hil_logs/p6 --json-report hil_logs/p6/auto_help_after_split.json --command 'motor commission auto' --command 'motor commission auto status' --command 'motor commission status' --command 'motor state status' --command 'motor encoder acquisition' --command 'motor fault snapshot status'
+```
+
+Results:
+
+- Split `motor commission auto run|status|apply|validate` and its multi-stage workflow helpers into `app/src/shell_commission_auto.c`.
+- `app/src/shell_motion_commission.c` is reduced to common commissioning status/reset/apply, manual flux/mechanical commands, motion-threshold helpers, and shared internal helpers.
+- Final commissioning shell file sizes:
+  - `app/src/shell_motion_commission.c`: 820 lines.
+  - `app/src/shell_commission_auto.c`: 1164 lines.
+  - `app/src/shell_commission_encoder.c`: 799 lines.
+  - `app/src/shell_commission_detent.c`: 529 lines.
+  - `app/src/shell_commission_validate.c`: 370 lines.
+- Firmware build: passed.
+- HIL parser unit tests: 9/9 passed.
+- Flash: passed.
+- HIL auto command-tree/status check: `PASS`; no motor fault, no fault snapshot latch, encoder acquisition counters within thresholds.
+
+HIL logs:
+
+- `hil_logs/p6/20260505_041454_custom.log`
+- `hil_logs/p6/auto_help_after_split.json`
+
+Open risks:
+
+- P6 did not change commissioning behavior intentionally; live detent/auto capture workflows were not run for this refactor-only phase.
+- `app/src/shell_commission_auto.c` is still large because the auto workflow is inherently multi-stage. Further reduction should move reusable identify/tune orchestration into `motor_core` rather than continuing to split shell glue.
+
+Next action:
+
+- Start P7 control kernel extraction: reduce ISR coupling to `struct motor_parameters` by introducing a smaller real-time control context/input/output boundary.
