@@ -135,11 +135,19 @@ static void motor_adc_stage_collect(struct motor_parameters *params,
 		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
 	bool encoder_capture_enabled = params->encoder_capture.enabled;
 	bool encoder_raw_trace_enabled = params->encoder_raw_trace.enabled;
+	bool motor_operating =
+		motor_state_ptr_is_online_control_state(params->state_for_isr);
 	bool encoder_sampling_enabled =
-		encoder_enabled || encoder_capture_enabled || encoder_raw_trace_enabled;
+		motor_operating || encoder_enabled ||
+		encoder_capture_enabled || encoder_raw_trace_enabled;
 
-	/* Publish policy then always collect once to drain any completed CQE/buffer,
-	 * even if encoder reads were just disabled this cycle.
+	/* ADC-owned cadence:
+	 * - collect the sample requested by the previous control tick
+	 * - immediately request the next sample so it can complete before the
+	 *   next ADC ISR
+	 *
+	 * `enabled` below means "eligible for control feedback"; the transport
+	 * may still be sampled for diagnostics in generated/open-loop modes.
 	 */
 	motor_encoder_acquisition_set_enabled(encoder_sampling_enabled);
 
@@ -157,6 +165,13 @@ static void motor_adc_stage_collect(struct motor_parameters *params,
 			(ret < 0 && ret != -EAGAIN && ret != -ENODATA);
 	}
 
+	if (encoder_sampling_enabled) {
+		int request_ret = motor_encoder_acquisition_request_sample();
+		if (request_ret < 0 && request_ret != -EALREADY) {
+			params->encoder_fault_counter++;
+		}
+	}
+
 	collect->encoder_sample = encoder_sample;
 }
 
@@ -168,8 +183,8 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 {
 	motor_adc_apply_keepalive_and_timeout(params);
 
-	/* Hardware-timer-driven position-sequence tick source.
-	 * Keep event posting out of encoder1_callback (direct ISR context).
+	/* Hardware-timer-driven position-sequence tick source. Keep event
+	 * posting in the ADC ISR path rather than a direct timer callback.
 	 */
 	if (params->profile_seq.running &&
 	    atomic_get(&params->control_armed) != 0 &&
@@ -299,32 +314,4 @@ void adc_callback(const struct device *dev, const q31_t *values,
 	motor_adc_stage_telemetry(params, cycles_start);
 
 	gpio_pin_set_dt(&trig, 0);
-}
-
-void encoder1_callback(const struct device *dev, uint32_t channel,
-		       void *user_data)
-{
-	struct motor_parameters *params = (struct motor_parameters *)user_data;
-	ARG_UNUSED(dev);
-	ARG_UNUSED(channel);
-
-	if (params == NULL) {
-		return;
-	}
-
-	/* Trigger continuous encoder reads when feature is enabled. */
-	bool encoder_enabled =
-		atomic_test_bit(&params->feature_flags, MOTOR_FEATURE_ENCODER_READ);
-	bool encoder_capture_enabled = params->encoder_capture.enabled;
-	bool encoder_raw_trace_enabled = params->encoder_raw_trace.enabled;
-	bool encoder_sampling_enabled =
-		encoder_enabled || encoder_capture_enabled || encoder_raw_trace_enabled;
-
-	motor_encoder_acquisition_set_enabled(encoder_sampling_enabled);
-	if (encoder_sampling_enabled) {
-		int ret = motor_encoder_acquisition_request_sample();
-		if (ret < 0 && ret != -EALREADY) {
-			params->encoder_fault_counter++;
-		}
-	}
 }

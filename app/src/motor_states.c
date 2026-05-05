@@ -526,28 +526,17 @@ static void motor_state_hw_init_entry(void *obj)
 	}
 
 	mcpwm_stop(pwm1);
-	mcpwm_stop(pwm3);
 	mcpwm_stop(pwm8);
 
 	drv8328_disable_all_channels(gate_driver_a);
 	drv8328_disable_all_channels(gate_driver_b);
 	mcpwm_disable(pwm1, 4);
-	mcpwm_disable(pwm3, 1);
 
 	/* Initialize PWM channels */
 	mcpwm_configure(pwm1, 4, STM32_PWM_OC_MODE_PWM2);
-	mcpwm_configure(pwm3, 1, 0);
 
 	/* Set initial duty cycles */
 	mcpwm_set_duty_cycle(pwm1, 4, 0x01000000);
-	// mcpwm_set_duty_cycle(pwm3, 1, 0x40000000);
-	/* Fire encoder compare callback in mid-early PWM period to balance SPI
-	 * completion slack against switching-noise susceptibility.
-	 */
-	mcpwm_set_duty_cycle(pwm3, 1, 0x5999999A); /* 35% duty cycle */
-
-	/* Set up encoder callback */
-	mcpwm_set_compare_callback(pwm3, 1, encoder1_callback, params);
 
 	/* Set up break interrupt handler for hardware fault protection */
 	mcpwm_set_break_callback(pwm1, gate_driver_a_break_callback, params);
@@ -561,12 +550,10 @@ static void motor_state_hw_init_entry(void *obj)
 	timing_init();
 	timing_start();
 
-	/* Enable PWM for sampling */
-	mcpwm_enable(pwm3, 1);
+	/* Enable PWM outputs used by the injected-ADC control cadence. */
 	mcpwm_enable(pwm1, 4);
 
 	/* Start master timers. pwm1 is the master timer */
-	mcpwm_start(pwm3);
 	mcpwm_start(pwm8);
 	mcpwm_start(pwm1);
 }
@@ -599,7 +586,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 			    1.0f / CONTROL_LOOP_FREQUENCY_HZ,
 			    ANGLE_OBSERVER_BANDWIDTH_HZ,
 			    MOTOR_POLE_PAIRS,
-			    ENCODER_SPI_PIPELINE_DELAY_SAMPLES);
+			    ENCODER_SAMPLE_DELAY_SAMPLES);
 
 	/* Initialize Id trajectory generator for smooth current ramping */
 	traj_init(&params->traj_Id);

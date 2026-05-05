@@ -13,7 +13,6 @@
 /* Hardware device handles */
 extern const struct device *const pwm1;
 extern const struct device *const pwm8;
-extern const struct device *const pwm3;
 extern const struct device *const encoder1;
 extern const struct device *const adc1;
 extern const struct device *const gate_driver_a;
@@ -34,7 +33,7 @@ int motor_hardware_init_gpio(void);
  * @brief Check all required devices are ready
  * 
  * Validates readiness of:
- * - PWM timers (pwm1, pwm3, pwm8)
+ * - PWM timers (pwm1, pwm8)
  * - Encoder or fast-path encoder transport (encoder1)
  * - ADC (adc1)
  * 

@@ -14,7 +14,6 @@
 /* Global device handles - accessed by ISR */
 extern const struct device *const pwm1;
 extern const struct device *const pwm8;
-extern const struct device *const pwm3;
 extern const struct device *const encoder1;
 extern const struct device *const adc1;
 extern const struct device *const gate_driver_a;
@@ -74,18 +73,5 @@ void gate_driver_a_break_callback(const struct device *dev, void *user_data);
  * @param user_data Pointer to motor_parameters struct
  */
 void gate_driver_b_break_callback(const struct device *dev, void *user_data);
-
-/**
- * @brief Encoder timer compare callback - triggers encoder read
- * 
- * Called at encoder sampling rate (derived from PWM timer).
- * Initiates an asynchronous RTIO read of the encoder position.
- *
- * @param dev Timer device
- * @param channel Timer channel that triggered
- * @param user_data Unused
- */
-void encoder1_callback(const struct device *dev, uint32_t channel,
-                       void *user_data);
 
 #endif /* MOTOR_ISR_H */

@@ -22,7 +22,6 @@ const struct gpio_dt_spec trig = GPIO_DT_SPEC_GET(DT_PATH(trig), gpios);
 /* Hardware device instances */
 const struct device *const pwm1 = DEVICE_DT_GET(DT_NODELABEL(pwm1));
 const struct device *const pwm8 = DEVICE_DT_GET(DT_NODELABEL(pwm8));
-const struct device *const pwm3 = DEVICE_DT_GET(DT_NODELABEL(pwm3));
 const struct device *const encoder1 = DEVICE_DT_GET(DT_ALIAS(encoder1));
 const struct device *const adc1 = DEVICE_DT_GET(DT_NODELABEL(adc1));
 const struct device *const gate_driver_a = DEVICE_DT_GET(DT_ALIAS(gate_driver_a));
@@ -57,11 +56,6 @@ int motor_hardware_check_devices(void)
 	/* Check PWM device readiness */
 	if (!device_is_ready(pwm1)) {
 		printk("PWM1 device is not ready\n");
-		return -ENODEV;
-	}
-
-	if (!device_is_ready(pwm3)) {
-		printk("PWM3 device is not ready\n");
 		return -ENODEV;
 	}
 

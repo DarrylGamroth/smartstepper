@@ -583,15 +583,24 @@ BUILD_ASSERT(VBUS_MAX_V > VBUS_REGEN_LIMIT_V,
 #error "encoder-direction-sign must be 1 or <(-1)>"
 #endif
 #define ENCODER_DIRECTION_SIGN ((ENCODER_DIRECTION_SIGN_RAW == 1) ? 1 : -1)
+/*
+ * The ADC ISR owns encoder request/collect cadence:
+ *   ISR N collects the transfer requested by ISR N-1, then requests ISR N+1.
+ * That makes valid samples one control tick old before any encoder protocol
+ * pipeline delay is considered.
+ */
+#define ENCODER_CONTROL_SAMPLE_DELAY_SAMPLES 1.0f
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
-#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 1.0f
+#define ENCODER_PROTOCOL_PIPELINE_DELAY_SAMPLES 1.0f
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
-#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 0.0f
+#define ENCODER_PROTOCOL_PIPELINE_DELAY_SAMPLES 0.0f
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835)
-#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 0.0f
+#define ENCODER_PROTOCOL_PIPELINE_DELAY_SAMPLES 0.0f
 #else
-#define ENCODER_SPI_PIPELINE_DELAY_SAMPLES 0.0f
+#define ENCODER_PROTOCOL_PIPELINE_DELAY_SAMPLES 0.0f
 #endif
+#define ENCODER_SAMPLE_DELAY_SAMPLES \
+	(ENCODER_CONTROL_SAMPLE_DELAY_SAMPLES + ENCODER_PROTOCOL_PIPELINE_DELAY_SAMPLES)
 #define OUTER_LOOP_DECIMATION_MIN 1U
 #define OUTER_LOOP_DECIMATION_MAX 1000U
 #define VELOCITY_LOOP_DECIMATION_DEFAULT 1U
