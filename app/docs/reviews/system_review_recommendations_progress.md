@@ -25,7 +25,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P2 Encoder PI Stabilization | Complete | eb52d82, 521a6ea, 0526872, 5a6f8a3, be5f2b6, 219b005, 43c2ae5, a8062b0 | Boot, current_encoder, velocity_encoder, and position_encoder have PASS HIL artifacts with conservative PI; cumulative current-mode encoder CRC diagnostics remain an open risk. |
 | P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d, 8cc4979 | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors; failed sweeps now abort acquisition. |
 | P4 Commissioning UX and Naming | Complete | fae3054 | Commissioning command help clarified; boot/mapping/validation commands print prerequisites and next steps; help/status HIL captured. |
-| P5 Direct ISR Safety Audit | Not Started |  |  |
+| P5 Direct ISR Safety Audit | Complete | 943081b | Break callbacks now use ISR ring only; ISR audit doc added; build/status/boot HIL pass. |
 | P6 Commissioning Shell Decomposition | Not Started |  |  |
 | P7 Control Kernel Extraction | Not Started |  |  |
 | P8 TI-Style Fast Block Discipline | Not Started |  |  |
@@ -524,3 +524,56 @@ Open risks:
 Next action:
 
 - Start P5 direct ISR safety audit before decomposing commissioning shell files.
+
+## Entry 9 - 2026-05-05 - P5: Direct ISR Safety Audit
+
+Status: Complete.
+
+Commit:
+
+- `943081b` (`P5 make break callbacks ISR-safe`).
+
+Commands:
+
+```bash
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+rg -n "motor_api_post_error|k_msgq|k_sem|k_mutex|shell_|LOG_|printk|drv8328_disable" app/src/motor_isr_io.c drivers/adc/adc_stm32_injected.c drivers/pwm/mcpwm_stm32.c
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p5 --json-report hil_logs/p5/status_after_p5.json
+python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --max-crc-errors 100 --max-status-errors 100 --max-transport-errors 100 --log-dir hil_logs/p5 --json-report hil_logs/p5/boot_after_p5.json
+```
+
+Results:
+
+- Parser tests: 9/9 passed.
+- Firmware build: passed.
+- Flash: passed.
+- Added ISR audit document: `app/docs/reviews/isr_safety_audit_2026-05-05.md`.
+- Gate-driver break callbacks no longer call gate-driver APIs or the generic
+  `motor_api_post_error()` path from interrupt context.
+- Gate-driver break callbacks now atomically disarm and enqueue
+  `ERROR_HARDWARE_BREAK` through the ISR-safe event ring.
+- MCPWM break ISR no longer logs from interrupt context.
+- HIL `status` verdict: `PASS`.
+- HIL `boot-commission` verdict: `PASS`.
+
+HIL logs:
+
+- `hil_logs/p5/20260505_035348_status.log`
+- `hil_logs/p5/status_after_p5.json`
+- `hil_logs/p5/20260505_035421_boot-commission.log`
+- `hil_logs/p5/boot_after_p5.json`
+
+Open risks:
+
+- `adc_callback()` still toggles the debug GPIO through the Zephyr GPIO API in
+  the zero-latency ISR. This is useful for timing but should become direct LL
+  GPIO or compile-time optional if ISR timing margin tightens.
+- The ADC ISR remains FPU-heavy by design; P7/P8 continue the work to shrink
+  the control kernel and formalize fast-block invariants.
+
+Next action:
+
+- Start P6 commissioning shell decomposition. Preserve the command tree and
+  behavior while splitting the large implementation file by workflow.
