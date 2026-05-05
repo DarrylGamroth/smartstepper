@@ -1,0 +1,4 @@
+tests:
+  chopper.motor_control_kernel.unit:
+    platform_allow: native_sim
+    tags: motor control kernel

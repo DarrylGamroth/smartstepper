@@ -26,6 +26,12 @@ struct motor_motion_ref {
 	float32_t acceleration_rad_s2;
 };
 
+enum motor_angle_input_source {
+	MOTOR_ANGLE_INPUT_SRC_GENERATED = 0U,
+	MOTOR_ANGLE_INPUT_SRC_ENCODER = 1U,
+	MOTOR_ANGLE_INPUT_SRC_PROPAGATED = 2U,
+};
+
 struct motor_feedback_ref {
 	enum motor_feedback_source source;
 	uint8_t input_source;

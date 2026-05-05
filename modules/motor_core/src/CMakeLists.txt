@@ -51,6 +51,7 @@ add_library(motor_core_rt STATIC
 	runtime/outer_loop_runtime.c
 	runtime/current_ref_policy_runtime.c
 	runtime/control_policy.c
+	runtime/control_kernel.c
 	runtime/config_snapshot.c
 	runtime/command_arbitration.c
 	runtime/keepalive_policy.c

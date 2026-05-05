@@ -16,6 +16,7 @@
 #include "motor/observers/encoder_feedback.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor/runtime/config_snapshot.h"
+#include "motor/runtime/control_kernel.h"
 #include "motor/runtime/control_policy.h"
 #include "motor/runtime/control_refs.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
@@ -99,6 +100,8 @@ struct motor_rt_control_ctx {
 	struct motor_feedback_ref feedback_ref;
 	struct motor_servo_ref servo_ref;
 	struct motor_actuator_ref actuator_ref;
+	struct motor_control_kernel_input kernel_input;
+	struct motor_control_kernel_output kernel_output;
 	struct motor_angle_ref angle_ref;
 	struct motor_current_ref current_ref;
 	struct motor_commutation_ref commutation_ref;

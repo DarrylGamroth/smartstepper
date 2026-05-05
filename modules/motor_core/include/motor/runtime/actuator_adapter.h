@@ -189,6 +189,10 @@ static inline int motor_actuator_ref_from_servo(const struct motor_control_polic
 						       servo->voltage_v);
 		return 0;
 	case MOTOR_ACTUATOR_STEP_DIR:
+		if (servo->effort_kind != MOTOR_SERVO_EFFORT_NONE) {
+			motor_actuator_ref_clear(actuator, policy->actuator_kind);
+			return -ENOTSUP;
+		}
 		motor_actuator_ref_set_step_dir(actuator, true,
 						servo->position_rad,
 						servo->velocity_rad_s,

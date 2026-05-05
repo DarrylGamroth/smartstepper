@@ -37,7 +37,7 @@
 #include "motor/runtime/outer_loop_runtime.h"
 #include "motor/runtime/current_ref_policy_runtime.h"
 #include "motor/runtime/feedback_quality.h"
-#include "motor/runtime/actuator_adapter.h"
+#include "motor/runtime/control_kernel.h"
 #include "motor/runtime/control_refs.h"
 #include "motor/motion/outer_loop_sched.h"
 #include "motor/protection/interlocks.h"
@@ -711,61 +711,6 @@ static inline void motor_feedback_ref_from_measurements(
 	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
 }
 
-static inline bool motor_encoder_required_feedback_valid(
-	const struct motor_control_policy *policy,
-	const struct motor_feedback_ref *feedback_ref,
-	uint16_t stale_count,
-	uint32_t stale_limit)
-{
-	if (policy == NULL || feedback_ref == NULL) {
-		return false;
-	}
-
-	if (!policy->encoder_required_for_control) {
-		return true;
-	}
-
-	if (feedback_ref->source == MOTOR_FEEDBACK_ENCODER &&
-	    feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U &&
-	    !feedback_ref->error) {
-		return true;
-	}
-
-	/*
-	 * Encoder SPI is asynchronous to the ADC ISR. A sample can legitimately
-	 * be pending for a short window, and occasional rejected frames should
-	 * not immediately tear down control if the angle observer can propagate
-	 * from the last valid sample. The encoder feedback core owns the actual
-	 * fault threshold; this guard only rejects sustained stale feedback.
-	 */
-	return feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_PROPAGATED &&
-	       stale_count <= stale_limit;
-}
-
-static inline bool motor_encoder_required_feedback_sane(
-	const struct motor_control_policy *policy,
-	const struct motor_feedback_ref *feedback_ref,
-	float32_t profile_max_velocity_rad_s)
-{
-	if (policy == NULL || feedback_ref == NULL || !policy->encoder_required_for_control) {
-		return true;
-	}
-
-	if (!isfinite(feedback_ref->velocity_filtered_rad_s)) {
-		return false;
-	}
-
-	/* The encoder observer is safety-critical for encoder-commutated modes.
-	 * If it reports speed beyond the configured motion envelope, stop before
-	 * the outer loop can chase a corrupt estimate.
-	 */
-	float32_t max_expected_rad_s =
-		fmaxf(profile_max_velocity_rad_s * 1.10f, 2.0f * PI_F32);
-
-	return fabsf(feedback_ref->velocity_filtered_rad_s) <= max_expected_rad_s;
-}
-
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct motor_parameters *params,
 					     uint32_t mode_flags,
 					     const q31_t *values,
@@ -1020,39 +965,6 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN) {
 		angle_gen_run(&params->angle_gen);
 	}
-}
-
-static inline void motor_control_step_build_servo_ref(
-	const struct motor_rt_control_ctx *ctx,
-	const struct motor_motion_ref *motion_ref,
-	const struct motor_current_ref *current_ref,
-	struct motor_servo_ref *servo_ref)
-{
-	if (servo_ref == NULL) {
-		return;
-	}
-
-	if (ctx == NULL || motion_ref == NULL || current_ref == NULL ||
-	    !ctx->feature_pi_control) {
-		motor_servo_ref_clear(servo_ref);
-		return;
-	}
-
-	motor_servo_ref_set_dq_current(servo_ref,
-				       true,
-				       motion_ref->position_rad,
-				       motion_ref->velocity_ref_rad_s,
-				       motion_ref->acceleration_rad_s2,
-				       current_ref->id_ref_a,
-				       current_ref->iq_ref_a);
-}
-
-static inline int motor_control_step_build_actuator_ref(
-	const struct motor_control_policy *policy,
-	const struct motor_servo_ref *servo_ref,
-	struct motor_actuator_ref *actuator_ref)
-{
-	return motor_actuator_ref_from_servo(policy, servo_ref, actuator_ref);
 }
 
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_parameters *params,
@@ -1349,14 +1261,14 @@ void motor_control_loop_step(struct motor_parameters *params,
 	motor_control_step_prepare_encoder_reports(params, encoder_sample, enc_stage, report);
 	motor_control_measurements_from_encoder(meas, enc_stage);
 	motor_feedback_ref_from_measurements(feedback_ref, meas);
-	if (!motor_encoder_required_feedback_valid(&ctx->policy, feedback_ref,
-						  params->live.position_stale_count,
-						  ENCODER_FAULT_THRESHOLD)) {
+	if (!motor_control_kernel_feedback_valid(&ctx->policy, feedback_ref,
+						 params->live.position_stale_count,
+						 ENCODER_FAULT_THRESHOLD)) {
 		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}
-	if (!motor_encoder_required_feedback_sane(&ctx->policy, feedback_ref,
-						 params->profile_max_velocity_rad_s)) {
+	if (!motor_control_kernel_feedback_sane(&ctx->policy, feedback_ref,
+						params->profile_max_velocity_rad_s)) {
 		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
 		goto isr_done;
 	}
@@ -1378,10 +1290,21 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_control_step_reference_stage(params, ctx, meas, motion_ref, feedback_ref,
 					   current_ref, rls_runtime);
-	motor_control_step_build_servo_ref(ctx, motion_ref, current_ref, servo_ref);
-	if (motor_control_step_build_actuator_ref(&ctx->policy, servo_ref, actuator_ref) != 0) {
+	ctx->kernel_input = (struct motor_control_kernel_input){
+		.policy = &ctx->policy,
+		.motion_ref = motion_ref,
+		.feedback_ref = feedback_ref,
+		.current_ref = current_ref,
+		.current_loop_enabled = ctx->feature_pi_control,
+		.feedback_stale_count = params->live.position_stale_count,
+		.feedback_stale_limit = ENCODER_FAULT_THRESHOLD,
+		.profile_max_velocity_rad_s = params->profile_max_velocity_rad_s,
+	};
+	if (motor_control_kernel_step_fast(&ctx->kernel_input, &ctx->kernel_output) != 0) {
 		goto isr_done;
 	}
+	*servo_ref = ctx->kernel_output.servo_ref;
+	*actuator_ref = ctx->kernel_output.actuator_ref;
 
 	if (!actuator_ref->enabled) {
 		goto isr_done;
