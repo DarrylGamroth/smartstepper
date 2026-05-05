@@ -22,7 +22,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 |---|---|---|---|
 | P0 Baseline and Evidence Gates | Complete | this progress commit | Unit tests passed twice; firmware build passed; HIL status passed. |
 | P1 HIL Pass/Fail Automation | Complete | this progress commit | Parser tests pass; status JSON report passed; boot-commission JSON report failed objectively as expected for current hardware state. |
-| P2 Encoder PI Stabilization | Not Started |  |  |
+| P2 Encoder PI Stabilization | In Progress | eb52d82 | Boot commissioning and current_encoder validation improved; velocity_encoder tuning remains open. |
 | P3 Robust Encoder Mapping | Not Started |  |  |
 | P4 Commissioning UX and Naming | Not Started |  |  |
 | P5 Direct ISR Safety Audit | Not Started |  |  |
@@ -183,3 +183,62 @@ Next action:
 
 - Start P2/P3 by fixing encoder acquisition/mapping readiness before tuning
   encoder PI modes.
+
+## Entry 4 - 2026-05-05 - P2: Encoder Acquisition Reset And Current Smoke
+
+Status: In Progress.
+
+Commit: `eb52d82` (`P2 stabilize encoder acquisition reset`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion --host 10.0.0.171 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --log-dir hil_logs/p2 --json-report hil_logs/p2/boot_after_p2_fix.json
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --command-timeout 8 --log-dir hil_logs/p2 --json-report hil_logs/p2/current_validate_p2.json --command 'motor state clear_error' --command 'motor safety timeout 0' --command 'motor commission validate current 0.03 160' --command 'motor encoder acquisition' --command 'motor state status' --command 'motor fault snapshot status' --command 'motor current iq 0' --command 'motor disarm' --command 'motor state idle' --command 'motor safety timeout 1000'
+```
+
+Results:
+
+- Firmware build: passed.
+- Flash: passed.
+- Boot commissioning verdict: `PASS`.
+- Boot mapping result:
+  - `valid=YES`.
+  - `dir=-1`.
+  - `corr=-0.9856`.
+  - `off_mech=0.224 deg`.
+  - `off_elec=11.191 deg`.
+  - `samples=500 rejected=0 warn=0 err=0 ret=0`.
+- Current validation command succeeded with clean motion samples:
+  - `+Iq: net=248.170 deg abs=248.170 deg samples=32 warn=0 err=0`.
+  - `-Iq: net=-190.164 deg abs=190.164 deg samples=32 warn=0 err=0`.
+- The custom current-validation HIL verdict failed because acquisition counters
+  accumulated `frame/crc/status=29` after remaining in the encoder mode for a
+  longer dwell. The validation sample window itself was clean and the motor
+  state remained `Error: NONE (0)`.
+- Velocity PI remains unstable/not tuned:
+  - default gains did not produce useful low-speed motion.
+  - aggressive Ki produced motion but overshot/runaway relative to the target.
+
+HIL logs:
+
+- `hil_logs/p2/20260505_021928_boot-commission.log`
+- `hil_logs/p2/boot_after_p2_fix.json`
+- `hil_logs/p2/20260505_022040_custom.log`
+- `hil_logs/p2/current_validate_p2.json`
+
+Open risks:
+
+- P2 is not complete. `velocity_encoder` and `position_encoder` are not proven.
+- The HIL script needs split current/velocity/position scenarios so failures do
+  not leave the system energized and so evidence points to one layer at a time.
+- Encoder acquisition error acceptance should probably become rate/window based;
+  cumulative counters after long dwell are too strict for validating a clean
+  motion sample window.
+
+Next action:
+
+- Add split HIL scenarios for current, velocity, and position validation.
+- Retune or improve velocity PI behavior with objective velocity HIL evidence.

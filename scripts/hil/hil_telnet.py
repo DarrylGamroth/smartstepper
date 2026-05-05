@@ -247,29 +247,92 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
 def scenario_encoder_validate(args: argparse.Namespace) -> list[ShellCommand]:
     cmds = scenario_boot_commission(args)
     cmds.extend([
+        *scenario_current_validate_commands(args),
+        *scenario_velocity_validate_commands(args),
+    ])
+    if args.include_position:
+        cmds.extend(scenario_position_validate_commands(args))
+    return cmds
+
+
+def _optional_velocity_pi_commands(args: argparse.Namespace) -> list[ShellCommand]:
+    if args.velocity_pi_kp is None and args.velocity_pi_ki is None:
+        return []
+    if args.velocity_pi_kp is None or args.velocity_pi_ki is None:
+        raise ValueError("--velocity-pi-kp and --velocity-pi-ki must be supplied together")
+    return [
+        ShellCommand(
+            f"motor velocity pi set {args.velocity_pi_kp:.6f} "
+            f"{args.velocity_pi_ki:.6f} {args.velocity_pi_iq_limit:.6f}",
+            timeout_s=2.0,
+        ),
+        ShellCommand("motor velocity pi status", timeout_s=2.0),
+    ]
+
+
+def scenario_current_validate_commands(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
         ShellCommand(
             f"motor commission validate current {args.current_iq:.3f} {args.current_hold_ms}",
             timeout_s=max(4.0, args.current_hold_ms / 1000.0 * 4.0 + 3.0),
         ),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder control_status"),
         ShellCommand("motor state status"),
+    ]
+
+
+def scenario_velocity_validate_commands(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        *_optional_velocity_pi_commands(args),
         ShellCommand(
             f"motor commission validate velocity {args.velocity_hz:.3f} {args.velocity_hold_ms}",
             timeout_s=max(12.0, args.velocity_hold_ms / 1000.0 * 9.0 + 4.0),
         ),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder control_status"),
         ShellCommand("motor state status"),
-    ])
-    if args.include_position:
-        cmds.extend([
-            ShellCommand(
-                f"motor commission validate position {args.position_delta_deg:.3f} {args.position_hold_ms}",
-                timeout_s=max(12.0, args.position_hold_ms / 1000.0 * 3.0 + 6.0),
-            ),
-            ShellCommand("motor encoder acquisition"),
-            ShellCommand("motor state status"),
-        ])
-    return cmds
+    ]
+
+
+def scenario_position_validate_commands(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        ShellCommand(
+            f"motor commission validate position {args.position_delta_deg:.3f} "
+            f"{args.position_hold_ms}",
+            timeout_s=max(12.0, args.position_hold_ms / 1000.0 * 3.0 + 6.0),
+        ),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder control_status"),
+        ShellCommand("motor state status"),
+    ]
+
+
+def scenario_current_validate(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        *scenario_boot_commission(args),
+        *scenario_current_validate_commands(args),
+    ]
+
+
+def scenario_velocity_validate(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        *scenario_boot_commission(args),
+        *scenario_velocity_validate_commands(args),
+    ]
+
+
+def scenario_position_validate(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        *scenario_boot_commission(args),
+        *scenario_velocity_validate_commands(args),
+        *scenario_position_validate_commands(args),
+    ]
 
 
 def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellCommand]:
@@ -304,8 +367,11 @@ def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
 SCENARIOS = {
     "status": (scenario_status, False),
     "boot-commission": (scenario_boot_commission, True),
+    "current-validate": (scenario_current_validate, True),
     "encoder-validate": (scenario_encoder_validate, True),
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
+    "position-validate": (scenario_position_validate, True),
+    "velocity-validate": (scenario_velocity_validate, True),
     "custom": (scenario_custom, False),
 }
 
@@ -437,6 +503,94 @@ def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
     return samples
 
 
+def _evaluate_current_validation(args: argparse.Namespace, checks: list[VerdictCheck],
+                                 results: Sequence[ShellResult]) -> None:
+    current_response = _last_response(results, "motor commission validate current")
+    current = _parse_current_validation(current_response)
+    if current is None:
+        checks.append(VerdictCheck("current_validation", "FAIL",
+                                   "Current validation summary not parsed"))
+        return
+
+    min_motion = args.min_current_motion_deg
+    opposite_sign = (
+        abs(float(current["pos_net_deg"])) >= min_motion and
+        abs(float(current["neg_net_deg"])) >= min_motion and
+        float(current["pos_net_deg"]) * float(current["neg_net_deg"]) < 0.0
+    )
+    clean = (
+        int(current["pos_err"]) <= args.max_sample_errors and
+        int(current["neg_err"]) <= args.max_sample_errors and
+        int(current["pos_warn"]) <= args.max_sample_warnings and
+        int(current["neg_warn"]) <= args.max_sample_warnings
+    )
+    _check(checks, "current_validation", opposite_sign and clean,
+           "Current validation motion is clean and opposite sign"
+           if opposite_sign and clean else
+           "Current validation motion/sign or sample quality failed",
+           current)
+
+
+def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[VerdictCheck],
+                                  results: Sequence[ShellResult]) -> None:
+    velocity_response = _last_response(results, "motor commission validate velocity")
+    velocity_samples = _parse_velocity_samples(velocity_response)
+    if not velocity_samples:
+        checks.append(VerdictCheck("velocity_validation", "FAIL",
+                                   "Velocity validation samples not parsed"))
+        return
+
+    nonzero_samples = [
+        sample for sample in velocity_samples
+        if abs(float(sample["target_hz"])) > 1.0e-6
+    ]
+    max_abs_err = max(abs(float(sample["err_hz"])) for sample in velocity_samples)
+    max_warn = max(int(sample["warn"]) for sample in velocity_samples)
+    max_err = max(int(sample["err"]) for sample in velocity_samples)
+    wrong_sign = [
+        sample for sample in nonzero_samples
+        if float(sample["target_hz"]) * float(sample["meas_hz"]) < 0.0
+    ]
+    tracking_samples = [
+        sample for sample in nonzero_samples
+        if abs(float(sample["meas_hz"])) >=
+        abs(float(sample["target_hz"])) * args.min_velocity_tracking_fraction
+    ]
+    max_meas_abs_hz = max(abs(float(sample["meas_hz"])) for sample in velocity_samples)
+    max_target_abs_hz = max(abs(float(sample["target_hz"])) for sample in velocity_samples)
+    overshoot_ratio = max_meas_abs_hz / max(max_target_abs_hz, 1.0e-6)
+    ok = (
+        max_abs_err <= args.max_velocity_error_hz and
+        overshoot_ratio <= args.max_velocity_overshoot_ratio and
+        max_warn <= args.max_sample_warnings and
+        max_err <= args.max_sample_errors and
+        not wrong_sign and
+        len(tracking_samples) >= max(1, args.min_velocity_tracking_samples)
+    )
+    _check(checks, "velocity_validation", ok,
+           "Velocity validation samples are within thresholds" if ok
+           else "Velocity validation samples exceed thresholds",
+           {
+               "samples": len(velocity_samples),
+               "tracking_samples": len(tracking_samples),
+               "max_abs_err_hz": max_abs_err,
+               "max_meas_abs_hz": max_meas_abs_hz,
+               "overshoot_ratio": overshoot_ratio,
+               "max_warn": max_warn,
+               "max_err": max_err,
+               "wrong_sign_samples": len(wrong_sign),
+           })
+
+
+def _evaluate_position_validation(checks: list[VerdictCheck],
+                                  results: Sequence[ShellResult]) -> None:
+    position_response = _last_response(results, "motor commission validate position")
+    complete = "Position encoder validation complete" in position_response
+    _check(checks, "position_validation", complete,
+           "Position validation completed" if complete else
+           "Position validation completion text not found")
+
+
 def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                      log_path: Path | None) -> ScenarioReport:
     checks: list[VerdictCheck] = []
@@ -505,7 +659,13 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         ready = _parse_yes_no_field(control_response, "Ready")
         mapping = _parse_yes_no_field(control_response, "Mapping applied")
         protocol = _parse_yes_no_field(control_response, "Protocol ok")
-        if args.scenario in ("boot-commission", "encoder-validate"):
+        if args.scenario in (
+            "boot-commission",
+            "current-validate",
+            "encoder-validate",
+            "velocity-validate",
+            "position-validate",
+        ):
             _check(checks, "encoder_ready", ready is True,
                    "Encoder control ready" if ready else "Encoder control not ready",
                    {"ready": bool(ready)})
@@ -523,73 +683,27 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                       "protocol_ok": bool(protocol),
                   })
 
-    if args.scenario == "boot-commission":
+    if args.scenario in (
+        "boot-commission",
+        "current-validate",
+        "encoder-validate",
+        "velocity-validate",
+        "position-validate",
+    ):
         complete = "Boot commissioning complete" in text
         _check(checks, "boot_commission_complete", complete,
                "Boot commissioning completed" if complete else "Boot commissioning completion text not found")
 
-    if args.scenario == "encoder-validate":
-        current_response = _last_response(results, "motor commission validate current")
-        current = _parse_current_validation(current_response)
-        if current is None:
-            checks.append(VerdictCheck("current_validation", "FAIL",
-                                       "Current validation summary not parsed"))
-        else:
-            min_motion = args.min_current_motion_deg
-            opposite_sign = (
-                abs(float(current["pos_net_deg"])) >= min_motion and
-                abs(float(current["neg_net_deg"])) >= min_motion and
-                float(current["pos_net_deg"]) * float(current["neg_net_deg"]) < 0.0
-            )
-            clean = (
-                int(current["pos_err"]) <= args.max_sample_errors and
-                int(current["neg_err"]) <= args.max_sample_errors and
-                int(current["pos_warn"]) <= args.max_sample_warnings and
-                int(current["neg_warn"]) <= args.max_sample_warnings
-            )
-            _check(checks, "current_validation", opposite_sign and clean,
-                   "Current validation motion is clean and opposite sign"
-                   if opposite_sign and clean else
-                   "Current validation motion/sign or sample quality failed",
-                   current)
+    if args.scenario in ("current-validate", "encoder-validate", "position-validate"):
+        _evaluate_current_validation(args, checks, results)
 
-        velocity_response = _last_response(results, "motor commission validate velocity")
-        velocity_samples = _parse_velocity_samples(velocity_response)
-        if not velocity_samples:
-            checks.append(VerdictCheck("velocity_validation", "FAIL",
-                                       "Velocity validation samples not parsed"))
-        else:
-            max_abs_err = max(abs(float(sample["err_hz"])) for sample in velocity_samples)
-            max_warn = max(int(sample["warn"]) for sample in velocity_samples)
-            max_err = max(int(sample["err"]) for sample in velocity_samples)
-            wrong_sign = [
-                sample for sample in velocity_samples
-                if abs(float(sample["target_hz"])) > 1.0e-6 and
-                float(sample["target_hz"]) * float(sample["meas_hz"]) < 0.0
-            ]
-            ok = (
-                max_abs_err <= args.max_velocity_error_hz and
-                max_warn <= args.max_sample_warnings and
-                max_err <= args.max_sample_errors and
-                not wrong_sign
-            )
-            _check(checks, "velocity_validation", ok,
-                   "Velocity validation samples are within thresholds" if ok
-                   else "Velocity validation samples exceed thresholds",
-                   {
-                       "samples": len(velocity_samples),
-                       "max_abs_err_hz": max_abs_err,
-                       "max_warn": max_warn,
-                       "max_err": max_err,
-                       "wrong_sign_samples": len(wrong_sign),
-                   })
+    if args.scenario in ("velocity-validate", "encoder-validate", "position-validate"):
+        _evaluate_velocity_validation(args, checks, results)
 
-        if args.include_position:
-            position_response = _last_response(results, "motor commission validate position")
-            complete = "Position encoder validation complete" in position_response
-            _check(checks, "position_validation", complete,
-                   "Position validation completed" if complete else
-                   "Position validation completion text not found")
+    if args.scenario == "position-validate" or (
+        args.scenario == "encoder-validate" and args.include_position
+    ):
+        _evaluate_position_validation(checks, results)
 
     has_fail = any(check.status == "FAIL" for check in checks)
     has_inconclusive = any(check.status == "INCONCLUSIVE" for check in checks)
@@ -635,6 +749,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--max-sample-errors", type=int, default=0)
     parser.add_argument("--min-current-motion-deg", type=float, default=0.01)
     parser.add_argument("--max-velocity-error-hz", type=float, default=0.10)
+    parser.add_argument("--max-velocity-overshoot-ratio", type=float, default=3.0,
+                        help="Maximum |measured velocity| / |target velocity| during validation.")
+    parser.add_argument("--min-velocity-tracking-fraction", type=float, default=0.10,
+                        help="Minimum measured/target fraction for at least one nonzero sample.")
+    parser.add_argument("--min-velocity-tracking-samples", type=int, default=1,
+                        help="Minimum number of nonzero velocity samples that must move enough.")
 
     parser.add_argument("--boot-current", type=float, default=0.15)
     parser.add_argument("--boot-hz", type=float, default=0.05)
@@ -643,6 +763,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--current-hold-ms", type=int, default=160)
     parser.add_argument("--velocity-hz", type=float, default=0.05)
     parser.add_argument("--velocity-hold-ms", type=int, default=1000)
+    parser.add_argument("--velocity-pi-kp", type=float,
+                        help="Optional velocity PI Kp to set before velocity validation.")
+    parser.add_argument("--velocity-pi-ki", type=float,
+                        help="Optional velocity PI Ki to set before velocity validation.")
+    parser.add_argument("--velocity-pi-iq-limit", type=float, default=0.12,
+                        help="Iq limit used with --velocity-pi-kp/--velocity-pi-ki.")
     parser.add_argument("--include-position", action="store_true")
     parser.add_argument("--position-delta-deg", type=float, default=5.0)
     parser.add_argument("--position-hold-ms", type=int, default=2000)
@@ -662,6 +788,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     builder, live_motion = SCENARIOS[args.scenario]
+    if (args.velocity_pi_kp is None) != (args.velocity_pi_ki is None):
+        print("ERROR: --velocity-pi-kp and --velocity-pi-ki must be supplied together",
+              file=sys.stderr)
+        return 2
     if live_motion and not args.yes_live_motion:
         print(f"ERROR: scenario '{args.scenario}' can energize/move hardware; pass --yes-live-motion",
               file=sys.stderr)
