@@ -107,3 +107,20 @@ motor position target <nearby absolute deg>
 - HIL command smoke test after flash, before identification data existed:
   - `motor velocity gains defaults safe`: `source=empirical`, `Kp=0.00955`, `Ki=0.00955`, `Iq limit=0.060 A`.
   - `motor position gains defaults safe`: `source=empirical`.
+- HIL `motor commission auto run slow` initially rejected every mechanical fit
+  even though capture quality was good. Added per-attempt diagnostics; the
+  captures had no rejected samples and high `R2`, but the fitted `J/B` signs
+  were negative. Mechanical ID now evaluates both torque polarities and selects
+  the physically valid result.
+- Final HIL slow auto commissioning after the torque-sign fix:
+  - `psi_f=0.00141178 Wb`, flux `R2=0.9281`, `N=312`.
+  - `J=0.00002685 kgm2`, `B=0.00017403 Nm/(rad/s)`,
+    `Tc=0.00266001 Nm`, mechanical `R2=0.9218`, validation `PASS`.
+  - selected mechanical fit torque sign `-1`; mapping direction diagnostic
+    still reports a negative acceleration/current correlation for the
+    velocity-loop path.
+  - staged auto-tune values:
+    `velocity Kp=0.03022`, `Ki=1.00093`, `Iq limit=0.101 A`;
+    `position Kp=25.13274`, `Ki=157.91368`.
+  - after valid identification data exists, `motor velocity gains defaults safe`
+    and `motor position gains defaults safe` report `source=model`.

@@ -195,7 +195,8 @@ static int motor_compute_model_outer_gains(const struct motor_parameters *params
 	float zeta = OUTER_LOOP_ZETA_DEFAULT;
 	float omega = 2.0f * PI_F32 * velocity_bw_hz;
 	float kp_num = (2.0f * zeta * omega * j) - b;
-	float kp = kp_num / kt;
+	float kp_floor = (0.25f * omega * j) / kt;
+	float kp = fmaxf(kp_num / kt, kp_floor);
 	float ki = (omega * omega * j) / kt;
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
 		return -ERANGE;
@@ -314,7 +315,9 @@ static int motor_compute_velocity_bandwidth_gains(const struct motor_parameters 
 		b = 0.0f;
 	}
 
-	float kp = ((2.0f * zeta * omega * j) - b) / kt;
+	float kp_num = (2.0f * zeta * omega * j) - b;
+	float kp_floor = (0.25f * omega * j) / kt;
+	float kp = fmaxf(kp_num / kt, kp_floor);
 	float ki = (omega * omega * j) / kt;
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
 		return -ERANGE;

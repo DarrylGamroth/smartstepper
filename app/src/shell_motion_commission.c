@@ -171,6 +171,28 @@ static const char *motor_commission_tune_error_to_string(int err)
 	}
 }
 
+static const char *motor_commission_mech_reject_to_string(uint8_t reason)
+{
+	switch (reason) {
+	case MOTOR_COMMISSION_MECH_REJECT_NONE:
+		return "none";
+	case MOTOR_COMMISSION_MECH_REJECT_KT_INVALID:
+		return "kt_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_SAMPLES:
+		return "samples";
+	case MOTOR_COMMISSION_MECH_REJECT_SOLVER:
+		return "solver";
+	case MOTOR_COMMISSION_MECH_REJECT_FINALIZE:
+		return "finalize";
+	case MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE:
+		return "viscous_negative";
+	case MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID:
+		return "fit_invalid";
+	default:
+		return "unknown";
+	}
+}
+
 static void motor_commission_print_tune_reject_flags(const struct shell *sh, uint32_t flags)
 {
 	if (flags == MOTOR_COMMISSION_TUNE_REJECT_NONE) {
@@ -215,6 +237,26 @@ static void motor_commission_print_tune_reject_flags(const struct shell *sh, uin
 	if ((flags & MOTOR_COMMISSION_TUNE_REJECT_KT_INVALID) != 0U) {
 		shell_print(sh, "    - torque constant check failed");
 	}
+}
+
+static void motor_commission_print_mech_fit_summary(const struct shell *sh,
+						    const char *prefix,
+						    const struct motor_commission_results *res)
+{
+	shell_print(sh,
+		    "%s valid=%s reason=%s err=%d tq_sign=%d J=%.8f B=%.8f Tc=%.8f T0=%.8f R2=%.4f rms=%.6f N=%u",
+		    prefix,
+		    res->mech_valid ? "YES" : "NO",
+		    motor_commission_mech_reject_to_string(res->mech_reject_reason),
+		    (int)res->mech_finalize_error,
+		    res->mech_fit_torque_sign,
+		    (double)res->inertia_kgm2,
+		    (double)res->viscous_friction_nm_per_rad_s,
+		    (double)res->coulomb_friction_nm,
+		    (double)res->offset_friction_nm,
+		    (double)res->mech_r2,
+		    (double)res->mech_residual_rms_nm,
+		    res->mech_sample_count);
 }
 
 static int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms)
@@ -900,6 +942,7 @@ struct motor_commission_mech_aggregate {
 	float32_t sum_r2;
 	float32_t min_r2;
 	float32_t max_rms;
+	int8_t fit_torque_sign;
 };
 
 static float32_t motor_commission_stddev(uint8_t count, float32_t sum, float32_t sum2)
@@ -925,9 +968,13 @@ static void motor_commission_mech_aggregate_add(
 	if (agg->count == 0U) {
 		agg->min_r2 = res->mech_r2;
 		agg->max_rms = res->mech_residual_rms_nm;
+		agg->fit_torque_sign = res->mech_fit_torque_sign;
 	} else {
 		agg->min_r2 = fminf(agg->min_r2, res->mech_r2);
 		agg->max_rms = fmaxf(agg->max_rms, res->mech_residual_rms_nm);
+		if (agg->fit_torque_sign != res->mech_fit_torque_sign) {
+			agg->fit_torque_sign = 0;
+		}
 	}
 
 	agg->count++;
@@ -961,6 +1008,9 @@ static int motor_commission_mech_aggregate_finalize(
 	res->mech_residual_rms_nm = agg->sum_rms / n;
 	res->mech_r2 = agg->sum_r2 / n;
 	res->mech_sample_count = (uint16_t)MIN(agg->sample_count / agg->count, UINT16_MAX);
+	res->mech_finalize_error = 0;
+	res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+	res->mech_fit_torque_sign = agg->fit_torque_sign;
 	res->inertia_stddev_kgm2 =
 		motor_commission_stddev(agg->count, agg->sum_j, agg->sum_j2);
 	res->viscous_friction_stddev_nm_per_rad_s =
@@ -984,6 +1034,9 @@ static int motor_commission_mech_aggregate_finalize(
 			  isfinite(res->coulomb_friction_nm) &&
 			  res->coulomb_friction_nm >= 0.0f &&
 			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f;
+	if (!res->mech_valid) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
+	}
 	return res->mech_valid ? 0 : -ERANGE;
 }
 
@@ -1101,6 +1154,10 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)ctx->results.mech_residual_rms_nm,
 		    (double)ctx->results.mech_r2,
 		    ctx->results.mech_sample_count);
+	shell_print(sh, "  Mech reject:    reason=%s err=%d tq_sign=%d",
+		    motor_commission_mech_reject_to_string(ctx->results.mech_reject_reason),
+		    (int)ctx->results.mech_finalize_error,
+		    ctx->results.mech_fit_torque_sign);
 	shell_print(sh, "  Mech repeat:    runs=%u conf=%.2f Jstd=%.8f Bstd=%.8f Tcstd=%.8f",
 		    ctx->results.mech_capture_count,
 		    (double)ctx->results.mech_confidence,
@@ -2735,6 +2792,21 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 					    "  Mech attempt %u/%u rejected by fit quality",
 					    (unsigned int)(attempt + 1U),
 					    (unsigned int)MOTOR_COMMISSION_AUTO_MECH_MAX_ATTEMPTS);
+				motor_commission_print_mech_fit_summary(
+					sh, "    Fit",
+					&g_motor_params->commission.results);
+				shell_print(sh,
+					    "    Capture: accepted=%u rejected=%u stored=%u/%u rejects(mode=%u disarmed=%u encoder=%u fault=%u sat=%u invalid=%u)",
+					    g_motor_params->commission.accepted_samples,
+					    g_motor_params->commission.rejected_samples,
+					    g_motor_params->commission.sample_count,
+					    MOTOR_COMMISSION_MAX_SAMPLES,
+					    g_motor_params->commission.reject_mode_mismatch,
+					    g_motor_params->commission.reject_disarmed,
+					    g_motor_params->commission.reject_encoder,
+					    g_motor_params->commission.reject_fault,
+					    g_motor_params->commission.reject_saturation,
+					    g_motor_params->commission.reject_data_invalid);
 				continue;
 			}
 
@@ -2754,17 +2826,12 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		const struct motor_commission_results *mech_res =
 			&g_motor_params->commission.results;
 		motor_commission_mech_aggregate_add(&mech_agg, mech_res);
-		shell_print(sh,
-			    "  Mech run %u/%u attempt %u: J=%.8f B=%.8f Tc=%.8f R2=%.4f rms=%.5f N=%u",
-			    (unsigned int)mech_agg.count,
-			    (unsigned int)MOTOR_COMMISSION_AUTO_MECH_RUNS,
-			    (unsigned int)(attempt + 1U),
-			    (double)mech_res->inertia_kgm2,
-			    (double)mech_res->viscous_friction_nm_per_rad_s,
-			    (double)mech_res->coulomb_friction_nm,
-			    (double)mech_res->mech_r2,
-			    (double)mech_res->mech_residual_rms_nm,
-			    mech_res->mech_sample_count);
+		char prefix[40];
+		snprintk(prefix, sizeof(prefix), "  Mech run %u/%u attempt %u:",
+			 (unsigned int)mech_agg.count,
+			 (unsigned int)MOTOR_COMMISSION_AUTO_MECH_RUNS,
+			 (unsigned int)(attempt + 1U));
+		motor_commission_print_mech_fit_summary(sh, prefix, mech_res);
 	}
 
 	if (mech_agg.count < MOTOR_COMMISSION_AUTO_MECH_RUNS) {

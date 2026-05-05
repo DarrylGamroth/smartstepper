@@ -89,8 +89,11 @@ struct motor_commission_results {
 	float32_t coulomb_friction_stddev_nm;
 	float32_t mech_validation_residual_rms_nm;
 	float32_t mech_confidence;
+	int32_t mech_finalize_error;
 	uint16_t mech_sample_count;
 	uint8_t mech_capture_count;
+	uint8_t mech_reject_reason;
+	int8_t mech_fit_torque_sign;
 	float32_t mapping_direction_corr;
 	float32_t mapping_offset_ratio;
 	float32_t mapping_pole_pairs_est;
@@ -115,6 +118,16 @@ struct motor_commission_results {
 	bool mapping_pole_pairs_pass;
 	bool mapping_valid;
 	bool mapping_pass;
+};
+
+enum motor_commission_mech_reject_reason {
+	MOTOR_COMMISSION_MECH_REJECT_NONE = 0,
+	MOTOR_COMMISSION_MECH_REJECT_KT_INVALID = 1,
+	MOTOR_COMMISSION_MECH_REJECT_SAMPLES = 2,
+	MOTOR_COMMISSION_MECH_REJECT_SOLVER = 3,
+	MOTOR_COMMISSION_MECH_REJECT_FINALIZE = 4,
+	MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE = 5,
+	MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID = 6,
 };
 
 struct motor_commission_observation {

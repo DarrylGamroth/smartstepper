@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <math.h>
 #include <string.h>
 
@@ -299,8 +300,6 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 {
 	struct motor_commission_ctx *commission = ctx->commission;
 	struct motor_commission_results *res = &commission->results;
-	struct motor_mech_id_state estimator;
-	struct motor_mech_id_result estimate;
 	float32_t kt = motor_torque_gain_resolve(*ctx->torque_gain_nm_per_a_active,
 						 *ctx->flux_linkage_wb_active,
 						 ctx->default_flux_linkage_wb,
@@ -312,20 +311,6 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			kt = derived_kt;
 		}
 	}
-	float32_t kt_fit = kt;
-	if (commission->expected_mode == MOTOR_COMMISSION_EXPECT_TORQUE &&
-	    res->iq_to_mech_sign < 0) {
-		kt_fit = -kt;
-	}
-
-	const struct motor_mech_id_config cfg = {
-		.kt_nm_per_a = kt_fit,
-		.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
-		.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
-		.min_r2 = 0.0f,
-		.require_positive_inertia = true,
-		.require_nonnegative_viscous = false,
-	};
 
 	res->mech_valid = false;
 	res->mech_sample_count = 0U;
@@ -340,41 +325,117 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	res->coulomb_friction_stddev_nm = 0.0f;
 	res->mech_validation_residual_rms_nm = 0.0f;
 	res->mech_confidence = 0.0f;
+	res->mech_finalize_error = 0;
 	res->mech_capture_count = 0U;
+	res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+	res->mech_fit_torque_sign = 0;
 	res->mech_validation_valid = false;
 	res->mech_validation_pass = false;
 
 	if (!isfinite(kt) || fabsf(kt) < MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_KT_INVALID;
 		return;
 	}
 
-	motor_mech_id_init(&estimator, &cfg);
-	for (uint32_t i = 0U; i < commission->sample_count; i++) {
-		const struct motor_commission_sample *s = &commission->samples[i];
-		if (fabsf(s->mech_speed_rad_s) < MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
+	const int8_t preferred_sign =
+		(commission->expected_mode == MOTOR_COMMISSION_EXPECT_TORQUE &&
+		 res->iq_to_mech_sign < 0) ? -1 : 1;
+	const int8_t signs[2] = {preferred_sign, (int8_t)-preferred_sign};
+	struct motor_mech_id_result best_estimate = {0};
+	int32_t best_finalize_error = 0;
+	int8_t best_sign = 0;
+	uint8_t best_reject_reason = MOTOR_COMMISSION_MECH_REJECT_FINALIZE;
+	bool have_best = false;
+
+	for (uint32_t sign_idx = 0U; sign_idx < ARRAY_SIZE(signs); sign_idx++) {
+		const int8_t fit_sign = signs[sign_idx];
+		const struct motor_mech_id_config cfg = {
+			.kt_nm_per_a = kt * (float32_t)fit_sign,
+			.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
+			.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
+			.min_r2 = 0.0f,
+			.require_positive_inertia = true,
+			.require_nonnegative_viscous = false,
+		};
+		struct motor_mech_id_state estimator;
+		struct motor_mech_id_result estimate;
+		uint8_t reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+		int ret;
+
+		motor_mech_id_init(&estimator, &cfg);
+		for (uint32_t i = 0U; i < commission->sample_count; i++) {
+			const struct motor_commission_sample *s = &commission->samples[i];
+			if (fabsf(s->mech_speed_rad_s) < MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
+				continue;
+			}
+			(void)motor_mech_id_accumulate(&estimator, s->mech_speed_rad_s,
+						       s->mech_accel_rad_s2, s->iq_a);
+		}
+
+		ret = motor_mech_id_finalize(&estimator, &estimate);
+		if (ret < 0) {
+			if (!have_best || estimate.sample_count > best_estimate.sample_count) {
+				best_estimate = estimate;
+				best_finalize_error = ret;
+				best_sign = fit_sign;
+				have_best = true;
+			}
 			continue;
 		}
-		(void)motor_mech_id_accumulate(&estimator, s->mech_speed_rad_s,
-					       s->mech_accel_rad_s2, s->iq_a);
+
+		if (estimate.viscous_friction_nm_per_rad_s <
+		    -MOTOR_COMMISSION_VISCOUS_NEG_TOL_NM_PER_RAD_S) {
+			reject_reason = MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE;
+		} else if (!estimate.valid) {
+			reject_reason = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
+		}
+
+		if (!have_best ||
+		    (reject_reason == MOTOR_COMMISSION_MECH_REJECT_NONE &&
+		     best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) ||
+		    (reject_reason == best_reject_reason &&
+		     estimate.residual_rms_nm < best_estimate.residual_rms_nm)) {
+			best_estimate = estimate;
+			best_finalize_error = 0;
+			best_sign = fit_sign;
+			best_reject_reason = reject_reason;
+			have_best = true;
+		}
 	}
 
-	if (motor_mech_id_finalize(&estimator, &estimate) < 0) {
-		return;
-	}
-	if (estimate.viscous_friction_nm_per_rad_s <
-	    -MOTOR_COMMISSION_VISCOUS_NEG_TOL_NM_PER_RAD_S) {
+	if (!have_best) {
 		return;
 	}
 
-	res->mech_sample_count = estimate.sample_count;
-	res->inertia_kgm2 = estimate.inertia_kgm2;
+	res->mech_finalize_error = best_finalize_error;
+	res->mech_fit_torque_sign = best_sign;
+	res->mech_sample_count = best_estimate.sample_count;
+	res->inertia_kgm2 = best_estimate.inertia_kgm2;
+	res->viscous_friction_nm_per_rad_s = best_estimate.viscous_friction_nm_per_rad_s;
+	res->coulomb_friction_nm = best_estimate.coulomb_friction_nm;
+	res->offset_friction_nm = best_estimate.offset_friction_nm;
+	res->mech_residual_rms_nm = best_estimate.residual_rms_nm;
+	res->mech_r2 = best_estimate.r2;
+
+	if (best_finalize_error < 0) {
+		if (best_finalize_error == -ENODATA) {
+			res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_SAMPLES;
+		} else if (best_finalize_error == -ERANGE) {
+			res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_SOLVER;
+		} else {
+			res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_FINALIZE;
+		}
+		return;
+	}
+
+	if (best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) {
+		res->mech_reject_reason = best_reject_reason;
+		return;
+	}
+
 	res->viscous_friction_nm_per_rad_s =
-		fmaxf(estimate.viscous_friction_nm_per_rad_s, 0.0f);
-	res->coulomb_friction_nm = estimate.coulomb_friction_nm;
-	res->offset_friction_nm = estimate.offset_friction_nm;
-	res->mech_residual_rms_nm = estimate.residual_rms_nm;
-	res->mech_r2 = estimate.r2;
-	res->mech_valid = estimate.valid;
+		fmaxf(best_estimate.viscous_friction_nm_per_rad_s, 0.0f);
+	res->mech_valid = best_estimate.valid;
 }
 
 static void motor_commission_validate_mapping_mech(struct motor_commission_runtime_ctx *ctx)
@@ -487,8 +548,11 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.coulomb_friction_stddev_nm = 0.0f;
 	commission->results.mech_validation_residual_rms_nm = 0.0f;
 	commission->results.mech_confidence = 0.0f;
+	commission->results.mech_finalize_error = 0;
 	commission->results.mech_sample_count = 0U;
 	commission->results.mech_capture_count = 0U;
+	commission->results.mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+	commission->results.mech_fit_torque_sign = 0;
 	commission->results.mapping_direction_corr = 0.0f;
 	commission->results.mapping_offset_ratio = 0.0f;
 	commission->results.mapping_pole_pairs_est = 0.0f;
@@ -660,7 +724,10 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	ctx->commission->results.coulomb_friction_stddev_nm = 0.0f;
 	ctx->commission->results.mech_validation_residual_rms_nm = 0.0f;
 	ctx->commission->results.mech_confidence = 0.0f;
+	ctx->commission->results.mech_finalize_error = 0;
 	ctx->commission->results.mech_capture_count = 0U;
+	ctx->commission->results.mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+	ctx->commission->results.mech_fit_torque_sign = 0;
 	ctx->commission->results.mech_validation_valid = false;
 	ctx->commission->results.mech_validation_pass = false;
 	ctx->commission->results.mapping_direction_valid = false;
