@@ -658,3 +658,46 @@ Open risks:
 Next action:
 
 - Continue P6 by splitting the encoder boot/mapping workflow or auto-tune workflow into separate command files.
+
+## Entry 13 - 2026-05-05 - P6: Commissioning Encoder Command Split
+
+Status: In Progress.
+
+Commit: `9205084` (`P6 split commissioning encoder commands`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 5 --log-dir hil_logs/p6 --json-report hil_logs/p6/stop_after_encoder_help_boot.json --command 'motor current iq 0' --command 'motor disarm' --command 'motor state idle' --command 'motor state status' --command 'motor encoder acquisition' --command 'motor fault snapshot status'
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 3 --log-dir hil_logs/p6 --json-report hil_logs/p6/encoder_status_after_split.json --command 'motor commission encoder' --command 'motor commission encoder status' --command 'motor state status' --command 'motor encoder acquisition' --command 'motor fault snapshot status'
+```
+
+Results:
+
+- Split `motor commission encoder run|robust|status|apply|clear` and `motor commission boot` into `app/src/shell_commission_encoder.c`.
+- Kept raw-trace polling helpers in the shared internal commissioning layer because validation and motion-threshold workflows also use them.
+- Reduced `app/src/shell_motion_commission.c` from 2638 lines to 1868 lines.
+- Firmware build: passed.
+- HIL parser unit tests: 9/9 passed.
+- Flash: passed.
+- A mistaken command-tree check invoked `motor commission boot`; it completed without fault, produced a valid staged/applied mapping, and was stopped to IDLE.
+- Follow-up HIL encoder command-tree/status check: `PASS`; staged mapping showed 500 accepted samples, 0 rejected, 0 warn, 0 err, sign -1, offset 0.2115 deg mechanical.
+
+HIL logs:
+
+- `hil_logs/p6/20260505_040746_custom.log`
+- `hil_logs/p6/stop_after_encoder_help_boot.json`
+- `hil_logs/p6/20260505_040826_custom.log`
+- `hil_logs/p6/encoder_status_after_split.json`
+
+Open risks:
+
+- P6 is still in progress. The main commissioning file still contains common status/reset/apply commands, flux/mechanical identification, motion-threshold, and auto-tune workflows.
+- The boot command has no help-only mode; invoking it with no arguments starts live commissioning by design.
+
+Next action:
+
+- Continue P6 by splitting the auto-tune workflow and/or the flux/mechanical identification workflow.
