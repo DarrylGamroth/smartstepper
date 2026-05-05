@@ -28,7 +28,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P5 Direct ISR Safety Audit | Complete | 943081b | Break callbacks now use ISR ring only; ISR audit doc added; build/status/boot HIL pass. |
 | P6 Commissioning Shell Decomposition | Complete | 7b24b9a, 8d3b207, 9205084, cb0a070 | Commissioning shell split into validation, detent, encoder/boot, and auto workflow files; build/parser tests pass; HIL command/status checks pass. |
 | P7 Control Kernel Extraction | Complete | b6e939d | Control kernel extracted into `motor_core`; full unit tests pass; firmware build/flash pass; HIL status pass. |
-| P8 TI-Style Fast Block Discipline | Not Started |  |  |
+| P8 TI-Style Fast Block Discipline | Complete | 344d254 | ISR fast-block audit added; PI regulator fast paths are header-inline; full unit tests/build/status HIL pass; velocity HIL still fails due tuning/control behavior. |
 | P9 Persistence Readiness | Not Started |  |  |
 | P10 Regression Gate | Not Started |  |  |
 
@@ -801,3 +801,91 @@ Next action:
 - Start P8 TI-style fast block discipline: move remaining configuration
   invariants out of step paths, reduce runtime guards to catastrophic checks,
   and keep ISR block APIs explicit and low-overhead.
+
+## Entry 16 - 2026-05-05 - P8: TI-Style Fast Block Discipline
+
+Status: Complete with live velocity-control risk documented.
+
+Commit: `344d254` (`P8 add PI regulator fast paths`).
+
+Commands:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.pi_controller.unit
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+./tests/run_unit_tests.sh wonderful_goldberg
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p8 --json-report hil_logs/p8/status_after_p8_fast_pi.json
+python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --current-iq 0.03 --velocity-hz 0.05 --velocity-hold-ms 1000 --log-dir hil_logs/p8 --json-report hil_logs/p8/encoder_validate_after_p8_fast_pi.json
+python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --velocity-hz 0.05 --velocity-hold-ms 1000 --velocity-pi-kp 0.100000 --velocity-pi-ki 0.050000 --velocity-pi-iq-limit 0.080000 --log-dir hil_logs/p8 --json-report hil_logs/p8/velocity_validate_after_p8_fast_pi_kp010.json
+python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --velocity-hz 0.10 --velocity-hold-ms 1000 --velocity-pi-kp 0.060000 --velocity-pi-ki 0.005000 --velocity-pi-iq-limit 0.050000 --log-dir hil_logs/p8 --json-report hil_logs/p8/velocity_validate_after_p8_fast_pi_kp006.json
+podman exec wonderful_goldberg bash -lc 'cd /workspace/build/chopper/smartstepper_v2 && /opt/toolchains/zephyr-sdk-1.0.0/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-nm -S zephyr/zephyr.elf | grep -E "motor_(velocity|position)_regulator_step(_fast)?|motor_outer_loop_runtime_step" || true'
+```
+
+Results:
+
+- Added `app/docs/reviews/isr_fast_block_audit_2026-05-05.md` with an audit
+  table for ISR-called blocks and their fast-path invariants.
+- Added header-inline `motor_position_regulator_step_fast()` and
+  `motor_velocity_regulator_step_fast()`.
+- Kept validated `motor_position_regulator_step()` and
+  `motor_velocity_regulator_step()` for non-ISR/test use.
+- Switched the outer-loop PI paths to call the fast regulator APIs after local
+  config/state setup.
+- Added validated-vs-fast equivalence unit tests for both PI regulators.
+- Focused PI controller unit test: 1/1 scenario passed, 10/10 test cases passed.
+- Full unit test run: 30/30 scenarios passed, 259/259 test cases passed.
+- Firmware build: passed; image size moved from 458784 B after P7 to 458528 B
+  after P8.
+- Flash using the J-Link runner: passed.
+- HIL status verdict: `PASS`; motor error `NONE`, fault snapshot clear, encoder
+  acquisition counters within thresholds.
+- Symbol check: no standalone `motor_velocity_regulator_step*` or
+  `motor_position_regulator_step*` symbols were emitted; only
+  `motor_outer_loop_runtime_step` was visible, consistent with fast-path
+  inlining in this build.
+
+Live HIL findings:
+
+- Combined `encoder-validate` failed because:
+  - current_encoder validation passed with clean motion and zero sample
+    warnings/errors.
+  - velocity_encoder validation did not track with the active conservative PI
+    gains.
+  - the HIL parser also flagged transient acquisition counters from an earlier
+    sub-scenario even though later velocity validation ended with zero
+    acquisition errors.
+- Narrow `velocity-validate` with Kp=0.100 Ki=0.050 IqLim=0.080 failed because
+  the loop saturated and oscillated.
+- Narrow `velocity-validate` with Kp=0.060 Ki=0.005 IqLim=0.050 failed because
+  tracking remained unstable/incorrect sign at parts of the sweep.
+- These failures are control tuning/encoder-control behavior risks. The new
+  fast PI path has unit equivalence coverage proving it matches the validated
+  PI math for valid inputs.
+
+HIL logs:
+
+- `hil_logs/p8/20260505_043039_status.log`
+- `hil_logs/p8/status_after_p8_fast_pi.json`
+- `hil_logs/p8/20260505_043132_encoder-validate.log`
+- `hil_logs/p8/encoder_validate_after_p8_fast_pi.json`
+- `hil_logs/p8/20260505_043420_velocity-validate.log`
+- `hil_logs/p8/velocity_validate_after_p8_fast_pi_kp010.json`
+- `hil_logs/p8/20260505_043635_velocity-validate.log`
+- `hil_logs/p8/velocity_validate_after_p8_fast_pi_kp006.json`
+
+Open risks:
+
+- Velocity encoder mode is still not tuned/stable enough for the scripted HIL
+  acceptance threshold. This is not closed by P8.
+- `motor_outer_loop_runtime_step()` still constructs PI/MPR/DOB configs in the
+  step path. P8 moved the PI step math to inline fast blocks, but full mode-entry
+  preconfiguration remains future work.
+- The HIL parser's acquisition-counter check uses the maximum counters across a
+  multi-stage scenario. That is conservative, but it can fail a combined scenario
+  even after a later stage resets/clears counters and finishes cleanly.
+
+Next action:
+
+- Start P9 persistence readiness while keeping velocity_encoder tuning and HIL
+  threshold semantics as explicit open risks for P10/regression gating.
