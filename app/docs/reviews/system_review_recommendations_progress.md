@@ -23,7 +23,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P0 Baseline and Evidence Gates | Complete | this progress commit | Unit tests passed twice; firmware build passed; HIL status passed. |
 | P1 HIL Pass/Fail Automation | Complete | this progress commit | Parser tests pass; status JSON report passed; boot-commission JSON report failed objectively as expected for current hardware state. |
 | P2 Encoder PI Stabilization | In Progress | eb52d82, 521a6ea, 0526872, 5a6f8a3, be5f2b6 | Boot commissioning, current_encoder, and conservative velocity_encoder are proven; low-speed tracking and position_encoder remain open. |
-| P3 Robust Encoder Mapping | Not Started |  |  |
+| P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors. |
 | P4 Commissioning UX and Naming | Not Started |  |  |
 | P5 Direct ISR Safety Audit | Not Started |  |  |
 | P6 Commissioning Shell Decomposition | Not Started |  |  |
@@ -328,3 +328,72 @@ Next action:
 
 - Move to P3 robust encoder mapping because mapping repeatability is now the
   blocker for position validation and for marking P2 complete.
+
+## Entry 6 - 2026-05-05 - P3: Robust Encoder Mapping
+
+Status: Complete.
+
+Commits:
+
+- `a7adcab` (`P3 add robust encoder mapping command`).
+- `128fe3d` (`P3 add robust encoder HIL scenario`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_encoder_map_detect.unit
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --max-crc-errors 20 --max-status-errors 20 --max-transport-errors 20 --log-dir hil_logs/p3 --json-report hil_logs/p3/boot_with_mapping_retry.json
+python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion --host 10.0.0.171 --connect-timeout 8 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --bidirectional --max-crc-errors 100 --max-status-errors 100 --max-transport-errors 100 --log-dir hil_logs/p3 --json-report hil_logs/p3/encoder_robust_bidirectional.json
+```
+
+Results:
+
+- Firmware build: passed after the robust mapping command implementation.
+- Encoder map-detect unit suite: 1/1 scenario passed, 8/8 test cases passed.
+- HIL parser tests: 8/8 passed after adding the `encoder-robust` scenario.
+- Boot commissioning HIL verdict: `PASS`.
+  - Mapping result: `valid=YES`, `dir=-1`, `corr=-0.9852`,
+    `off_mech=0.209 deg`, `off_elec=10.452 deg`.
+  - Residuals: `offset=0.0806 rad`, `direction=0.0022 rad`,
+    `motion=361.009 deg`, `samples=500`, `rejected=0`, `warn=0`,
+    `err=0`, `ret=0`.
+  - `+Iq` validation: `Iq=0.060 A`, `net=188.687 deg`,
+    `samples=16`, `warn=0`, `err=0`.
+- Explicit bidirectional robust encoder HIL verdict: `PASS`.
+  - Forward sweep: `valid=YES`, `dir=-1`, `corr=-0.9857`,
+    `off_mech=0.208 deg`, `off_elec=10.407 deg`,
+    `motion=360.737 deg`, `samples=500`, `warn=0`, `err=0`.
+  - Reverse sweep: `valid=YES`, `dir=-1`, `corr=-0.9850`,
+    `off_mech=0.070 deg`, `off_elec=3.506 deg`,
+    `motion=360.803 deg`, `samples=500`, `warn=0`, `err=0`.
+  - Combined result: `valid=YES`, `dir=-1`, `corr=-0.9854`,
+    `off_mech=0.139 deg`, `off_elec=6.957 deg`,
+    `motion=721.540 deg`, `samples=1000`, `rejected=0`, `warn=0`,
+    `err=0`.
+  - Mapping applied successfully.
+  - Final state after stop footer: `IDLE`, motor error `NONE`, fault
+    snapshot latch clear, acquisition errors all zero.
+
+HIL logs:
+
+- `hil_logs/p3/20260505_030358_boot-commission.log`
+- `hil_logs/p3/boot_with_mapping_retry.json`
+- `hil_logs/p3/20260505_031844_encoder-robust.log`
+- `hil_logs/p3/encoder_robust_bidirectional.json`
+
+Open risks:
+
+- P3 proves robust generated-sweep encoder mapping and application. It does not
+  prove closed-loop position control; that remains a P2 follow-up after mapping
+  repeatability.
+- The forward/reverse offset difference is visible (`0.208 deg` vs `0.070 deg`
+  mechanical). The combined residual remained acceptable, but repeated
+  multi-run variance should be tracked in the regression gate.
+
+Next action:
+
+- Resume P2 closure by rerunning `current-validate`, `velocity-validate`, and
+  `position-validate` with the more robust mapping gate. If position still
+  fails, isolate position-profile limits and velocity-loop tuning separately.
