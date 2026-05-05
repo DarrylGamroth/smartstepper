@@ -129,7 +129,8 @@ Run one unit test suite (example):
 - The firmware enables the Zephyr telnet shell when the network stack is built.
 - Prefer telnet over UART for HIL command automation because it avoids UART RX
   ring overruns when logs are active or commands are sent quickly.
-- Get the DHCP address from boot logs. Recent HIL evidence used:
+- Get the DHCP address from boot logs or `net iface`. Current lab target
+  observed during HIL testing:
 
 ```text
 10.0.0.171

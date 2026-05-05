@@ -305,7 +305,9 @@ static int motor_commission_wait_for_offset_calibration(uint32_t timeout_ms)
 		if (g_motor_params != NULL &&
 		    observed_calibration &&
 		    g_motor_params->calibration.complete &&
-		    !g_motor_params->calibration.running) {
+		    !g_motor_params->calibration.running &&
+		    state != MOTOR_STATE_PREPARE_ONLINE &&
+		    state != MOTOR_STATE_OFFSET_MEAS) {
 			return 0;
 		}
 		motor_command_feed_watchdog(g_motor_params);
@@ -1965,6 +1967,7 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "+Iq validation failed (err %d)", ret);
 		return ret;
 	}
+	motor_encoder_acquisition_reset_stats();
 	motor_commission_motion_stop_current();
 	motor_commission_encoder_stop_generated();
 	(void)motor_api_set_param("outer_loop_mode", (float32_t)MOTOR_OUTER_LOOP_MODE_PI);
@@ -2434,6 +2437,7 @@ static int motor_commission_prepare_pi_encoder_validation(const struct shell *sh
 	(void)motor_api_set_param("outer_loop_mode", (float32_t)MOTOR_OUTER_LOOP_MODE_PI);
 	(void)motor_api_set_param("velocity_dob_enable", 0.0f);
 	(void)cmd_motor_commission_detent_clear(sh, 0, NULL);
+	motor_encoder_acquisition_reset_stats();
 	motor_commission_motion_stop_current();
 	motor_commission_set_velocity_target_hz(0.0f);
 	motor_command_feed_watchdog(g_motor_params);
