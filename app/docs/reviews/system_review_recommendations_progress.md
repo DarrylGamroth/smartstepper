@@ -620,3 +620,41 @@ Open risks:
 Next action:
 
 - Continue P6 by splitting the encoder mapping/boot workflow and detent workflow into separate command files.
+
+## Entry 12 - 2026-05-05 - P6: Commissioning Detent Command Split
+
+Status: In Progress.
+
+Commit: `8d3b207` (`P6 split commissioning detent commands`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 3 --log-dir hil_logs/p6 --json-report hil_logs/p6/detent_help_after_split.json --command 'motor commission detent' --command 'motor commission detent status' --command 'motor state status' --command 'motor fault snapshot status'
+```
+
+Results:
+
+- Split `motor commission detent run|status|apply|clear` into `app/src/shell_commission_detent.c`.
+- Reduced `app/src/shell_motion_commission.c` from 3140 lines to 2638 lines.
+- Firmware build: passed.
+- HIL parser unit tests: 9/9 passed.
+- Flash: passed.
+- HIL detent command-tree/status check: command subtree and staged/runtime detent status are visible; no motor fault or fault snapshot latch.
+
+HIL logs:
+
+- `hil_logs/p6/20260505_040304_custom.log`
+- `hil_logs/p6/detent_help_after_split.json`
+
+Open risks:
+
+- P6 is still in progress. The main commissioning file still contains status/common commands, flux/mechanical ID, encoder boot/mapping, and auto-tune workflows.
+- The HIL check is command/status only; it intentionally did not run a live detent capture.
+
+Next action:
+
+- Continue P6 by splitting the encoder boot/mapping workflow or auto-tune workflow into separate command files.
