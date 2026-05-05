@@ -1654,6 +1654,7 @@ static int motor_commission_encoder_run_generated_sweep(
 
 	motor_commission_encoder_stop_generated();
 	motor_commission_encoder_trace_restore(&trace_guard);
+	motor_encoder_acquisition_abort();
 
 	struct motor_encoder_map_detect_config cfg = {
 		.pole_pairs = (float32_t)MOTOR_POLE_PAIRS,
