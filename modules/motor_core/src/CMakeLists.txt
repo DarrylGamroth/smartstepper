@@ -53,6 +53,7 @@ add_library(motor_core_rt STATIC
 	runtime/control_policy.c
 	runtime/control_kernel.c
 	runtime/config_snapshot.c
+	runtime/persistent_config.c
 	runtime/command_arbitration.c
 	runtime/keepalive_policy.c
 	protection/interlocks.c

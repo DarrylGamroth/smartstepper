@@ -1,0 +1,4 @@
+tests:
+  chopper.motor_persistent_config.unit:
+    platform_allow: native_sim
+    tags: motor persistence
