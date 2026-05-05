@@ -575,6 +575,26 @@ static void motor_commission_motion_stop_current(void)
 	motor_command_feed_watchdog(g_motor_params);
 }
 
+static int motor_commission_request_idle_disarmed(void)
+{
+	if (g_motor_params == NULL) {
+		return -ENODEV;
+	}
+
+	motor_commission_motion_stop_current();
+	motor_commission_set_velocity_target_hz(0.0f);
+	atomic_set(&g_motor_params->control_armed, 0);
+	motor_command_feed_watchdog(g_motor_params);
+
+	int ret = motor_api_request_idle();
+	if (ret != 0) {
+		return ret;
+	}
+
+	return motor_commission_wait_for_mode(MOTOR_STATE_IDLE,
+					      MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
+}
+
 static int motor_commission_motion_measure_current(
 	float32_t signed_iq_a,
 	uint32_t hold_ms,
@@ -2653,6 +2673,7 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	}
 	motor_commission_motion_stop_current();
 	motor_commission_encoder_trace_restore(&trace_guard);
+	int idle_ret = motor_commission_request_idle_disarmed();
 
 	shell_print(sh,
 		    "Current encoder validation: Iq=+/-%.3f A hold=%u ms outer=PI DOB=off detent=off",
@@ -2668,6 +2689,11 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	if (ret != 0) {
 		shell_error(sh, "Current encoder validation stopped by fault/error (err %d)", ret);
 		return ret;
+	}
+	if (idle_ret != 0) {
+		shell_error(sh, "Current encoder validation failed to return to IDLE (err %d)",
+			    idle_ret);
+		return idle_ret;
 	}
 	if (pos.sample_count < MOTOR_COMMISSION_MOTION_MIN_SAMPLES ||
 	    neg.sample_count < MOTOR_COMMISSION_MOTION_MIN_SAMPLES ||
@@ -2737,6 +2763,12 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 
 	motor_commission_set_velocity_target_hz(0.0f);
 	motor_command_feed_watchdog(g_motor_params);
+	int idle_ret = motor_commission_request_idle_disarmed();
+	if (ret == 0 && idle_ret != 0) {
+		shell_error(sh, "Velocity validation failed to return to IDLE (err %d)",
+			    idle_ret);
+		ret = idle_ret;
+	}
 	return ret;
 }
 
@@ -2837,6 +2869,7 @@ int cmd_motor_commission_validate_position(const struct shell *sh, size_t argc, 
 	ret = motor_commission_plan_position_target(target_rad, &duration_s);
 	if (ret != 0) {
 		shell_error(sh, "Failed to plan outbound position move (err %d)", ret);
+		(void)motor_commission_request_idle_disarmed();
 		return ret;
 	}
 	motor_command_feed_watchdog(g_motor_params);
@@ -2846,18 +2879,27 @@ int cmd_motor_commission_validate_position(const struct shell *sh, size_t argc, 
 	ret = motor_commission_wait_ms_or_fault((uint32_t)(duration_s * 1000.0f) + hold_ms);
 	if (ret != 0) {
 		shell_error(sh, "Outbound position validation stopped by fault (err %d)", ret);
+		(void)motor_commission_request_idle_disarmed();
 		return ret;
 	}
 
 	ret = motor_commission_plan_position_target(start_rad, &duration_s);
 	if (ret != 0) {
 		shell_error(sh, "Failed to plan return position move (err %d)", ret);
+		(void)motor_commission_request_idle_disarmed();
 		return ret;
 	}
 	motor_command_feed_watchdog(g_motor_params);
 	ret = motor_commission_wait_ms_or_fault((uint32_t)(duration_s * 1000.0f) + hold_ms);
 	if (ret != 0) {
 		shell_error(sh, "Return position validation stopped by fault (err %d)", ret);
+		(void)motor_commission_request_idle_disarmed();
+		return ret;
+	}
+
+	ret = motor_commission_request_idle_disarmed();
+	if (ret != 0) {
+		shell_error(sh, "Position validation failed to return to IDLE (err %d)", ret);
 		return ret;
 	}
 
