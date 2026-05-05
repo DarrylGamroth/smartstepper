@@ -12,8 +12,9 @@
 
 / {
 	aliases {
-		/* Use integrated MT6835 sensor for control-loop encoder input. */
+		/* Use integrated MT6835 fast frontend for control-loop encoder input. */
 		encoder1 = &mt6835;
+		rtspi0 = &spi2;
 	};
 
 	user_parameters: user_parameters {
@@ -67,5 +68,24 @@
 		encoder-fault-threshold = <100>;
 		/* 120% of 1.5 A current limit. */
 		overcurrent-threshold-ma = <1800>;
+	};
+};
+
+&spi2 {
+	compatible = "rubus,stm32-rt-spi";
+	status = "okay";
+	spi-clock-frequency = <DT_FREQ_M(12)>;
+	max-frame-len = <6>;
+	cs-mode = "hardware";
+	spi-cpol;
+	spi-cpha;
+	fifo-enable;
+
+	mt6835: mt6835@0 {
+		compatible = "magntek,mt6835-fast";
+		reg = <0>;
+		pipeline-delay-samples = <0>;
+		cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
+		status = "okay";
 	};
 };

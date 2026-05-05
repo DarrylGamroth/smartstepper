@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Rubus Technologies Inc
+# SPDX-License-Identifier: Apache-2.0
+
+description: MT6835 encoder using a parent low-latency SPI transport
+
+compatible: "magntek,mt6835-fast"
+
+include: base.yaml
+
+on-bus: rt-spi
+
+properties:
+  reg:
+    required: true
+
+  pipeline-delay-samples:
+    type: int
+    default: 0
+    description: Protocol/sample delay to account for in angle-observer configuration.
+
+  cal-en-gpios:
+    type: phandle-array
+    description: Optional MT6835 calibration-enable GPIO.

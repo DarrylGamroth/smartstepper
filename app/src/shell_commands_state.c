@@ -33,16 +33,25 @@
 #include <drivers/rt_spi.h>
 #define MOTOR_ENCODER_IS_AEAT9955 1
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 1
+#define MOTOR_ENCODER_IS_FAST 1
+#elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835_fast)
+#include <drivers/encoder_rt.h>
+#include <drivers/rt_spi.h>
+#define MOTOR_ENCODER_IS_AEAT9955 0
+#define MOTOR_ENCODER_IS_AEAT9955_FAST 0
+#define MOTOR_ENCODER_IS_FAST 1
 #elif DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
 #include <drivers/sensor/brcm_aeat9955.h>
 #define MOTOR_ENCODER_IS_AEAT9955 1
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 0
+#define MOTOR_ENCODER_IS_FAST 0
 #else
 #define MOTOR_ENCODER_IS_AEAT9955 0
 #define MOTOR_ENCODER_IS_AEAT9955_FAST 0
+#define MOTOR_ENCODER_IS_FAST 0
 #endif
 
-#if MOTOR_ENCODER_IS_AEAT9955_FAST && DT_NODE_EXISTS(DT_ALIAS(rtspi0))
+#if MOTOR_ENCODER_IS_FAST && DT_NODE_EXISTS(DT_ALIAS(rtspi0))
 #define MOTOR_ENCODER_HAS_RTSPI 1
 static const struct device *const encoder_rtspi = DEVICE_DT_GET(DT_ALIAS(rtspi0));
 #else
@@ -1567,7 +1576,7 @@ int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-#if !MOTOR_ENCODER_IS_AEAT9955_FAST
+#if !MOTOR_ENCODER_IS_FAST
 	shell_error(sh, "encoder1 is not a fast encoder_rt device on this build");
 	return -ENOTSUP;
 #else
@@ -1578,14 +1587,18 @@ int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv)
 
 	struct encoder_rt_stats stats = {0};
 	encoder_rt_get_stats(encoder1, &stats);
+#if MOTOR_ENCODER_IS_AEAT9955_FAST
 	enum aeat9955_fast_spi4_mode spi4_mode = AEAT9955_FAST_SPI4_16_PARITY;
 	(void)aeat9955_fast_get_spi4_mode(encoder1, &spi4_mode);
+#endif
 
 	shell_print(sh, "Fast Encoder:");
 	shell_print(sh, "  Device:          %s", encoder1->name);
+#if MOTOR_ENCODER_IS_AEAT9955_FAST
 	shell_print(sh, "  SPI4 mode:       %s",
 		    (spi4_mode == AEAT9955_FAST_SPI4_8_CRC16) ?
 			    "spi4-8-crc16" : "spi4-16-parity");
+#endif
 	shell_print(sh, "  Transport delay:  %u samples", encoder_rt_get_pipeline_delay(encoder1));
 	shell_print(sh, "  Request:         ok=%u busy=%u disabled=%u error=%u",
 		    stats.request_count, stats.busy_count,
@@ -1605,6 +1618,7 @@ int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv)
 #endif
 }
 
+#if MOTOR_ENCODER_IS_AEAT9955_FAST
 static int motor_encoder_parse_u8_arg(const char *arg, uint8_t *value)
 {
 	if (arg == NULL || value == NULL) {
@@ -1621,6 +1635,7 @@ static int motor_encoder_parse_u8_arg(const char *arg, uint8_t *value)
 	*value = (uint8_t)parsed;
 	return 0;
 }
+#endif
 
 /* motor encoder reg_read <addr> */
 int cmd_motor_encoder_reg_read(const struct shell *sh, size_t argc, char **argv)

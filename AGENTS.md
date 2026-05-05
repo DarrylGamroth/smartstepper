@@ -117,7 +117,8 @@ Run one unit test suite (example):
 
 ## Serial Shell
 
-- Device: `/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0`
+- AEAT-9955 board device: `/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0`
+- MT6835 board device: `/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTHC021S-if00-port0`
 - Baud rate: `115200`
 - Use this serial shell to run HIL commands against the actual motor hardware
   (state transitions, current/velocity/position modes, commissioning, and safety checks).
@@ -130,16 +131,18 @@ Run one unit test suite (example):
 - Prefer telnet over UART for HIL command automation because it avoids UART RX
   ring overruns when logs are active or commands are sent quickly.
 - Get the DHCP address from boot logs or `net iface`. Current lab target
-  observed during HIL testing:
+  addresses observed during HIL testing:
 
 ```text
-10.0.0.171
+AEAT-9955 board: 10.0.0.171
+MT6835 board:    10.0.0.44
 ```
 
 - Recommended interactive command:
 
 ```bash
 telnet 10.0.0.171
+telnet 10.0.0.44
 ```
 
 - For automation, keep a single persistent telnet session open and pace commands

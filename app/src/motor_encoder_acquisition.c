@@ -18,7 +18,12 @@
 #if DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
 #include <drivers/encoder_rt.h>
-#define MOTOR_ENCODER_ACQUISITION_FAST_AEAT 1
+#define MOTOR_ENCODER_ACQUISITION_FAST 1
+
+static const struct device *const motor_encoder_rt_dev = DEVICE_DT_GET(DT_ALIAS(encoder1));
+#elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), magntek_mt6835_fast)
+#include <drivers/encoder_rt.h>
+#define MOTOR_ENCODER_ACQUISITION_FAST 1
 
 static const struct device *const motor_encoder_rt_dev = DEVICE_DT_GET(DT_ALIAS(encoder1));
 #elif DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955)
@@ -67,7 +72,7 @@ static inline void encoder_inject_frame_fault(uint8_t *buffer)
 #error "Unsupported encoder type for encoder1 alias"
 #endif
 
-#ifndef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifndef MOTOR_ENCODER_ACQUISITION_FAST
 SENSOR_DT_READ_IODEV(motor_encoder_iodev, DT_ALIAS(encoder1), {SENSOR_CHAN_ROTATION, 0});
 RTIO_DEFINE_WITH_MEMPOOL(motor_encoder_rtio_ctx, 8, 8, 16, 16, sizeof(void *));
 #endif
@@ -156,6 +161,15 @@ static bool motor_encoder_acquisition_angle_glitch(float32_t angle_deg)
 
 void motor_encoder_acquisition_set_enabled(bool enabled)
 {
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
+	if (enabled) {
+		(void)encoder_rt_set_mode(motor_encoder_rt_dev, ENCODER_RT_MODE_REALTIME);
+	} else {
+		encoder_rt_abort_sample(motor_encoder_rt_dev);
+		atomic_set(&motor_encoder_read_in_flight_count, 0);
+		(void)encoder_rt_set_mode(motor_encoder_rt_dev, ENCODER_RT_MODE_DISABLED);
+	}
+#endif
 	atomic_set(&motor_encoder_acquisition_enabled, enabled ? 1 : 0);
 }
 
@@ -221,7 +235,7 @@ void motor_encoder_acquisition_reset_stats(void)
 
 void motor_encoder_acquisition_abort(void)
 {
-#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
 	encoder_rt_abort_sample(motor_encoder_rt_dev);
 #endif
 	atomic_set(&motor_encoder_read_in_flight_count, 0);
@@ -249,7 +263,7 @@ int motor_encoder_acquisition_request_sample(void)
 		return -ESHUTDOWN;
 	}
 
-#ifndef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifndef MOTOR_ENCODER_ACQUISITION_FAST
 	if (atomic_get(&motor_encoder_read_in_flight_count) >=
 	    MOTOR_ENCODER_ACQUISITION_MAX_INFLIGHT) {
 		atomic_inc(&motor_encoder_request_busy_count);
@@ -257,7 +271,7 @@ int motor_encoder_acquisition_request_sample(void)
 	}
 #endif
 
-#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
 	int ret = encoder_rt_request_sample(motor_encoder_rt_dev);
 	if (ret == -EALREADY || ret == -EBUSY) {
 		atomic_inc(&motor_encoder_request_busy_count);
@@ -275,7 +289,7 @@ int motor_encoder_acquisition_request_sample(void)
 	}
 #endif
 
-#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
 	if (atomic_get(&motor_encoder_read_in_flight_count) == 0) {
 		atomic_inc(&motor_encoder_read_in_flight_count);
 	}
@@ -286,7 +300,7 @@ int motor_encoder_acquisition_request_sample(void)
 	return 0;
 }
 
-#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
 static int motor_encoder_acquisition_collect_fast(struct motor_encoder_sample *sample)
 {
 	struct encoder_rt_sample enc_sample = {0};
@@ -318,13 +332,12 @@ static int motor_encoder_acquisition_collect_fast(struct motor_encoder_sample *s
 	enum motor_encoder_test_inject_mode inject_mode =
 		(enum motor_encoder_test_inject_mode)atomic_get(&motor_encoder_test_inject_mode);
 	if (inject_mode == MOTOR_ENCODER_TEST_INJECT_STATUS) {
-		sample->status |= AEAT9955_FAST_POS_STATUS_ERROR_BIT;
+		sample->status |= 1U;
 		sample->warning = true;
 		sample->frame_status_error = true;
 	} else if (inject_mode == MOTOR_ENCODER_TEST_INJECT_FRAME) {
-		sample->status ^= AEAT9955_FAST_POS_STATUS_PARITY_BIT;
 		sample->error = true;
-		sample->frame_parity_error = true;
+		sample->frame_crc_error = true;
 	}
 
 	if (sample->frame_status_error) {
@@ -460,7 +473,7 @@ int motor_encoder_acquisition_collect(struct motor_encoder_sample *sample)
 
 	memset(sample, 0, sizeof(*sample));
 
-#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST
 	return motor_encoder_acquisition_collect_fast(sample);
 #else
 	return motor_encoder_acquisition_collect_rtio(sample);

@@ -22,10 +22,10 @@
 #define MOTOR_ENCODER_CONTROL_AEAT_FAST 0
 #endif
 
+#if MOTOR_ENCODER_CONTROL_AEAT_FAST
 static bool motor_encoder_control_aeat_regs_match_spi4_8_crc16(
 	const struct motor_encoder_control_status *status)
 {
-#if MOTOR_ENCODER_CONTROL_AEAT_FAST
 	const uint8_t expected_config0 =
 		AEAT9955_FAST_CONFIG0_SAFETY_BIT |
 		AEAT9955_FAST_CONFIG0_CRC_SELECT |
@@ -35,13 +35,8 @@ static bool motor_encoder_control_aeat_regs_match_spi4_8_crc16(
 	       ((status->config7 & AEAT9955_FAST_CONFIG0_SPI4_MODE_MASK) ==
 		AEAT9955_FAST_CONFIG0_SPI4_MODE_8) &&
 	       ((status->config9 & AEAT9955_FAST_CONFIG1_PSEL_BIT) == 0U);
-#else
-	ARG_UNUSED(status);
-	return true;
-#endif
 }
 
-#if MOTOR_ENCODER_CONTROL_AEAT_FAST
 static int motor_encoder_control_read_aeat_protocol_regs(
 	struct motor_encoder_control_status *status)
 {

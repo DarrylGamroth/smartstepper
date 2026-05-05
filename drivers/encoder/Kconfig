@@ -5,6 +5,7 @@ menuconfig ENCODER_RT
 	bool "Real-time encoder drivers"
 	depends on RT_SPI
 	default y if DT_HAS_BRCM_AEAT_9955_FAST_ENABLED
+	default y if DT_HAS_MAGNTEK_MT6835_FAST_ENABLED
 	help
 	  Enables deterministic request/collect encoder drivers for high-rate
 	  motor-control ISR use.
@@ -24,6 +25,15 @@ config BRCM_AEAT_9955_FAST
 	default y
 	help
 	  Enable the AEAT-9955 encoder driver that uses the low-latency rt_spi
+	  transport and exposes the encoder_rt API.
+
+config MAGNTEK_MT6835_FAST
+	bool "MT6835 real-time encoder driver"
+	depends on DT_HAS_MAGNTEK_MT6835_FAST_ENABLED
+	select CRC
+	default y
+	help
+	  Enable the MT6835 encoder driver that uses the low-latency rt_spi
 	  transport and exposes the encoder_rt API.
 
 endif # ENCODER_RT
