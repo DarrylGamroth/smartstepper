@@ -12,6 +12,7 @@
 
 #include "shell_commands_commission.h"
 #include "shell_commands_motion.h"
+#include "shell_commands_state.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor_control_api.h"
 #include "motor_states.h"
@@ -33,6 +34,10 @@
 #define MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES 4U
 #define MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS 3000U
+#define MOTOR_COMMISSION_BOOT_CAL_TIMEOUT_MS 8000U
+#define MOTOR_COMMISSION_BOOT_DEFAULT_CURRENT_A 0.150f
+#define MOTOR_COMMISSION_BOOT_DEFAULT_MECH_HZ 0.100f
+#define MOTOR_COMMISSION_BOOT_DEFAULT_CYCLES 1.0f
 #define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_MOTION_MIN_SAMPLES 4U
@@ -110,6 +115,12 @@ struct motor_commission_velocity_gain_restore {
 	float32_t iq_limit_a;
 	float32_t i_term_a;
 	bool valid;
+};
+
+struct motor_commission_encoder_sweep_config {
+	float32_t current_a;
+	float32_t mech_hz;
+	float32_t cycles;
 };
 
 static int motor_post_mode_change(enum motor_state target_mode)
@@ -213,6 +224,35 @@ static int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeou
 		}
 		if (state == MOTOR_STATE_ERROR) {
 			return -EFAULT;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
+	}
+
+	return -ETIMEDOUT;
+}
+
+static int motor_commission_wait_for_offset_calibration(uint32_t timeout_ms)
+{
+	uint32_t start_ms = k_uptime_get_32();
+	bool observed_calibration = false;
+
+	while ((k_uptime_get_32() - start_ms) < timeout_ms) {
+		int state = motor_api_get_state();
+		if (state == MOTOR_STATE_ERROR) {
+			return -EFAULT;
+		}
+		if (g_motor_params != NULL &&
+		    (g_motor_params->calibration.running ||
+		     !g_motor_params->calibration.complete ||
+		     state == MOTOR_STATE_OFFSET_MEAS)) {
+			observed_calibration = true;
+		}
+		if (g_motor_params != NULL &&
+		    observed_calibration &&
+		    g_motor_params->calibration.complete &&
+		    !g_motor_params->calibration.running) {
+			return 0;
 		}
 		motor_command_feed_watchdog(g_motor_params);
 		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
@@ -1358,49 +1398,47 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 	return 0;
 }
 
-int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv)
+static int motor_commission_encoder_validate_sweep(
+	const struct shell *sh,
+	const struct motor_commission_encoder_sweep_config *sweep)
 {
-	if (argc != 4) {
-		shell_error(sh, "Usage: motor commission encoder run <current_a> <mech_hz> <cycles>");
-		return -EINVAL;
-	}
-	if (!g_motor_params) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-	if (!g_motor_params->calibration.complete) {
-		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
-		return -EACCES;
-	}
-	if (!motor_control_is_armed(g_motor_params)) {
-		shell_error(sh, "Control is disarmed; run 'motor arm' before encoder detect");
-		return -EACCES;
-	}
-	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
-		shell_error(sh, "Motor is in ERROR state; clear error first");
-		return -EFAULT;
-	}
-
-	float32_t current_a = 0.0f;
-	float32_t mech_hz = 0.0f;
-	float32_t cycles_f = 0.0f;
-	if (!shell_parse_finite_float(argv[1], &current_a) ||
-	    !shell_parse_finite_float(argv[2], &mech_hz) ||
-	    !shell_parse_finite_float(argv[3], &cycles_f) ||
-	    fabsf(current_a) < 1.0e-6f ||
-	    fabsf(mech_hz) < 1.0e-6f ||
-	    cycles_f <= 0.0f) {
+	if (sweep == NULL ||
+	    !isfinite(sweep->current_a) ||
+	    !isfinite(sweep->mech_hz) ||
+	    !isfinite(sweep->cycles) ||
+	    fabsf(sweep->current_a) < 1.0e-6f ||
+	    fabsf(sweep->mech_hz) < 1.0e-6f ||
+	    sweep->cycles <= 0.0f) {
 		shell_error(sh, "current_a and mech_hz must be non-zero; cycles must be > 0");
 		return -EINVAL;
 	}
-	if (fabsf(current_a) > MOTOR_MAX_CURRENT_A) {
+	if (fabsf(sweep->current_a) > MOTOR_MAX_CURRENT_A) {
 		shell_error(sh, "current_a exceeds motor current limit %.3f A",
 			    (double)MOTOR_MAX_CURRENT_A);
 		return -ERANGE;
 	}
 
-	motor_commission_encoder_clear_result();
+	return 0;
+}
 
+static int motor_commission_encoder_parse_required_sweep(
+	const struct shell *sh,
+	char **argv,
+	struct motor_commission_encoder_sweep_config *sweep)
+{
+	if (sweep == NULL ||
+	    !shell_parse_finite_float(argv[1], &sweep->current_a) ||
+	    !shell_parse_finite_float(argv[2], &sweep->mech_hz) ||
+	    !shell_parse_finite_float(argv[3], &sweep->cycles)) {
+		shell_error(sh, "Invalid encoder mapping arguments");
+		return -EINVAL;
+	}
+
+	return motor_commission_encoder_validate_sweep(sh, sweep);
+}
+
+static int motor_commission_encoder_prepare_generated_mode(const struct shell *sh)
+{
 	int ret = motor_api_request_online();
 	if (ret != 0) {
 		shell_error(sh, "Failed to request ONLINE state (err %d)", ret);
@@ -1421,7 +1459,27 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		}
 	}
 
-	float32_t duration_ms_f = (cycles_f / fabsf(mech_hz)) * 1000.0f;
+	return 0;
+}
+
+static int motor_commission_encoder_run_generated_sweep(
+	const struct shell *sh,
+	const struct motor_commission_encoder_sweep_config *sweep,
+	bool print_apply_hint)
+{
+	int ret = motor_commission_encoder_validate_sweep(sh, sweep);
+	if (ret != 0) {
+		return ret;
+	}
+
+	motor_commission_encoder_clear_result();
+
+	ret = motor_commission_encoder_prepare_generated_mode(sh);
+	if (ret != 0) {
+		return ret;
+	}
+
+	float32_t duration_ms_f = (sweep->cycles / fabsf(sweep->mech_hz)) * 1000.0f;
 	uint32_t duration_ms = (uint32_t)ceilf(duration_ms_f);
 	duration_ms = MAX(duration_ms, MOTOR_COMMISSION_ENCODER_MIN_SAMPLE_MS);
 	uint32_t sample_period_ms =
@@ -1437,14 +1495,15 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 	struct motor_commission_encoder_trace_guard trace_guard;
 	motor_commission_encoder_trace_force_on(&trace_guard);
 
-	motor_commission_set_direct_current(0.0f, current_a);
-	motor_commission_set_velocity_target_hz(mech_hz);
+	motor_commission_set_direct_current(0.0f, sweep->current_a);
+	motor_commission_set_velocity_target_hz(sweep->mech_hz);
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh,
 		    "Encoder mapping detect: current=%.3f A velocity=%.3f Hz cycles=%.2f duration=%u ms sample=%u ms N=%u",
-		    (double)current_a, (double)mech_hz, (double)cycles_f,
-		    duration_ms, sample_period_ms, target_samples);
+		    (double)sweep->current_a, (double)sweep->mech_hz,
+		    (double)sweep->cycles, duration_ms, sample_period_ms,
+		    target_samples);
 
 	uint32_t accepted = 0U;
 	uint32_t last_trace_loop = g_motor_params->rt_fast.control_loop_count;
@@ -1499,11 +1558,11 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		 * mapping unless the RMS phase spread is clearly excessive.
 		 */
 		.max_offset_residual_rad = 0.80f,
-			.max_direction_residual_rad = 0.50f,
-			.min_direction_correlation = 0.70f,
-			.max_error_samples = MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES,
-			.estimate_ratio = false,
-		};
+		.max_direction_residual_rad = 0.50f,
+		.min_direction_correlation = 0.70f,
+		.max_error_samples = MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES,
+		.estimate_ratio = false,
+	};
 	ret = motor_encoder_map_detect_compute(&cfg, encoder_detect_samples, accepted,
 					       &encoder_detect_result);
 	encoder_detect_result_valid = encoder_detect_result.valid;
@@ -1525,12 +1584,46 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		    encoder_detect_result.encoder_warning_count,
 		    encoder_detect_result.encoder_error_count,
 		    ret);
-		if (encoder_detect_result.valid) {
-			motor_encoder_acquisition_reset_stats();
+	if (encoder_detect_result.valid) {
+		motor_encoder_acquisition_reset_stats();
+		if (print_apply_hint) {
 			shell_print(sh, "Run 'motor commission encoder apply' to apply staged mapping.");
 		}
+	}
 
 	return ret;
+}
+
+int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 4) {
+		shell_error(sh, "Usage: motor commission encoder run <current_a> <mech_hz> <cycles>");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.complete) {
+		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before encoder detect");
+		return -EACCES;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	struct motor_commission_encoder_sweep_config sweep = {0};
+	int ret = motor_commission_encoder_parse_required_sweep(sh, argv, &sweep);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return motor_commission_encoder_run_generated_sweep(sh, &sweep, true);
 }
 
 int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv)
@@ -1565,11 +1658,8 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 	return 0;
 }
 
-int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv)
+static int motor_commission_encoder_apply_staged(const struct shell *sh)
 {
-	ARG_UNUSED(argc);
-	ARG_UNUSED(argv);
-
 	if (!g_motor_params) {
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
@@ -1590,6 +1680,106 @@ int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh, "Encoder mapping applied: sign=%d offset=%.4f deg mechanical",
+		    g_motor_params->encoder_direction_sign,
+		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	return motor_commission_encoder_apply_staged(sh);
+}
+
+int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc > 4) {
+		shell_error(sh,
+			    "Usage: motor commission boot [current_a] [mech_hz] [cycles]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	struct motor_commission_encoder_sweep_config sweep = {
+		.current_a = MOTOR_COMMISSION_BOOT_DEFAULT_CURRENT_A,
+		.mech_hz = MOTOR_COMMISSION_BOOT_DEFAULT_MECH_HZ,
+		.cycles = MOTOR_COMMISSION_BOOT_DEFAULT_CYCLES,
+	};
+
+	if (argc > 1 && !shell_parse_finite_float(argv[1], &sweep.current_a)) {
+		shell_error(sh, "Invalid current_a");
+		return -EINVAL;
+	}
+	if (argc > 2 && !shell_parse_finite_float(argv[2], &sweep.mech_hz)) {
+		shell_error(sh, "Invalid mech_hz");
+		return -EINVAL;
+	}
+	if (argc > 3 && !shell_parse_finite_float(argv[3], &sweep.cycles)) {
+		shell_error(sh, "Invalid cycles");
+		return -EINVAL;
+	}
+
+	int ret = motor_commission_encoder_validate_sweep(sh, &sweep);
+	if (ret != 0) {
+		return ret;
+	}
+
+	shell_print(sh,
+		    "Boot commissioning: current offset + generated encoder map + apply");
+	shell_print(sh,
+		    "Runtime-only: run this after every boot until mapping persistence exists.");
+
+	shell_print(sh, "[1/3] Current offset calibration");
+	ret = motor_api_request_calibrate();
+	if (ret != 0) {
+		shell_error(sh, "Failed to request current offset calibration (err %d)", ret);
+		return ret;
+	}
+	ret = motor_commission_wait_for_offset_calibration(
+		MOTOR_COMMISSION_BOOT_CAL_TIMEOUT_MS);
+	if (ret != 0) {
+		shell_error(sh, "Current offset calibration failed/timed out (err %d)", ret);
+		return ret;
+	}
+	shell_print(sh, "  offsets: Ia=%.4f Ib=%.4f",
+		    (double)g_motor_params->Ia_offset,
+		    (double)g_motor_params->Ib_offset);
+
+	shell_print(sh, "[2/3] Generated-sweep encoder mapping");
+	ret = cmd_motor_arm(sh, 0, NULL);
+	if (ret != 0) {
+		shell_error(sh, "Failed to arm control output (err %d)", ret);
+		return ret;
+	}
+	ret = motor_commission_encoder_run_generated_sweep(sh, &sweep, false);
+	if (ret != 0) {
+		shell_error(sh, "Encoder mapping sweep failed (err %d)", ret);
+		return ret;
+	}
+	if (!encoder_detect_result_valid || !encoder_detect_result.valid) {
+		shell_error(sh, "Encoder mapping quality rejected");
+		return -ERANGE;
+	}
+
+	shell_print(sh, "[3/3] Apply encoder mapping");
+	ret = motor_commission_encoder_apply_staged(sh);
+	if (ret != 0) {
+		return ret;
+	}
+	motor_commission_encoder_stop_generated();
+	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh,
+		    "Boot commissioning complete: sign=%d offset=%.4f deg mechanical",
 		    g_motor_params->encoder_direction_sign,
 		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
 	return 0;
