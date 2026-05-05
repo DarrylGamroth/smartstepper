@@ -577,3 +577,46 @@ Next action:
 
 - Start P6 commissioning shell decomposition. Preserve the command tree and
   behavior while splitting the large implementation file by workflow.
+
+## Entry 11 - 2026-05-05 - P6: Commissioning Validation Command Split
+
+Status: In Progress.
+
+Commit: `7b24b9a` (`P6 split commissioning validation commands`).
+
+Commands:
+
+```bash
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p6 --json-report hil_logs/p6/status_after_p6.json
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 3 --log-dir hil_logs/p6 --json-report hil_logs/p6/commission_validate_help.json --command 'motor commission validate' --command 'motor commission status' --command 'motor state status' --command 'motor fault snapshot status'
+```
+
+Results:
+
+- Split `motor commission validate current|velocity|position` into `app/src/shell_commission_validate.c`.
+- Added `app/include/shell_commission_internal.h` for the small set of shared commissioning-shell helpers used by split command files.
+- Reduced `app/src/shell_motion_commission.c` from 3498 lines to 3140 lines.
+- Firmware build: passed.
+- HIL parser unit tests: 9/9 passed.
+- Flash: passed.
+- HIL status: `PASS`.
+- HIL command-tree check: validation subcommands are visible; verdict `INCONCLUSIVE` only because the help/status sequence does not print encoder acquisition counters.
+
+HIL logs:
+
+- `hil_logs/p6/20260505_035957_status.log`
+- `hil_logs/p6/status_after_p6.json`
+- `hil_logs/p6/20260505_040025_custom.log`
+- `hil_logs/p6/commission_validate_help.json`
+
+Open risks:
+
+- P6 is not complete. The original commissioning shell file still contains boot/mapping, full identification, detent-map, and tuning workflows.
+- Shared helpers are intentionally internal to commissioning shell code; further splits should keep the header narrow and avoid turning it into a generic dumping ground.
+
+Next action:
+
+- Continue P6 by splitting the encoder mapping/boot workflow and detent workflow into separate command files.
