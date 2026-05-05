@@ -79,6 +79,7 @@ Safety behavior:
 - Live-motion scenarios refuse to run without `--yes-live-motion`.
 - The script sends best-effort stop commands at the end of live-motion scenarios:
   `motor velocity target 0`, `motor current iq 0`, `motor disarm`,
-  `motor state idle`, and `motor safety timeout 1000`.
+  `motor state idle`, and `motor safety timeout 1000`, followed by status
+  commands used for the final verdict.
 - Use `--leave-timeout-disabled` only for manual debugging sessions where the
   command watchdog must remain disabled after the script exits.

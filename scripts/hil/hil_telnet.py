@@ -232,6 +232,10 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
     return [
         ShellCommand("motor state status"),
         ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition_reset"),
         ShellCommand(
@@ -724,6 +728,10 @@ def stop_commands() -> list[ShellCommand]:
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 1000", timeout_s=1.5),
+        ShellCommand("motor encoder control_status", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition", timeout_s=2.0),
+        ShellCommand("motor state status", timeout_s=2.0),
+        ShellCommand("motor fault snapshot status", timeout_s=2.0),
     ]
 
 
