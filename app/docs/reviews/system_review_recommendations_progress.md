@@ -20,8 +20,8 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 
 | Phase | Status | Commit | Evidence Summary |
 |---|---|---|---|
-| P0 Baseline and Evidence Gates | Not Started |  | Baseline evidence exists from the source review, but P0 has not been rerun under this plan. |
-| P1 HIL Pass/Fail Automation | Not Started |  |  |
+| P0 Baseline and Evidence Gates | Complete | this progress commit | Unit tests passed twice; firmware build passed; HIL status passed. |
+| P1 HIL Pass/Fail Automation | Complete | this progress commit | Parser tests pass; status JSON report passed; boot-commission JSON report failed objectively as expected for current hardware state. |
 | P2 Encoder PI Stabilization | Not Started |  |  |
 | P3 Robust Encoder Mapping | Not Started |  |  |
 | P4 Commissioning UX and Naming | Not Started |  |  |
@@ -99,3 +99,87 @@ Open risks:
 Next action:
 
 - Start P0 by rerunning unit tests, firmware build, and non-motion HIL status.
+
+## Entry 2 - 2026-05-05 - P0: Baseline And Evidence Gates
+
+Status: Complete.
+
+Commit: this progress update commit.
+
+Commands:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg
+./tests/run_unit_tests.sh wonderful_goldberg
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --log-dir hil_logs/p0
+```
+
+Results:
+
+- Unit tests run 1: 29/29 scenarios passed, 251/251 test cases passed.
+- Unit tests run 2: 29/29 scenarios passed, 251/251 test cases passed.
+- Firmware build: passed, `ninja: no work to do`.
+- HIL status: shell communication was ordered and completed.
+- Device baseline:
+  - State `IDLE`.
+  - Motor error `NONE`.
+  - Encoder control readiness `YES`.
+  - Encoder acquisition errors all zero.
+  - Fault snapshot latch clear.
+
+HIL logs:
+
+- `hil_logs/p0/20260505_015311_status.log`
+
+Open risks:
+
+- P0 proves the non-motion baseline only. Live boot commissioning still needs
+  objective validation and is handled by P1/P2/P3.
+
+Next action:
+
+- Complete P1 parser and JSON verdict support.
+
+## Entry 3 - 2026-05-05 - P1: HIL Pass/Fail Automation
+
+Status: Complete.
+
+Commit: this progress update commit.
+
+Commands:
+
+```bash
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --log-dir hil_logs/p1 --json-report hil_logs/p1/status.json
+python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion --host 10.0.0.171 --boot-current 0.15 --boot-hz 0.05 --cycles 1 --log-dir hil_logs/p1 --json-report hil_logs/p1/boot_commission.json
+```
+
+Results:
+
+- Parser unit tests: 4/4 passed.
+- Status HIL verdict: `PASS`.
+- Boot-commission HIL verdict: `FAIL`, correctly returned nonzero and wrote
+  JSON evidence.
+- Boot-commission failure reason:
+  - `boot_commission_complete` failed.
+  - `encoder_ready` failed after the mapping attempt.
+  - The mapping command reported `samples=0 rejected=500 warn=0 err=500 ret=-61`.
+  - Motor state remained `ONLINE_VELOCITY_GENERATED` with motor error `NONE`.
+
+HIL logs:
+
+- `hil_logs/p1/20260505_015725_status.log`
+- `hil_logs/p1/status.json`
+- `hil_logs/p1/20260505_015758_boot-commission.log`
+- `hil_logs/p1/boot_commission.json`
+
+Open risks:
+
+- P1 proves the HIL verdict mechanism, not encoder-mode stability.
+- The boot-commission failure is now objective evidence feeding P2/P3.
+
+Next action:
+
+- Start P2/P3 by fixing encoder acquisition/mapping readiness before tuning
+  encoder PI modes.

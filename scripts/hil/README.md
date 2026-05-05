@@ -32,6 +32,28 @@ python3 scripts/hil/hil_telnet.py encoder-validate \
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file
 logging or `--log-dir <path>` to choose another location.
 
+Machine-readable evidence:
+
+```bash
+python3 scripts/hil/hil_telnet.py status \
+  --host 10.0.0.171 \
+  --json-report hil_logs/status.json
+```
+
+Each scenario prints a final `PASS`, `FAIL`, or `INCONCLUSIVE` verdict and can
+write the same checks to JSON with `--json-report`. The script exits nonzero on
+`FAIL` or `INCONCLUSIVE`, so it can be used by regression scripts.
+
+Parser-only tests:
+
+```bash
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+```
+
+Thresholds for encoder errors, current motion, and velocity tracking are
+configurable with options such as `--max-crc-errors`,
+`--min-current-motion-deg`, and `--max-velocity-error-hz`.
+
 Safety behavior:
 
 - Live-motion scenarios refuse to run without `--yes-live-motion`.

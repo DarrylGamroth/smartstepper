@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import json
 import os
 import re
 import socket
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -34,6 +35,44 @@ class ShellCommand:
     command: str
     timeout_s: float = 3.0
     settle_s: float = 0.05
+
+
+@dataclass(frozen=True)
+class ShellResult:
+    command: str
+    response: str
+
+
+@dataclass
+class VerdictCheck:
+    name: str
+    status: str
+    detail: str
+    values: dict[str, float | int | str | bool] = field(default_factory=dict)
+
+
+@dataclass
+class ScenarioReport:
+    scenario: str
+    verdict: str
+    log_path: str | None
+    checks: list[VerdictCheck]
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "scenario": self.scenario,
+            "verdict": self.verdict,
+            "log_path": self.log_path,
+            "checks": [
+                {
+                    "name": check.name,
+                    "status": check.status,
+                    "detail": check.detail,
+                    "values": check.values,
+                }
+                for check in self.checks
+            ],
+        }
 
 
 class TelnetShell:
@@ -270,6 +309,298 @@ SCENARIOS = {
 }
 
 
+def _combined_text(results: Sequence[ShellResult]) -> str:
+    return "\n".join(result.response for result in results)
+
+
+def _last_response(results: Sequence[ShellResult], command_prefix: str) -> str:
+    for result in reversed(results):
+        if result.command.startswith(command_prefix):
+            return result.response
+    return ""
+
+
+def _check(checks: list[VerdictCheck], name: str, ok: bool, detail: str,
+           values: dict[str, float | int | str | bool] | None = None) -> None:
+    checks.append(VerdictCheck(name, "PASS" if ok else "FAIL", detail, values or {}))
+
+
+def _info(checks: list[VerdictCheck], name: str, detail: str,
+          values: dict[str, float | int | str | bool] | None = None) -> None:
+    checks.append(VerdictCheck(name, "INFO", detail, values or {}))
+
+
+def _parse_motor_error(response: str) -> tuple[str, int] | None:
+    match = re.search(r"^\s*Error:\s+([A-Z0-9_]+)\s+\(([-0-9]+)\)", response, re.MULTILINE)
+    if match is None:
+        return None
+    return match.group(1), int(match.group(2))
+
+
+def _parse_yes_no_field(response: str, label: str) -> bool | None:
+    match = re.search(rf"^\s*{re.escape(label)}:\s+(YES|NO)\b", response, re.MULTILINE)
+    if match is None:
+        return None
+    return match.group(1) == "YES"
+
+
+def _parse_latch_field(response: str, label: str) -> bool | None:
+    match = re.search(rf"^\s*{re.escape(label)}:\s+(YES|NO|SET|CLEAR)\b", response, re.MULTILINE)
+    if match is None:
+        return None
+    return match.group(1) in ("YES", "SET")
+
+
+def _parse_acquisition_errors(response: str) -> dict[str, int] | None:
+    match = re.search(
+        r"Errors:\s+transport=(\d+)\s+frame=(\d+)\s+parity=(\d+)\s+crc=(\d+)\s+status=(\d+)\s+glitch=(\d+)",
+        response,
+    )
+    if match is not None:
+        keys = ("transport", "frame", "parity", "crc", "status", "glitch")
+        return {key: int(value) for key, value in zip(keys, match.groups())}
+
+    match = re.search(
+        r"Acquisition errors:\s+transport=(\d+)\s+parity=(\d+)\s+crc=(\d+)\s+glitch=(\d+)\s+status=(\d+)",
+        response,
+    )
+    if match is not None:
+        transport, parity, crc, glitch, status = (int(value) for value in match.groups())
+        return {
+            "transport": transport,
+            "frame": 0,
+            "parity": parity,
+            "crc": crc,
+            "status": status,
+            "glitch": glitch,
+        }
+
+    return None
+
+
+def _max_acquisition_errors(results: Sequence[ShellResult]) -> dict[str, int] | None:
+    maxima: dict[str, int] = {}
+    found = False
+    for result in results:
+        parsed = _parse_acquisition_errors(result.response)
+        if parsed is None:
+            continue
+        found = True
+        for key, value in parsed.items():
+            maxima[key] = max(maxima.get(key, 0), value)
+    return maxima if found else None
+
+
+def _parse_current_validation(response: str) -> dict[str, float | int] | None:
+    pos = re.search(
+        r"\+Iq:\s+net=\s*([-+0-9.]+)\s+deg\s+abs=\s*([-+0-9.]+)\s+deg\s+samples=(\d+)\s+warn=(\d+)\s+err=(\d+)",
+        response,
+    )
+    neg = re.search(
+        r"-Iq:\s+net=\s*([-+0-9.]+)\s+deg\s+abs=\s*([-+0-9.]+)\s+deg\s+samples=(\d+)\s+warn=(\d+)\s+err=(\d+)",
+        response,
+    )
+    if pos is None or neg is None:
+        return None
+    return {
+        "pos_net_deg": float(pos.group(1)),
+        "pos_abs_deg": float(pos.group(2)),
+        "pos_samples": int(pos.group(3)),
+        "pos_warn": int(pos.group(4)),
+        "pos_err": int(pos.group(5)),
+        "neg_net_deg": float(neg.group(1)),
+        "neg_abs_deg": float(neg.group(2)),
+        "neg_samples": int(neg.group(3)),
+        "neg_warn": int(neg.group(4)),
+        "neg_err": int(neg.group(5)),
+    }
+
+
+def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
+    samples: list[dict[str, float | int]] = []
+    for match in re.finditer(
+        r"target=\s*([-+0-9.]+)\s+Hz\s+ref=\s*([-+0-9.]+)\s+Hz\s+meas=\s*([-+0-9.]+)\s+Hz\s+err=\s*([-+0-9.]+)\s+Hz\s+Iq=([-+0-9.]+)\s+A\s+Id=([-+0-9.]+)\s+A\s+warn=(\d+)\s+err=(\d+)",
+        response,
+    ):
+        samples.append({
+            "target_hz": float(match.group(1)),
+            "ref_hz": float(match.group(2)),
+            "meas_hz": float(match.group(3)),
+            "err_hz": float(match.group(4)),
+            "iq_a": float(match.group(5)),
+            "id_a": float(match.group(6)),
+            "warn": int(match.group(7)),
+            "err": int(match.group(8)),
+        })
+    return samples
+
+
+def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
+                     log_path: Path | None) -> ScenarioReport:
+    checks: list[VerdictCheck] = []
+    text = _combined_text(results)
+
+    fatal_patterns = (
+        "HARD FAULT",
+        "FATAL ERROR",
+        "OVERCURRENT",
+        "Validation stopped",
+        "stopped by motor fault",
+        "stopped by fault",
+    )
+    fatal_hits = [pattern for pattern in fatal_patterns if pattern in text]
+    _check(checks, "no_fatal_text", not fatal_hits,
+           "No fatal/fault-stop text found" if not fatal_hits else ", ".join(fatal_hits),
+           {"hits": ",".join(fatal_hits)})
+
+    state_response = _last_response(results, "motor state status")
+    motor_error = _parse_motor_error(state_response)
+    if motor_error is None:
+        checks.append(VerdictCheck("motor_error_none", "INCONCLUSIVE",
+                                   "No motor state status error field parsed"))
+    else:
+        error_name, error_code = motor_error
+        _check(checks, "motor_error_none", error_name == "NONE" and error_code == 0,
+               f"Motor error is {error_name} ({error_code})",
+               {"error": error_name, "code": error_code})
+
+    fault_response = _last_response(results, "motor fault snapshot status")
+    if fault_response:
+        latched = _parse_latch_field(fault_response, "Latched")
+        if latched is None:
+            checks.append(VerdictCheck("fault_snapshot_clear", "INCONCLUSIVE",
+                                       "Fault snapshot latch field not parsed"))
+        else:
+            _check(checks, "fault_snapshot_clear", not latched,
+                   "Fault snapshot latch is clear" if not latched else "Fault snapshot latch is set",
+                   {"latched": latched})
+
+    acquisition_errors = _max_acquisition_errors(results)
+    if acquisition_errors is None:
+        checks.append(VerdictCheck("encoder_acquisition_errors", "INCONCLUSIVE",
+                                   "No encoder acquisition counters parsed"))
+    else:
+        max_transport = args.max_transport_errors
+        max_crc = args.max_crc_errors
+        max_status = args.max_status_errors
+        max_glitch = args.max_glitch_errors
+        ok = (
+            acquisition_errors.get("transport", 0) <= max_transport and
+            acquisition_errors.get("frame", 0) <= max_transport and
+            acquisition_errors.get("parity", 0) <= max_crc and
+            acquisition_errors.get("crc", 0) <= max_crc and
+            acquisition_errors.get("status", 0) <= max_status and
+            acquisition_errors.get("glitch", 0) <= max_glitch
+        )
+        detail = (
+            "Encoder acquisition counters within thresholds" if ok
+            else "Encoder acquisition counters exceed thresholds"
+        )
+        _check(checks, "encoder_acquisition_errors", ok, detail, acquisition_errors)
+
+    control_response = _last_response(results, "motor encoder control_status")
+    if control_response:
+        ready = _parse_yes_no_field(control_response, "Ready")
+        mapping = _parse_yes_no_field(control_response, "Mapping applied")
+        protocol = _parse_yes_no_field(control_response, "Protocol ok")
+        if args.scenario in ("boot-commission", "encoder-validate"):
+            _check(checks, "encoder_ready", ready is True,
+                   "Encoder control ready" if ready else "Encoder control not ready",
+                   {"ready": bool(ready)})
+            _check(checks, "mapping_applied", mapping is True,
+                   "Encoder mapping applied" if mapping else "Encoder mapping not applied",
+                   {"mapping_applied": bool(mapping)})
+            _check(checks, "encoder_protocol_ok", protocol is True,
+                   "Encoder protocol ok" if protocol else "Encoder protocol not ok",
+                   {"protocol_ok": bool(protocol)})
+        else:
+            _info(checks, "encoder_ready", "Encoder readiness parsed",
+                  {
+                      "ready": bool(ready),
+                      "mapping_applied": bool(mapping),
+                      "protocol_ok": bool(protocol),
+                  })
+
+    if args.scenario == "boot-commission":
+        complete = "Boot commissioning complete" in text
+        _check(checks, "boot_commission_complete", complete,
+               "Boot commissioning completed" if complete else "Boot commissioning completion text not found")
+
+    if args.scenario == "encoder-validate":
+        current_response = _last_response(results, "motor commission validate current")
+        current = _parse_current_validation(current_response)
+        if current is None:
+            checks.append(VerdictCheck("current_validation", "FAIL",
+                                       "Current validation summary not parsed"))
+        else:
+            min_motion = args.min_current_motion_deg
+            opposite_sign = (
+                abs(float(current["pos_net_deg"])) >= min_motion and
+                abs(float(current["neg_net_deg"])) >= min_motion and
+                float(current["pos_net_deg"]) * float(current["neg_net_deg"]) < 0.0
+            )
+            clean = (
+                int(current["pos_err"]) <= args.max_sample_errors and
+                int(current["neg_err"]) <= args.max_sample_errors and
+                int(current["pos_warn"]) <= args.max_sample_warnings and
+                int(current["neg_warn"]) <= args.max_sample_warnings
+            )
+            _check(checks, "current_validation", opposite_sign and clean,
+                   "Current validation motion is clean and opposite sign"
+                   if opposite_sign and clean else
+                   "Current validation motion/sign or sample quality failed",
+                   current)
+
+        velocity_response = _last_response(results, "motor commission validate velocity")
+        velocity_samples = _parse_velocity_samples(velocity_response)
+        if not velocity_samples:
+            checks.append(VerdictCheck("velocity_validation", "FAIL",
+                                       "Velocity validation samples not parsed"))
+        else:
+            max_abs_err = max(abs(float(sample["err_hz"])) for sample in velocity_samples)
+            max_warn = max(int(sample["warn"]) for sample in velocity_samples)
+            max_err = max(int(sample["err"]) for sample in velocity_samples)
+            wrong_sign = [
+                sample for sample in velocity_samples
+                if abs(float(sample["target_hz"])) > 1.0e-6 and
+                float(sample["target_hz"]) * float(sample["meas_hz"]) < 0.0
+            ]
+            ok = (
+                max_abs_err <= args.max_velocity_error_hz and
+                max_warn <= args.max_sample_warnings and
+                max_err <= args.max_sample_errors and
+                not wrong_sign
+            )
+            _check(checks, "velocity_validation", ok,
+                   "Velocity validation samples are within thresholds" if ok
+                   else "Velocity validation samples exceed thresholds",
+                   {
+                       "samples": len(velocity_samples),
+                       "max_abs_err_hz": max_abs_err,
+                       "max_warn": max_warn,
+                       "max_err": max_err,
+                       "wrong_sign_samples": len(wrong_sign),
+                   })
+
+        if args.include_position:
+            position_response = _last_response(results, "motor commission validate position")
+            complete = "Position encoder validation complete" in position_response
+            _check(checks, "position_validation", complete,
+                   "Position validation completed" if complete else
+                   "Position validation completion text not found")
+
+    has_fail = any(check.status == "FAIL" for check in checks)
+    has_inconclusive = any(check.status == "INCONCLUSIVE" for check in checks)
+    verdict = "FAIL" if has_fail else ("INCONCLUSIVE" if has_inconclusive else "PASS")
+    return ScenarioReport(args.scenario, verdict, str(log_path) if log_path is not None else None, checks)
+
+
+def print_report(report: ScenarioReport) -> None:
+    print(f"\n### VERDICT: {report.verdict}")
+    for check in report.checks:
+        print(f"{check.status:12s} {check.name}: {check.detail}")
+
+
 def stop_commands() -> list[ShellCommand]:
     return [
         ShellCommand("motor velocity target 0", timeout_s=1.5),
@@ -288,9 +619,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--connect-timeout", type=float, default=5.0)
     parser.add_argument("--log-dir", default="hil_logs")
     parser.add_argument("--no-log", action="store_true")
+    parser.add_argument("--json-report",
+                        help="Write a machine-readable report with PASS/FAIL checks.")
     parser.add_argument("--yes-live-motion", action="store_true",
                         help="Required for scenarios that can energize or move the motor.")
     parser.add_argument("--leave-timeout-disabled", action="store_true")
+    parser.add_argument("--max-transport-errors", type=int, default=0)
+    parser.add_argument("--max-crc-errors", type=int, default=0,
+                        help="Maximum parity/CRC errors tolerated in a scenario.")
+    parser.add_argument("--max-status-errors", type=int, default=0)
+    parser.add_argument("--max-glitch-errors", type=int, default=0)
+    parser.add_argument("--max-sample-warnings", type=int, default=0)
+    parser.add_argument("--max-sample-errors", type=int, default=0)
+    parser.add_argument("--min-current-motion-deg", type=float, default=0.01)
+    parser.add_argument("--max-velocity-error-hz", type=float, default=0.10)
 
     parser.add_argument("--boot-current", type=float, default=0.15)
     parser.add_argument("--boot-hz", type=float, default=0.05)
@@ -332,10 +674,12 @@ def main(argv: Sequence[str]) -> int:
 
     commands = builder(args)
     exit_code = 0
+    results: list[ShellResult] = []
     with TelnetShell(args.host, args.port, args.connect_timeout, log_path) as shell:
         try:
             for cmd in commands:
-                shell.run(cmd)
+                response = shell.run(cmd)
+                results.append(ShellResult(cmd.command, response))
         except KeyboardInterrupt:
             exit_code = 130
             print("Interrupted; sending stop commands", file=sys.stderr)
@@ -343,12 +687,27 @@ def main(argv: Sequence[str]) -> int:
             if live_motion and not args.leave_timeout_disabled:
                 for cmd in stop_commands():
                     try:
-                        shell.run(cmd)
+                        response = shell.run(cmd)
+                        results.append(ShellResult(cmd.command, response))
                     except Exception as exc:  # noqa: BLE001 - best-effort hardware stop path
                         print(f"WARN: stop command failed: {cmd.command}: {exc}", file=sys.stderr)
                         exit_code = exit_code or 1
     if log_path is not None:
         print(f"Log saved: {log_path}")
+
+    report = evaluate_results(args, results, log_path)
+    print_report(report)
+    if args.json_report:
+        json_path = Path(args.json_report)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(report.to_json_dict(), indent=2) + "\n",
+                             encoding="utf-8")
+        print(f"JSON report saved: {json_path}")
+
+    if report.verdict == "FAIL":
+        exit_code = exit_code or 1
+    elif report.verdict == "INCONCLUSIVE":
+        exit_code = exit_code or 3
     return exit_code
 
 
