@@ -30,7 +30,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P7 Control Kernel Extraction | Complete | b6e939d | Control kernel extracted into `motor_core`; full unit tests pass; firmware build/flash pass; HIL status pass. |
 | P8 TI-Style Fast Block Discipline | Complete | 344d254 | ISR fast-block audit added; PI regulator fast paths are header-inline; full unit tests/build/status HIL pass; velocity HIL still fails due tuning/control behavior. |
 | P9 Persistence Readiness | Complete | b9af9b2 | Versioned persistence schema/helper added; no storage/autoload enabled; full tests/build/status HIL pass. |
-| P10 Regression Gate | Not Started |  |  |
+| P10 Regression Gate | Complete | cb91052 | Regression gate doc and wrappers added; non-HIL gate pass; HIL status gate pass; live velocity/position gates documented as unstable/explicit. |
 
 ## Completion Gate
 
@@ -948,3 +948,54 @@ Next action:
 - Start P10 regression gate: document and script the repeatable unit/build/HIL
   checks, including which current failures are release blockers versus known
   open control-tuning risks.
+
+## Entry 18 - 2026-05-05 - P10: Regression Gate
+
+Status: Complete.
+
+Commit: `cb91052` (`P10 add regression gate wrappers`).
+
+Commands:
+
+```bash
+bash -n scripts/checks/run_non_hil_gate.sh scripts/hil/run_hil_gate.sh
+scripts/hil/run_hil_gate.sh --help
+scripts/checks/run_non_hil_gate.sh wonderful_goldberg
+scripts/hil/run_hil_gate.sh --host 10.0.0.171 --log-root hil_logs/p10
+```
+
+Results:
+
+- Added `app/docs/reviews/system_review_regression_gate.md`.
+- Added `scripts/checks/run_non_hil_gate.sh` for unit tests plus firmware build.
+- Added `scripts/hil/run_hil_gate.sh` for repeatable HIL status and optional
+  live-motion gates.
+- Updated `AGENTS.md` with the regression gate commands.
+- Shell syntax check: passed.
+- HIL wrapper help output: printed successfully.
+- Non-HIL gate wrapper: `PASS`.
+  - Unit tests: 31/31 scenarios passed, 263/263 test cases passed.
+  - Firmware build: passed, `ninja: no work to do`.
+- HIL status gate wrapper: `PASS`.
+  - No fatal text.
+  - Motor error `NONE`.
+  - Fault snapshot latch clear.
+  - Encoder acquisition counters within thresholds.
+
+HIL logs:
+
+- `hil_logs/p10/20260505_044835/20260505_044835_status.log`
+- `hil_logs/p10/20260505_044835/status.json`
+
+Open risks:
+
+- Live velocity/position encoder gates remain explicitly unstable and are not
+  hidden. The wrapper requires `--include-velocity` and `--include-position` to
+  run those checks so their current failure does not block non-motion refactors.
+- `hil_logs/` remains untracked evidence by default.
+
+Next action:
+
+- The review recommendation plan is implemented through P10. The next technical
+  work should address velocity_encoder stability/tuning and the conservative HIL
+  parser semantics for multi-stage acquisition counters.
