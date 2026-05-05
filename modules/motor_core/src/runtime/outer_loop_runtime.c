@@ -117,12 +117,12 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_position_step(struct moto
 							    ctx->position_reg_state,
 							    *ctx->position_cl_i_term_rad_s);
 		}
-		int pos_ret = motor_position_regulator_step(&pos_cfg,
-							    ctx->position_reg_state,
-							    position_error_rad,
-							    profile_velocity_ff_rad_s,
-							    in->position_loop_dt_s,
-							    &velocity_target);
+		int pos_ret = motor_position_regulator_step_fast(&pos_cfg,
+								 ctx->position_reg_state,
+								 position_error_rad,
+								 profile_velocity_ff_rad_s,
+								 in->position_loop_dt_s,
+								 &velocity_target);
 		if (pos_ret != 0) {
 			motor_position_regulator_reset(ctx->position_reg_state, 0.0f);
 		}
@@ -258,11 +258,11 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_pi_step(struct m
 						    ctx->velocity_reg_state,
 						    *ctx->velocity_cl_i_term_a);
 	}
-	int vel_ret = motor_velocity_regulator_step(&vel_cfg,
-						    ctx->velocity_reg_state,
-						    speed_error_rad_s,
-						    in->velocity_loop_dt_s,
-						    &iq_cmd);
+	int vel_ret = motor_velocity_regulator_step_fast(&vel_cfg,
+							 ctx->velocity_reg_state,
+							 speed_error_rad_s,
+							 in->velocity_loop_dt_s,
+							 &iq_cmd);
 	if (vel_ret != 0) {
 		motor_velocity_regulator_reset(ctx->velocity_reg_state, 0.0f);
 		iq_cmd = 0.0f;

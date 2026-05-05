@@ -112,6 +112,33 @@ ZTEST(pi_controller, test_velocity_regulator_conditional_anti_windup)
 	zassert_within(state.integrator_a, 0.0f, 1e-6f, NULL);
 }
 
+ZTEST(pi_controller, test_velocity_regulator_fast_matches_validated_step)
+{
+	struct motor_velocity_regulator_config cfg = {
+		.kp_a_per_rad_s = 0.4f,
+		.ki_a_per_rad = 1.2f,
+		.integrator_limit_a = 0.8f,
+		.output_limit_a = 0.6f,
+	};
+	struct motor_velocity_regulator_state validated = {0};
+	struct motor_velocity_regulator_state fast = {0};
+	float32_t validated_cmd = 0.0f;
+	float32_t fast_cmd = 0.0f;
+
+	zassert_ok(motor_velocity_regulator_init(&cfg, &validated, 0.05f), NULL);
+	zassert_ok(motor_velocity_regulator_init(&cfg, &fast, 0.05f), NULL);
+
+	zassert_ok(motor_velocity_regulator_step(&cfg, &validated, -0.7f, 0.002f,
+						 &validated_cmd),
+		   NULL);
+	zassert_ok(motor_velocity_regulator_step_fast(&cfg, &fast, -0.7f, 0.002f,
+						      &fast_cmd),
+		   NULL);
+
+	zassert_within(fast_cmd, validated_cmd, 1e-6f, NULL);
+	zassert_within(fast.integrator_a, validated.integrator_a, 1e-6f, NULL);
+}
+
 ZTEST(pi_controller, test_position_regulator_conditional_anti_windup)
 {
 	struct motor_position_regulator_config cfg = {
@@ -138,6 +165,33 @@ ZTEST(pi_controller, test_position_regulator_conditional_anti_windup)
 		   NULL);
 	zassert_within(cmd, -0.5f, 1e-6f, NULL);
 	zassert_within(state.integrator_rad_s, 0.0f, 1e-6f, NULL);
+}
+
+ZTEST(pi_controller, test_position_regulator_fast_matches_validated_step)
+{
+	struct motor_position_regulator_config cfg = {
+		.kp_rad_s_per_rad = 1.5f,
+		.ki_rad_s2_per_rad = 0.8f,
+		.integrator_limit_rad_s = 2.0f,
+		.output_limit_rad_s = 3.0f,
+	};
+	struct motor_position_regulator_state validated = {0};
+	struct motor_position_regulator_state fast = {0};
+	float32_t validated_cmd = 0.0f;
+	float32_t fast_cmd = 0.0f;
+
+	zassert_ok(motor_position_regulator_init(&cfg, &validated, -0.1f), NULL);
+	zassert_ok(motor_position_regulator_init(&cfg, &fast, -0.1f), NULL);
+
+	zassert_ok(motor_position_regulator_step(&cfg, &validated, 0.4f, 0.2f, 0.004f,
+						 &validated_cmd),
+		   NULL);
+	zassert_ok(motor_position_regulator_step_fast(&cfg, &fast, 0.4f, 0.2f, 0.004f,
+						      &fast_cmd),
+		   NULL);
+
+	zassert_within(fast_cmd, validated_cmd, 1e-6f, NULL);
+	zassert_within(fast.integrator_rad_s, validated.integrator_rad_s, 1e-6f, NULL);
 }
 
 ZTEST(pi_controller, test_regulator_validate_rejects_invalid_inputs)
