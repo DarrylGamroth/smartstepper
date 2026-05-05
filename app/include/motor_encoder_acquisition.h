@@ -75,6 +75,14 @@ void motor_encoder_acquisition_get_stats(struct motor_encoder_acquisition_stats 
 void motor_encoder_acquisition_reset_stats(void);
 
 /**
+ * @brief Abort any in-flight encoder transport request and clear busy state.
+ *
+ * This is intended for thread-context recovery paths before starting a new
+ * commissioning or telemetry capture.
+ */
+void motor_encoder_acquisition_abort(void);
+
+/**
  * @brief Request one async encoder read if enabled and not already in flight.
  *
  * @return 0 when a new read was queued, -EALREADY if a read is already in

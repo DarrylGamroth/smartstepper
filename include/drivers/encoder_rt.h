@@ -63,6 +63,7 @@ typedef int (*encoder_rt_set_mode_api)(const struct device *dev, enum encoder_rt
 typedef int (*encoder_rt_request_sample_api)(const struct device *dev);
 typedef int (*encoder_rt_collect_sample_api)(const struct device *dev,
 					     struct encoder_rt_sample *sample);
+typedef void (*encoder_rt_abort_sample_api)(const struct device *dev);
 typedef void (*encoder_rt_get_stats_api)(const struct device *dev,
 					 struct encoder_rt_stats *stats);
 typedef void (*encoder_rt_reset_stats_api)(const struct device *dev);
@@ -72,6 +73,7 @@ __subsystem struct encoder_rt_driver_api {
 	encoder_rt_set_mode_api set_mode;
 	encoder_rt_request_sample_api request_sample;
 	encoder_rt_collect_sample_api collect_sample;
+	encoder_rt_abort_sample_api abort_sample;
 	encoder_rt_get_stats_api get_stats;
 	encoder_rt_reset_stats_api reset_stats;
 	encoder_rt_get_pipeline_delay_api get_pipeline_delay;
@@ -91,6 +93,15 @@ static inline int encoder_rt_collect_sample(const struct device *dev,
 					    struct encoder_rt_sample *sample)
 {
 	return DEVICE_API_GET(encoder_rt, dev)->collect_sample(dev, sample);
+}
+
+static inline void encoder_rt_abort_sample(const struct device *dev)
+{
+	const struct encoder_rt_driver_api *api = DEVICE_API_GET(encoder_rt, dev);
+
+	if (api->abort_sample != NULL) {
+		api->abort_sample(dev);
+	}
 }
 
 static inline void encoder_rt_get_stats(const struct device *dev,

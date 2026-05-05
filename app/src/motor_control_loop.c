@@ -1137,6 +1137,11 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	}
 
 	float32_t vq_limit_v = 0.0f;
+	if (fabsf(actuator_ref->id_ref_a) <= 1.0e-5f &&
+	    fabsf(actuator_ref->iq_ref_a) <= 1.0e-5f) {
+		pi_set_ui(&params->pi_Id, 0.0f);
+		pi_set_ui(&params->pi_Iq, 0.0f);
+	}
 	if (motor_current_loop_step_fast_values(&params->pi_Id,
 						&params->pi_Iq,
 						actuator_ref->id_ref_a,

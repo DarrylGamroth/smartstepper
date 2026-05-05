@@ -199,6 +199,7 @@ void motor_encoder_acquisition_get_stats(struct motor_encoder_acquisition_stats 
 
 void motor_encoder_acquisition_reset_stats(void)
 {
+	motor_encoder_acquisition_abort();
 	atomic_set(&motor_encoder_request_ok_count, 0);
 	atomic_set(&motor_encoder_request_busy_count, 0);
 	atomic_set(&motor_encoder_request_disabled_count, 0);
@@ -216,6 +217,14 @@ void motor_encoder_acquisition_reset_stats(void)
 	motor_encoder_last_angle_valid = false;
 	motor_encoder_last_angle_deg = 0.0f;
 	motor_encoder_consecutive_glitches = 0U;
+}
+
+void motor_encoder_acquisition_abort(void)
+{
+#ifdef MOTOR_ENCODER_ACQUISITION_FAST_AEAT
+	encoder_rt_abort_sample(motor_encoder_rt_dev);
+#endif
+	atomic_set(&motor_encoder_read_in_flight_count, 0);
 }
 
 void motor_encoder_acquisition_set_test_inject_mode(enum motor_encoder_test_inject_mode mode)

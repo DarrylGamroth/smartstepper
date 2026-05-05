@@ -377,6 +377,15 @@ static int aeat9955_fast_collect_sample(const struct device *dev,
 	return ret;
 }
 
+static void aeat9955_fast_abort_sample(const struct device *dev)
+{
+	const struct aeat9955_fast_config *cfg = dev->config;
+	struct aeat9955_fast_data *data = dev->data;
+
+	rt_spi_abort(cfg->transport);
+	data->sample_in_flight = false;
+}
+
 static void aeat9955_fast_get_stats(const struct device *dev,
 				    struct encoder_rt_stats *stats)
 {
@@ -1023,6 +1032,7 @@ static DEVICE_API(encoder_rt, aeat9955_fast_api) = {
 	.set_mode = aeat9955_fast_set_mode,
 	.request_sample = aeat9955_fast_request_sample,
 	.collect_sample = aeat9955_fast_collect_sample,
+	.abort_sample = aeat9955_fast_abort_sample,
 	.get_stats = aeat9955_fast_get_stats,
 	.reset_stats = aeat9955_fast_reset_stats,
 	.get_pipeline_delay = aeat9955_fast_get_pipeline_delay,

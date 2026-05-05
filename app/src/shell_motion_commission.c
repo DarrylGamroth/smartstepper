@@ -437,11 +437,12 @@ static void motor_commission_print_velocity_validation_sample(const struct shell
 	float32_t err_hz = target_hz - meas_hz;
 
 	shell_print(sh,
-		    "  target=%7.3f Hz ref=%7.3f Hz meas=%7.3f Hz err=%7.3f Hz Iq=%.4f A Id=%.4f A warn=%u err=%u",
+		    "  target=%7.3f Hz ref=%7.3f Hz meas=%7.3f Hz err=%7.3f Hz Iq_ref=%.4f A Iq=%.4f A Id=%.4f A warn=%u err=%u",
 		    (double)target_hz,
 		    (double)ref_hz,
 		    (double)meas_hz,
 		    (double)err_hz,
+		    (double)g_motor_params->live.Iq_ref_A,
 		    (double)g_motor_params->live.Iq_A,
 		    (double)g_motor_params->live.Id_A,
 		    g_motor_params->live.encoder_sample_warning,

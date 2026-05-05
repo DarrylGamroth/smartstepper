@@ -284,7 +284,8 @@ def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellComm
         ShellCommand(f"motor current iq {args.open_loop_iq:.3f}"),
         ShellCommand("motor encoder trace clear"),
         ShellCommand(f"motor encoder trace start {args.trace_decimation}"),
-        ShellCommand(f"motor velocity target {args.open_loop_hz:.3f}", timeout_s=duration_s + 1.0),
+        ShellCommand(f"motor velocity target {args.open_loop_hz:.3f}",
+                     timeout_s=2.0, settle_s=duration_s),
         ShellCommand("motor encoder trace stop"),
         ShellCommand("motor velocity target 0"),
         ShellCommand("motor current iq 0"),
@@ -419,7 +420,7 @@ def _parse_current_validation(response: str) -> dict[str, float | int] | None:
 def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
     samples: list[dict[str, float | int]] = []
     for match in re.finditer(
-        r"target=\s*([-+0-9.]+)\s+Hz\s+ref=\s*([-+0-9.]+)\s+Hz\s+meas=\s*([-+0-9.]+)\s+Hz\s+err=\s*([-+0-9.]+)\s+Hz\s+Iq=([-+0-9.]+)\s+A\s+Id=([-+0-9.]+)\s+A\s+warn=(\d+)\s+err=(\d+)",
+        r"target=\s*([-+0-9.]+)\s+Hz\s+ref=\s*([-+0-9.]+)\s+Hz\s+meas=\s*([-+0-9.]+)\s+Hz\s+err=\s*([-+0-9.]+)\s+Hz\s+(?:Iq_ref=([-+0-9.]+)\s+A\s+)?Iq=([-+0-9.]+)\s+A\s+Id=([-+0-9.]+)\s+A\s+warn=(\d+)\s+err=(\d+)",
         response,
     ):
         samples.append({
@@ -427,10 +428,11 @@ def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
             "ref_hz": float(match.group(2)),
             "meas_hz": float(match.group(3)),
             "err_hz": float(match.group(4)),
-            "iq_a": float(match.group(5)),
-            "id_a": float(match.group(6)),
-            "warn": int(match.group(7)),
-            "err": int(match.group(8)),
+            "iq_ref_a": float(match.group(5)) if match.group(5) is not None else 0.0,
+            "iq_a": float(match.group(6)),
+            "id_a": float(match.group(7)),
+            "warn": int(match.group(8)),
+            "err": int(match.group(9)),
         })
     return samples
 
