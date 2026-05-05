@@ -24,7 +24,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P1 HIL Pass/Fail Automation | Complete | this progress commit | Parser tests pass; status JSON report passed; boot-commission JSON report failed objectively as expected for current hardware state. |
 | P2 Encoder PI Stabilization | Complete | eb52d82, 521a6ea, 0526872, 5a6f8a3, be5f2b6, 219b005, 43c2ae5, a8062b0 | Boot, current_encoder, velocity_encoder, and position_encoder have PASS HIL artifacts with conservative PI; cumulative current-mode encoder CRC diagnostics remain an open risk. |
 | P3 Robust Encoder Mapping | Complete | a7adcab, 128fe3d, 8cc4979 | Robust mapping command added; boot uses robust retry; bidirectional HIL mapping passed with 1000 accepted samples and zero encoder errors; failed sweeps now abort acquisition. |
-| P4 Commissioning UX and Naming | Not Started |  |  |
+| P4 Commissioning UX and Naming | Complete | fae3054 | Commissioning command help clarified; boot/mapping/validation commands print prerequisites and next steps; help/status HIL captured. |
 | P5 Direct ISR Safety Audit | Not Started |  |  |
 | P6 Commissioning Shell Decomposition | Not Started |  |  |
 | P7 Control Kernel Extraction | Not Started |  |  |
@@ -472,3 +472,55 @@ Next action:
 - Move to P4 commissioning UX/naming so operators can distinguish boot gate,
   encoder mapping, validation, and full identification workflows without source
   inspection.
+
+## Entry 8 - 2026-05-05 - P4: Commissioning UX And Naming
+
+Status: Complete.
+
+Commit:
+
+- `fae3054` (`P4 clarify commissioning workflow commands`).
+
+Commands:
+
+```bash
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py custom --host 10.0.0.171 --connect-timeout 8 --command-timeout 3 --log-dir hil_logs/p4 --json-report hil_logs/p4/commission_help.json --command 'motor commission' --command 'motor commission encoder' --command 'motor commission validate' --command 'motor commission status' --command 'motor state status' --command 'motor fault snapshot status'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p4 --json-report hil_logs/p4/status_after_p4.json
+```
+
+Results:
+
+- Parser tests: 9/9 passed.
+- Firmware build: passed.
+- Flash: passed.
+- Commissioning help output now separates:
+  - runtime boot gate.
+  - encoder commutation mapping.
+  - encoder-mode smoke validation.
+  - full identify/tune workflow.
+- Boot, robust encoder mapping, mapping apply, and current/velocity/position
+  validation commands now print prerequisites, scope, and next recommended
+  command.
+- Help-only custom capture completed. Its HIL verdict is `INCONCLUSIVE` only
+  because no encoder acquisition counters are printed by the help commands.
+- Standard non-motion `status` scenario verdict: `PASS`.
+
+HIL logs:
+
+- `hil_logs/p4/20260505_034951_custom.log`
+- `hil_logs/p4/commission_help.json`
+- `hil_logs/p4/20260505_035017_status.log`
+- `hil_logs/p4/status_after_p4.json`
+
+Open risks:
+
+- This phase improves command wording and command-tree discoverability. It does
+  not split the large commissioning shell implementation; that remains P6.
+- More failure-path messages can still be improved as workflows are split.
+
+Next action:
+
+- Start P5 direct ISR safety audit before decomposing commissioning shell files.
