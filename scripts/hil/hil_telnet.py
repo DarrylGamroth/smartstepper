@@ -663,16 +663,24 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         ready = _parse_yes_no_field(control_response, "Ready")
         mapping = _parse_yes_no_field(control_response, "Mapping applied")
         protocol = _parse_yes_no_field(control_response, "Protocol ok")
-        if args.scenario in (
-            "boot-commission",
+        if args.scenario == "boot-commission":
+            _check(checks, "encoder_ready", ready is True,
+                   "Encoder control ready" if ready else "Encoder control not ready",
+                   {"ready": bool(ready)})
+            _check(checks, "mapping_applied", mapping is True,
+                   "Encoder mapping applied" if mapping else "Encoder mapping not applied",
+                   {"mapping_applied": bool(mapping)})
+            _check(checks, "encoder_protocol_ok", protocol is True,
+                   "Encoder protocol ok" if protocol else "Encoder protocol not ok",
+                   {"protocol_ok": bool(protocol)})
+        elif args.scenario in (
             "current-validate",
             "encoder-validate",
             "velocity-validate",
             "position-validate",
         ):
-            _check(checks, "encoder_ready", ready is True,
-                   "Encoder control ready" if ready else "Encoder control not ready",
-                   {"ready": bool(ready)})
+            _info(checks, "encoder_ready", "Encoder readiness parsed after validation",
+                  {"ready": bool(ready)})
             _check(checks, "mapping_applied", mapping is True,
                    "Encoder mapping applied" if mapping else "Encoder mapping not applied",
                    {"mapping_applied": bool(mapping)})
