@@ -53,6 +53,7 @@ int motor_commission_wait_ms_or_fault(uint32_t hold_ms);
 void motor_commission_set_velocity_target_hz(float32_t target_hz);
 void motor_commission_motion_stop_current(void);
 int motor_commission_request_idle_disarmed(void);
+void motor_commission_encoder_clear_result(void);
 int motor_commission_motion_measure_current(float32_t signed_iq_a,
 					    uint32_t hold_ms,
 					    float32_t min_motion_rad,
@@ -62,7 +63,12 @@ void motor_commission_print_velocity_validation_sample(const struct shell *sh,
 void motor_commission_encoder_trace_force_on_decimated(
 	struct motor_commission_encoder_trace_guard *guard,
 	uint16_t decimation);
+void motor_commission_encoder_trace_force_on(
+	struct motor_commission_encoder_trace_guard *guard);
 void motor_commission_encoder_trace_restore(
 	const struct motor_commission_encoder_trace_guard *guard);
+bool motor_commission_encoder_latest_raw_trace_after(
+	uint32_t min_loop,
+	struct motor_encoder_raw_trace_sample *out);
 
 #endif /* SHELL_COMMISSION_INTERNAL_H_ */
