@@ -144,6 +144,14 @@ telnet 10.0.0.171
 
 - For automation, keep a single persistent telnet session open and pace commands
   by waiting for response/prompt boundaries.
+- Repeatable Python HIL workflows are available in `scripts/hil/hil_telnet.py`.
+  Live-motion scenarios require `--yes-live-motion`.
+
+```bash
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171
+python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion --host 10.0.0.171
+```
+
 - If the DHCP address is unknown or telnet is unavailable, fall back to the
   persistent UART workflow below.
 

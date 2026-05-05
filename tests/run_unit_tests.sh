@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="${PODMAN_CONTAINER:-priceless_wiles}"
+CONTAINER_NAME="${PODMAN_CONTAINER:-wonderful_goldberg}"
 CONTAINER_PROJECT_PATH="${CHOPPER_CONTAINER_PATH:-/workspace/chopper}"
 PLATFORM="${TWISTER_PLATFORM:-native_sim}"
 TEST_ROOT="${TWISTER_TEST_ROOT:-tests/unit}"
@@ -27,6 +27,7 @@ twister_cmd=(
 	-T "${TEST_ROOT}"
 	-p "${PLATFORM}"
 	--outdir "${OUTDIR}"
+	--clobber-output
 	--inline-logs
 	-v
 )

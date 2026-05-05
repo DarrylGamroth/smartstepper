@@ -15,5 +15,5 @@ Optional:
 ## Zephyr unit tests (inside podman)
 
 ```sh
-podman exec priceless_wiles bash -lc 'cd /workspace/chopper && west twister -T tests/unit -p native_sim --inline-logs -v'
+podman exec wonderful_goldberg bash -lc 'cd /workspace/chopper && west twister -T tests/unit -p native_sim --inline-logs -v'
 ```
