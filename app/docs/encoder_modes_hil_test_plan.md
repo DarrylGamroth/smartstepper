@@ -422,10 +422,10 @@ Pass criteria:
 
 | Test | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Boot commissioning | pass | `motor commission boot 0.15 0.10 1` valid; direction `-1`; corrected commutation offset `0.202 deg`; `control_status Ready: YES`. | Apply path now converts generated-reference offset to FOC commutation offset with `+/-90 electrical` Iq-axis correction. |
+| Boot commissioning | pass | Historical `motor commission boot 0.15 0.10 1` valid; direction `-1`; corrected commutation offset `0.202 deg`; `control_status Ready: YES`. | Current implementation now uses an `Id` d-axis generated sweep so the detected offset is applied directly; re-run HIL before treating the old Iq-sweep numbers as current evidence. |
 | Phase 0 generated sanity | pass | `velocity_generated`, `Iq=0.10 A`, `target=0.5 Hz`; raw trace clean (`warn=0 err=0 io=0`). | Trace overran because it was left running beyond the motion interval; clean window was still valid. |
 | Phase 1 current_encoder entry | pass | Entered `ONLINE_CURRENT_ENCODER`; `Iq=0.03/0.06 A` tracked current with no faults and clean trace. | Mode entry disarms control, so test sequence must arm after mode entry. |
-| Phase 1 current_encoder signed current | pass | `Iq=+0.04/-0.04 A` tracked with no state fault; `Iq=0.15 A` moved after commutation-offset correction. | Before the `+90 electrical` correction, `Iq=0.15 A` produced essentially no motion despite clean current tracking. |
+| Phase 1 current_encoder signed current | pass | Historical `Iq=+0.04/-0.04 A` tracked with no state fault; `Iq=0.15 A` moved after commutation-offset correction. | The old evidence used an Iq-excited sweep plus phase correction. Current boot commissioning validates `+Iq` motion after applying the direct Id-sweep offset. |
 | Phase 2 velocity_encoder low-speed steps | partial pass | Entered `ONLINE_VELOCITY_ENCODER`; target `0.25 Hz` produced motion after correction; encoder trace clean at stop. | Safe gains integrate too slowly; nominal gains overshot to roughly `0.5-0.7 Hz`. Needs velocity tuning and anti-windup/zero-target behavior review. |
 | Phase 2 velocity_encoder direction | partial pass | Positive target produced positive measured velocity after correction. | Reverse target not run after correction because velocity tuning still needs cleanup. |
 | Phase 3 position_encoder hold | pass | Entered `ONLINE_POSITION_ENCODER`; hold target near current position stayed stable with small position error. | Uses safe position/velocity gains and decimation. |
@@ -464,8 +464,9 @@ Manual trim experiment:
 - Applied `motor encoder trim 90`.
 - `current_encoder`, `Iq=0.15 A` produced immediate motion, roughly `6 Hz`
   mechanical in the raw trace.
-- Conclusion: generated-sweep mapping needs `+90 electrical degrees` correction
-  for positive `Iq` excitation.
+- Conclusion: the old Iq-excited generated-sweep mapping needed `+90 electrical
+  degrees` correction for positive `Iq` excitation. The current implementation
+  avoids that convention problem by using `Id` d-axis excitation during mapping.
 
 After implementing automatic correction:
 

@@ -8,6 +8,7 @@ mapping is not persisted yet. The workflow must run:
 1. Current offset calibration.
 2. Generated-sweep encoder mapping.
 3. Apply the staged encoder mapping to the active runtime configuration.
+4. Validate that a short positive `Iq` pulse produces measurable encoder motion.
 
 This is intentionally runtime-only for now. The operator must run the command
 after each boot until non-volatile persistence is added.
@@ -27,10 +28,9 @@ Defaults:
 - `cycles = 1.0`
 
 The command prints progress for each stage and fails fast on state, calibration,
-encoder acquisition, or mapping-quality errors. Applying the mapping converts
-the generated-sweep reference offset into the FOC commutation offset by adding
-the expected `Iq` excitation phase correction (`+/-90 electrical degrees`,
-depending on sweep current sign).
+encoder acquisition, mapping-quality, or validation errors. The generated sweep
+uses `Id` d-axis current with `Iq=0`, so applying the mapping uses the detected
+generated-reference offset directly as the FOC commutation offset.
 
 ## Implementation Plan
 
@@ -50,6 +50,7 @@ depending on sweep current sign).
 - Arm control output using the same runtime state used by `motor arm`.
 - Run generated-sweep encoder mapping.
 - Apply the staged mapping.
+- Run a short `current_encoder` positive-`Iq` validation pulse.
 - Leave current and velocity targets at zero at the end of the workflow.
 
 ### Phase 3: Register and Validate
@@ -70,6 +71,14 @@ depending on sweep current sign).
 ## Validation Evidence
 
 - `west build --build-dir /workspace/build/chopper/smartstepper_v2`: passed.
+- 2026-05-04 implementation update:
+  - boot command now runs an `Id` d-axis generated sweep and applies the
+    detected offset directly.
+  - HIL `motor commission boot 0.15 0.10 1`: mapping valid, direction `-1`,
+    commutation offset about `0.20 deg mechanical`.
+  - `+Iq=0.060 A` validation produced positive control-coordinate motion; a
+    small encoder error budget is allowed and reported during this short motion
+    pulse.
 - `west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip`: passed.
 - `motor commission boot 0.15 0.10 1`: passed on AEAT-9955 hardware.
   - Current offsets: `Ia=2.9943`, `Ib=2.9953`.
@@ -78,9 +87,12 @@ depending on sweep current sign).
     0 warnings, 0 errors.
   - Post-check: `motor encoder control_status` reported `Ready: YES`.
 - 2026-05-04 follow-up HIL found the raw generated-reference offset was not a
-  valid FOC commutation offset by itself. `current_encoder` at `0.15 A` produced
-  no motion until `+90 electrical degrees` trim was applied. The apply path now
-  includes that `Iq`-axis phase correction automatically. Re-test:
+  valid FOC commutation offset by itself when the sweep used `Iq` excitation.
+  `current_encoder` at `0.15 A` produced no motion until `+90 electrical
+  degrees` trim was applied. The corrected convention is to use `Id` excitation
+  for mapping so the detected offset is the rotor d-axis commutation offset
+  directly.
+  Earlier Iq-excited re-test:
   - `motor commission boot 0.15 0.10 1`: valid, direction `-1`,
     generated-reference offset `-1.598 deg mechanical`, corrected commutation
     offset `0.202 deg mechanical`.

@@ -18,6 +18,8 @@
 #include "motor/runtime/feedback_quality.h"
 
 #define MOTOR_OUTER_LOOP_NOINLINE __attribute__((noinline))
+#define MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S (0.02f * 2.0f * PI_F32)
+#define MOTOR_OUTER_LOOP_POSITION_HOLD_EPS_RAD (0.5f * PI_F32 / 180.0f)
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_outer_loop_runtime_ctx *ctx)
 {
@@ -63,6 +65,17 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_position_step(struct moto
 	}
 
 	if (!position_loop_update) {
+		return;
+	}
+
+	if (!move_active &&
+	    fabsf(position_error_rad) <= MOTOR_OUTER_LOOP_POSITION_HOLD_EPS_RAD &&
+	    fabsf(profile_velocity_ff_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S) {
+		motor_position_regulator_reset(ctx->position_reg_state, 0.0f);
+		motor_mpr_position_reset(ctx->position_mpr_state, 0.0f);
+		*ctx->position_cl_i_term_rad_s = 0.0f;
+		out->velocity_target_rad_s = 0.0f;
+		traj_set_target_value(ctx->traj_velocity, 0.0f);
 		return;
 	}
 
@@ -222,6 +235,17 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_pi_step(struct m
 {
 	float32_t speed_error_rad_s =
 		out->velocity_ref_rad_s - out->speed_mech_filtered_rad_s;
+	if (fabsf(out->velocity_target_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S &&
+	    fabsf(out->velocity_ref_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S &&
+	    fabsf(out->speed_mech_filtered_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S) {
+		motor_velocity_regulator_reset(ctx->velocity_reg_state, 0.0f);
+		*ctx->velocity_cl_i_term_a = 0.0f;
+		out->id_ref_a = ctx->id_setpoint_a;
+		*iq_cmd_pre_dob_a = 0.0f;
+		out->iq_ref_a = 0.0f;
+		return;
+	}
+
 	struct motor_velocity_regulator_config vel_cfg = {
 		.kp_a_per_rad_s = ctx->velocity_cl_kp_a_per_rad_s,
 		.ki_a_per_rad = ctx->velocity_cl_ki_a_per_rad,

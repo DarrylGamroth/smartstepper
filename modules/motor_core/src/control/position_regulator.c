@@ -72,13 +72,30 @@ int motor_position_regulator_step(const struct motor_position_regulator_config *
 		return -EINVAL;
 	}
 
-	float32_t i_next = state->integrator_rad_s +
-			   (cfg->ki_rad_s2_per_rad * position_error_rad * dt_s);
-	i_next = clampf(i_next, -cfg->integrator_limit_rad_s, cfg->integrator_limit_rad_s);
-	state->integrator_rad_s = i_next;
+	float32_t p_term = cfg->kp_rad_s_per_rad * position_error_rad;
+	float32_t i_candidate = state->integrator_rad_s +
+				(cfg->ki_rad_s2_per_rad * position_error_rad * dt_s);
+	i_candidate = clampf(i_candidate,
+			     -cfg->integrator_limit_rad_s,
+			     cfg->integrator_limit_rad_s);
 
-	float32_t feedback_velocity =
-		(cfg->kp_rad_s_per_rad * position_error_rad) + state->integrator_rad_s;
+	float32_t candidate_cmd = velocity_ff_rad_s + p_term + i_candidate;
+	float32_t current_cmd = velocity_ff_rad_s + p_term + state->integrator_rad_s;
+	bool already_high = current_cmd >= cfg->output_limit_rad_s;
+	bool already_low = current_cmd <= -cfg->output_limit_rad_s;
+	bool windup_high = already_high && candidate_cmd > cfg->output_limit_rad_s &&
+			   position_error_rad > 0.0f;
+	bool windup_low = already_low && candidate_cmd < -cfg->output_limit_rad_s &&
+			  position_error_rad < 0.0f;
+	if (!windup_high && !windup_low) {
+		state->integrator_rad_s = i_candidate;
+	} else {
+		state->integrator_rad_s = clampf(state->integrator_rad_s,
+						 -cfg->integrator_limit_rad_s,
+						 cfg->integrator_limit_rad_s);
+	}
+
+	float32_t feedback_velocity = p_term + state->integrator_rad_s;
 	float32_t velocity_cmd = velocity_ff_rad_s + feedback_velocity;
 	*velocity_cmd_rad_s_out =
 		clampf(velocity_cmd, -cfg->output_limit_rad_s, cfg->output_limit_rad_s);

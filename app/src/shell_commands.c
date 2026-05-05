@@ -19,6 +19,7 @@
 #include "config.h"
 #include "motor_torque.h"
 #include "motor/math/angle_wrap.h"
+#include "motor/motion/motion_planner.h"
 #include "shell_commands_motion.h"
 #include "shell_commands_commission.h"
 #include "shell_commands_state.h"
@@ -74,6 +75,10 @@ enum motor_gains_profile {
 #define OUTER_LOOP_ZETA_MAX 2.0f
 #define POSITION_TO_VELOCITY_BW_RATIO_MAX 0.2f
 #define VELOCITY_STATUS_TRACK_TOL_HZ 0.2f
+#define VELOCITY_DEFAULT_NOMINAL_IQ_LIMIT_A 0.120f
+#define VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A 0.060f
+#define VELOCITY_DEFAULT_GAIN_SPEED_HZ 0.50f
+#define POSITION_TARGET_MIN_DURATION_S 0.20f
 
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
 {
@@ -98,11 +103,19 @@ static void motor_compute_nominal_outer_gains(const struct motor_parameters *par
 					       float *vel_iq_limit,
 					       float *pos_kp, float *pos_ki)
 {
-	float max_vel = MAX(params->profile_max_velocity_rad_s, 1.0f);
+	float move_iq_a = (params->commission.results.iq_move_valid ||
+			   params->commission.results.iq_move_pos_valid) ?
+				  params->commission.results.iq_move_recommended_a :
+				  0.0f;
+	float iq_limit = fmaxf(VELOCITY_DEFAULT_NOMINAL_IQ_LIMIT_A, 1.50f * move_iq_a);
+	iq_limit = clampf(iq_limit, 0.06f,
+			  fminf(MOTOR_MAX_CURRENT_A, 0.25f * MOTOR_MAX_CURRENT_A));
 
-	*vel_kp = MOTOR_MAX_CURRENT_A / max_vel;
-	*vel_ki = 2.0f * (*vel_kp);
-	*vel_iq_limit = MOTOR_MAX_CURRENT_A;
+	float gain_speed_rad_s = 2.0f * PI_F32 * VELOCITY_DEFAULT_GAIN_SPEED_HZ;
+	*vel_kp = 0.75f * iq_limit / gain_speed_rad_s;
+	*vel_ki = *vel_kp;
+	*vel_iq_limit = iq_limit;
+	float max_vel = fmaxf(params->profile_max_velocity_rad_s, 1.0f);
 	*pos_kp = max_vel / PI_F32;
 	*pos_ki = 0.5f * (*pos_kp);
 }
@@ -114,9 +127,16 @@ static void motor_compute_safe_outer_gains(const struct motor_parameters *params
 {
 	motor_compute_nominal_outer_gains(params, vel_kp, vel_ki, vel_iq_limit, pos_kp, pos_ki);
 
-	*vel_kp *= 0.5f;
+	float move_iq_a = (params->commission.results.iq_move_valid ||
+			   params->commission.results.iq_move_pos_valid) ?
+				  params->commission.results.iq_move_recommended_a :
+				  0.0f;
+	float safe_limit = fmaxf(VELOCITY_DEFAULT_SAFE_IQ_LIMIT_A, move_iq_a);
+	*vel_iq_limit = clampf(safe_limit, 0.04f,
+			       fminf(MOTOR_MAX_CURRENT_A, 0.12f));
+	float gain_speed_rad_s = 2.0f * PI_F32 * VELOCITY_DEFAULT_GAIN_SPEED_HZ;
+	*vel_kp = 0.5f * (*vel_iq_limit) / gain_speed_rad_s;
 	*vel_ki = *vel_kp;
-	*vel_iq_limit *= 0.25f;
 	*pos_kp *= 0.5f;
 	*pos_ki *= 0.1f;
 }
@@ -138,6 +158,7 @@ static int motor_apply_velocity_gains(float kp, float ki, float iq_limit)
 
 	if (g_motor_params) {
 		g_motor_params->velocity_cl_i_term_A = 0.0f;
+		motor_velocity_regulator_reset(&g_motor_params->velocity_reg_state, 0.0f);
 	}
 
 	return 0;
@@ -156,6 +177,7 @@ static int motor_apply_position_gains(float kp, float ki)
 
 	if (g_motor_params) {
 		g_motor_params->position_cl_i_term_rad_s = 0.0f;
+		motor_position_regulator_reset(&g_motor_params->position_reg_state, 0.0f);
 	}
 
 	return 0;
@@ -252,6 +274,69 @@ static int motor_estimate_velocity_bandwidth_hz(const struct motor_parameters *p
 
 	*bw_hz_out = omega / (2.0f * PI_F32);
 	return 0;
+}
+
+static float32_t motor_position_target_duration_s(float32_t distance_rad,
+						   float32_t max_velocity_rad_s,
+						   float32_t max_accel_rad_s2)
+{
+	float32_t dist = fabsf(distance_rad);
+	if (dist <= 1.0e-6f) {
+		return POSITION_TARGET_MIN_DURATION_S;
+	}
+
+	float32_t max_vel = fmaxf(max_velocity_rad_s, 0.1f);
+	float32_t max_accel = fmaxf(max_accel_rad_s2, 0.1f);
+
+	/* A zero-endpoint quintic peaks above average speed/accel. These factors
+	 * are intentionally conservative for shell-commanded position moves.
+	 */
+	float32_t t_vel = 2.0f * dist / max_vel;
+	float32_t t_accel = sqrtf(8.0f * dist / max_accel);
+
+	return fmaxf(POSITION_TARGET_MIN_DURATION_S, fmaxf(t_vel, t_accel));
+}
+
+static int motor_position_target_plan_bounded(float32_t target_wrapped_rad,
+					      float32_t *duration_s_out)
+{
+	if (g_motor_params == NULL || duration_s_out == NULL) {
+		return -EINVAL;
+	}
+
+	float32_t start_pos_rad = g_motor_params->live.position_rad;
+	float32_t start_vel_rad_s = g_motor_params->live.velocity_filtered_rad_s;
+	if (!isfinite(start_pos_rad)) {
+		start_pos_rad = g_motor_params->position_target_rad;
+	}
+	if (!isfinite(start_vel_rad_s)) {
+		start_vel_rad_s = 0.0f;
+	}
+
+	float32_t delta_rad = wrap_rad_pi(target_wrapped_rad - start_pos_rad);
+	float32_t duration_s =
+		motor_position_target_duration_s(delta_rad,
+						 g_motor_params->profile_max_velocity_rad_s,
+						 g_motor_params->profile_max_accel_rad_s2);
+
+	int ret = -ERANGE;
+	for (uint8_t attempt = 0U; attempt < 5U; attempt++) {
+		ret = motor_position_move_plan_sequence_segment(&g_motor_params->position_profile,
+								start_pos_rad,
+								start_vel_rad_s,
+								target_wrapped_rad,
+								0.0f,
+								duration_s,
+								g_motor_params->profile_max_velocity_rad_s,
+								g_motor_params->profile_max_accel_rad_s2);
+		if (ret == 0) {
+			*duration_s_out = duration_s;
+			return 0;
+		}
+		duration_s *= 1.5f;
+	}
+
+	return ret;
 }
 
 /*============================================================================
@@ -1111,11 +1196,26 @@ static int cmd_motor_position_target(const struct shell *sh, size_t argc, char *
 	float target_rad = wrap_rad_2pi(target_deg * PI_F32 / 180.0f);
 	g_motor_params->profile_seq.running = false;
 	g_motor_params->profile_seq.tick_counter = 0U;
-	motion_profile_quintic_cancel(&g_motor_params->position_profile, target_rad);
-	g_motor_params->position_target_rad = target_rad;
+
+	float32_t duration_s = 0.0f;
+	int ret = motor_position_target_plan_bounded(target_rad, &duration_s);
+	if (ret != 0) {
+		shell_error(sh, "Failed to plan bounded position target (err %d)", ret);
+		return ret;
+	}
+
+	g_motor_params->position_target_rad =
+		wrap_rad_2pi(g_motor_params->position_profile.start_position_rad);
+	g_motor_params->position_cl_i_term_rad_s = 0.0f;
+	motor_position_regulator_reset(&g_motor_params->position_reg_state, 0.0f);
+	g_motor_params->velocity_cl_i_term_A = 0.0f;
+	motor_velocity_regulator_reset(&g_motor_params->velocity_reg_state, 0.0f);
 	motor_command_feed_watchdog(g_motor_params);
 
-	shell_print(sh, "Position target set to %.2f deg", (double)(target_rad * 180.0f / PI_F32));
+	shell_print(sh,
+		    "Position target planned to %.2f deg over %.3f s (bounded by profile limits)",
+		    (double)(target_rad * 180.0f / PI_F32),
+		    (double)duration_s);
 	return 0;
 }
 

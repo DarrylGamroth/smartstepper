@@ -87,6 +87,59 @@ ZTEST(pi_controller, test_velocity_regulator_limits_iq_command)
 	zassert_within(cmd, 0.5f, 1e-6f, NULL);
 }
 
+ZTEST(pi_controller, test_velocity_regulator_conditional_anti_windup)
+{
+	struct motor_velocity_regulator_config cfg = {
+		.kp_a_per_rad_s = 10.0f,
+		.ki_a_per_rad = 10.0f,
+		.integrator_limit_a = 3.0f,
+		.output_limit_a = 0.5f,
+	};
+	struct motor_velocity_regulator_state state = {0};
+	float32_t cmd = 0.0f;
+	zassert_ok(motor_velocity_regulator_init(&cfg, &state, 0.0f), NULL);
+
+	for (int i = 0; i < 8; i++) {
+		zassert_ok(motor_velocity_regulator_step(&cfg, &state, 1.0f, 0.1f, &cmd),
+			   NULL);
+	}
+
+	zassert_within(cmd, 0.5f, 1e-6f, NULL);
+	zassert_within(state.integrator_a, 0.0f, 1e-6f, NULL);
+
+	zassert_ok(motor_velocity_regulator_step(&cfg, &state, -1.0f, 0.1f, &cmd), NULL);
+	zassert_within(cmd, -0.5f, 1e-6f, NULL);
+	zassert_within(state.integrator_a, 0.0f, 1e-6f, NULL);
+}
+
+ZTEST(pi_controller, test_position_regulator_conditional_anti_windup)
+{
+	struct motor_position_regulator_config cfg = {
+		.kp_rad_s_per_rad = 10.0f,
+		.ki_rad_s2_per_rad = 10.0f,
+		.integrator_limit_rad_s = 3.0f,
+		.output_limit_rad_s = 0.5f,
+	};
+	struct motor_position_regulator_state state = {0};
+	float32_t cmd = 0.0f;
+	zassert_ok(motor_position_regulator_init(&cfg, &state, 0.0f), NULL);
+
+	for (int i = 0; i < 8; i++) {
+		zassert_ok(motor_position_regulator_step(&cfg, &state, 1.0f, 0.0f, 0.1f,
+							 &cmd),
+			   NULL);
+	}
+
+	zassert_within(cmd, 0.5f, 1e-6f, NULL);
+	zassert_within(state.integrator_rad_s, 0.0f, 1e-6f, NULL);
+
+	zassert_ok(motor_position_regulator_step(&cfg, &state, -1.0f, 0.0f, 0.1f,
+						 &cmd),
+		   NULL);
+	zassert_within(cmd, -0.5f, 1e-6f, NULL);
+	zassert_within(state.integrator_rad_s, 0.0f, 1e-6f, NULL);
+}
+
 ZTEST(pi_controller, test_regulator_validate_rejects_invalid_inputs)
 {
 	struct motor_position_regulator_config pos_cfg = {

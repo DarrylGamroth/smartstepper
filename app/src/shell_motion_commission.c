@@ -38,6 +38,9 @@
 #define MOTOR_COMMISSION_BOOT_DEFAULT_CURRENT_A 0.150f
 #define MOTOR_COMMISSION_BOOT_DEFAULT_MECH_HZ 0.100f
 #define MOTOR_COMMISSION_BOOT_DEFAULT_CYCLES 1.0f
+#define MOTOR_COMMISSION_BOOT_VALIDATE_MAX_IQ_A 0.060f
+#define MOTOR_COMMISSION_BOOT_VALIDATE_HOLD_MS 80U
+#define MOTOR_COMMISSION_BOOT_VALIDATE_MIN_MOTION_DEG 0.5f
 #define MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS 3000U
 #define MOTOR_COMMISSION_MOTION_SAMPLE_MS 5U
 #define MOTOR_COMMISSION_MOTION_MIN_SAMPLES 4U
@@ -436,6 +439,14 @@ static void motor_commission_encoder_trace_force_on(
 	g_motor_params->encoder_raw_trace.phase = 0U;
 }
 
+static void motor_commission_encoder_trace_force_on_decimated(
+	struct motor_commission_encoder_trace_guard *guard,
+	uint16_t decimation)
+{
+	motor_commission_encoder_trace_force_on(guard);
+	g_motor_params->encoder_raw_trace.decimation = MAX(decimation, (uint16_t)1U);
+}
+
 static void motor_commission_encoder_trace_restore(
 	const struct motor_commission_encoder_trace_guard *guard)
 {
@@ -494,7 +505,8 @@ static bool motor_commission_motion_sample_clean(
 	       sample->sample_fresh != 0U &&
 	       sample->sample_error == 0U &&
 	       sample->sample_io_fault == 0U &&
-	       isfinite(sample->raw_angle_rad);
+	       isfinite(sample->raw_angle_rad) &&
+	       isfinite(sample->control_angle_rad);
 }
 
 static void motor_commission_motion_stop_current(void)
@@ -559,23 +571,23 @@ static int motor_commission_motion_measure_current(
 
 		out->sample_count++;
 		if (!have_prev) {
-			prev_angle_rad = raw_trace.raw_angle_rad;
+			prev_angle_rad = raw_trace.control_angle_rad;
 			have_prev = true;
 			continue;
 		}
 
-		float32_t delta_rad = wrap_rad_pi(raw_trace.raw_angle_rad - prev_angle_rad);
+		float32_t delta_rad = wrap_rad_pi(raw_trace.control_angle_rad - prev_angle_rad);
 		if (!isfinite(delta_rad)) {
 			out->error_count++;
 			continue;
 		}
 		out->net_motion_rad += delta_rad;
 		out->abs_motion_rad += fabsf(delta_rad);
-		prev_angle_rad = raw_trace.raw_angle_rad;
+		prev_angle_rad = raw_trace.control_angle_rad;
 	}
 
 	out->valid = out->sample_count >= MOTOR_COMMISSION_MOTION_MIN_SAMPLES &&
-		     out->error_count == 0U &&
+		     out->error_count <= MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES &&
 		     fabsf(out->net_motion_rad) >= min_motion_rad &&
 		     out->abs_motion_rad >= min_motion_rad;
 
@@ -1498,12 +1510,16 @@ static int motor_commission_encoder_run_generated_sweep(
 	struct motor_commission_encoder_trace_guard trace_guard;
 	motor_commission_encoder_trace_force_on(&trace_guard);
 
-	motor_commission_set_direct_current(0.0f, sweep->current_a);
+	/* D-axis excitation means the generated reference angle is the commanded
+	 * rotor flux axis. The detected offset can therefore be applied directly
+	 * as the encoder FOC commutation offset.
+	 */
+	motor_commission_set_direct_current(sweep->current_a, 0.0f);
 	motor_commission_set_velocity_target_hz(sweep->mech_hz);
 	motor_command_feed_watchdog(g_motor_params);
 
 	shell_print(sh,
-		    "Encoder mapping detect: current=%.3f A velocity=%.3f Hz cycles=%.2f duration=%u ms sample=%u ms N=%u",
+		    "Encoder mapping detect: Id=%.3f A velocity=%.3f Hz cycles=%.2f duration=%u ms sample=%u ms N=%u",
 		    (double)sweep->current_a, (double)sweep->mech_hz,
 		    (double)sweep->cycles, duration_ms, sample_period_ms,
 		    target_samples);
@@ -1599,18 +1615,12 @@ static int motor_commission_encoder_run_generated_sweep(
 
 static float32_t motor_commission_encoder_commutation_offset_mech_rad(void)
 {
-	float32_t excitation_sign = (encoder_detect_current_a >= 0.0f) ? 1.0f : -1.0f;
-	/* The generated sweep drives Id=0, Iq!=0. With the inverse Park
-	 * convention used by the current loop, that excites a stator vector
-	 * +/-90 electrical degrees from the generated reference angle. Convert
-	 * the detected generated-reference offset into the rotor d-axis offset
-	 * required for encoder-commutated FOC.
+	/* Generated-sweep encoder mapping uses Id d-axis excitation, so the
+	 * generated-reference offset is already the mechanical d-axis FOC
+	 * commutation offset. Do not apply the +/-90 electrical q-axis correction
+	 * used by the previous Iq-excited mapping experiment.
 	 */
-	float32_t commutation_elec_offset_rad =
-		wrap_rad_pi(encoder_detect_result.offset_elec_rad +
-			    excitation_sign * (0.5f * PI_F32));
-
-	return wrap_rad_pi(commutation_elec_offset_rad / (float32_t)MOTOR_POLE_PAIRS);
+	return wrap_rad_pi(encoder_detect_result.offset_mech_rad);
 }
 
 int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char **argv)
@@ -1654,7 +1664,7 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 	shell_print(sh, "  Staged valid:   %s", encoder_detect_result_valid ? "YES" : "NO");
 	shell_print(sh, "  Duration/sample:%u ms / %u ms",
 		    encoder_detect_duration_ms, encoder_detect_sample_period_ms);
-	shell_print(sh, "  Excitation:     Iq=%.3f A", (double)encoder_detect_current_a);
+	shell_print(sh, "  Excitation:     Id=%.3f A, Iq=0.000 A", (double)encoder_detect_current_a);
 	shell_print(sh, "  Valid:          %s", encoder_detect_result.valid ? "YES" : "NO");
 	shell_print(sh, "  Direction:      sign=%d valid=%s corr=%.4f residual=%.4f rad",
 		    encoder_detect_result.direction_sign,
@@ -1670,7 +1680,7 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 		float32_t commutation_offset_rad =
 			motor_commission_encoder_commutation_offset_mech_rad();
 		shell_print(sh,
-			    "  FOC offset:      mech=%.4f deg (includes Iq-axis +90/-90 electrical correction)",
+			    "  FOC offset:      mech=%.4f deg (direct Id-axis d-axis offset)",
 			    (double)(commutation_offset_rad * 180.0f / PI_F32));
 	}
 	shell_print(sh, "  Ratio:          %.4f valid=%s",
@@ -1682,6 +1692,76 @@ int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, cha
 		    encoder_detect_result.encoder_warning_count,
 		    encoder_detect_result.encoder_error_count,
 		    (double)(encoder_detect_result.mech_motion_rad * 180.0f / PI_F32));
+	return 0;
+}
+
+static int motor_commission_validate_positive_iq_motion(const struct shell *sh,
+							float32_t sweep_current_a)
+{
+	if (g_motor_params == NULL) {
+		return -ENODEV;
+	}
+
+	float32_t validate_iq_a = clampf(fabsf(sweep_current_a),
+					 0.04f,
+					 MOTOR_COMMISSION_BOOT_VALIDATE_MAX_IQ_A);
+	float32_t min_motion_rad =
+		MOTOR_COMMISSION_BOOT_VALIDATE_MIN_MOTION_DEG * (PI_F32 / 180.0f);
+
+	int ret = motor_api_request_online();
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER,
+					     MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		return ret;
+	}
+
+	struct motor_commission_encoder_trace_guard trace_guard;
+	motor_commission_encoder_trace_force_on_decimated(&trace_guard, 8U);
+
+	struct motor_commission_motion_measurement meas = {0};
+	ret = motor_commission_motion_measure_current(validate_iq_a,
+						      MOTOR_COMMISSION_BOOT_VALIDATE_HOLD_MS,
+						      min_motion_rad,
+						      &meas);
+	motor_commission_motion_stop_current();
+	motor_commission_encoder_trace_restore(&trace_guard);
+
+	shell_print(sh,
+		    "  +Iq validation: Iq=%.3f A net=%.3f deg abs=%.3f deg samples=%u warn=%u err=%u",
+		    (double)validate_iq_a,
+		    (double)(meas.net_motion_rad * 180.0f / PI_F32),
+		    (double)(meas.abs_motion_rad * 180.0f / PI_F32),
+		    meas.sample_count,
+		    meas.warning_count,
+		    meas.error_count);
+
+	if (ret != 0) {
+		return ret;
+	}
+	if (!meas.valid || meas.net_motion_rad <= 0.0f) {
+		return -ENODATA;
+	}
+
+	struct motor_commission_results *res = &g_motor_params->commission.results;
+	res->iq_move_pos_valid = true;
+	res->iq_move_neg_valid = false;
+	res->iq_move_valid = false;
+	res->iq_move_min_pos_a = validate_iq_a;
+	res->iq_move_min_neg_a = 0.0f;
+	res->iq_move_recommended_a = validate_iq_a;
+	res->iq_to_mech_sign = 1;
+	res->iq_move_pos_sample_count = meas.sample_count;
+	res->iq_move_neg_sample_count = 0U;
+	res->iq_move_warning_count = meas.warning_count;
+	res->iq_move_error_count = meas.error_count;
+
 	return 0;
 }
 
@@ -1762,11 +1842,11 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	shell_print(sh,
-		    "Boot commissioning: current offset + generated encoder map + apply");
+		    "Boot commissioning: current offset + Id-axis encoder map + apply + +Iq validation");
 	shell_print(sh,
 		    "Runtime-only: run this after every boot until mapping persistence exists.");
 
-	shell_print(sh, "[1/3] Current offset calibration");
+	shell_print(sh, "[1/4] Current offset calibration");
 	ret = motor_api_request_calibrate();
 	if (ret != 0) {
 		shell_error(sh, "Failed to request current offset calibration (err %d)", ret);
@@ -1782,7 +1862,7 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->Ia_offset,
 		    (double)g_motor_params->Ib_offset);
 
-	shell_print(sh, "[2/3] Generated-sweep encoder mapping");
+	shell_print(sh, "[2/4] Id-axis generated-sweep encoder mapping");
 	ret = cmd_motor_arm(sh, 0, NULL);
 	if (ret != 0) {
 		shell_error(sh, "Failed to arm control output (err %d)", ret);
@@ -1798,13 +1878,21 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		return -ERANGE;
 	}
 
-	shell_print(sh, "[3/3] Apply encoder mapping");
+	shell_print(sh, "[3/4] Apply encoder mapping");
 	ret = motor_commission_encoder_apply_staged(sh);
 	if (ret != 0) {
 		return ret;
 	}
 	motor_commission_encoder_stop_generated();
 	motor_command_feed_watchdog(g_motor_params);
+
+	shell_print(sh, "[4/4] Validate +Iq torque direction");
+	ret = motor_commission_validate_positive_iq_motion(sh, sweep.current_a);
+	if (ret != 0) {
+		motor_commission_motion_stop_current();
+		shell_error(sh, "+Iq validation failed (err %d)", ret);
+		return ret;
+	}
 
 	shell_print(sh,
 		    "Boot commissioning complete: sign=%d commutation_offset=%.4f deg mechanical",
