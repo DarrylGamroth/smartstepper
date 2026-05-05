@@ -37,10 +37,10 @@ bool motor_encoder_feedback_update_state(const struct motor_encoder_feedback_cor
 	}
 
 	if (in->sample_enabled) {
-		if (!in->fresh) {
-			if (in->io_fault) {
-				state->fault_counter++;
-			}
+		bool hard_bad_sample = !in->fresh || in->error || in->io_fault;
+
+		if (hard_bad_sample) {
+			state->fault_counter++;
 			if (in->warning) {
 				state->warning_count++;
 			}

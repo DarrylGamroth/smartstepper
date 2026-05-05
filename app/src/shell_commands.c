@@ -2526,6 +2526,17 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission validate subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_validate,
+	SHELL_CMD_ARG(current, NULL, "Validate current_encoder [iq_a] [hold_ms]",
+		      cmd_motor_commission_validate_current, 1, 2),
+	SHELL_CMD_ARG(velocity, NULL, "Validate velocity_encoder PI [max_hz] [hold_ms]",
+		      cmd_motor_commission_validate_velocity, 1, 2),
+	SHELL_CMD_ARG(position, NULL, "Validate position_encoder PI [delta_deg] [hold_ms]",
+		      cmd_motor_commission_validate_position, 1, 2),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(status, NULL, "Show commissioning status and capture stats", cmd_motor_commission_status),
@@ -2541,6 +2552,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Generated-sweep encoder mapping", NULL),
 	SHELL_CMD(detent, &sub_motor_commission_detent, "Detent feedforward commissioning", NULL),
 	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),
+	SHELL_CMD(validate, &sub_motor_commission_validate, "Encoder-mode validation workflows", NULL),
 	SHELL_SUBCMD_SET_END
 );
 

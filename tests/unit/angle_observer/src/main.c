@@ -149,6 +149,29 @@ ZTEST(angle_observer, test_prediction_matches_forward_euler_state)
 	zassert_within(obs.elec_angle_pred_rad, expected_elec_pred, 1e-6f, NULL);
 }
 
+ZTEST(angle_observer, test_predict_advances_without_measurement_correction)
+{
+	struct angle_observer_state obs = {0};
+	const float32_t Ts = 0.001f;
+	const float32_t offset = -0.2f;
+
+	angle_observer_init(&obs, Ts, 30.0f, 5u, 0.0f);
+	angle_observer_set_offset(&obs, offset);
+	angle_observer_reset_tracking(&obs, 1.0f, 3.0f);
+
+	angle_observer_predict(&obs);
+
+	const float32_t expected_mech = wrap_rad_2pi(1.0f + (Ts * 3.0f));
+	const float32_t expected_pred = wrap_rad_2pi(expected_mech + (Ts * 3.0f));
+
+	zassert_within(angle_observer_get_mech_angle(&obs), expected_mech, 1e-6f, NULL);
+	zassert_within(angle_observer_get_mech_speed(&obs), 3.0f, 1e-6f, NULL);
+	zassert_within(angle_observer_get_elec_angle(&obs),
+		       wrap_rad_2pi((expected_mech + offset) * 5.0f), 1e-6f, NULL);
+	zassert_within(angle_observer_get_elec_angle_pred(&obs),
+		       wrap_rad_2pi((expected_pred + offset) * 5.0f), 1e-6f, NULL);
+}
+
 ZTEST(angle_observer, test_delay_setter_and_electrical_speed_accessor)
 {
 	struct angle_observer_state obs = {0};

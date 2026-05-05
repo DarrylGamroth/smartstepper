@@ -113,6 +113,17 @@ void angle_observer_update(struct angle_observer_state *obs,
 			   float32_t encoder_angle_rad);
 
 /**
+ * @brief Advance the observer without applying a new measurement correction.
+ *
+ * Use this for bounded encoder dropouts: the current speed estimate propagates
+ * the angle forward, keeping commutation continuous without learning from bad
+ * CRC/parity/transport data.
+ *
+ * @param obs Pointer to observer state structure
+ */
+void angle_observer_predict(struct angle_observer_state *obs);
+
+/**
  * @brief Reseed observer state for mode handoff
  *
  * Resets the internal tracking state to a known mechanical angle/speed while

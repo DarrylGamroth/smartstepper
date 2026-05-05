@@ -41,6 +41,7 @@ struct motor_angle_path_input {
 	bool sample_warning;
 	bool sample_error;
 	bool sample_io_fault;
+	bool propagated_valid;
 	uint8_t previous_input_source;
 	float32_t sample_angle_deg;
 	float32_t encoder_direction_sign;

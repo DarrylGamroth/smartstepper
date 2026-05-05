@@ -91,15 +91,16 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	*ctx->sample_error = core_state.sample_error;
 	*ctx->last_status = core_state.last_status;
 
-	if (threshold_exceeded) {
-		return -EIO;
-	}
-
 	float32_t generated_angle_rad = angle_gen_get_angle(ctx->angle_gen);
 	float32_t generated_mech_rad = wrap_rad_2pi(generated_angle_rad);
 	float32_t generated_elec_rad =
 		wrap_rad_2pi((generated_mech_rad + ctx->observer->mech_angle_offset_rad) *
 			     (float32_t)ctx->pole_pairs);
+	uint8_t previous_source = *ctx->encoder_input_source;
+	bool propagated_valid =
+		raw_sample_enabled && !threshold_exceeded &&
+		(previous_source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER ||
+		 previous_source == MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED);
 	struct motor_angle_path_input path_in = {
 		.feature_angle_gen = feature_angle_gen,
 		.sample_enabled = raw_sample_enabled,
@@ -107,7 +108,8 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 		.sample_warning = raw_warning,
 		.sample_error = raw_error,
 		.sample_io_fault = raw_io_fault,
-		.previous_input_source = *ctx->encoder_input_source,
+		.propagated_valid = propagated_valid,
+		.previous_input_source = previous_source,
 		.sample_angle_deg = raw_angle_deg,
 		.encoder_direction_sign = encoder_direction_sign,
 		.generated_mech_rad = generated_angle_rad,
@@ -163,7 +165,7 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	feedback->accel_mech_rad_s2 = feedback->control.accel_mech_rad_s2;
 	feedback->speed_mech_filtered_rad_s = feedback->control.speed_mech_filtered_rad_s;
 
-	return 0;
+	return threshold_exceeded ? -EIO : 0;
 }
 
 int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_ctx *ctx,

@@ -49,21 +49,32 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 	if (encoder_handoff) {
 		angle_observer_reset_tracking(observer, observer_input_rad, 0.0f);
 	}
-	angle_observer_update(observer, observer_input_rad);
+	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED) {
+		angle_observer_predict(observer);
+		observer_input_rad = angle_observer_get_mech_angle(observer);
+	} else {
+		angle_observer_update(observer, observer_input_rad);
+	}
 
 	bool has_error = in->sample_error || in->sample_io_fault;
 	bool control_fresh = (source == MOTOR_ENCODER_FEEDBACK_SOURCE_GENERATED) ||
 			     ((source == MOTOR_ENCODER_FEEDBACK_SOURCE_ENCODER) &&
 			      in->sample_fresh);
+	bool control_valid = control_fresh && !has_error;
+	bool control_error = has_error;
+	if (source == MOTOR_ENCODER_FEEDBACK_SOURCE_PROPAGATED) {
+		control_valid = in->propagated_valid;
+		control_error = !in->propagated_valid && (in->sample_enabled || has_error);
+	}
 
 	uint8_t quality_flags = 0U;
 	if (control_fresh) {
 		quality_flags |= MOTOR_FEEDBACK_QUALITY_FRESH;
 	}
-	if (has_error) {
+	if (control_error) {
 		quality_flags |= MOTOR_FEEDBACK_QUALITY_ERROR;
 	}
-	if (control_fresh && !has_error) {
+	if (control_valid) {
 		quality_flags |= MOTOR_FEEDBACK_QUALITY_VALID;
 	}
 

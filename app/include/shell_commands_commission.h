@@ -28,5 +28,8 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 int cmd_motor_commission_auto_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_apply(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_validate(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_validate_position(const struct shell *sh, size_t argc, char **argv);
 
 #endif /* SHELL_COMMANDS_COMMISSION_H_ */
