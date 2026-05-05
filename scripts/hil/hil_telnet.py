@@ -768,7 +768,7 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
     if args.scenario == "encoder-robust":
         _evaluate_encoder_robust(checks, results)
 
-    if args.scenario in ("current-validate", "encoder-validate", "position-validate"):
+    if args.scenario in ("current-validate", "encoder-validate"):
         _evaluate_current_validation(args, checks, results)
 
     if args.scenario in ("velocity-validate", "encoder-validate", "position-validate"):

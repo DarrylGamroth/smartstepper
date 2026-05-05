@@ -304,6 +304,48 @@ Encoder Control Readiness:
         )
         self.assertEqual(apply_check.status, "FAIL")
 
+    def test_position_validate_does_not_require_current_validation_output(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor commission boot 0.150 0.050 1.000",
+                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission validate velocity 0.500 1000",
+                """
+Velocity encoder validation: active PI gains, max=0.500 Hz hold=1000 ms DOB=off detent=off
+  target=  0.500 Hz ref=  0.500 Hz meas=  0.460 Hz err=  0.040 Hz Iq_ref=0.0300 A Iq=0.0200 A Id=0.0000 A warn=0 err=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission validate position 5.000 2000",
+                "Position encoder validation complete: pos=10.000 deg vel=0.000 Hz Iq=0.0000 A\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder control_status",
+                """
+Encoder Control Readiness:
+  Ready:           YES
+  Mapping applied: YES
+  Protocol ok:     YES
+  Acquisition errors: transport=0 parity=0 crc=0 glitch=0 status=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("position-validate"), results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+        self.assertFalse(any(check.name == "current_validation" for check in report.checks))
+
 
 if __name__ == "__main__":
     unittest.main()
