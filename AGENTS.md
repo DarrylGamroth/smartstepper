@@ -282,3 +282,24 @@ Execution rules:
 6. Avoid extra scope beyond the current task unless required to satisfy validation.
 
 Reference seed commit for this plan pack: `f22b4b4`.
+
+## System Review Recommendations Plan
+
+Use `app/docs/reviews/system_review_recommendations_plan.md` as the execution
+contract for the recommendations from
+`app/docs/reviews/system_review_2026-05-05.md`.
+
+Progress and validation evidence must be recorded in:
+
+```text
+app/docs/reviews/system_review_recommendations_progress.md
+```
+
+Execution rules:
+
+1. Work phases in order unless an explicit blocker requires a different order.
+2. Do not mark a phase complete until the code/docs/scripts are committed and
+   the required unit-test, build, and HIL evidence is recorded.
+3. Include validation commands, summarized results, HIL log paths, and open
+   risks in the progress log.
+4. Use telnet HIL automation when Ethernet shell is available.
