@@ -1877,6 +1877,10 @@ int cmd_motor_commission_encoder_robust(const struct shell *sh, size_t argc, cha
 		return -EINVAL;
 	}
 
+	shell_print(sh,
+		    "Encoder commutation mapping: generated Id sweep, no motor parameter ID, no gain tuning");
+	shell_print(sh,
+		    "Prerequisite: current offsets complete and control armed; next: 'motor commission encoder apply'");
 	return motor_commission_encoder_run_robust_sweep(sh, &sweep, bidirectional, true);
 }
 
@@ -2015,6 +2019,8 @@ static int motor_commission_encoder_apply_staged(const struct shell *sh)
 		    "Encoder mapping applied: sign=%d commutation_offset=%.4f deg mechanical",
 		    g_motor_params->encoder_direction_sign,
 		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
+	shell_print(sh,
+		    "Next: run 'motor commission validate current', then velocity/position validation.");
 	return 0;
 }
 
@@ -2076,6 +2082,8 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		    "Boot commissioning: current offset + Id-axis encoder map + apply + +Iq validation");
 	shell_print(sh,
 		    "Runtime-only: run this after every boot until mapping persistence exists.");
+	shell_print(sh,
+		    "Does not identify Rs/L/flux/J/B or tune regulators; use 'motor commission auto' later.");
 	shell_print(sh, "Bring-up defaults: outer=PI, DOB=disabled, detent FF=disabled");
 
 	shell_print(sh, "[1/4] Current offset calibration");
@@ -2154,6 +2162,8 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 		    "Boot commissioning complete: sign=%d commutation_offset=%.4f deg mechanical outer=PI",
 		    g_motor_params->encoder_direction_sign,
 		    (double)(g_motor_params->observer_alignment_offset_rad * 180.0f / PI_F32));
+	shell_print(sh,
+		    "Next: 'motor commission validate current 0.035 160' for encoder-current smoke test.");
 	return 0;
 }
 
@@ -2651,6 +2661,8 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	hold_ms = CLAMP(hold_ms, MOTOR_COMMISSION_MOTION_SAMPLE_MS,
 			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
 
+	shell_print(sh,
+		    "Validate current_encoder: requires 'motor commission boot'; does not tune gains.");
 	int ret = motor_commission_prepare_pi_encoder_validation(sh);
 	if (ret != 0) {
 		return ret;
@@ -2705,6 +2717,7 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	}
 
 	shell_print(sh, "Current encoder validation complete");
+	shell_print(sh, "Next: 'motor commission validate velocity 0.50 1000'.");
 	return 0;
 }
 
@@ -2732,6 +2745,8 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 	hold_ms = CLAMP(hold_ms, MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS,
 			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
 
+	shell_print(sh,
+		    "Validate velocity_encoder PI: requires boot mapping; uses active velocity PI gains.");
 	int ret = motor_commission_prepare_pi_encoder_validation(sh);
 	if (ret != 0) {
 		return ret;
@@ -2769,6 +2784,10 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 		shell_error(sh, "Velocity validation failed to return to IDLE (err %d)",
 			    idle_ret);
 		ret = idle_ret;
+	}
+	if (ret == 0) {
+		shell_print(sh, "Velocity encoder validation complete");
+		shell_print(sh, "Next: 'motor commission validate position 5 2000'.");
 	}
 	return ret;
 }
@@ -2851,6 +2870,8 @@ int cmd_motor_commission_validate_position(const struct shell *sh, size_t argc, 
 	hold_ms = CLAMP(hold_ms, MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS,
 			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
 
+	shell_print(sh,
+		    "Validate position_encoder: requires boot mapping and stable velocity_encoder behavior.");
 	int ret = motor_commission_prepare_pi_encoder_validation(sh);
 	if (ret != 0) {
 		return ret;
@@ -2909,6 +2930,7 @@ int cmd_motor_commission_validate_position(const struct shell *sh, size_t argc, 
 		    (double)(g_motor_params->live.position_rad * 180.0f / PI_F32),
 		    (double)(g_motor_params->live.velocity_rad_s / (2.0f * PI_F32)),
 		    (double)g_motor_params->live.Iq_ref_A);
+	shell_print(sh, "Next: repeat validation or continue to full commissioning/tuning.");
 	return 0;
 }
 
