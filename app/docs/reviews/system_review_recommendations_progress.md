@@ -27,7 +27,7 @@ Source review: `app/docs/reviews/system_review_2026-05-05.md`
 | P4 Commissioning UX and Naming | Complete | fae3054 | Commissioning command help clarified; boot/mapping/validation commands print prerequisites and next steps; help/status HIL captured. |
 | P5 Direct ISR Safety Audit | Complete | 943081b | Break callbacks now use ISR ring only; ISR audit doc added; build/status/boot HIL pass. |
 | P6 Commissioning Shell Decomposition | Complete | 7b24b9a, 8d3b207, 9205084, cb0a070 | Commissioning shell split into validation, detent, encoder/boot, and auto workflow files; build/parser tests pass; HIL command/status checks pass. |
-| P7 Control Kernel Extraction | Not Started |  |  |
+| P7 Control Kernel Extraction | Complete | b6e939d | Control kernel extracted into `motor_core`; full unit tests pass; firmware build/flash pass; HIL status pass. |
 | P8 TI-Style Fast Block Discipline | Not Started |  |  |
 | P9 Persistence Readiness | Not Started |  |  |
 | P10 Regression Gate | Not Started |  |  |
@@ -745,3 +745,59 @@ Open risks:
 Next action:
 
 - Start P7 control kernel extraction: reduce ISR coupling to `struct motor_parameters` by introducing a smaller real-time control context/input/output boundary.
+
+## Entry 15 - 2026-05-05 - P7: Control Kernel Extraction
+
+Status: Complete.
+
+Commit: `b6e939d` (`P7 extract control kernel dataflow`).
+
+Commands:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_control_kernel.unit
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+./tests/run_unit_tests.sh wonderful_goldberg
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.171 --connect-timeout 8 --log-dir hil_logs/p7 --json-report hil_logs/p7/status_after_p7_kernel.json
+```
+
+Results:
+
+- Added `motor_control_kernel` to `motor_core` for pure feedback validation,
+  feedback sanity checks, servo-reference construction, and actuator-reference
+  construction.
+- Moved angle-input source definitions from app-local `config.h` into
+  `motor_core` control references so the kernel does not depend on app state.
+- Removed duplicated feedback-validity and servo/actuator construction helpers
+  from `app/src/motor_control_loop.c`.
+- Tightened Step/Dir actuator adaptation so it rejects D/Q-current servo
+  commands instead of silently accepting an incompatible effort type.
+- Added `chopper.motor_control_kernel.unit` covering generated-current output,
+  disabled-current behavior, propagated-feedback stale window, feedback error
+  rejection, speed sanity rejection, and unsupported actuator pairing.
+- Focused control-kernel unit test: 1/1 scenario passed, 6/6 test cases passed.
+- Full unit test run: 30/30 scenarios passed, 257/257 test cases passed.
+- Firmware build: passed.
+- Flash using the J-Link runner: passed.
+- HIL status verdict: `PASS`; motor error `NONE`, fault snapshot clear, encoder
+  acquisition counters within thresholds.
+
+HIL logs:
+
+- `hil_logs/p7/20260505_042419_status.log`
+- `hil_logs/p7/status_after_p7_kernel.json`
+
+Open risks:
+
+- P7 is a structural extraction phase. It proves no non-motion regression after
+  flash, but it does not revalidate live current/velocity/position motion.
+- `motor_control_loop_step()` still owns ADC measurement, encoder collection,
+  reference generation, FOC, and telemetry staging. P8 should continue reducing
+  per-step validation and making fast blocks more TI-like.
+
+Next action:
+
+- Start P8 TI-style fast block discipline: move remaining configuration
+  invariants out of step paths, reduce runtime guards to catastrophic checks,
+  and keep ISR block APIs explicit and low-overhead.
