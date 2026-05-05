@@ -84,6 +84,20 @@ enum motor_gains_profile {
 #define POSITION_MODEL_SAFE_BW_RATIO 0.10f
 #define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
 #define POSITION_TARGET_MIN_DURATION_S 0.20f
+#define VELOCITY_MPR_BW_Q_MIN 0.2f
+#define VELOCITY_MPR_BW_Q_MAX 10.0f
+#define VELOCITY_MPR_BW_R_MIN 0.01f
+#define VELOCITY_MPR_BW_R_MAX 0.5f
+#define VELOCITY_MPR_BW_HORIZON 8U
+#define VELOCITY_MPR_DIST_KI_MIN 0.005f
+#define VELOCITY_MPR_DIST_KI_MAX 0.2f
+#define POSITION_MPR_BW_Q_POS_MIN 0.5f
+#define POSITION_MPR_BW_Q_POS_MAX 20.0f
+#define POSITION_MPR_BW_Q_VEL_MIN 0.1f
+#define POSITION_MPR_BW_Q_VEL_MAX 10.0f
+#define POSITION_MPR_BW_R_MIN 0.02f
+#define POSITION_MPR_BW_R_MAX 0.5f
+#define POSITION_MPR_BW_HORIZON 16U
 
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
 {
@@ -350,6 +364,17 @@ static int motor_estimate_velocity_bandwidth_hz(const struct motor_parameters *p
 	}
 
 	*bw_hz_out = omega / (2.0f * PI_F32);
+	return 0;
+}
+
+static int motor_set_param_checked(const char *name, float value)
+{
+	int ret = motor_api_set_param(name, value);
+
+	if (ret != 0) {
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -935,16 +960,18 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
-/* motor velocity gains set <kp_a_per_rad_s> <ki_a_per_rad> <iq_limit_a>
- * motor velocity gains defaults <safe|nominal>
- * motor velocity gains bandwidth <hz> [zeta]
+/* motor velocity pi status
+ * motor velocity pi set <kp_a_per_rad_s> <ki_a_per_rad> <iq_limit_a>
+ * motor velocity pi defaults <safe|nominal>
+ * motor velocity pi bandwidth <hz> [zeta]
  */
-static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **argv)
+static int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc < 3 || argc > 5) {
-		shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
-			    "motor velocity gains defaults <safe|nominal> | "
-			    "motor velocity gains bandwidth <hz> [zeta]");
+	if (argc < 2 || argc > 5) {
+		shell_error(sh, "Usage: motor velocity pi status | "
+			    "motor velocity pi set <kp> <ki> <iq_limit> | "
+			    "motor velocity pi defaults <safe|nominal> | "
+			    "motor velocity pi bandwidth <hz> [zeta]");
 		return -EINVAL;
 	}
 
@@ -954,12 +981,31 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 	}
 	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
 		shell_warn(sh,
-			   "outer_loop_mode=MPR; velocity PI gains are inactive unless outer_loop_mode is set to 0");
+			   "outer mode is MPR; velocity PI settings are inactive until 'motor outer mode pi'");
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		if (argc != 2) {
+			shell_error(sh, "Usage: motor velocity pi status");
+			return -EINVAL;
+		}
+		shell_print(sh, "Velocity PI:");
+		shell_print(sh, "  Active:   %s",
+			    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_PI ? "YES" : "NO");
+		shell_print(sh, "  Kp:       %.6f A/(rad/s)",
+			    (double)g_motor_params->velocity_cl_kp_A_per_rad_s);
+		shell_print(sh, "  Ki:       %.6f A/rad",
+			    (double)g_motor_params->velocity_cl_ki_A_per_rad);
+		shell_print(sh, "  I term:   %.6f A",
+			    (double)g_motor_params->velocity_cl_i_term_A);
+		shell_print(sh, "  Iq limit: %.6f A",
+			    (double)g_motor_params->velocity_cl_iq_limit_A);
+		return 0;
 	}
 
 	if (strcmp(argv[1], "defaults") == 0) {
 		if (argc != 3) {
-			shell_error(sh, "Usage: motor velocity gains defaults <safe|nominal>");
+			shell_error(sh, "Usage: motor velocity pi defaults <safe|nominal>");
 			return -EINVAL;
 		}
 
@@ -1005,7 +1051,7 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 
 	if (strcmp(argv[1], "set") == 0) {
 		if (argc != 5) {
-			shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit>");
+			shell_error(sh, "Usage: motor velocity pi set <kp> <ki> <iq_limit>");
 			return -EINVAL;
 		}
 
@@ -1021,19 +1067,19 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 
 		int ret = motor_apply_velocity_gains(kp, ki, iq_limit);
 		if (ret != 0) {
-			shell_error(sh, "Failed to update velocity gains (err %d)", ret);
+			shell_error(sh, "Failed to update velocity PI settings (err %d)", ret);
 			return ret;
 		}
 
 		motor_command_feed_watchdog(g_motor_params);
-		shell_print(sh, "Velocity gains set: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
+		shell_print(sh, "Velocity PI set: Kp=%.5f A/(rad/s), Ki=%.5f A/rad, Iq limit=%.3f A",
 			    (double)kp, (double)ki, (double)iq_limit);
 		return 0;
 	}
 
 	if (strcmp(argv[1], "bandwidth") == 0) {
 		if (argc != 3 && argc != 4) {
-			shell_error(sh, "Usage: motor velocity gains bandwidth <hz> [zeta]");
+			shell_error(sh, "Usage: motor velocity pi bandwidth <hz> [zeta]");
 			return -EINVAL;
 		}
 
@@ -1068,7 +1114,7 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 
 		ret = motor_apply_velocity_gains(kp, ki, g_motor_params->velocity_cl_iq_limit_A);
 		if (ret != 0) {
-			shell_error(sh, "Failed to apply velocity bandwidth gains (err %d)", ret);
+			shell_error(sh, "Failed to apply velocity PI bandwidth settings (err %d)", ret);
 			return ret;
 		}
 
@@ -1079,9 +1125,159 @@ static int cmd_motor_velocity_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
-	shell_error(sh, "Usage: motor velocity gains set <kp> <ki> <iq_limit> | "
-		    "motor velocity gains defaults <safe|nominal> | "
-		    "motor velocity gains bandwidth <hz> [zeta]");
+	shell_error(sh, "Usage: motor velocity pi status | "
+		    "motor velocity pi set <kp> <ki> <iq_limit> | "
+		    "motor velocity pi defaults <safe|nominal> | "
+		    "motor velocity pi bandwidth <hz> [zeta]");
+	return -EINVAL;
+}
+
+/* motor velocity mpr status
+ * motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki]
+ * motor velocity mpr bandwidth <hz>
+ */
+static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2 || argc > 7) {
+		shell_error(sh, "Usage: motor velocity mpr status | "
+			    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
+			    "motor velocity mpr bandwidth <hz>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		if (argc != 2) {
+			shell_error(sh, "Usage: motor velocity mpr status");
+			return -EINVAL;
+		}
+		shell_print(sh, "Velocity MPR:");
+		shell_print(sh, "  Active:        %s",
+			    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ? "YES" : "NO");
+		shell_print(sh, "  q_speed:       %.6f",
+			    (double)g_motor_params->velocity_mpr_cfg.q_speed);
+		shell_print(sh, "  r_delta_iq:    %.6f",
+			    (double)g_motor_params->velocity_mpr_cfg.r_delta_iq);
+		shell_print(sh, "  Horizon:       %u", g_motor_params->velocity_mpr_cfg.horizon);
+		shell_print(sh, "  dIq max:       %.6f A/sample",
+			    (double)g_motor_params->velocity_mpr_cfg.max_delta_iq_a);
+		shell_print(sh, "  Disturbance KI %.6f Nm/(rad/s)",
+			    (double)g_motor_params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s);
+		shell_print(sh, "  dt:            %.6f s",
+			    (double)g_motor_params->velocity_mpr_cfg.dt_s);
+		shell_print(sh, "  Iq cmd:        %.6f A",
+			    (double)g_motor_params->velocity_mpr_state.iq_cmd_a);
+		shell_print(sh, "  Model omega:   %.6f rad/s",
+			    (double)g_motor_params->velocity_mpr_state.omega_model_rad_s);
+		shell_print(sh, "  Iq limit:      %.6f A",
+			    (double)g_motor_params->velocity_mpr_cfg.iq_limit_a);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "set") == 0) {
+		if (argc != 6 && argc != 7) {
+			shell_error(sh, "Usage: motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki]");
+			return -EINVAL;
+		}
+
+		float q_speed = 0.0f;
+		float r_delta_iq = 0.0f;
+		uint32_t horizon = 0U;
+		float max_delta_iq = 0.0f;
+		float disturbance_ki = g_motor_params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s;
+		if (!shell_parse_finite_float(argv[2], &q_speed) ||
+		    !shell_parse_finite_float(argv[3], &r_delta_iq) ||
+		    !shell_parse_u32(argv[4], &horizon) ||
+		    !shell_parse_finite_float(argv[5], &max_delta_iq) ||
+		    (argc == 7 && !shell_parse_finite_float(argv[6], &disturbance_ki))) {
+			shell_error(sh, "MPR parameters must be finite numbers; horizon must be integer");
+			return -EINVAL;
+		}
+		if (q_speed <= 0.0f || r_delta_iq <= 0.0f || horizon == 0U ||
+		    horizon > MOTOR_MPR_HORIZON_MAX || max_delta_iq < 0.0f || disturbance_ki < 0.0f) {
+			shell_error(sh, "Invalid velocity MPR limits; horizon must be 1..%u",
+				    MOTOR_MPR_HORIZON_MAX);
+			return -EINVAL;
+		}
+
+		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
+		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_horizon", (float)horizon);
+		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s",
+					       disturbance_ki);
+		if (ret != 0) {
+			shell_error(sh, "Failed to update velocity MPR params (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Velocity MPR set: q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=%.6f",
+			    (double)q_speed, (double)r_delta_iq, horizon,
+			    (double)max_delta_iq, (double)disturbance_ki);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "bandwidth") == 0) {
+		if (argc != 3) {
+			shell_error(sh, "Usage: motor velocity mpr bandwidth <hz>");
+			return -EINVAL;
+		}
+
+		float bw_hz = 0.0f;
+		if (!shell_parse_finite_float(argv[2], &bw_hz) || bw_hz <= 0.0f) {
+			shell_error(sh, "Bandwidth must be a positive finite number");
+			return -EINVAL;
+		}
+
+		float j = g_motor_params->inertia_kgm2_active;
+		float kt = motor_torque_gain_resolve_active(g_motor_params);
+		if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f) {
+			shell_error(sh, "Need valid active commissioning params (J, torque_gain)");
+			return -ERANGE;
+		}
+
+		float omega = 2.0f * PI_F32 * bw_hz;
+		float q_speed = clampf((omega * j) / kt,
+				       VELOCITY_MPR_BW_Q_MIN, VELOCITY_MPR_BW_Q_MAX);
+		float r_delta_iq = clampf(1.0f / (10.0f * q_speed),
+					  VELOCITY_MPR_BW_R_MIN, VELOCITY_MPR_BW_R_MAX);
+		float max_delta_iq = clampf(g_motor_params->velocity_cl_iq_limit_A * 0.15f,
+					    0.01f, g_motor_params->velocity_cl_iq_limit_A);
+		float disturbance_ki = clampf(
+			fmaxf(g_motor_params->viscous_friction_nm_per_rad_s_active,
+			      VELOCITY_MPR_DIST_KI_MIN),
+			VELOCITY_MPR_DIST_KI_MIN, VELOCITY_MPR_DIST_KI_MAX);
+
+		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
+		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_horizon",
+					       (float)VELOCITY_MPR_BW_HORIZON);
+		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s",
+					       disturbance_ki);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply velocity MPR bandwidth params (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Velocity MPR bandwidth tuned: bw=%.2f Hz -> q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=%.6f",
+			    (double)bw_hz, (double)q_speed, (double)r_delta_iq,
+			    VELOCITY_MPR_BW_HORIZON, (double)max_delta_iq,
+			    (double)disturbance_ki);
+		return 0;
+	}
+
+	shell_error(sh, "Usage: motor velocity mpr status | "
+		    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
+		    "motor velocity mpr bandwidth <hz>");
 	return -EINVAL;
 }
 
@@ -1405,16 +1601,18 @@ static int cmd_motor_position_status(const struct shell *sh, size_t argc, char *
 	return 0;
 }
 
-/* motor position gains set <kp_rad_s_per_rad> <ki_rad_s2_per_rad>
- * motor position gains defaults <safe|nominal>
- * motor position gains bandwidth <hz> [zeta]
+/* motor position pi status
+ * motor position pi set <kp_rad_s_per_rad> <ki_rad_s2_per_rad>
+ * motor position pi defaults <safe|nominal>
+ * motor position pi bandwidth <hz> [zeta]
  */
-static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **argv)
+static int cmd_motor_position_pi(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc < 3 || argc > 4) {
-		shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
-			    "motor position gains defaults <safe|nominal> | "
-			    "motor position gains bandwidth <hz> [zeta]");
+	if (argc < 2 || argc > 4) {
+		shell_error(sh, "Usage: motor position pi status | "
+			    "motor position pi set <kp> <ki> | "
+			    "motor position pi defaults <safe|nominal> | "
+			    "motor position pi bandwidth <hz> [zeta]");
 		return -EINVAL;
 	}
 
@@ -1424,12 +1622,29 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 	}
 	if (g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR) {
 		shell_warn(sh,
-			   "outer_loop_mode=MPR; position PI gains are inactive unless outer_loop_mode is set to 0");
+			   "outer mode is MPR; position PI settings are inactive until 'motor outer mode pi'");
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		if (argc != 2) {
+			shell_error(sh, "Usage: motor position pi status");
+			return -EINVAL;
+		}
+		shell_print(sh, "Position PI:");
+		shell_print(sh, "  Active: %s",
+			    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_PI ? "YES" : "NO");
+		shell_print(sh, "  Kp:     %.6f (rad/s)/rad",
+			    (double)g_motor_params->position_cl_kp_rad_s_per_rad);
+		shell_print(sh, "  Ki:     %.6f (rad/s^2)/rad",
+			    (double)g_motor_params->position_cl_ki_rad_s2_per_rad);
+		shell_print(sh, "  I term: %.6f rad/s",
+			    (double)g_motor_params->position_cl_i_term_rad_s);
+		return 0;
 	}
 
 	if (strcmp(argv[1], "defaults") == 0) {
 		if (argc != 3) {
-			shell_error(sh, "Usage: motor position gains defaults <safe|nominal>");
+			shell_error(sh, "Usage: motor position pi defaults <safe|nominal>");
 			return -EINVAL;
 		}
 
@@ -1475,7 +1690,7 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 
 	if (strcmp(argv[1], "set") == 0) {
 		if (argc != 4) {
-			shell_error(sh, "Usage: motor position gains set <kp> <ki>");
+			shell_error(sh, "Usage: motor position pi set <kp> <ki>");
 			return -EINVAL;
 		}
 
@@ -1489,19 +1704,19 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 
 		int ret = motor_apply_position_gains(kp, ki);
 		if (ret != 0) {
-			shell_error(sh, "Failed to update position gains (err %d)", ret);
+			shell_error(sh, "Failed to update position PI settings (err %d)", ret);
 			return ret;
 		}
 
 		motor_command_feed_watchdog(g_motor_params);
-		shell_print(sh, "Position gains set: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
+		shell_print(sh, "Position PI set: Kp=%.5f (rad/s)/rad, Ki=%.5f (rad/s^2)/rad",
 			    (double)kp, (double)ki);
 		return 0;
 	}
 
 	if (strcmp(argv[1], "bandwidth") == 0) {
 		if (argc != 3 && argc != 4) {
-			shell_error(sh, "Usage: motor position gains bandwidth <hz> [zeta]");
+			shell_error(sh, "Usage: motor position pi bandwidth <hz> [zeta]");
 			return -EINVAL;
 		}
 
@@ -1539,7 +1754,7 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		float ki = omega * omega;
 		int ret = motor_apply_position_gains(kp, ki);
 		if (ret != 0) {
-			shell_error(sh, "Failed to apply position bandwidth gains (err %d)", ret);
+			shell_error(sh, "Failed to apply position PI bandwidth settings (err %d)", ret);
 			return ret;
 		}
 
@@ -1550,10 +1765,236 @@ static int cmd_motor_position_gains(const struct shell *sh, size_t argc, char **
 		return 0;
 	}
 
-	shell_error(sh, "Usage: motor position gains set <kp> <ki> | "
-		    "motor position gains defaults <safe|nominal> | "
-		    "motor position gains bandwidth <hz> [zeta]");
+	shell_error(sh, "Usage: motor position pi status | "
+		    "motor position pi set <kp> <ki> | "
+		    "motor position pi defaults <safe|nominal> | "
+		    "motor position pi bandwidth <hz> [zeta]");
 	return -EINVAL;
+}
+
+/* motor position mpr status
+ * motor position mpr set <q_position> <q_velocity_ff> <r_delta_velocity> <horizon> [max_delta_velocity]
+ * motor position mpr bandwidth <hz>
+ */
+static int cmd_motor_position_mpr(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2 || argc > 7) {
+		shell_error(sh, "Usage: motor position mpr status | "
+			    "motor position mpr set <q_position> <q_velocity_ff> <r_delta_velocity> <horizon> [max_delta_velocity] | "
+			    "motor position mpr bandwidth <hz>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (strcmp(argv[1], "status") == 0) {
+		if (argc != 2) {
+			shell_error(sh, "Usage: motor position mpr status");
+			return -EINVAL;
+		}
+		shell_print(sh, "Position MPR:");
+		shell_print(sh, "  Active:           %s",
+			    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ? "YES" : "NO");
+		shell_print(sh, "  q_position:       %.6f",
+			    (double)g_motor_params->position_mpr_cfg.q_position);
+		shell_print(sh, "  q_velocity_ff:    %.6f",
+			    (double)g_motor_params->position_mpr_cfg.q_velocity_ff);
+		shell_print(sh, "  r_delta_velocity: %.6f",
+			    (double)g_motor_params->position_mpr_cfg.r_delta_velocity);
+		shell_print(sh, "  Horizon:          %u", g_motor_params->position_mpr_cfg.horizon);
+		shell_print(sh, "  Velocity limit:   %.6f rad/s",
+			    (double)g_motor_params->position_mpr_cfg.velocity_limit_rad_s);
+		shell_print(sh, "  dVel max:         %.6f rad/s/sample",
+			    (double)g_motor_params->position_mpr_cfg.max_delta_velocity_rad_s);
+		shell_print(sh, "  dt:               %.6f s",
+			    (double)g_motor_params->position_mpr_cfg.dt_s);
+		shell_print(sh, "  Velocity cmd:     %.6f rad/s",
+			    (double)g_motor_params->position_mpr_state.velocity_cmd_rad_s);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "set") == 0) {
+		if (argc != 6 && argc != 7) {
+			shell_error(sh, "Usage: motor position mpr set <q_position> <q_velocity_ff> <r_delta_velocity> <horizon> [max_delta_velocity]");
+			return -EINVAL;
+		}
+
+		float q_position = 0.0f;
+		float q_velocity_ff = 0.0f;
+		float r_delta_velocity = 0.0f;
+		uint32_t horizon = 0U;
+		float max_delta_velocity =
+			g_motor_params->position_mpr_cfg.max_delta_velocity_rad_s;
+		if (!shell_parse_finite_float(argv[2], &q_position) ||
+		    !shell_parse_finite_float(argv[3], &q_velocity_ff) ||
+		    !shell_parse_finite_float(argv[4], &r_delta_velocity) ||
+		    !shell_parse_u32(argv[5], &horizon) ||
+		    (argc == 7 && !shell_parse_finite_float(argv[6], &max_delta_velocity))) {
+			shell_error(sh, "MPR parameters must be finite numbers; horizon must be integer");
+			return -EINVAL;
+		}
+		if (q_position < 0.0f || q_velocity_ff < 0.0f ||
+		    (q_position == 0.0f && q_velocity_ff == 0.0f) ||
+		    r_delta_velocity <= 0.0f || horizon == 0U ||
+		    horizon > MOTOR_MPR_HORIZON_MAX || max_delta_velocity < 0.0f) {
+			shell_error(sh, "Invalid position MPR limits; horizon must be 1..%u",
+				    MOTOR_MPR_HORIZON_MAX);
+			return -EINVAL;
+		}
+
+		int ret = motor_set_param_checked("position_mpr_q_position", q_position);
+		ret |= motor_set_param_checked("position_mpr_q_velocity_ff", q_velocity_ff);
+		ret |= motor_set_param_checked("position_mpr_r_delta_velocity",
+					       r_delta_velocity);
+		ret |= motor_set_param_checked("position_mpr_horizon", (float)horizon);
+		ret |= motor_set_param_checked("position_mpr_max_delta_velocity_rad_s",
+					       max_delta_velocity);
+		if (ret != 0) {
+			shell_error(sh, "Failed to update position MPR params (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Position MPR set: q_pos=%.6f q_vel=%.6f r=%.6f horizon=%u dVel=%.6f rad/s/sample",
+			    (double)q_position, (double)q_velocity_ff,
+			    (double)r_delta_velocity, horizon,
+			    (double)max_delta_velocity);
+		return 0;
+	}
+
+	if (strcmp(argv[1], "bandwidth") == 0) {
+		if (argc != 3) {
+			shell_error(sh, "Usage: motor position mpr bandwidth <hz>");
+			return -EINVAL;
+		}
+
+		float bw_hz = 0.0f;
+		if (!shell_parse_finite_float(argv[2], &bw_hz) || bw_hz <= 0.0f) {
+			shell_error(sh, "Bandwidth must be a positive finite number");
+			return -EINVAL;
+		}
+
+		float omega = 2.0f * PI_F32 * bw_hz;
+		float q_position = clampf(2.0f * omega,
+					  POSITION_MPR_BW_Q_POS_MIN,
+					  POSITION_MPR_BW_Q_POS_MAX);
+		float q_velocity_ff = clampf(0.5f * omega,
+					     POSITION_MPR_BW_Q_VEL_MIN,
+					     POSITION_MPR_BW_Q_VEL_MAX);
+		float r_delta_velocity = clampf(1.0f / (5.0f * q_position),
+						POSITION_MPR_BW_R_MIN,
+						POSITION_MPR_BW_R_MAX);
+		float max_delta_velocity =
+			g_motor_params->profile_max_accel_rad_s2 *
+			g_motor_params->position_mpr_cfg.dt_s;
+		max_delta_velocity = clampf(max_delta_velocity, 0.001f,
+					    g_motor_params->profile_max_velocity_rad_s);
+
+		int ret = motor_set_param_checked("position_mpr_q_position", q_position);
+		ret |= motor_set_param_checked("position_mpr_q_velocity_ff", q_velocity_ff);
+		ret |= motor_set_param_checked("position_mpr_r_delta_velocity",
+					       r_delta_velocity);
+		ret |= motor_set_param_checked("position_mpr_horizon",
+					       (float)POSITION_MPR_BW_HORIZON);
+		ret |= motor_set_param_checked("position_mpr_max_delta_velocity_rad_s",
+					       max_delta_velocity);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply position MPR bandwidth params (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Position MPR bandwidth tuned: bw=%.2f Hz -> q_pos=%.6f q_vel=%.6f r=%.6f horizon=%u dVel=%.6f rad/s/sample",
+			    (double)bw_hz, (double)q_position, (double)q_velocity_ff,
+			    (double)r_delta_velocity, POSITION_MPR_BW_HORIZON,
+			    (double)max_delta_velocity);
+		return 0;
+	}
+
+	shell_error(sh, "Usage: motor position mpr status | "
+		    "motor position mpr set <q_position> <q_velocity_ff> <r_delta_velocity> <horizon> [max_delta_velocity] | "
+		    "motor position mpr bandwidth <hz>");
+	return -EINVAL;
+}
+
+/* motor outer status
+ * motor outer mode <pi|mpr>
+ */
+static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	shell_print(sh, "Outer Loop:");
+	shell_print(sh, "  Mode:        %s",
+		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ? "MPR" : "PI");
+	shell_print(sh, "  Velocity dt: %.6f s (%u tick)",
+		    (double)g_motor_params->velocity_mpr_cfg.dt_s,
+		    MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->velocity_loop_decimation));
+	shell_print(sh, "  Position dt: %.6f s (%u tick)",
+		    (double)g_motor_params->position_mpr_cfg.dt_s,
+		    MAX(OUTER_LOOP_DECIMATION_MIN, g_motor_params->position_loop_decimation));
+	shell_print(sh, "  Velocity PI: Kp=%.6f Ki=%.6f IqLim=%.6f A",
+		    (double)g_motor_params->velocity_cl_kp_A_per_rad_s,
+		    (double)g_motor_params->velocity_cl_ki_A_per_rad,
+		    (double)g_motor_params->velocity_cl_iq_limit_A);
+	shell_print(sh, "  Position PI: Kp=%.6f Ki=%.6f",
+		    (double)g_motor_params->position_cl_kp_rad_s_per_rad,
+		    (double)g_motor_params->position_cl_ki_rad_s2_per_rad);
+	shell_print(sh, "  Velocity MPR: q=%.6f r=%.6f horizon=%u",
+		    (double)g_motor_params->velocity_mpr_cfg.q_speed,
+		    (double)g_motor_params->velocity_mpr_cfg.r_delta_iq,
+		    g_motor_params->velocity_mpr_cfg.horizon);
+	shell_print(sh, "  Position MPR: q_pos=%.6f q_vel=%.6f r=%.6f horizon=%u",
+		    (double)g_motor_params->position_mpr_cfg.q_position,
+		    (double)g_motor_params->position_mpr_cfg.q_velocity_ff,
+		    (double)g_motor_params->position_mpr_cfg.r_delta_velocity,
+		    g_motor_params->position_mpr_cfg.horizon);
+	return 0;
+}
+
+static int cmd_motor_outer_mode(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: motor outer mode <pi|mpr>");
+		return -EINVAL;
+	}
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	float mode_value;
+	if (strcmp(argv[1], "pi") == 0) {
+		mode_value = (float)MOTOR_OUTER_LOOP_MODE_PI;
+	} else if (strcmp(argv[1], "mpr") == 0) {
+		mode_value = (float)MOTOR_OUTER_LOOP_MODE_MPR;
+	} else {
+		shell_error(sh, "Mode must be 'pi' or 'mpr'");
+		return -EINVAL;
+	}
+
+	int ret = motor_api_set_param("outer_loop_mode", mode_value);
+	if (ret != 0) {
+		shell_error(sh, "Failed to set outer loop mode (err %d)", ret);
+		return ret;
+	}
+
+	motor_command_feed_watchdog(g_motor_params);
+	shell_print(sh, "Outer loop mode set to %s",
+		    mode_value == (float)MOTOR_OUTER_LOOP_MODE_MPR ? "MPR" : "PI");
+	return 0;
 }
 
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
@@ -1811,13 +2252,23 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_rls,
 );
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 
+/* motor outer subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_outer,
+	SHELL_CMD(mode, NULL, "Select outer-loop regulator <pi|mpr>", cmd_motor_outer_mode),
+	SHELL_CMD(status, NULL, "Show active outer-loop regulator and tuning", cmd_motor_outer_status),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor velocity subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
 	SHELL_CMD_ARG(decimation, NULL, "Set velocity loop decimation <ticks>", cmd_motor_velocity_decimation, 2, 0),
-	SHELL_CMD_ARG(gains, NULL,
-		      "Configure velocity PI gains: set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
-		      cmd_motor_velocity_gains, 3, 2),
+	SHELL_CMD_ARG(pi, NULL,
+		      "Velocity PI: status | set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
+		      cmd_motor_velocity_pi, 2, 3),
+	SHELL_CMD_ARG(mpr, NULL,
+		      "Velocity MPR: status | set <q> <r> <horizon> <max_delta_iq> [dist_ki] | bandwidth <hz>",
+		      cmd_motor_velocity_mpr, 2, 5),
 	SHELL_CMD_ARG(dob, NULL,
 		      "Velocity disturbance observer: status | defaults <safe|nominal> | enable <0|1> | gain <nm_per_rad_s> | torque_limit <nm> | iq_limit <a>",
 		      cmd_motor_velocity_dob, 2, 1),
@@ -1829,9 +2280,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 	SHELL_CMD_ARG(target, NULL, "Set position target <deg>", cmd_motor_position_target, 2, 0),
 	SHELL_CMD_ARG(decimation, NULL, "Set position loop decimation <ticks>", cmd_motor_position_decimation, 2, 0),
-	SHELL_CMD_ARG(gains, NULL,
-		      "Configure position PI gains: set <kp> <ki> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
-		      cmd_motor_position_gains, 3, 1),
+	SHELL_CMD_ARG(pi, NULL,
+		      "Position PI: status | set <kp> <ki> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
+		      cmd_motor_position_pi, 2, 2),
+	SHELL_CMD_ARG(mpr, NULL,
+		      "Position MPR: status | set <q_pos> <q_vel> <r> <horizon> [max_delta_vel] | bandwidth <hz>",
+		      cmd_motor_position_mpr, 2, 5),
 	SHELL_CMD(status, NULL, "Show position status", cmd_motor_position_status),
 	SHELL_SUBCMD_SET_END
 );
@@ -2104,6 +2558,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+	SHELL_CMD(outer, &sub_motor_outer, "Outer-loop regulator selection", NULL),
 	SHELL_CMD(velocity, &sub_motor_velocity, "Velocity control", NULL),
 	SHELL_CMD(position, &sub_motor_position, "Position control", NULL),
 	SHELL_CMD(profile, &sub_motor_profile, "Motion profile settings", NULL),
