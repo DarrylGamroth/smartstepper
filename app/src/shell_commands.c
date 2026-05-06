@@ -84,13 +84,15 @@ enum motor_gains_profile {
 #define POSITION_MODEL_SAFE_BW_RATIO 0.10f
 #define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
 #define POSITION_TARGET_MIN_DURATION_S 0.20f
-#define VELOCITY_MPR_BW_Q_MIN 0.2f
-#define VELOCITY_MPR_BW_Q_MAX 10.0f
-#define VELOCITY_MPR_BW_R_MIN 0.01f
-#define VELOCITY_MPR_BW_R_MAX 0.5f
+#define VELOCITY_MPR_BW_Q_MIN 0.003f
+#define VELOCITY_MPR_BW_Q_MAX 0.05f
+#define VELOCITY_MPR_BW_R_MIN 20.0f
+#define VELOCITY_MPR_BW_R_MAX 100.0f
 #define VELOCITY_MPR_BW_HORIZON 8U
-#define VELOCITY_MPR_DIST_KI_MIN 0.005f
-#define VELOCITY_MPR_DIST_KI_MAX 0.2f
+#define VELOCITY_MPR_DI_MIN_A 0.0005f
+#define VELOCITY_MPR_DI_MAX_A 0.0020f
+#define VELOCITY_MPR_DIST_KI_MIN 0.0f
+#define VELOCITY_MPR_DIST_KI_MAX 0.05f
 #define POSITION_MPR_BW_Q_POS_MIN 0.5f
 #define POSITION_MPR_BW_Q_POS_MAX 20.0f
 #define POSITION_MPR_BW_Q_VEL_MIN 0.1f
@@ -1245,14 +1247,13 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 		float omega = 2.0f * PI_F32 * bw_hz;
 		float q_speed = clampf((omega * j) / kt,
 				       VELOCITY_MPR_BW_Q_MIN, VELOCITY_MPR_BW_Q_MAX);
-		float r_delta_iq = clampf(1.0f / (10.0f * q_speed),
+		float r_delta_iq = clampf(1.0f / (4.0f * q_speed),
 					  VELOCITY_MPR_BW_R_MIN, VELOCITY_MPR_BW_R_MAX);
-		float max_delta_iq = clampf(g_motor_params->velocity_cl_iq_limit_A * 0.15f,
-					    0.01f, g_motor_params->velocity_cl_iq_limit_A);
-		float disturbance_ki = clampf(
-			fmaxf(g_motor_params->viscous_friction_nm_per_rad_s_active,
-			      VELOCITY_MPR_DIST_KI_MIN),
-			VELOCITY_MPR_DIST_KI_MIN, VELOCITY_MPR_DIST_KI_MAX);
+		float max_delta_iq = clampf(g_motor_params->velocity_cl_iq_limit_A * 0.003f,
+					    VELOCITY_MPR_DI_MIN_A,
+					    fminf(g_motor_params->velocity_cl_iq_limit_A,
+						  VELOCITY_MPR_DI_MAX_A));
+		float disturbance_ki = VELOCITY_MPR_DIST_KI_MIN;
 
 		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
 		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);

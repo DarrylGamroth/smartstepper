@@ -164,6 +164,31 @@ int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms)
 	return -ETIMEDOUT;
 }
 
+int motor_commission_wait_for_control_loop(uint32_t timeout_ms)
+{
+	if (g_motor_params == NULL) {
+		return -ENODEV;
+	}
+
+	uint32_t start_ms = k_uptime_get_32();
+	uint32_t start_loop = g_motor_params->control_loop_count;
+
+	while ((k_uptime_get_32() - start_ms) < timeout_ms) {
+		int state = motor_api_get_state();
+
+		if (state == MOTOR_STATE_ERROR) {
+			return -EFAULT;
+		}
+		if (g_motor_params->control_loop_count != start_loop) {
+			return 0;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(MOTOR_COMMISSION_AUTO_POLL_MS);
+	}
+
+	return -ETIMEDOUT;
+}
+
 static int motor_commission_wait_for_state_commission(uint32_t timeout_ms)
 {
 	uint32_t start_ms = k_uptime_get_32();
@@ -346,6 +371,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}
+	g_motor_params->calibration.commissioning_complete = true;
 
 	shell_print(sh, "[4/4] Return to safe idle");
 	motor_commission_standard_cleanup(saved_timeout_ms);
@@ -716,10 +742,17 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    ctx->results.mech_validation_valid ? "YES" : "NO",
 		    (double)ctx->results.mech_validation_residual_rms_nm,
 		    ctx->results.mech_validation_pass ? "PASS" : "FAIL");
+	bool runtime_mapping_complete =
+		g_motor_params != NULL && g_motor_params->calibration.encoder_mapping_complete;
+	bool mapping_valid = ctx->results.mapping_valid || runtime_mapping_complete;
+	bool mapping_pass = ctx->results.mapping_valid ?
+		ctx->results.mapping_pass : runtime_mapping_complete;
+	float32_t mapping_confidence = ctx->results.mapping_valid ?
+		ctx->results.mapping_confidence : (runtime_mapping_complete ? 1.0f : 0.0f);
 	shell_print(sh, "  Mapping:        valid=%s pass=%s confidence=%.2f",
-		    ctx->results.mapping_valid ? "YES" : "NO",
-		    ctx->results.mapping_pass ? "YES" : "NO",
-		    (double)ctx->results.mapping_confidence);
+		    mapping_valid ? "YES" : "NO",
+		    mapping_pass ? "YES" : "NO",
+		    (double)mapping_confidence);
 	if (ctx->results.mapping_direction_valid) {
 		shell_print(sh, "  Direction chk:  corr=%.4f -> %s",
 			    (double)ctx->results.mapping_direction_corr,

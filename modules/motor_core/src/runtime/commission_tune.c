@@ -15,6 +15,12 @@
 #define MOTOR_COMMISSION_TUNE_IQ_LIMIT_MIN_A 0.05f
 #define MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN 0.02f
 #define MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MAX 0.20f
+#define MOTOR_COMMISSION_TUNE_MPR_Q_MIN 0.003f
+#define MOTOR_COMMISSION_TUNE_MPR_Q_MAX 0.05f
+#define MOTOR_COMMISSION_TUNE_MPR_R_MIN 20.0f
+#define MOTOR_COMMISSION_TUNE_MPR_R_MAX 100.0f
+#define MOTOR_COMMISSION_TUNE_MPR_DI_MIN_A 0.0005f
+#define MOTOR_COMMISSION_TUNE_MPR_DI_MAX_A 0.0020f
 
 static bool tune_is_finite_positive(float32_t value)
 {
@@ -202,14 +208,24 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 	out->position_ki_rad_s2_per_rad = position_ki;
 
 	out->velocity_mpr_horizon = 8U;
+	/*
+	 * Velocity MPR is much more sensitive to sample-to-sample current
+	 * changes than the PI path. Keep commissioned defaults conservative and
+	 * let the shell bandwidth command raise them after HIL validation.
+	 */
 	out->velocity_mpr_q_speed =
-		clampf((velocity_omega * inertia) / kt, 0.2f, 10.0f);
+		clampf((velocity_omega * inertia) / kt,
+		       MOTOR_COMMISSION_TUNE_MPR_Q_MIN,
+		       MOTOR_COMMISSION_TUNE_MPR_Q_MAX);
 	out->velocity_mpr_r_delta_iq =
-		clampf(1.0f / (10.0f * out->velocity_mpr_q_speed), 0.01f, 0.5f);
+		clampf(1.0f / (4.0f * out->velocity_mpr_q_speed),
+		       MOTOR_COMMISSION_TUNE_MPR_R_MIN,
+		       MOTOR_COMMISSION_TUNE_MPR_R_MAX);
 	out->velocity_mpr_max_delta_iq_a =
-		clampf(iq_limit * 0.15f, 0.01f, iq_limit);
-	out->velocity_mpr_disturbance_ki_nm_per_rad_s =
-		clampf(MAX(viscous, 0.005f), 0.005f, 0.2f);
+		clampf(iq_limit * 0.003f,
+		       MOTOR_COMMISSION_TUNE_MPR_DI_MIN_A,
+		       fminf(iq_limit, MOTOR_COMMISSION_TUNE_MPR_DI_MAX_A));
+	out->velocity_mpr_disturbance_ki_nm_per_rad_s = 0.0f;
 
 	out->position_mpr_horizon = 16U;
 	out->position_mpr_q_position = clampf(2.0f * position_omega, 0.5f, 20.0f);

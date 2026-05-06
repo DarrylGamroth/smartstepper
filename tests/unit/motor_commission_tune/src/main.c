@@ -117,6 +117,20 @@ ZTEST(motor_commission_tune, test_accepts_and_produces_positive_gains)
 	zassert_true(out.velocity_ki_a_per_rad > 0.0f, NULL);
 	zassert_true(out.position_kp_rad_s_per_rad > 0.0f, NULL);
 	zassert_true(out.position_ki_rad_s2_per_rad > 0.0f, NULL);
+	zassert_true(out.velocity_mpr_q_speed >= 0.003f &&
+		     out.velocity_mpr_q_speed <= 0.05f,
+		     "MPR q default is outside safe range: %f",
+		     (double)out.velocity_mpr_q_speed);
+	zassert_true(out.velocity_mpr_r_delta_iq >= 20.0f &&
+		     out.velocity_mpr_r_delta_iq <= 100.0f,
+		     "MPR r default is outside safe range: %f",
+		     (double)out.velocity_mpr_r_delta_iq);
+	zassert_true(out.velocity_mpr_max_delta_iq_a >= 0.0005f &&
+		     out.velocity_mpr_max_delta_iq_a <= 0.0020f,
+		     "MPR dIq default is outside safe range: %f",
+		     (double)out.velocity_mpr_max_delta_iq_a);
+	zassert_equal(out.velocity_mpr_disturbance_ki_nm_per_rad_s, 0.0f,
+		      "MPR internal disturbance integrator should default off");
 	zassert_false(out.velocity_dob_enable, NULL);
 	zassert_true(out.velocity_dob_torque_limit_nm > 0.0f, NULL);
 }

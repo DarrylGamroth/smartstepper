@@ -208,6 +208,8 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 {
 	params->Id_setpoint_A = 0.0f;
 	params->Iq_setpoint_A = 0.0f;
+	params->live.Id_ref_A = 0.0f;
+	params->live.Iq_ref_A = 0.0f;
 	params->live.velocity_target_rad_s = 0.0f;
 	params->live.velocity_ref_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
@@ -237,6 +239,7 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
+	params->live.detent_iq_ff_a = 0.0f;
 }
 
 static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
@@ -629,11 +632,11 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->position_cl_i_term_rad_s = 0.0f;
 	params->velocity_mpr_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_mpr_cfg.horizon = 8U;
-	params->velocity_mpr_cfg.q_speed = 1.5f;
-	params->velocity_mpr_cfg.r_delta_iq = 0.05f;
+	params->velocity_mpr_cfg.q_speed = 0.005f;
+	params->velocity_mpr_cfg.r_delta_iq = 50.0f;
 	params->velocity_mpr_cfg.iq_limit_a = params->velocity_cl_iq_limit_A;
-	params->velocity_mpr_cfg.max_delta_iq_a = 0.0f;
-	params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = 0.02f;
+	params->velocity_mpr_cfg.max_delta_iq_a = 0.0005f;
+	params->velocity_mpr_cfg.disturbance_ki_nm_per_rad_s = 0.0f;
 	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
 
 	params->position_mpr_cfg.dt_s = position_loop_dt_s;

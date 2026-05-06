@@ -182,6 +182,13 @@ static int motor_commission_encoder_prepare_generated_mode(const struct shell *s
 		}
 	}
 
+	ret = motor_commission_wait_for_control_loop(MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		shell_error(sh, "Control ISR is not advancing in velocity_generated mode (err %d)",
+			    ret);
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -218,6 +225,13 @@ static int motor_commission_encoder_run_generated_sweep(
 
 	struct motor_commission_encoder_trace_guard trace_guard;
 	motor_commission_encoder_trace_force_on(&trace_guard);
+	ret = motor_commission_wait_for_control_loop(MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		motor_commission_encoder_trace_restore(&trace_guard);
+		shell_error(sh, "Control ISR did not advance after enabling encoder trace (err %d)",
+			    ret);
+		return ret;
+	}
 
 	/* D-axis excitation means the generated reference angle is the commanded
 	 * rotor flux axis. The detected offset can therefore be applied directly

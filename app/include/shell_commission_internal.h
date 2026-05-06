@@ -51,6 +51,7 @@ struct motor_commission_encoder_trace_guard {
 int motor_post_mode_change(enum motor_state target_mode);
 int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms);
 int motor_commission_wait_ms_or_fault(uint32_t hold_ms);
+int motor_commission_wait_for_control_loop(uint32_t timeout_ms);
 void motor_commission_ctx_from_global(struct motor_commission_runtime_ctx *ctx);
 int motor_commission_run_motion_threshold(const struct shell *sh,
 					  float32_t start_a,

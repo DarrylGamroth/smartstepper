@@ -224,6 +224,9 @@ void motor_commission_encoder_trace_force_on(
 	 * Raw-trace enable is the existing ISR-safe telemetry gate that asks the
 	 * encoder acquisition to sample without changing the commutation policy.
 	 */
+	g_motor_params->encoder_raw_trace.write_idx = 0U;
+	g_motor_params->encoder_raw_trace.count = 0U;
+	g_motor_params->encoder_raw_trace.overrun_count = 0U;
 	g_motor_params->encoder_raw_trace.enabled = true;
 	g_motor_params->encoder_raw_trace.decimation = 1U;
 	g_motor_params->encoder_raw_trace.phase = 0U;
