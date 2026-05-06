@@ -109,6 +109,15 @@ static inline bool motor_calibration_owns_angle_generator(uint32_t mode_flags)
 	       motor_is_align_active_state(mode_flags);
 }
 
+static inline bool motor_vbus_fault_required(uint32_t mode_flags)
+{
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
+	       motor_is_align_active_state(mode_flags);
+}
+
 static inline enum motor_control_policy_mode
 motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
@@ -782,13 +791,15 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 	meas->ib_a = adc_to_current(values[CURRENT_SENSE_ADC_BUFFER_INDEX_1], CURRENT_SENSE_POLARITY_1);
 	meas->vbus_v = adc_to_vbus_v(values[VBUS_ADC_BUFFER_INDEX]);
 	commission_obs->vbus_v = meas->vbus_v;
+	params->live.dc_bus_voltage_V = meas->vbus_v;
 
-	if (meas->vbus_v < VBUS_MIN_VALID_V) {
+	bool vbus_fault_required = motor_vbus_fault_required(mode_flags);
+	if (vbus_fault_required && meas->vbus_v < VBUS_MIN_VALID_V) {
 		motor_step_report_post_error(report, ERROR_HARDWARE_BREAK);
 		return true;
 	}
 
-	if (meas->vbus_v > VBUS_MAX_V) {
+	if (vbus_fault_required && meas->vbus_v > VBUS_MAX_V) {
 		motor_step_report_post_error(report, ERROR_OVERVOLTAGE);
 		return true;
 	}
@@ -1336,13 +1347,13 @@ void motor_control_loop_step(struct motor_parameters *params,
 		goto isr_done;
 	}
 
-	/* Skip control if PWM output not enabled */
-	if (!feature_pwm_output) {
+	if (motor_control_step_measure_stage(params, mode_flags, values, current_ref, current_ref,
+					     meas, commission_obs, report)) {
 		goto isr_done;
 	}
 
-	if (motor_control_step_measure_stage(params, mode_flags, values, current_ref, current_ref,
-					     meas, commission_obs, report)) {
+	/* ADC sampling/telemetry is independent of PWM output. */
+	if (!feature_pwm_output) {
 		goto isr_done;
 	}
 

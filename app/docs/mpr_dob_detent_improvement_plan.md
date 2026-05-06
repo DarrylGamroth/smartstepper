@@ -592,3 +592,20 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   --detent-validate-ms 3000 \
   --json-report hil_logs/mpr_dob_detent/narrow_pi_mpr_mprdob_after_hold_fix.json
 ```
+
+### 2026-05-06 ADC Sampling Regression Fix
+
+- Root cause: `motor_control_loop_step()` skipped the ADC measurement stage when
+  `MOTOR_FEATURE_PWM_OUTPUT` was not enabled. This made `motor info live` report
+  stale/zero `Vbus` in `IDLE` and obscured the real power-stage state.
+- Fix: ADC current/Vbus measurement now runs every ISR tick before the PWM-output
+  gate. Live Vbus telemetry is updated unconditionally from the injected ADC
+  sample.
+- Fault policy: invalid/overvoltage Vbus faults are still only raised in active
+  calibration/online modes where the power stage requires valid bus voltage.
+- Validation:
+  - MT6835 west build passed.
+  - Firmware flashed successfully.
+  - `motor info live` in `IDLE` reports `Vbus: 23.6 V`.
+  - Controller recovered to `IDLE`, `Error: NONE`, command timeout restored to
+    `1000 ms` after the interrupted live commissioning attempt.
