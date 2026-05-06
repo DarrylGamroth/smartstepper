@@ -1182,15 +1182,13 @@ static int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **arg
 /* motor velocity mpr status
  * motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki]
  * motor velocity mpr bandwidth <hz>
- * motor velocity mpr preset <safe|medium|fast>
  */
 static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc < 2 || argc > 7) {
 		shell_error(sh, "Usage: motor velocity mpr status | "
 			    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
-			    "motor velocity mpr bandwidth <hz> | "
-			    "motor velocity mpr preset <safe|medium|fast>");
+			    "motor velocity mpr bandwidth <hz>");
 		return -EINVAL;
 	}
 
@@ -1283,51 +1281,6 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 		return 0;
 	}
 
-	if (strcmp(argv[1], "preset") == 0) {
-		if (argc != 3) {
-			shell_error(sh, "Usage: motor velocity mpr preset <safe|medium|fast>");
-			return -EINVAL;
-		}
-
-		float q_speed;
-		float r_delta_iq;
-		float max_delta_iq;
-		if (strcmp(argv[2], "safe") == 0) {
-			q_speed = 0.010f;
-			r_delta_iq = 50.0f;
-			max_delta_iq = 0.0005f;
-		} else if (strcmp(argv[2], "medium") == 0) {
-			q_speed = 0.015f;
-			r_delta_iq = 30.0f;
-			max_delta_iq = 0.0007f;
-		} else if (strcmp(argv[2], "fast") == 0) {
-			q_speed = 0.020f;
-			r_delta_iq = 20.0f;
-			max_delta_iq = 0.0010f;
-		} else {
-			shell_error(sh, "Preset must be safe, medium, or fast");
-			return -EINVAL;
-		}
-
-		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
-		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
-		ret |= motor_set_param_checked("velocity_mpr_horizon",
-					       (float)MOTOR_MPR_VELOCITY_BW_HORIZON);
-		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
-		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s", 0.0f);
-		if (ret != 0) {
-			shell_error(sh, "Failed to apply velocity MPR preset (err %d)", ret);
-			return ret;
-		}
-
-		motor_command_feed_watchdog(g_motor_params);
-		shell_print(sh,
-			    "Velocity MPR %s preset applied: q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=0",
-			    argv[2], (double)q_speed, (double)r_delta_iq,
-			    MOTOR_MPR_VELOCITY_BW_HORIZON, (double)max_delta_iq);
-		return 0;
-	}
-
 	if (strcmp(argv[1], "bandwidth") == 0) {
 		if (argc != 3) {
 			shell_error(sh, "Usage: motor velocity mpr bandwidth <hz>");
@@ -1384,8 +1337,7 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 
 	shell_error(sh, "Usage: motor velocity mpr status | "
 		    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
-		    "motor velocity mpr bandwidth <hz> | "
-		    "motor velocity mpr preset <safe|medium|fast>");
+		    "motor velocity mpr bandwidth <hz>");
 	return -EINVAL;
 }
 
@@ -2436,7 +2388,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 		      "Velocity PI: status | set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_velocity_pi, 2, 3),
 	SHELL_CMD_ARG(mpr, NULL,
-		      "Velocity MPR: status | set <q> <r> <horizon> <max_delta_iq> [dist_ki] | bandwidth <hz> | preset <safe|medium|fast>",
+		      "Velocity MPR: status | set <q> <r> <horizon> <max_delta_iq> [dist_ki] | bandwidth <hz>",
 		      cmd_motor_velocity_mpr, 2, 5),
 	SHELL_CMD_ARG(dob, NULL,
 		      "Velocity disturbance observer: status | defaults <safe|nominal> | enable <0|1> | gain <nm_per_rad_s> | torque_limit <nm> | iq_limit <a>",

@@ -68,6 +68,7 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --yes-live-motion \
   --detent-hz 0.05 \
   --detent-cycles 3 \
+  --mpr-bandwidth-hz 0.5 \
   --velocity-hz 0.05 \
   --velocity-hold-ms 1000
 ```
@@ -80,7 +81,8 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --yes-live-motion \
   --feature-combo pi \
   --feature-combo mpr \
-  --feature-combo mpr_detent
+  --feature-combo mpr_detent \
+  --mpr-bandwidth-hz 0.5
 ```
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file

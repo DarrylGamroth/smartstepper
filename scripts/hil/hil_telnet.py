@@ -422,8 +422,7 @@ def _feature_velocity_validate_commands(args: argparse.Namespace,
                                         label: str,
                                         outer_mode: str,
                                         detent_enable: bool,
-                                        dob_enable: bool,
-                                        mpr_preset: str = "safe") -> list[ShellCommand]:
+                                        dob_enable: bool) -> list[ShellCommand]:
     commands = [
         ShellCommand("motor velocity target 0", timeout_s=1.5),
         ShellCommand("motor current iq 0", timeout_s=1.5),
@@ -435,7 +434,8 @@ def _feature_velocity_validate_commands(args: argparse.Namespace,
     ]
     if outer_mode == "mpr":
         commands.extend([
-            ShellCommand(f"motor velocity mpr preset {mpr_preset}", timeout_s=2.0),
+            ShellCommand(f"motor velocity mpr bandwidth {args.mpr_bandwidth_hz:.3f}",
+                         timeout_s=2.0),
             ShellCommand("motor outer mode mpr", timeout_s=2.0),
         ])
     else:
@@ -1141,6 +1141,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--current-hold-ms", type=int, default=160)
     parser.add_argument("--velocity-hz", type=float, default=0.05)
     parser.add_argument("--velocity-hold-ms", type=int, default=1000)
+    parser.add_argument("--mpr-bandwidth-hz", type=float, default=0.5,
+                        help="Velocity MPR bandwidth used by mpr-dob-detent feature combos.")
     parser.add_argument("--velocity-pi-kp", type=float,
                         help="Optional velocity PI Kp to set before velocity validation.")
     parser.add_argument("--velocity-pi-ki", type=float,

@@ -426,9 +426,10 @@ Updated: 2026-05-06
   - `motor commission detent validate <mech_hz> <duration_ms>` compares
     detent off/on velocity ripple and current effort.
 - Phase 3 MPR safe tuning:
-  - added `motor velocity mpr preset <safe|medium|fast>`,
-  - presets keep horizon at `8`, disturbance integrator disabled, and bounded
-    `dIq` rates.
+  - added `motor velocity mpr bandwidth <hz>`,
+  - bandwidth mapping keeps horizon and `dIq` rates bounded,
+  - raw `motor velocity mpr set ...` remains available for engineering
+    diagnosis.
 - Phase 4 DOB gates:
   - DOB defaults stage tuning without enabling,
   - `motor velocity dob enable 1` checks readiness,
@@ -505,6 +506,7 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   --yes-live-motion \
   --feature-combo pi \
   --feature-combo mpr \
+  --mpr-bandwidth-hz 0.5 \
   --detent-hz 0.05 \
   --detent-cycles 3 \
   --detent-iq-limit 0.12 \
@@ -541,8 +543,9 @@ Important caveat from HIL:
 
 ### Current Completion State
 
-- MPR safe presets, bandwidth interface, and unit-tested core implementation
-  are complete.
+- MPR bandwidth interface and unit-tested core implementation are complete.
+  Public velocity MPR presets have been removed from the shell; use bandwidth
+  for operator-facing tuning and raw `set` only for engineering diagnosis.
 - DOB readiness/status and conservative enable flow are complete.
 - Detent map capture/validation infrastructure is implemented but not accepted
   as default behavior. The map must show repeatable RMS and peak improvement
@@ -563,6 +566,7 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   --feature-combo pi \
   --feature-combo mpr \
   --feature-combo mpr_dob \
+  --mpr-bandwidth-hz 0.5 \
   --velocity-hz 0.05 \
   --velocity-hold-ms 1000 \
   --detent-hz 0.10 \

@@ -50,10 +50,11 @@ Keep these engineering commands:
 ```text
 motor velocity mpr set ...
 motor position mpr set ...
-motor velocity mpr preset ...
 ```
 
-Presets remain bring-up shortcuts; bandwidth is the preferred tuning interface.
+Velocity MPR presets were removed from the public shell interface. Use
+bandwidth for operator-facing tuning and raw `set` only for engineering
+diagnosis.
 
 ## Implementation Phases
 
