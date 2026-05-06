@@ -16,6 +16,7 @@ target_sources(app PRIVATE
 	src/main.c
 	src/config.c
 	src/shell_commands.c
+	src/shell_control.c
 	src/shell_commands_state.c
 	src/shell_parse.c
 	src/shell_motion_profile.c
