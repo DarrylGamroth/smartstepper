@@ -1,0 +1,22 @@
+id: SH020
+status: pending
+title: Domain implementation split
+touch_files:
+  - app/src/shell_commands_state.c
+  - app/src/shell_state.c
+  - app/src/shell_safety.c
+  - app/src/shell_gate.c
+  - app/src/shell_info.c
+  - app/src/shell_observer.c
+  - app/src/shell_encoder.c
+  - app/src/shell_encoder_protocol.c
+  - app/src/shell_encoder_trace.c
+  - app/src/shell_encoder_capture.c
+  - app/src/shell_fault.c
+  - app/include/shell_commands_state.h
+  - app/CMakeLists.txt
+validation:
+  - west build MT6835
+constraints:
+  - preserve existing command names
+  - keep shared helpers private to the file that uses them where possible

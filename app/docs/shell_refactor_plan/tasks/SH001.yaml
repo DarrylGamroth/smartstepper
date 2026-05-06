@@ -1,0 +1,8 @@
+id: SH001
+status: pending
+title: Current shell ownership map
+touch_files:
+  - app/docs/shell_refactor_plan/current_shell_ownership.md
+  - app/docs/shell_refactor_plan/execution_log.md
+validation:
+  - rg -n "shell_commands.c|shell_commands_state.c" app/docs/shell_refactor_plan/current_shell_ownership.md

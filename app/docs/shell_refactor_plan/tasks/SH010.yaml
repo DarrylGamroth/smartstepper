@@ -1,0 +1,13 @@
+id: SH010
+status: pending
+title: Root registration split
+touch_files:
+  - app/src/shell_commands.c
+  - app/src/shell_control.c
+  - app/include/shell_control.h
+  - app/CMakeLists.txt
+validation:
+  - west build MT6835
+constraints:
+  - preserve existing command names
+  - no runtime behavior changes

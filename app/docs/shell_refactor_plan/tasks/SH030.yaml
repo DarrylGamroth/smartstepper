@@ -1,0 +1,11 @@
+id: SH030
+status: pending
+title: Encoder command nesting cleanup
+touch_files:
+  - app/src/shell_commands.c
+  - app/include/shell_commands_state.h
+validation:
+  - HIL parser unit tests
+constraints:
+  - add clean nested commands
+  - keep compatibility aliases during this refactor

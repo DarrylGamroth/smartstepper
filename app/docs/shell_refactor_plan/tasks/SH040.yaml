@@ -1,0 +1,10 @@
+id: SH040
+status: pending
+title: Validation and final report
+touch_files:
+  - app/docs/shell_refactor_plan/final_validation_report.md
+  - app/docs/shell_refactor_plan/execution_log.md
+validation:
+  - ./tests/run_unit_tests.sh
+  - west build MT6835
+  - python3 -m unittest scripts/hil/test_hil_telnet_parser.py
