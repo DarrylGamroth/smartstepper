@@ -2052,10 +2052,11 @@ static int cmd_motor_position_mpr(const struct shell *sh, size_t argc, char **ar
 	return -EINVAL;
 }
 
-/* motor outer status
+/* motor control status
+ * motor outer status
  * motor outer mode <pi|mpr>
  */
-static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **argv)
+static int cmd_motor_control_status(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
@@ -2065,8 +2066,8 @@ static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **ar
 		return -ENODEV;
 	}
 
-	shell_print(sh, "Outer Loop:");
-	shell_print(sh, "  Mode:        %s",
+	shell_print(sh, "Control System:");
+	shell_print(sh, "  Regulator:   %s",
 		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ? "MPR" : "PI");
 	shell_print(sh, "  Velocity dt: %.6f s (%u tick)",
 		    (double)g_motor_params->velocity_mpr_cfg.dt_s,
@@ -2092,18 +2093,23 @@ static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **ar
 		    g_motor_params->position_mpr_cfg.horizon);
 	const char *dob_reason = NULL;
 	bool dob_ready = motor_velocity_dob_ready(g_motor_params, &dob_reason);
-	shell_print(sh, "  DOB:          %s ready=%s (%s) ff=%.6f A dist=%.6f Nm",
+	shell_print(sh, "  Feedforward DOB:    %s ready=%s (%s) ff=%.6f A dist=%.6f Nm",
 		    g_motor_params->velocity_dob_cfg.enabled ? "ENABLED" : "DISABLED",
 		    dob_ready ? "YES" : "NO",
 		    dob_reason,
 		    (double)g_motor_params->live.velocity_dob_iq_ff_a,
 		    (double)g_motor_params->live.velocity_dob_disturbance_nm);
-	shell_print(sh, "  Detent FF:    %s gain=%.3f limit=%.6f A live=%.6f A",
+	shell_print(sh, "  Feedforward detent: %s gain=%.3f limit=%.6f A live=%.6f A",
 		    g_motor_params->detent_map_cfg.enabled ? "ENABLED" : "DISABLED",
 		    (double)g_motor_params->detent_map_cfg.gain,
 		    (double)g_motor_params->detent_map_cfg.iq_ff_limit_a,
 		    (double)g_motor_params->live.detent_iq_ff_a);
 	return 0;
+}
+
+static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **argv)
+{
+	return cmd_motor_control_status(sh, argc, argv);
 }
 
 static int cmd_motor_outer_mode(const struct shell *sh, size_t argc, char **argv)
@@ -2402,6 +2408,20 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_outer,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor control subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_control,
+	SHELL_CMD(status, NULL, "Show control regulator, limits, and feedforward status",
+		  cmd_motor_control_status),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor observer subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_observer,
+	SHELL_CMD(status, NULL, "Show observer trust, angles, and latency",
+		  cmd_motor_observer_status),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor velocity subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 	SHELL_CMD_ARG(target, NULL, "Set velocity target <hz>", cmd_motor_velocity_target, 2, 0),
@@ -2544,6 +2564,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_protocol,
 );
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
+	SHELL_CMD(status, NULL, "Show concise encoder control status", cmd_motor_encoder_status),
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
 	SHELL_CMD(fast, NULL, "Show fast encoder_rt driver status/counters",
 		  cmd_motor_encoder_fast),
@@ -2726,6 +2747,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
 	SHELL_CMD(outer, &sub_motor_outer, "Outer-loop regulator selection", NULL),
+	SHELL_CMD(control, &sub_motor_control, "Control regulator/feedforward status", NULL),
+	SHELL_CMD(observer, &sub_motor_observer, "Observer status", NULL),
 	SHELL_CMD(velocity, &sub_motor_velocity, "Velocity control", NULL),
 	SHELL_CMD(position, &sub_motor_position, "Position control", NULL),
 	SHELL_CMD(profile, &sub_motor_profile, "Motion profile settings", NULL),
