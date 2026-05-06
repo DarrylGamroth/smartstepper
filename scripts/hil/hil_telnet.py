@@ -223,6 +223,7 @@ def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor state status", timeout_s=5.0),
         ShellCommand("motor state transition", timeout_s=5.0),
+        ShellCommand("motor state recovery", timeout_s=5.0),
         ShellCommand("motor state policy", timeout_s=5.0),
         ShellCommand("motor control status", timeout_s=5.0),
         ShellCommand("motor observer status", timeout_s=5.0),
@@ -230,6 +231,7 @@ def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor outer status", timeout_s=5.0),
         ShellCommand("motor encoder control_status", timeout_s=5.0),
         ShellCommand("motor encoder acquisition", timeout_s=5.0),
+        ShellCommand("motor fault recovery", timeout_s=5.0),
         ShellCommand("motor fault snapshot status", timeout_s=5.0),
         ShellCommand("motor info live", timeout_s=5.0),
     ]
@@ -528,6 +530,16 @@ def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
     return [ShellCommand(cmd, timeout_s=args.command_timeout) for cmd in args.command]
 
 
+def scenario_recovery_status(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        ShellCommand("motor state recovery", timeout_s=5.0),
+        ShellCommand("motor fault recovery", timeout_s=5.0),
+        ShellCommand("motor gate status", timeout_s=5.0),
+        ShellCommand("motor encoder acquisition", timeout_s=5.0),
+        ShellCommand("motor state status", timeout_s=5.0),
+    ]
+
+
 SCENARIOS = {
     "status": (scenario_status, False),
     "boot-commission": (scenario_boot_commission, True),
@@ -537,6 +549,7 @@ SCENARIOS = {
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
     "mpr-dob-detent": (scenario_mpr_dob_detent, True),
     "position-validate": (scenario_position_validate, True),
+    "recovery-status": (scenario_recovery_status, False),
     "velocity-validate": (scenario_velocity_validate, True),
     "custom": (scenario_custom, False),
 }
@@ -985,6 +998,35 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                {
                    "result": transition_result or "",
                    "reason": transition_reason or "",
+               })
+
+    recovery_response = _last_response(results, "motor state recovery")
+    if not recovery_response:
+        recovery_response = _last_response(results, "motor fault recovery")
+    if recovery_response:
+        safe_ready = _parse_yes_no_field(recovery_response, "Safe idle ready")
+        fault_latched = _parse_yes_no_field(recovery_response, "Fault latched")
+        gate_req = _parse_yes_no_field(recovery_response, "Gate reset req")
+        gate_done = _parse_yes_no_field(recovery_response, "Gate reset done")
+        enc_req = _parse_yes_no_field(recovery_response, "Encoder rec req")
+        enc_done = _parse_yes_no_field(recovery_response, "Encoder rec done")
+        recovery_ok = (
+            fault_latched is False or
+            (
+                (gate_req is not True or gate_done is True) and
+                (enc_req is not True or enc_done is True) and
+                safe_ready is True
+            )
+        )
+        _check(checks, "recovery_ready", recovery_ok,
+               "Recovery status is ready" if recovery_ok else "Recovery status needs action",
+               {
+                   "fault_latched": bool(fault_latched),
+                   "gate_required": bool(gate_req),
+                   "gate_done": bool(gate_done),
+                   "encoder_required": bool(enc_req),
+                   "encoder_done": bool(enc_done),
+                   "safe_idle_ready": bool(safe_ready),
                })
 
     fault_response = _last_response(results, "motor fault snapshot status")

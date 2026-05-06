@@ -18,6 +18,7 @@ int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv
 int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_policy(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_transition(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_recovery(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_observer_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_mode_current_encoder(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_mode_velocity_generated(const struct shell *sh, size_t argc, char **argv);
@@ -56,6 +57,7 @@ int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char
 int cmd_motor_encoder_acquisition(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_acquisition_inject(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_recover(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv);
@@ -77,5 +79,6 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 int cmd_motor_fault_snapshot_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_start(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_stop(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_fault_recovery(const struct shell *sh, size_t argc, char **argv);
 
 #endif /* SHELL_COMMANDS_STATE_H_ */

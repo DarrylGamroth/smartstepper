@@ -671,7 +671,7 @@ int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv
 	ARG_UNUSED(argv);
 	
 	if (motor_api_clear_error() == 0) {
-		shell_print(sh, "Error cleared");
+		shell_print(sh, "Error clear requested");
 		return 0;
 	} else {
 		shell_error(sh, "Failed to clear error");
@@ -862,6 +862,46 @@ int cmd_motor_state_transition(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Loop:         %u", st->loop_count);
 	shell_print(sh, "  Reason:       %s", st->reason);
 	return 0;
+}
+
+static void motor_shell_print_recovery_status(const struct shell *sh,
+					      const struct motor_recovery_status *st)
+{
+	shell_print(sh, "Recovery Status:");
+	shell_print(sh, "  Sequence:          %u", st->sequence);
+	shell_print(sh, "  Fault latched:     %s", st->fault_latched ? "YES" : "NO");
+	shell_print(sh, "  Last error:        %s (%u)",
+		    motor_error_to_string(st->last_error_code),
+		    st->last_error_code);
+	shell_print(sh, "  Gate reset req:    %s", st->gate_reset_required ? "YES" : "NO");
+	shell_print(sh, "  Gate reset done:   %s", st->gate_reset_done ? "YES" : "NO");
+	shell_print(sh, "  Encoder rec req:   %s",
+		    st->encoder_recovery_required ? "YES" : "NO");
+	shell_print(sh, "  Encoder rec done:  %s",
+		    st->encoder_recovery_done ? "YES" : "NO");
+	shell_print(sh, "  Safe idle ready:   %s", st->safe_idle_ready ? "YES" : "NO");
+	shell_print(sh, "  Clear command:     motor state clear_error");
+	shell_print(sh, "  Gate recovery:     motor gate reset");
+	shell_print(sh, "  Encoder recovery:  motor encoder recover");
+}
+
+int cmd_motor_state_recovery(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	motor_shell_print_recovery_status(sh, &g_motor_params->recovery_status);
+	return 0;
+}
+
+int cmd_motor_fault_recovery(const struct shell *sh, size_t argc, char **argv)
+{
+	return cmd_motor_state_recovery(sh, argc, argv);
 }
 
 /* motor state policy */
@@ -1131,6 +1171,14 @@ int cmd_motor_gate_reset(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
+	if (g_motor_params) {
+		g_motor_params->recovery_status.gate_reset_done = true;
+		g_motor_params->recovery_status.safe_idle_ready =
+			(!g_motor_params->recovery_status.gate_reset_required ||
+			 g_motor_params->recovery_status.gate_reset_done) &&
+			(!g_motor_params->recovery_status.encoder_recovery_required ||
+			 g_motor_params->recovery_status.encoder_recovery_done);
+	}
 	shell_print(sh, "Gate-driver fault reset pulse sent");
 	return 0;
 }
@@ -1447,8 +1495,27 @@ int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, cha
 	ARG_UNUSED(argv);
 
 	motor_encoder_acquisition_reset_stats();
+	if (g_motor_params) {
+		g_motor_params->encoder_fault_counter = 0U;
+		g_motor_params->recovery_status.encoder_recovery_done = true;
+		g_motor_params->recovery_status.safe_idle_ready =
+			(!g_motor_params->recovery_status.gate_reset_required ||
+			 g_motor_params->recovery_status.gate_reset_done) &&
+			(!g_motor_params->recovery_status.encoder_recovery_required ||
+			 g_motor_params->recovery_status.encoder_recovery_done);
+	}
 	shell_print(sh, "Encoder acquisition counters reset");
 	return 0;
+}
+
+/* motor encoder recover */
+int cmd_motor_encoder_recover(const struct shell *sh, size_t argc, char **argv)
+{
+	int ret = cmd_motor_encoder_acquisition_reset(sh, argc, argv);
+	if (ret == 0) {
+		shell_print(sh, "Encoder recovery complete");
+	}
+	return ret;
 }
 
 /* motor encoder acquisition_inject [none|status|frame] */

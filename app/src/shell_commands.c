@@ -2336,6 +2336,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(policy, NULL, "Show active control policy", cmd_motor_state_policy),
 	SHELL_CMD(transition, NULL, "Show latest state/mode transition result",
 		  cmd_motor_state_transition),
+	SHELL_CMD(recovery, NULL, "Show fault recovery status", cmd_motor_state_recovery),
 	SHELL_CMD(mode, &sub_motor_state_mode, "Switch control mode", NULL),
 	SHELL_SUBCMD_SET_END
 );
@@ -2543,6 +2544,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 		  cmd_motor_encoder_acquisition),
 	SHELL_CMD(acquisition_reset, NULL, "Reset encoder acquisition counters",
 		  cmd_motor_encoder_acquisition_reset),
+	SHELL_CMD(recover, NULL, "Abort/reset encoder acquisition fault state",
+		  cmd_motor_encoder_recover),
 	SHELL_CMD_ARG(acquisition_inject, NULL, "Acquisition fault inject mode [none|status|frame]",
 		      cmd_motor_encoder_acquisition_inject, 1, 1),
 	SHELL_CMD(control_status, NULL, "Show encoder-control readiness gate",
@@ -2580,6 +2583,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault_snapshot,
 /* motor fault subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_fault,
 	SHELL_CMD(snapshot, &sub_motor_fault_snapshot, "ISR fault snapshot diagnostics", NULL),
+	SHELL_CMD(recovery, NULL, "Show explicit fault recovery status", cmd_motor_fault_recovery),
 	SHELL_SUBCMD_SET_END
 );
 

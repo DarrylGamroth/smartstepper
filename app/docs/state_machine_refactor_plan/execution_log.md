@@ -34,7 +34,7 @@ Notes:
 
 ## 2026-05-06 - SMF0401/SMF0402 - Centralize online mode reset policy
 Status: done
-Commit: pending
+Commit: 875d4d1
 Validation:
 - west build MT6835: PASS
 - python3 -m py_compile scripts/hil/hil_telnet.py: PASS
@@ -42,3 +42,16 @@ Validation:
 Notes:
 - Online substates now use motor_operating_mode descriptors for ISR feature masks.
 - Entry/exit reset behavior for direct current, generated velocity/position, and encoder velocity/position modes is centralized in motor_operating_mode_apply_*_policy().
+
+## 2026-05-06 - SMF0501/SMF0502/SMF0503 - Explicit fault recovery status
+Status: done
+Commit: pending
+Validation:
+- west build MT6835: PASS
+- python3 -m py_compile scripts/hil/hil_telnet.py: PASS
+- python3 -m unittest scripts/hil/test_hil_telnet_parser.py: PASS
+Notes:
+- ERROR entry records whether gate reset and/or encoder recovery is required.
+- `motor state clear_error` now rejects recovery-incomplete faults instead of implicitly pulsing gate-driver recovery.
+- Added shell visibility via `motor state recovery`, `motor fault recovery`, and explicit `motor encoder recover`.
+- HIL parser now checks recovery readiness and has unit coverage for incomplete gate recovery.

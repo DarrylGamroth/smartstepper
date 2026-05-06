@@ -700,6 +700,10 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->fault_snapshot.latch_loop = 0U;
 	params->fault_snapshot.latch_error_code = ERROR_NONE;
 	params->fault_snapshot.latched = 0U;
+	params->recovery_status = (struct motor_recovery_status){
+		.last_error_code = ERROR_NONE,
+		.safe_idle_ready = true,
+	};
 	params->live.velocity_dob_iq_ff_a = 0.0f;
 	params->live.velocity_dob_disturbance_nm = 0.0f;
 	params->live.velocity_dob_residual_rad_s = 0.0f;
@@ -1081,6 +1085,18 @@ static void motor_state_error_entry(void *obj)
 
 	/* Store the error code that triggered this state */
 	params->last_error_code = params->event.error_code;
+	params->recovery_status.sequence++;
+	params->recovery_status.last_error_code = params->last_error_code;
+	params->recovery_status.fault_latched = true;
+	params->recovery_status.gate_reset_required =
+		params->last_error_code == ERROR_HARDWARE_BREAK ||
+		params->last_error_code == ERROR_OVERCURRENT;
+	params->recovery_status.encoder_recovery_required =
+		params->last_error_code == ERROR_ENCODER_FAULT;
+	params->recovery_status.gate_reset_done = !params->recovery_status.gate_reset_required;
+	params->recovery_status.encoder_recovery_done =
+		!params->recovery_status.encoder_recovery_required;
+	params->recovery_status.safe_idle_ready = false;
 
 	LOG_ERR("Entering ERROR state, code: %s",
 		motor_error_to_string(params->last_error_code));
@@ -1112,17 +1128,43 @@ static enum smf_state_result motor_state_error_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_CLEAR_ERROR:
+		if ((params->recovery_status.gate_reset_required &&
+		     !params->recovery_status.gate_reset_done) ||
+		    (params->recovery_status.encoder_recovery_required &&
+		     !params->recovery_status.encoder_recovery_done)) {
+			LOG_WRN("Error clear rejected: recovery incomplete "
+				"(gate_required=%u gate_done=%u encoder_required=%u encoder_done=%u)",
+				params->recovery_status.gate_reset_required,
+				params->recovery_status.gate_reset_done,
+				params->recovery_status.encoder_recovery_required,
+				params->recovery_status.encoder_recovery_done);
+			motor_transition_status_update(
+				params, MOTOR_EVENT_CLEAR_ERROR, MOTOR_STATE_IDLE,
+				MOTOR_STATE_ERROR, MOTOR_STATE_ERROR, MOTOR_STATE_ERROR,
+				MOTOR_TRANSITION_RESULT_REJECTED, params->last_error_code,
+				"fault recovery incomplete");
+			return SMF_EVENT_HANDLED;
+		}
+
 		if (params->profile_max_velocity_rad_s <= 0.0f) {
 			LOG_INF("Error cleared before controller init completed, retrying initialization");
 			params->last_error_code = ERROR_NONE;
-			motor_reset_gate_driver_faults_before_enable(params);
+			params->recovery_status = (struct motor_recovery_status){
+				.sequence = params->recovery_status.sequence,
+				.last_error_code = ERROR_NONE,
+				.safe_idle_ready = true,
+			};
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_HW_INIT]);
 			return SMF_EVENT_HANDLED;
 		}
 
 		LOG_INF("Error cleared, transitioning to IDLE");
 		params->last_error_code = ERROR_NONE;
-		motor_reset_gate_driver_faults_before_enable(params);
+		params->recovery_status = (struct motor_recovery_status){
+			.sequence = params->recovery_status.sequence,
+			.last_error_code = ERROR_NONE,
+			.safe_idle_ready = true,
+		};
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 		return SMF_EVENT_HANDLED;
 

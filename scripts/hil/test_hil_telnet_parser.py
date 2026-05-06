@@ -39,6 +39,18 @@ Transition Status:
 """,
             ),
             hil_telnet.ShellResult(
+                "motor state recovery",
+                """
+Recovery Status:
+  Fault latched:     NO
+  Gate reset req:    NO
+  Gate reset done:   YES
+  Encoder rec req:   NO
+  Encoder rec done:  YES
+  Safe idle ready:   YES
+""",
+            ),
+            hil_telnet.ShellResult(
                 "motor fault snapshot status",
                 """
 Fault snapshot:
@@ -88,6 +100,38 @@ Transition Status:
         transition = next(check for check in report.checks
                           if check.name == "transition_not_rejected")
         self.assertEqual(transition.values["result"], "rejected")
+
+    def test_recovery_status_fails_when_gate_reset_required(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  State: ERROR (17)\n  Error: OVERCURRENT (2)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state recovery",
+                """
+Recovery Status:
+  Fault latched:     YES
+  Last error:        OVERCURRENT (2)
+  Gate reset req:    YES
+  Gate reset done:   NO
+  Encoder rec req:   NO
+  Encoder rec done:  YES
+  Safe idle ready:   NO
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("recovery-status"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        recovery = next(check for check in report.checks if check.name == "recovery_ready")
+        self.assertTrue(recovery.values["gate_required"])
+        self.assertFalse(recovery.values["gate_done"])
 
     def test_boot_commission_fails_without_completion_text(self) -> None:
         results = [

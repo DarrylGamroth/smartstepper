@@ -333,6 +333,17 @@ struct motor_runtime_adapter_ctxs {
 	struct motor_commission_runtime_ctx commission;
 };
 
+struct motor_recovery_status {
+	uint32_t sequence;
+	uint32_t last_error_code;
+	bool fault_latched;
+	bool gate_reset_required;
+	bool encoder_recovery_required;
+	bool gate_reset_done;
+	bool encoder_recovery_done;
+	bool safe_idle_ready;
+};
+
 /**
  * @brief Main motor control parameters structure
  *
@@ -345,6 +356,7 @@ struct motor_parameters {
 	const struct smf_state *state_for_isr;
 	struct motor_event event;  /* Current event being processed */
 	struct motor_transition_status transition_status; /* Latest SMF transition result */
+	struct motor_recovery_status recovery_status; /* Latest explicit fault recovery state */
 	struct k_timer state_timer;  /* Timer for state timeouts */
 	/* P03 split scaffolding:
 	 * - rt_fast: ISR-rate mirrors for hot data migration.
