@@ -83,6 +83,65 @@ int motor_dob_validate(const struct motor_dob_config *cfg,
 	return 0;
 }
 
+const char *motor_dob_readiness_reason_str(enum motor_dob_readiness_reason reason)
+{
+	switch (reason) {
+	case MOTOR_DOB_READY:
+		return "ready";
+	case MOTOR_DOB_NOT_COMMISSIONED:
+		return "commissioning incomplete";
+	case MOTOR_DOB_ENCODER_MAPPING_MISSING:
+		return "encoder mapping incomplete";
+	case MOTOR_DOB_FEEDBACK_UNTRUSTED:
+		return "encoder feedback not trusted";
+	case MOTOR_DOB_FAULT_ACTIVE:
+		return "motor fault active";
+	case MOTOR_DOB_MODEL_INVALID:
+		return "invalid Kt/J model";
+	case MOTOR_DOB_LIMIT_INVALID:
+		return "invalid current limit";
+	case MOTOR_DOB_TUNING_INVALID:
+		return "invalid DOB tuning";
+	default:
+		return "unknown";
+	}
+}
+
+int motor_dob_readiness_check(const struct motor_dob_readiness_input *in,
+			      struct motor_dob_readiness_result *out)
+{
+	if (in == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	enum motor_dob_readiness_reason reason = MOTOR_DOB_READY;
+	if (in->fault_active) {
+		reason = MOTOR_DOB_FAULT_ACTIVE;
+	} else if (!in->commissioning_complete) {
+		reason = MOTOR_DOB_NOT_COMMISSIONED;
+	} else if (!in->encoder_mapping_complete) {
+		reason = MOTOR_DOB_ENCODER_MAPPING_MISSING;
+	} else if (!in->feedback_trusted) {
+		reason = MOTOR_DOB_FEEDBACK_UNTRUSTED;
+	} else if (!motor_dob_is_finite_positive(in->torque_constant_nm_per_a) ||
+		   !motor_dob_is_finite_positive(in->inertia_kgm2)) {
+		reason = MOTOR_DOB_MODEL_INVALID;
+	} else if (!motor_dob_is_finite_positive(in->velocity_iq_limit_a)) {
+		reason = MOTOR_DOB_LIMIT_INVALID;
+	} else if (in->cfg == NULL ||
+		   !motor_dob_is_finite_nonnegative(in->cfg->observer_gain_nm_per_rad_s) ||
+		   !motor_dob_is_finite_positive(in->cfg->torque_limit_nm) ||
+		   !motor_dob_is_finite_nonnegative(in->cfg->iq_ff_limit_a)) {
+		reason = MOTOR_DOB_TUNING_INVALID;
+	}
+
+	out->ready = (reason == MOTOR_DOB_READY);
+	out->reason = reason;
+	out->reason_str = motor_dob_readiness_reason_str(reason);
+
+	return 0;
+}
+
 int motor_dob_init(const struct motor_dob_config *cfg,
 	   const struct motor_dob_model *model,
 	   struct motor_dob_state *state,

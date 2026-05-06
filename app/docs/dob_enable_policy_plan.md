@@ -104,3 +104,53 @@ Expected:
 - Unit tests cover enable gating where practical.
 - HIL evidence covers PI+DOB and MPR+DOB.
 
+## Implementation Evidence
+
+Status: implemented with live PI+DOB/MPR+DOB HIL validation deferred until the
+velocity-encoder commissioning baseline is stable.
+
+Code changes:
+
+- Added a `motor_core` DOB readiness contract:
+  - `motor_dob_readiness_check()`
+  - `motor_dob_readiness_reason_str()`
+- Shell `motor velocity dob enable 1` now uses the shared readiness contract.
+- Runtime DOB now clears/resets deterministically when:
+  - DOB is disabled,
+  - torque model is invalid,
+  - target and measured speed are near zero,
+  - velocity reference changes sign,
+  - velocity reference makes a large step,
+  - encoder feedback becomes untrusted,
+  - DOB init/step fails.
+- DOB feedforward remains bounded by the existing `iq_ff_limit_a` and final
+  velocity-loop current clamp.
+
+Validation:
+
+```text
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_dob.unit
+```
+
+Result:
+
+```text
+8 of 8 executed test cases passed
+```
+
+Firmware build:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Result:
+
+```text
+zephyr/zephyr.elf linked successfully
+```
+
+HIL note:
+
+- Required PI+DOB and MPR+DOB validation remains open until current/encoder
+  commissioning produces repeatable safe velocity-encoder operation.

@@ -114,54 +114,34 @@ static bool motor_velocity_dob_ready(const struct motor_parameters *params,
 		}
 		return false;
 	}
-	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
-		if (reason != NULL) {
-			*reason = "motor in ERROR";
-		}
-		return false;
-	}
-	if (!params->calibration.complete || !params->calibration.encoder_mapping_complete) {
-		if (reason != NULL) {
-			*reason = "commissioning or encoder mapping incomplete";
-		}
-		return false;
-	}
-	if (!isfinite(params->torque_gain_nm_per_a_active) ||
-	    params->torque_gain_nm_per_a_active <= 0.0f ||
-	    !isfinite(params->inertia_kgm2_active) ||
-	    params->inertia_kgm2_active <= 0.0f ||
-	    !isfinite(params->velocity_cl_iq_limit_A) ||
-	    params->velocity_cl_iq_limit_A <= 0.0f) {
-		if (reason != NULL) {
-			*reason = "invalid Kt/J/current limit";
-		}
-		return false;
-	}
-	if (!isfinite(params->velocity_dob_cfg.observer_gain_nm_per_rad_s) ||
-	    params->velocity_dob_cfg.observer_gain_nm_per_rad_s < 0.0f ||
-	    !isfinite(params->velocity_dob_cfg.torque_limit_nm) ||
-	    params->velocity_dob_cfg.torque_limit_nm <= 0.0f ||
-	    !isfinite(params->velocity_dob_cfg.iq_ff_limit_a) ||
-	    params->velocity_dob_cfg.iq_ff_limit_a < 0.0f) {
-		if (reason != NULL) {
-			*reason = "invalid DOB tuning";
-		}
-		return false;
-	}
 
 	bool encoder_mode =
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
-	if (encoder_mode &&
-	    params->live.position_trust_state != MOTOR_FEEDBACK_TRUST_TRUSTED) {
+	struct motor_dob_readiness_result readiness = {0};
+	const struct motor_dob_readiness_input input = {
+		.commissioning_complete = params->calibration.complete,
+		.encoder_mapping_complete = params->calibration.encoder_mapping_complete,
+		.feedback_trusted = !encoder_mode ||
+				    params->live.position_trust_state ==
+					    MOTOR_FEEDBACK_TRUST_TRUSTED,
+		.fault_active = motor_api_get_state() == MOTOR_STATE_ERROR,
+		.torque_constant_nm_per_a = params->torque_gain_nm_per_a_active,
+		.inertia_kgm2 = params->inertia_kgm2_active,
+		.velocity_iq_limit_a = params->velocity_cl_iq_limit_A,
+		.cfg = &params->velocity_dob_cfg,
+	};
+
+	if (motor_dob_readiness_check(&input, &readiness) != 0 || !readiness.ready) {
 		if (reason != NULL) {
-			*reason = "encoder feedback not trusted";
+			*reason = (readiness.reason_str != NULL) ? readiness.reason_str :
+								   "readiness check failed";
 		}
 		return false;
 	}
 
 	if (reason != NULL) {
-		*reason = "ready";
+		*reason = readiness.reason_str;
 	}
 	return true;
 }

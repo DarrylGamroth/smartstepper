@@ -69,8 +69,41 @@ struct motor_dob_state {
 	float32_t b_d;
 };
 
+enum motor_dob_readiness_reason {
+	MOTOR_DOB_READY = 0,
+	MOTOR_DOB_NOT_COMMISSIONED,
+	MOTOR_DOB_ENCODER_MAPPING_MISSING,
+	MOTOR_DOB_FEEDBACK_UNTRUSTED,
+	MOTOR_DOB_FAULT_ACTIVE,
+	MOTOR_DOB_MODEL_INVALID,
+	MOTOR_DOB_LIMIT_INVALID,
+	MOTOR_DOB_TUNING_INVALID,
+};
+
+struct motor_dob_readiness_input {
+	bool commissioning_complete;
+	bool encoder_mapping_complete;
+	bool feedback_trusted;
+	bool fault_active;
+	float32_t torque_constant_nm_per_a;
+	float32_t inertia_kgm2;
+	float32_t velocity_iq_limit_a;
+	const struct motor_dob_config *cfg;
+};
+
+struct motor_dob_readiness_result {
+	bool ready;
+	enum motor_dob_readiness_reason reason;
+	const char *reason_str;
+};
+
 int motor_dob_validate(const struct motor_dob_config *cfg,
 		       const struct motor_dob_model *model);
+
+const char *motor_dob_readiness_reason_str(enum motor_dob_readiness_reason reason);
+
+int motor_dob_readiness_check(const struct motor_dob_readiness_input *in,
+			      struct motor_dob_readiness_result *out);
 
 int motor_dob_init(const struct motor_dob_config *cfg,
 	   const struct motor_dob_model *model,

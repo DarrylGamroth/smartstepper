@@ -94,6 +94,76 @@ ZTEST(motor_dob, test_validate_rejects_invalid_inputs)
 	zassert_equal(motor_dob_validate(&cfg, &model), -EINVAL, NULL);
 }
 
+ZTEST(motor_dob, test_readiness_check_accepts_good_state)
+{
+	const struct motor_dob_config cfg = {
+		.enabled = false,
+		.dt_s = 0.001f,
+		.observer_gain_nm_per_rad_s = 0.05f,
+		.torque_limit_nm = 0.2f,
+		.iq_ff_limit_a = 0.5f,
+	};
+	const struct motor_dob_readiness_input input = {
+		.commissioning_complete = true,
+		.encoder_mapping_complete = true,
+		.feedback_trusted = true,
+		.fault_active = false,
+		.torque_constant_nm_per_a = 0.1f,
+		.inertia_kgm2 = 0.001f,
+		.velocity_iq_limit_a = 0.5f,
+		.cfg = &cfg,
+	};
+	struct motor_dob_readiness_result result = {0};
+
+	zassert_ok(motor_dob_readiness_check(&input, &result), NULL);
+	zassert_true(result.ready, NULL);
+	zassert_equal(result.reason, MOTOR_DOB_READY, NULL);
+	zassert_true(result.reason_str == motor_dob_readiness_reason_str(MOTOR_DOB_READY),
+		     NULL);
+}
+
+ZTEST(motor_dob, test_readiness_check_reports_first_failure)
+{
+	struct motor_dob_config cfg = {
+		.enabled = false,
+		.dt_s = 0.001f,
+		.observer_gain_nm_per_rad_s = 0.05f,
+		.torque_limit_nm = 0.2f,
+		.iq_ff_limit_a = 0.5f,
+	};
+	struct motor_dob_readiness_input input = {
+		.commissioning_complete = true,
+		.encoder_mapping_complete = true,
+		.feedback_trusted = true,
+		.fault_active = false,
+		.torque_constant_nm_per_a = 0.1f,
+		.inertia_kgm2 = 0.001f,
+		.velocity_iq_limit_a = 0.5f,
+		.cfg = &cfg,
+	};
+	struct motor_dob_readiness_result result = {0};
+
+	input.fault_active = true;
+	zassert_ok(motor_dob_readiness_check(&input, &result), NULL);
+	zassert_false(result.ready, NULL);
+	zassert_equal(result.reason, MOTOR_DOB_FAULT_ACTIVE, NULL);
+
+	input.fault_active = false;
+	input.feedback_trusted = false;
+	zassert_ok(motor_dob_readiness_check(&input, &result), NULL);
+	zassert_equal(result.reason, MOTOR_DOB_FEEDBACK_UNTRUSTED, NULL);
+
+	input.feedback_trusted = true;
+	input.torque_constant_nm_per_a = 0.0f;
+	zassert_ok(motor_dob_readiness_check(&input, &result), NULL);
+	zassert_equal(result.reason, MOTOR_DOB_MODEL_INVALID, NULL);
+
+	input.torque_constant_nm_per_a = 0.1f;
+	cfg.torque_limit_nm = 0.0f;
+	zassert_ok(motor_dob_readiness_check(&input, &result), NULL);
+	zassert_equal(result.reason, MOTOR_DOB_TUNING_INVALID, NULL);
+}
+
 ZTEST(motor_dob, test_disabled_mode_outputs_zero_feedforward)
 {
 	struct motor_dob_config cfg = {

@@ -56,6 +56,8 @@ struct motor_outer_loop_runtime_ctx {
 	float32_t coulomb_friction_nm_active;
 	struct motor_dob_config *velocity_dob_cfg;
 	struct motor_dob_state *velocity_dob_state;
+	bool velocity_dob_ref_valid;
+	float32_t velocity_dob_last_ref_rad_s;
 	float32_t *live_velocity_dob_iq_ff_a;
 	float32_t *live_velocity_dob_disturbance_nm;
 	float32_t *live_velocity_dob_residual_rad_s;

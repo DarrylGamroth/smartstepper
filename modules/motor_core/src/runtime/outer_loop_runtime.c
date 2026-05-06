@@ -20,6 +20,7 @@
 #define MOTOR_OUTER_LOOP_NOINLINE __attribute__((noinline))
 #define MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S (0.02f * 2.0f * PI_F32)
 #define MOTOR_OUTER_LOOP_POSITION_HOLD_EPS_RAD (0.5f * PI_F32 / 180.0f)
+#define MOTOR_OUTER_LOOP_DOB_REF_STEP_RESET_RAD_S (0.25f * 2.0f * PI_F32)
 
 static inline bool motor_outer_loop_use_mpr(const struct motor_outer_loop_runtime_ctx *ctx)
 {
@@ -39,6 +40,48 @@ static void motor_outer_loop_outputs_init(const struct motor_outer_loop_inputs *
 	out->speed_mech_filtered_rad_s = in->speed_mech_rad_s;
 	out->id_ref_a = in->id_ref_a;
 	out->iq_ref_a = in->iq_ref_a;
+}
+
+static inline void motor_outer_loop_dob_clear(struct motor_outer_loop_runtime_ctx *ctx,
+					      float32_t omega_rad_s)
+{
+	if (ctx->velocity_dob_state != NULL) {
+		motor_dob_reset(ctx->velocity_dob_state, omega_rad_s);
+	}
+	ctx->velocity_dob_ref_valid = false;
+	ctx->velocity_dob_last_ref_rad_s = 0.0f;
+	if (ctx->live_velocity_dob_iq_ff_a != NULL) {
+		*ctx->live_velocity_dob_iq_ff_a = 0.0f;
+	}
+	if (ctx->live_velocity_dob_disturbance_nm != NULL) {
+		*ctx->live_velocity_dob_disturbance_nm = 0.0f;
+	}
+	if (ctx->live_velocity_dob_residual_rad_s != NULL) {
+		*ctx->live_velocity_dob_residual_rad_s = 0.0f;
+	}
+}
+
+static inline bool motor_outer_loop_dob_ref_discontinuous(
+	struct motor_outer_loop_runtime_ctx *ctx,
+	float32_t ref_rad_s)
+{
+	if (!ctx->velocity_dob_ref_valid) {
+		ctx->velocity_dob_ref_valid = true;
+		ctx->velocity_dob_last_ref_rad_s = ref_rad_s;
+		return false;
+	}
+
+	float32_t previous = ctx->velocity_dob_last_ref_rad_s;
+	ctx->velocity_dob_last_ref_rad_s = ref_rad_s;
+
+	bool sign_change =
+		fabsf(previous) > MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S &&
+		fabsf(ref_rad_s) > MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S &&
+		((previous > 0.0f) != (ref_rad_s > 0.0f));
+	bool large_step =
+		fabsf(ref_rad_s - previous) > MOTOR_OUTER_LOOP_DOB_REF_STEP_RESET_RAD_S;
+
+	return sign_change || large_step;
 }
 
 static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_position_step(struct motor_outer_loop_runtime_ctx *ctx,
@@ -163,10 +206,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_hold_on_bad_feedback(stru
 	motor_mpr_velocity_reset(ctx->velocity_mpr_state,
 				 out->speed_mech_filtered_rad_s,
 				 out->iq_ref_a);
-	motor_dob_reset(ctx->velocity_dob_state, out->speed_mech_filtered_rad_s);
-	*ctx->live_velocity_dob_iq_ff_a = 0.0f;
-	*ctx->live_velocity_dob_disturbance_nm = 0.0f;
-	*ctx->live_velocity_dob_residual_rad_s = 0.0f;
+	motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
 	if (ctx->live_detent_iq_ff_a != NULL) {
 		*ctx->live_detent_iq_ff_a = 0.0f;
 	}
@@ -280,7 +320,23 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_dob_step(struct 
 					       float32_t iq_cmd_pre_dob_a)
 {
 #if defined(CONFIG_MOTOR_VELOCITY_DOB) && (CONFIG_MOTOR_VELOCITY_DOB == 1)
+	if (ctx->velocity_dob_cfg == NULL ||
+	    ctx->velocity_dob_state == NULL ||
+	    !ctx->velocity_dob_cfg->enabled) {
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
+		return;
+	}
 	if (!isfinite(torque_gain_nm_per_a) || torque_gain_nm_per_a <= 0.0f) {
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
+		return;
+	}
+	if (fabsf(out->velocity_ref_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S &&
+	    fabsf(out->speed_mech_filtered_rad_s) <= MOTOR_OUTER_LOOP_ZERO_VELOCITY_EPS_RAD_S) {
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
+		return;
+	}
+	if (motor_outer_loop_dob_ref_discontinuous(ctx, out->velocity_ref_rad_s)) {
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
 		return;
 	}
 
@@ -309,9 +365,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_dob_step(struct 
 						  ctx->velocity_dob_state,
 						  out->speed_mech_filtered_rad_s);
 		if (dob_init_ret != 0) {
-			*ctx->live_velocity_dob_iq_ff_a = 0.0f;
-			*ctx->live_velocity_dob_disturbance_nm = 0.0f;
-			*ctx->live_velocity_dob_residual_rad_s = 0.0f;
+			motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
 			dob_ready = false;
 		}
 	}
@@ -336,10 +390,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_dob_step(struct 
 				       -ctx->velocity_cl_iq_limit_a,
 				       ctx->velocity_cl_iq_limit_a);
 	} else {
-		motor_dob_reset(ctx->velocity_dob_state, out->speed_mech_filtered_rad_s);
-		*ctx->live_velocity_dob_iq_ff_a = 0.0f;
-		*ctx->live_velocity_dob_disturbance_nm = 0.0f;
-		*ctx->live_velocity_dob_residual_rad_s = 0.0f;
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
 	}
 #else
 	ARG_UNUSED(ctx);
@@ -412,7 +463,11 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct moto
 		motor_outer_loop_hold_on_bad_feedback(ctx, in, out);
 		return;
 	}
-	if (!velocity_loop_update || !velocity_feedback_trusted) {
+	if (!velocity_feedback_trusted) {
+		motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
+		return;
+	}
+	if (!velocity_loop_update) {
 		return;
 	}
 
