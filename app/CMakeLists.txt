@@ -17,7 +17,16 @@ target_sources(app PRIVATE
 	src/config.c
 	src/shell_commands.c
 	src/shell_control.c
-	src/shell_commands_state.c
+	src/shell_state.c
+	src/shell_safety.c
+	src/shell_gate.c
+	src/shell_info.c
+	src/shell_observer.c
+	src/shell_encoder.c
+	src/shell_encoder_protocol.c
+	src/shell_encoder_trace.c
+	src/shell_encoder_capture.c
+	src/shell_fault.c
 	src/shell_parse.c
 	src/shell_motion_profile.c
 	src/shell_motion_sequence.c
