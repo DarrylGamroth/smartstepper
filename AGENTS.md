@@ -95,6 +95,87 @@ Overlay note:
 - Default profile is `configs/motor_mt6835_2a.overlay`.
 - For AEAT-9955 hardware, switch to `configs/motor_aeat9955_067a.overlay`.
 
+## Planning and Scope Control
+
+Keep implementation plans small enough to complete, validate, and review in one
+focused work cycle. Prefer one plan per owner concept:
+
+- one architectural cleanup,
+- one control feature,
+- one commissioning workflow,
+- one shell/API cleanup,
+- one HIL validation target.
+
+Avoid broad plans that combine algorithm design, runtime refactor, shell naming,
+commissioning, persistence, and HIL validation at the same time. If a request
+spans multiple concepts, create a program index and split the work into narrow
+execution plans.
+
+Each plan should use this structure:
+
+```md
+# Title
+
+## Goal
+One sentence.
+
+## Non-Goals
+Explicitly exclude related work.
+
+## Current Problem
+What is broken or confusing now.
+
+## Design
+Small target architecture.
+
+## Implementation Phases
+Phase 1:
+Phase 2:
+Phase 3:
+
+## Acceptance Criteria
+Measurable pass/fail.
+
+## HIL Evidence
+Commands, expected result, log path.
+
+## Risks
+What could invalidate the plan.
+
+## Done State
+What code/docs/tests prove completion.
+```
+
+Plan execution rules:
+
+- Read the relevant plan before editing code.
+- Do not expand scope just because related code is nearby.
+- Run the validation listed in the plan before marking it complete.
+- Record evidence in the plan or a linked HIL log.
+- If implementation reveals a larger architectural issue, create a follow-up
+  plan instead of silently expanding the current one.
+
+Current focused control-system plan set:
+
+- `app/docs/control_system_improvement_index.md`
+- `app/docs/encoder_sample_quality_plan.md`
+- `app/docs/angle_observer_contract_plan.md`
+- `app/docs/detent_learning_v2_plan.md`
+- `app/docs/mpr_bandwidth_interface_plan.md`
+- `app/docs/dob_enable_policy_plan.md`
+- `app/docs/hil_motion_regression_plan.md`
+- `app/docs/motion_control_status_shell_plan.md`
+
+Recommended execution order:
+
+1. Encoder sample quality.
+2. Angle observer contract.
+3. HIL motion regression baseline.
+4. MPR bandwidth interface.
+5. Detent learning v2.
+6. DOB enable policy.
+7. Shell/status cleanup.
+
 ## Unit Tests
 
 Run all unit tests (recommended wrapper):
