@@ -639,3 +639,57 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
     `err=0`.
   - Final state returned to `IDLE`, `Error: NONE`, encoder acquisition errors
     all zero, and fault snapshot clear.
+
+### 2026-05-06 Staged Baseline Revalidation After PWM/ADC Trigger Fix
+
+Execution rule used for this pass: validate one layer at a time. Do not proceed
+from PI to MPR to DOB/detent unless the previous layer has objective HIL evidence.
+
+1. `current_encoder` baseline:
+   - Command: `scripts/hil/hil_telnet.py current-validate --boot-current 0.15 --boot-hz 0.10 --cycles 1 --current-iq 0.03 --current-hold-ms 160`.
+   - Result: PASS.
+   - Boot mapping: `valid=YES`, `dir=-1`, `corr=-0.9351`, `off_mech=1.012 deg`, `samples=500`, `warn=0`, `err=0`.
+   - Current validation: `+Iq net=0.116 deg`, `-Iq net=-0.078 deg`, both with `warn=0`, `err=0`.
+   - Encoder acquisition errors stayed zero.
+
+2. PI `velocity_encoder` baseline with commissioned/default limit:
+   - Command: `scripts/hil/hil_telnet.py velocity-validate --velocity-hz 0.50 --velocity-hold-ms 1000`.
+   - Result: FAIL.
+   - Cause: the effective velocity-loop authority was about `0.040 A`; measured speed stayed approximately zero for most targets.
+   - Interpretation: not an encoder transport issue. Encoder errors stayed zero; the controller simply did not have enough Iq authority to overcome friction/detent at low speed.
+
+3. PI `velocity_encoder` baseline with only Iq limit raised to `0.15 A`:
+   - Result: FAIL.
+   - Improvement: `+0.5 Hz` moved (`meas=0.506 Hz`), but low-speed and reverse targets still stuck or under-tracked.
+   - Interpretation: current authority alone helps, but the PI gains are too soft for this motor.
+
+4. Empirical PI `velocity_encoder` baseline:
+   - Command: `motor velocity pi set 0.080000 0.160000 0.250000`, then `motor commission validate velocity 0.500 2000`.
+   - Result: PASS.
+   - Tracking samples:
+     - `+0.100 Hz`: `meas=0.121 Hz`, `err=-0.021 Hz`, `Iq_ref=0.0669 A`.
+     - `+0.300 Hz`: `meas=0.347 Hz`, `err=-0.047 Hz`, `Iq_ref=0.0435 A`.
+     - `+0.500 Hz`: `meas=0.478 Hz`, `err=0.022 Hz`, `Iq_ref=0.0799 A`.
+     - `-0.100 Hz`: `meas=-0.109 Hz`, `err=0.009 Hz`, `Iq_ref=-0.0557 A`.
+     - `-0.300 Hz`: `meas=-0.327 Hz`, `err=0.027 Hz`, `Iq_ref=-0.0520 A`.
+     - `-0.500 Hz`: `meas=-0.495 Hz`, `err=-0.005 Hz`, `Iq_ref=-0.0680 A`.
+   - Encoder acquisition errors stayed zero; no faults.
+   - Status: accepted as the current HIL baseline, but explicitly empirical. These values are not yet derived from the mechanical estimator.
+
+5. MPR bandwidth `1.0 Hz` with same `0.25 A` authority:
+   - Command: `motor velocity mpr bandwidth 1.000`, `motor outer mode mpr`, `motor commission validate velocity 0.500 2000 active`.
+   - Result: command sequence completed without faults or encoder errors, but tracking is not accepted.
+   - Observed tracking was worse than PI, including poor low-speed response and direction-change behavior:
+     - `+0.100 Hz`: `meas=0.008 Hz`, `err=0.092 Hz`.
+     - `+0.300 Hz`: `meas=-0.074 Hz`, `err=0.374 Hz`.
+     - `+0.500 Hz`: `meas=0.622 Hz`, `err=-0.122 Hz`.
+     - `-0.100 Hz`: `meas=-0.217 Hz`, `err=0.117 Hz`.
+     - `-0.300 Hz`: `meas=-0.325 Hz`, `err=0.025 Hz`.
+     - `-0.500 Hz`: `meas=-0.584 Hz`, `err=0.084 Hz`.
+   - Status: MPR is operational but not tuned/accepted. Do not enable DOB or detent on top of MPR until MPR matches the PI baseline.
+
+Next action:
+
+- Make the commissioned/model-derived velocity tuning produce a practical hybrid-stepper PI baseline instead of the too-low `~0.04 A` authority.
+- Preserve the empirical PI baseline (`Kp=0.08`, `Ki=0.16`, `Iq limit=0.25 A`) as the comparison target.
+- Retune MPR bandwidth mapping against this PI baseline before enabling DOB.
