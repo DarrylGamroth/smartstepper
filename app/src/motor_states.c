@@ -232,6 +232,7 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	motor_dob_reset(&params->velocity_dob_state,
 			params->live.velocity_rad_s);
 	params->live.position_quality_flags = 0U;
+	params->live.position_trust_state = MOTOR_FEEDBACK_TRUST_FAULT;
 	params->live.position_stale_count = 0U;
 	params->live.position_stale_events = 0U;
 	params->live.position_glitch_count = 0U;
@@ -679,6 +680,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->live.velocity_rad_s = 0.0f;
 	params->live.acceleration_rad_s2 = 0.0f;
 	params->live.position_quality_flags = 0U;
+	params->live.position_trust_state = MOTOR_FEEDBACK_TRUST_FAULT;
 	params->live.position_stale_count = 0U;
 	params->live.position_stale_events = 0U;
 	params->live.position_glitch_count = 0U;

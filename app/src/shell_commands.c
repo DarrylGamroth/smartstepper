@@ -168,11 +168,9 @@ static bool motor_velocity_dob_ready(const struct motor_parameters *params,
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 	if (encoder_mode &&
-	    ((params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U ||
-	     (params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) == 0U ||
-	     params->live.encoder_sample_error != 0U)) {
+	    params->live.position_trust_state != MOTOR_FEEDBACK_TRUST_TRUSTED) {
 		if (reason != NULL) {
-			*reason = "encoder feedback not fresh/valid";
+			*reason = "encoder feedback not trusted";
 		}
 		return false;
 	}
@@ -955,9 +953,7 @@ static int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char *
 	float error_hz = ref_hz - meas_hz;
 	bool traj_at_target = traj_is_at_target(&g_motor_params->traj_velocity);
 	uint8_t quality_flags = g_motor_params->live.position_quality_flags;
-	bool feedback_valid =
-		((quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U) &&
-		((quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U);
+	bool feedback_valid = motor_feedback_quality_is_usable(quality_flags);
 	bool speed_tracking_ok = fabsf(error_hz) <= VELOCITY_STATUS_TRACK_TOL_HZ;
 	bool at_target = traj_at_target && feedback_valid && speed_tracking_ok;
 	uint32_t velocity_decimation =

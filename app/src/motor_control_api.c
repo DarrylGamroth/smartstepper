@@ -1025,6 +1025,7 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 		}
 		params->encoder_direction_sign = sign;
 		params->live.position_quality_flags = 0U;
+		params->live.position_trust_state = MOTOR_FEEDBACK_TRUST_FAULT;
 		params->live.position_stale_count = 0U;
 		params->live.position_stale_events = 0U;
 		params->live.position_glitch_count = 0U;

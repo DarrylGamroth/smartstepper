@@ -38,6 +38,7 @@ struct motor_encoder_feedback_ctx {
 	uint32_t *position_glitch_count;
 	uint32_t *position_jitter_count;
 	uint8_t *position_quality_flags;
+	uint8_t *position_trust_state;
 	uint32_t encoder_fault_threshold;
 	uint8_t encoder_delay_samples;
 	uint16_t pole_pairs;
@@ -55,6 +56,7 @@ struct motor_encoder_feedback {
 	bool io_fault;
 	uint8_t status;
 	uint8_t input_source;
+	uint8_t trust_state;
 
 	float32_t angle_sensor_deg;
 	float32_t angle_control_deg;

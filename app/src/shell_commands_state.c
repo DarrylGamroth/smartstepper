@@ -26,6 +26,18 @@
 #include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
 
+static const char *motor_shell_feedback_trust_name(uint8_t trust_state)
+{
+	switch (trust_state) {
+	case MOTOR_FEEDBACK_TRUST_TRUSTED:
+		return "trusted";
+	case MOTOR_FEEDBACK_TRUST_PREDICTED:
+		return "predicted";
+	default:
+		return "fault";
+	}
+}
+
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
 #include <drivers/encoder_rt.h>
@@ -1188,8 +1200,9 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Enc flag count: warn=%u err=%u",
 		    g_motor_params->encoder_warning_count,
 		    g_motor_params->encoder_error_count);
-	shell_print(sh, "  Pos quality:    0x%02X (valid=%s fresh=%s err=%s)",
+	shell_print(sh, "  Pos quality:    0x%02X trust=%s (valid=%s fresh=%s err=%s)",
 		    g_motor_params->live.position_quality_flags,
+		    motor_shell_feedback_trust_name(g_motor_params->live.position_trust_state),
 		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) ? "yes" : "no",
 		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) ? "yes" : "no",
 		    (g_motor_params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) ? "yes" : "no");

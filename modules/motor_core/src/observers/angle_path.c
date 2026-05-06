@@ -77,6 +77,8 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 	if (control_valid) {
 		quality_flags |= MOTOR_FEEDBACK_QUALITY_VALID;
 	}
+	enum motor_feedback_trust_state trust_state =
+		motor_feedback_quality_trust_state(quality_flags);
 
 	out->observer_input_rad = observer_input_rad;
 	out->observer_mech_rad = angle_observer_get_mech_angle(observer);
@@ -93,6 +95,7 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 	out->control.speed_mech_filtered_rad_s = out->control.speed_mech_rad_s;
 	out->control.input_source = source;
 	out->control.quality_flags = quality_flags;
+	out->control.trust_state = (uint8_t)trust_state;
 
 	return 0;
 }

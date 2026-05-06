@@ -14,11 +14,12 @@
 
 static inline bool motor_velocity_feedback_is_valid(uint8_t quality_flags)
 {
-	const uint8_t required = MOTOR_FEEDBACK_QUALITY_VALID;
-	const uint8_t forbidden = MOTOR_FEEDBACK_QUALITY_ERROR;
+	return motor_feedback_quality_is_usable(quality_flags);
+}
 
-	return ((quality_flags & required) != 0U) &&
-	       ((quality_flags & forbidden) == 0U);
+static inline bool motor_velocity_feedback_is_trusted(uint8_t quality_flags)
+{
+	return motor_feedback_quality_is_trusted(quality_flags);
 }
 
 #endif /* MOTOR_RUNTIME_FEEDBACK_QUALITY_H_ */

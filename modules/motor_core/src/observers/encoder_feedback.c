@@ -132,6 +132,7 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	feedback->observer_elec_pred_rad = path_out.observer_elec_pred_rad;
 	feedback->observer_elec_speed_rad_s = path_out.observer_elec_speed_rad_s;
 	feedback->control = path_out.control;
+	feedback->trust_state = path_out.control.trust_state;
 
 	if (feedback->input_source == MOTOR_ENCODER_INPUT_SRC_ENCODER) {
 		*ctx->encoder_raw_deg = feedback->angle_sensor_deg;
@@ -153,6 +154,9 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	}
 
 	*ctx->position_quality_flags = quality_flags;
+	if (ctx->position_trust_state != NULL) {
+		*ctx->position_trust_state = feedback->trust_state;
+	}
 	*ctx->position_glitch_count = 0U;
 	*ctx->position_jitter_count = 0U;
 

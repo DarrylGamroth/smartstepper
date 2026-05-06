@@ -24,6 +24,7 @@ struct motor_control_feedback {
 	bool io_fault;
 	uint8_t status;
 	uint8_t input_source;
+	uint8_t trust_state;
 	float32_t angle_sensor_deg;
 	float32_t angle_control_deg;
 	float32_t generated_mech_rad;

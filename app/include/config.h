@@ -309,6 +309,7 @@ struct motor_live_telemetry_ctx {
 	uint8_t encoder_sample_error;
 	uint8_t encoder_input_source;
 	uint8_t position_quality_flags;
+	uint8_t position_trust_state;
 	uint16_t position_stale_count;
 	uint32_t position_stale_events;
 	uint32_t position_glitch_count;

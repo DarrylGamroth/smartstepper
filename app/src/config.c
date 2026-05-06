@@ -215,6 +215,7 @@ void config_init_runtime_adapters(struct motor_parameters *params)
 		.position_glitch_count = &params->live.position_glitch_count,
 		.position_jitter_count = &params->live.position_jitter_count,
 		.position_quality_flags = &params->live.position_quality_flags,
+		.position_trust_state = &params->live.position_trust_state,
 		.encoder_fault_threshold = ENCODER_FAULT_THRESHOLD,
 		.encoder_delay_samples = ENCODER_SAMPLE_DELAY_SAMPLES,
 		.pole_pairs = MOTOR_POLE_PAIRS,

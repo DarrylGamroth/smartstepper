@@ -402,8 +402,8 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct moto
 	out->speed_mech_filtered_rad_s =
 		filter_so_run(ctx->filter_velocity_notch, in->speed_mech_rad_s);
 	bool velocity_feedback_valid = motor_velocity_feedback_is_valid(ctx->position_quality_flags);
-	bool velocity_feedback_fresh =
-		(ctx->position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U;
+	bool velocity_feedback_trusted =
+		motor_velocity_feedback_is_trusted(ctx->position_quality_flags);
 	if (!velocity_feedback_valid) {
 		/* Hold measured dq currents and reset outer-loop observers while encoder
 		 * quality is degraded. This avoids current spikes when velocity/angle
@@ -412,7 +412,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct moto
 		motor_outer_loop_hold_on_bad_feedback(ctx, in, out);
 		return;
 	}
-	if (!velocity_loop_update || !velocity_feedback_fresh) {
+	if (!velocity_loop_update || !velocity_feedback_trusted) {
 		return;
 	}
 

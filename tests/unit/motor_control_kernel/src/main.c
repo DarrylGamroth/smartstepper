@@ -38,7 +38,8 @@ static struct motor_feedback_ref valid_encoder_feedback(void)
 	return (struct motor_feedback_ref){
 		.source = MOTOR_FEEDBACK_ENCODER,
 		.input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER,
-		.quality_flags = MOTOR_FEEDBACK_QUALITY_VALID,
+		.quality_flags = MOTOR_FEEDBACK_QUALITY_VALID | MOTOR_FEEDBACK_QUALITY_FRESH,
+		.trust_state = MOTOR_FEEDBACK_TRUST_TRUSTED,
 		.fresh = true,
 		.position_rad = 1.0f,
 		.electrical_angle_rad = 2.0f,
@@ -124,7 +125,8 @@ ZTEST(motor_control_kernel, test_encoder_modes_accept_short_propagated_window)
 
 	feedback.input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 	feedback.source = MOTOR_FEEDBACK_ENCODER;
-	feedback.quality_flags = 0U;
+	feedback.quality_flags = MOTOR_FEEDBACK_QUALITY_VALID;
+	feedback.trust_state = MOTOR_FEEDBACK_TRUST_PREDICTED;
 	feedback.fresh = false;
 
 	zassert_true(motor_control_kernel_feedback_valid(&policy, &feedback, 2U, 3U), NULL);

@@ -29,7 +29,7 @@ bool motor_control_kernel_feedback_valid(const struct motor_control_policy *poli
 
 	if (feedback_ref->source == MOTOR_FEEDBACK_ENCODER &&
 	    feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_ENCODER &&
-	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U &&
+	    motor_feedback_quality_is_trusted(feedback_ref->quality_flags) &&
 	    !feedback_ref->error) {
 		return true;
 	}
@@ -39,6 +39,7 @@ bool motor_control_kernel_feedback_valid(const struct motor_control_policy *poli
 	 * this guard only blocks sustained stale feedback in encoder modes.
 	 */
 	return feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_PROPAGATED &&
+	       motor_feedback_quality_is_usable(feedback_ref->quality_flags) &&
 	       stale_count <= stale_limit;
 }
 

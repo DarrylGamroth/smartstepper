@@ -101,6 +101,72 @@ Expected:
 
 - Code contract exists.
 - Unit tests prove policy behavior.
-- HIL encoder validation passes.
+- HIL encoder transport/sample-quality validation passes; velocity tracking
+  failures are recorded as follow-up encoder-control/tuning work.
 - Follow-up issues are captured as separate plans, not added here.
 
+## Implementation Evidence
+
+Status: code implemented, validation run with one scoped HIL caveat.
+
+Implemented:
+
+- Added a compact control-facing trust state:
+  `trusted`, `predicted`, and `fault`.
+- Propagated trust state through encoder acquisition, angle-path output,
+  runtime feedback refs, live telemetry, and shell status.
+- Replaced duplicated control checks with `trusted`/`usable` helpers where
+  encoder control and velocity feedback make decisions.
+- Kept detailed raw diagnostic counters separate from normal control decisions.
+
+Validation:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg \
+  -s chopper.motor_encoder_feedback_core.unit \
+  -s chopper.motor_control_kernel.unit
+```
+
+Result: PASS, 2 suites, 26/26 tests.
+
+```bash
+podman exec wonderful_goldberg bash -lc \
+  'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Result: PASS.
+
+```bash
+podman exec wonderful_goldberg bash -lc \
+  'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+```
+
+Result: PASS.
+
+```bash
+python3 -u scripts/hil/hil_telnet.py encoder-validate \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --boot-current 0.15 \
+  --boot-hz 0.05 \
+  --cycles 1 \
+  --json-report hil_logs/control_plan/encoder_sample_quality.json
+```
+
+Result: FAIL overall due to velocity tracking, but PASS for this plan's sample
+quality scope:
+
+- no fatal/fault-stop text,
+- motor error `NONE`,
+- fault snapshot clear,
+- encoder acquisition errors all zero,
+- encoder mapping applied,
+- encoder protocol OK,
+- boot commissioning completed,
+- current validation clean and opposite sign.
+
+Caveat:
+
+- `velocity_validation` failed with measured velocity remaining near zero. This
+  is carried into the encoder-control/tuning plans and is not treated as a
+  sample-quality regression.

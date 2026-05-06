@@ -40,6 +40,7 @@ struct motor_control_measurements {
 	float32_t speed_mech_filtered_rad_s;
 	uint8_t encoder_input_source;
 	uint8_t position_quality_flags;
+	uint8_t position_trust_state;
 	bool fresh_encoder_sample;
 	uint8_t encoder_frame_status;
 	bool encoder_frame_warning;
@@ -62,6 +63,7 @@ struct motor_encoder_stage_result {
 	bool frame_error;
 	bool io_fault;
 	uint8_t position_quality_flags;
+	uint8_t position_trust_state;
 };
 
 /*

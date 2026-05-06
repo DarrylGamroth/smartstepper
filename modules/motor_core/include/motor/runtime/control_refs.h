@@ -36,6 +36,7 @@ struct motor_feedback_ref {
 	enum motor_feedback_source source;
 	uint8_t input_source;
 	uint8_t quality_flags;
+	uint8_t trust_state;
 	uint8_t status;
 	bool fresh;
 	bool warning;

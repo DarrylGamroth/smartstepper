@@ -268,6 +268,7 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->io_fault = encoder_fb->io_fault;
 	control_fb->status = encoder_fb->status;
 	control_fb->input_source = encoder_fb->input_source;
+	control_fb->trust_state = encoder_fb->trust_state;
 	control_fb->angle_sensor_deg = encoder_fb->angle_sensor_deg;
 	control_fb->angle_control_deg = encoder_fb->angle_control_deg;
 	control_fb->generated_mech_rad = encoder_fb->generated_mech_rad;
@@ -286,6 +287,7 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->accel_mech_rad_s2 = encoder_fb->control.accel_mech_rad_s2;
 	control_fb->speed_mech_filtered_rad_s = encoder_fb->control.speed_mech_filtered_rad_s;
 	control_fb->input_source = encoder_fb->control.input_source;
+	control_fb->trust_state = encoder_fb->control.trust_state;
 }
 
 static inline void motor_control_publish_encoder_live(
@@ -311,6 +313,7 @@ static inline void motor_control_publish_encoder_live(
 	params->live.acceleration_rad_s2 = control_fb->accel_mech_rad_s2;
 	params->live.velocity_filtered_rad_s = control_fb->speed_mech_filtered_rad_s;
 	params->live.position_quality_flags = position_quality_flags;
+	params->live.position_trust_state = control_fb->trust_state;
 }
 
 static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_runtime_ctx *ctx,
@@ -519,6 +522,7 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	enc_res->frame_error = enc_res->control_fb.error;
 	enc_res->io_fault = enc_res->control_fb.io_fault;
 	enc_res->position_quality_flags = enc_res->feedback.control.quality_flags;
+	enc_res->position_trust_state = enc_res->feedback.control.trust_state;
 	motor_control_publish_encoder_live(params, &enc_res->control_fb,
 					   enc_res->position_quality_flags);
 
@@ -623,8 +627,7 @@ static inline void motor_control_step_detent_capture(
 	cap->decimation_counter = 0U;
 
 	float32_t omega = feedback_ref->velocity_filtered_rad_s;
-	if ((feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U ||
-	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) == 0U ||
+	if (!motor_feedback_quality_is_trusted(feedback_ref->quality_flags) ||
 	    feedback_ref->error ||
 	    !isfinite(feedback_ref->position_rad) ||
 	    !isfinite(omega) ||
@@ -698,6 +701,7 @@ static inline void motor_control_measurements_from_encoder(
 	meas->angle_control_degrees = enc_stage->angle_control_deg;
 	meas->encoder_input_source = enc_stage->input_source;
 	meas->position_quality_flags = enc_stage->position_quality_flags;
+	meas->position_trust_state = enc_stage->position_trust_state;
 	meas->fresh_encoder_sample = enc_stage->fresh;
 	meas->encoder_frame_status = enc_stage->frame_status;
 	meas->encoder_frame_warning = enc_stage->frame_warning;
@@ -735,6 +739,7 @@ static inline void motor_feedback_ref_from_measurements(
 	}
 	feedback_ref->input_source = meas->encoder_input_source;
 	feedback_ref->quality_flags = meas->position_quality_flags;
+	feedback_ref->trust_state = meas->position_trust_state;
 	feedback_ref->status = meas->encoder_frame_status;
 	feedback_ref->fresh = meas->fresh_encoder_sample;
 	feedback_ref->warning = meas->encoder_frame_warning;

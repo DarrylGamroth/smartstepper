@@ -42,6 +42,7 @@ static inline void motor_disable_isr_feature_flags(struct motor_parameters *para
 static inline void motor_online_reset_feedback_quality(struct motor_parameters *params)
 {
 	params->live.position_quality_flags = 0U;
+	params->live.position_trust_state = MOTOR_FEEDBACK_TRUST_FAULT;
 	params->live.position_stale_count = 0U;
 	params->live.position_stale_events = 0U;
 	params->live.position_glitch_count = 0U;

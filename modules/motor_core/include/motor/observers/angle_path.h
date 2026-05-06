@@ -29,6 +29,7 @@ struct motor_encoder_control_sample {
 	float32_t speed_mech_filtered_rad_s;
 	uint8_t input_source;
 	uint8_t quality_flags;
+	uint8_t trust_state;
 };
 
 /**
