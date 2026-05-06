@@ -45,7 +45,7 @@ Notes:
 
 ## 2026-05-06 - SMF0501/SMF0502/SMF0503 - Explicit fault recovery status
 Status: done
-Commit: pending
+Commit: 30ffb89
 Validation:
 - west build MT6835: PASS
 - python3 -m py_compile scripts/hil/hil_telnet.py: PASS
@@ -55,3 +55,16 @@ Notes:
 - `motor state clear_error` now rejects recovery-incomplete faults instead of implicitly pulsing gate-driver recovery.
 - Added shell visibility via `motor state recovery`, `motor fault recovery`, and explicit `motor encoder recover`.
 - HIL parser now checks recovery readiness and has unit coverage for incomplete gate recovery.
+
+## 2026-05-06 - SMF0601/SMF0602 - Workflow docs and final gate
+Status: done
+Commit: pending
+Validation:
+- west build MT6835: PASS
+- ./tests/run_unit_tests.sh: PASS
+- python3 -m py_compile scripts/hil/hil_telnet.py: PASS
+- python3 -m unittest scripts/hil/test_hil_telnet_parser.py: PASS
+- HIL status: SKIPPED, no live hardware gate run in this cleanup pass
+Notes:
+- Updated command-tree/taxonomy docs with staged-mode, transition-status, and explicit recovery workflow.
+- Added final validation report with commands and residual HIL risk.

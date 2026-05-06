@@ -233,11 +233,15 @@ telnet 10.0.0.44
 
 ```bash
 python3 scripts/hil/hil_telnet.py status --host 10.0.0.171
+python3 scripts/hil/hil_telnet.py recovery-status --host 10.0.0.171
 python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion --host 10.0.0.171
 ```
 
 - If the DHCP address is unknown or telnet is unavailable, fall back to the
   persistent UART workflow below.
+- For state-machine regressions, always check both `motor state transition` and
+  `motor state recovery`. The HIL `status` and `recovery-status` scenarios do
+  this automatically.
 
 ### Reliable Serial Workflow (Important)
 

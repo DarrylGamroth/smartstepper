@@ -81,3 +81,34 @@ motor position mpr bandwidth <hz>
 
 Avoid adding commands such as `velocity gains` because they hide which regulator is being
 tuned. If a new regulator is added, give it a dedicated subtree.
+
+## State And Recovery
+
+State commands distinguish staging from execution:
+
+```text
+motor state mode <current_encoder|velocity_generated|position_generated|velocity_encoder|position_encoder>
+motor state online
+motor state status
+motor state transition
+motor state recovery
+```
+
+`motor state mode ...` stages the requested online submode. It does not mean the
+motor is running in that mode until `motor state online` completes and
+`motor state transition` reports `completed`.
+
+Fault recovery is explicit:
+
+```text
+motor fault recovery
+motor gate status
+motor gate reset
+motor encoder acquisition
+motor encoder recover
+motor state clear_error
+```
+
+`motor state clear_error` is only the state-machine clear request. Hardware
+recovery operations are separate so gate-driver nSLEEP pulses and encoder
+acquisition resets are visible and deterministic.

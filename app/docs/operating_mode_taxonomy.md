@@ -47,3 +47,34 @@ Do not add new code or docs using these names:
 
 Use `motor state prepare` for the energized prepare/calibration path before
 online operation.
+
+## Transition Semantics
+
+Online mode selection is a two-step operation:
+
+1. `motor state mode <mode>` stages the requested online submode.
+2. `motor state online` asks the state machine to enter ONLINE and resolve that
+   staged mode.
+
+The authoritative result is visible with:
+
+```text
+motor state transition
+```
+
+Encoder modes can be rejected if setup is incomplete. Generated modes must not
+require encoder mapping, but they may still use encoder trace/capture telemetry
+for diagnostics.
+
+## Fault Recovery Semantics
+
+Fault recovery is separate from lifecycle state clearing:
+
+- `motor state recovery` / `motor fault recovery` reports required recovery
+  actions.
+- `motor gate reset` performs the explicit DRV8328 nSLEEP recovery pulse.
+- `motor encoder recover` aborts and clears encoder acquisition fault counters.
+- `motor state clear_error` requests the transition out of ERROR after required
+  recovery actions are complete.
+
+This avoids hidden hardware recovery side effects during `clear_error`.

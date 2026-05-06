@@ -7,6 +7,7 @@ Default target:
 
 ```bash
 python3 scripts/hil/hil_telnet.py status --host 10.0.0.44
+python3 scripts/hil/hil_telnet.py recovery-status --host 10.0.0.44
 ```
 
 Motion-producing scenarios require an explicit safety acknowledgement:
@@ -28,10 +29,10 @@ Useful options:
 python3 scripts/hil/hil_telnet.py encoder-validate \
   --yes-live-motion \
   --boot-current 0.15 \
-  --boot-hz 0.05 \
+  --boot-hz 0.10 \
   --cycles 1 \
   --current-iq 0.03 \
-  --velocity-hz 0.05
+  --velocity-hz 0.50
 ```
 
 Use the split scenarios while bringing up encoder control. They run the same
@@ -40,13 +41,13 @@ script exit:
 
 ```bash
 python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.05 --cycles 1 \
+  --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
   --current-iq 0.03 --current-hold-ms 160
 
 python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.05 --cycles 1 \
+  --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
   --velocity-pi-kp 0.100 --velocity-pi-ki 0.250 --velocity-pi-iq-limit 0.120 \
-  --velocity-hz 0.05 --velocity-hold-ms 1000
+  --velocity-hz 0.50 --velocity-hold-ms 1000
 ```
 
 Use the robust encoder-mapping scenario to test only generated-sweep mapping
@@ -54,7 +55,7 @@ and apply, without running current/velocity/position validation afterward:
 
 ```bash
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.05 --cycles 1 --bidirectional
+  --boot-current 0.15 --boot-hz 0.10 --cycles 1 --bidirectional
 ```
 
 Use the advanced motion scenario after basic encoder validation is passing. It
@@ -66,10 +67,11 @@ the same velocity-validation command:
 python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --host 10.0.0.44 \
   --yes-live-motion \
-  --detent-hz 0.05 \
-  --detent-cycles 3 \
-  --mpr-bandwidth-hz 0.5 \
-  --velocity-hz 0.05 \
+  --commission-profile confirm \
+  --detent-hz 0.10 \
+  --detent-cycles 10 \
+  --mpr-bandwidth-hz 1.0 \
+  --velocity-hz 0.50 \
   --velocity-hold-ms 1000
 ```
 
@@ -82,7 +84,7 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --feature-combo pi \
   --feature-combo mpr \
   --feature-combo mpr_detent \
-  --mpr-bandwidth-hz 0.5
+  --mpr-bandwidth-hz 1.0
 ```
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file
@@ -111,6 +113,17 @@ Regression gate:
 ```bash
 scripts/hil/run_hil_gate.sh --host 10.0.0.44
 ```
+
+Useful non-motion diagnostics:
+
+```bash
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.44
+python3 scripts/hil/hil_telnet.py recovery-status --host 10.0.0.44
+```
+
+The status scenario verifies `motor state transition` and recovery readiness so
+command echo success does not hide rejected state-machine transitions or
+incomplete fault recovery.
 
 The default gate is non-motion status only. The live gate runs the currently
 recommended safe baseline:
