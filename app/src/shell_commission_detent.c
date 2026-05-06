@@ -23,7 +23,10 @@
 #include "motor/motion/traj.h"
 
 #define MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ 1.0f
-#define MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A 0.15f
+#define MOTOR_COMMISSION_DETENT_RECOMMENDED_SPEED_HZ 0.10f
+#define MOTOR_COMMISSION_DETENT_RECOMMENDED_CYCLES 10.0f
+#define MOTOR_COMMISSION_DETENT_LOW_SPEED_WARN_HZ 0.08f
+#define MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A 0.12f
 #define MOTOR_COMMISSION_DETENT_SAFE_GAIN_SPEED_HZ 1.0f
 #define MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MIN_DECIMATION 1U
@@ -38,6 +41,14 @@
 #define MOTOR_COMMISSION_DETENT_ACCEL_LIMIT_FACTOR 3.0f
 #define MOTOR_COMMISSION_DETENT_MAX_REJECT_RATIO 0.95f
 #define MOTOR_COMMISSION_DETENT_MAX_ADJ_STEP_A 0.08f
+#define MOTOR_COMMISSION_DETENT_VALIDATE_MIN_SAMPLES 10U
+#define MOTOR_COMMISSION_DETENT_VALIDATE_MATCH_RATIO 1.02f
+
+enum motor_commission_detent_recommendation {
+	MOTOR_COMMISSION_DETENT_RECOMMEND_INCONCLUSIVE = 0,
+	MOTOR_COMMISSION_DETENT_RECOMMEND_DO_NOT_APPLY,
+	MOTOR_COMMISSION_DETENT_RECOMMEND_APPLY,
+};
 
 struct motor_commission_detent_result {
 	bool valid;
@@ -73,12 +84,32 @@ struct motor_commission_detent_result {
 	float32_t mean_abs_iq_ff_a;
 	float32_t rms_iq_ff_a;
 	float32_t recommended_limit_a;
+	bool validation_complete;
+	enum motor_commission_detent_recommendation validation_recommendation;
+	float32_t validation_off_rms_hz;
+	float32_t validation_on_rms_hz;
+	float32_t validation_improvement_pct;
+	uint32_t validation_encoder_errors;
 	float32_t table_iq_a[MOTOR_DETENT_MAP_BINS];
 	uint16_t bin_counts[MOTOR_DETENT_MAP_BINS];
 	uint8_t bin_flags[MOTOR_DETENT_MAP_BINS];
 };
 
 static struct motor_commission_detent_result detent_result;
+
+static const char *motor_commission_detent_recommendation_str(
+	enum motor_commission_detent_recommendation recommendation)
+{
+	switch (recommendation) {
+	case MOTOR_COMMISSION_DETENT_RECOMMEND_APPLY:
+		return "RECOMMEND_APPLY";
+	case MOTOR_COMMISSION_DETENT_RECOMMEND_DO_NOT_APPLY:
+		return "DO_NOT_APPLY";
+	case MOTOR_COMMISSION_DETENT_RECOMMEND_INCONCLUSIVE:
+	default:
+		return "INCONCLUSIVE";
+	}
+}
 
 enum motor_commission_detent_bin_flag {
 	MOTOR_COMMISSION_DETENT_BIN_RAW = BIT(0),
@@ -460,6 +491,10 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	if (argc < 3 || argc > 5) {
 		shell_error(sh,
 			    "Usage: motor commission detent run <mech_hz> <cycles> [decimation] [iq_limit_a]");
+		shell_error(sh, "Recommended start: motor commission detent run %.2f %.0f 1 %.2f",
+			    (double)MOTOR_COMMISSION_DETENT_RECOMMENDED_SPEED_HZ,
+			    (double)MOTOR_COMMISSION_DETENT_RECOMMENDED_CYCLES,
+			    (double)MOTOR_COMMISSION_DETENT_SAFE_IQ_LIMIT_A);
 		return -EINVAL;
 	}
 	if (!g_motor_params) {
@@ -502,6 +537,18 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "detent capture speed is limited to %.3f Hz",
 			    (double)MOTOR_COMMISSION_DETENT_MAX_SPEED_HZ);
 		return -ERANGE;
+	}
+	if (speed_hz < MOTOR_COMMISSION_DETENT_LOW_SPEED_WARN_HZ) {
+		shell_warn(sh,
+			   "Capture speed %.3f Hz is low; friction/stiction can dominate. Recommended start is %.2f Hz.",
+			   (double)speed_hz,
+			   (double)MOTOR_COMMISSION_DETENT_RECOMMENDED_SPEED_HZ);
+	}
+	if (cycles < MOTOR_COMMISSION_DETENT_RECOMMENDED_CYCLES) {
+		shell_warn(sh,
+			   "Only %.1f cycles requested; recommended start is %.0f cycles for forward/reverse bin agreement.",
+			   (double)cycles,
+			   (double)MOTOR_COMMISSION_DETENT_RECOMMENDED_CYCLES);
 	}
 	if (capture_iq_limit_a <= 0.0f || capture_iq_limit_a > MOTOR_MAX_CURRENT_A) {
 		shell_error(sh, "iq_limit_a must be within (0, %.3f] A",
@@ -672,6 +719,17 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    (double)g_motor_params->detent_map_cfg.iq_ff_limit_a,
 		    (double)g_motor_params->live.detent_iq_ff_a,
 		    g_motor_params->detent_map_state.last_index);
+	uint32_t candidate_samples = detent_result.sample_count + detent_result.rejected_samples;
+	float32_t accepted_ratio =
+		(candidate_samples > 0U) ?
+			((float32_t)detent_result.sample_count / (float32_t)candidate_samples) :
+			0.0f;
+	float32_t fwd_coverage =
+		(float32_t)detent_result.forward_bins / (float32_t)MOTOR_DETENT_MAP_BINS;
+	float32_t rev_coverage =
+		(float32_t)detent_result.reverse_bins / (float32_t)MOTOR_DETENT_MAP_BINS;
+	float32_t both_coverage =
+		(float32_t)detent_result.both_direction_bins / (float32_t)MOTOR_DETENT_MAP_BINS;
 	shell_print(sh, "  Staged:    %s", detent_result.valid ? "YES" : "NO");
 	shell_print(sh, "  Quality:   raw=%s fill=%s apply=%s conf=%.2f reject_ratio=%.2f max_step=%.5f A",
 		    detent_result.raw_valid ? "PASS" : "FAIL",
@@ -694,11 +752,17 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    detent_result.filled_bins,
 		    detent_result.min_bin_count,
 		    detent_result.max_bin_count);
+	shell_print(sh, "  Samples:   accepted_ratio=%.1f%% candidate=%u",
+		    (double)(accepted_ratio * 100.0f), candidate_samples);
 	shell_print(sh, "  Direction: fwd=%u rev=%u both_bins=%u fr_rms=%.5f A",
 		    detent_result.accepted_forward,
 		    detent_result.accepted_reverse,
 		    detent_result.both_direction_bins,
 		    (double)detent_result.forward_reverse_rms_a);
+	shell_print(sh, "  Coverage:  fwd=%.1f%% rev=%.1f%% both=%.1f%%",
+		    (double)(fwd_coverage * 100.0f),
+		    (double)(rev_coverage * 100.0f),
+		    (double)(both_coverage * 100.0f));
 	shell_print(sh, "  Rejects:   quality=%u velocity=%u accel=%u saturation=%u",
 		    detent_result.rejected_quality,
 		    detent_result.rejected_velocity,
@@ -710,6 +774,13 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    (double)detent_result.mean_abs_iq_ff_a,
 		    (double)detent_result.rms_iq_ff_a,
 		    (double)detent_result.recommended_limit_a);
+	shell_print(sh, "  Validate:  %s off_rms=%.4f Hz on_rms=%.4f Hz improve=%.1f%% enc_err=%u",
+		    motor_commission_detent_recommendation_str(
+			    detent_result.validation_recommendation),
+		    (double)detent_result.validation_off_rms_hz,
+		    (double)detent_result.validation_on_rms_hz,
+		    (double)detent_result.validation_improvement_pct,
+		    detent_result.validation_encoder_errors);
 	return 0;
 }
 
@@ -746,6 +817,16 @@ int cmd_motor_commission_detent_apply(const struct shell *sh, size_t argc, char 
 	if (gain < 0.0f || limit_a < 0.0f || limit_a > g_motor_params->velocity_cl_iq_limit_A) {
 		shell_error(sh, "gain must be >=0 and limit_a must be within velocity Iq limit");
 		return -ERANGE;
+	}
+	if (enable && detent_result.validation_recommendation !=
+		      MOTOR_COMMISSION_DETENT_RECOMMEND_APPLY) {
+		shell_error(sh,
+			    "Detent table has not been validated for enabled apply: recommendation=%s",
+			    motor_commission_detent_recommendation_str(
+				    detent_result.validation_recommendation));
+		shell_error(sh,
+			    "Run 'motor commission detent validate <hz> <ms>' first, or apply disabled with 'motor commission detent apply 0'.");
+		return -EACCES;
 	}
 
 	memcpy(g_motor_params->detent_map_iq_table_a,
@@ -853,6 +934,71 @@ static void motor_commission_detent_validate_print(
 		    encoder_delta);
 }
 
+static float32_t motor_commission_detent_validate_rms_hz(
+	const struct motor_commission_detent_validate_metrics *m)
+{
+	if (m == NULL || m->samples == 0U) {
+		return 0.0f;
+	}
+
+	return sqrtf(m->sum_sq_vel_err_hz / (float32_t)m->samples);
+}
+
+static uint32_t motor_commission_detent_validate_encoder_delta(
+	const struct motor_commission_detent_validate_metrics *m)
+{
+	if (m == NULL || m->encoder_errors_end < m->encoder_errors_start) {
+		return 0U;
+	}
+
+	return m->encoder_errors_end - m->encoder_errors_start;
+}
+
+static enum motor_commission_detent_recommendation
+motor_commission_detent_validate_recommend(
+	const struct motor_commission_detent_validate_metrics *off,
+	const struct motor_commission_detent_validate_metrics *on,
+	float32_t *off_rms_hz,
+	float32_t *on_rms_hz,
+	float32_t *improvement_pct,
+	uint32_t *encoder_errors)
+{
+	float32_t off_rms = motor_commission_detent_validate_rms_hz(off);
+	float32_t on_rms = motor_commission_detent_validate_rms_hz(on);
+	uint32_t enc_delta = motor_commission_detent_validate_encoder_delta(off) +
+			     motor_commission_detent_validate_encoder_delta(on);
+	float32_t improvement = 0.0f;
+
+	if (off_rms > 0.0f) {
+		improvement = 100.0f * (off_rms - on_rms) / off_rms;
+	}
+
+	if (off_rms_hz != NULL) {
+		*off_rms_hz = off_rms;
+	}
+	if (on_rms_hz != NULL) {
+		*on_rms_hz = on_rms;
+	}
+	if (improvement_pct != NULL) {
+		*improvement_pct = improvement;
+	}
+	if (encoder_errors != NULL) {
+		*encoder_errors = enc_delta;
+	}
+
+	if (off == NULL || on == NULL ||
+	    off->samples < MOTOR_COMMISSION_DETENT_VALIDATE_MIN_SAMPLES ||
+	    on->samples < MOTOR_COMMISSION_DETENT_VALIDATE_MIN_SAMPLES ||
+	    off_rms <= 0.0f ||
+	    enc_delta != 0U) {
+		return MOTOR_COMMISSION_DETENT_RECOMMEND_INCONCLUSIVE;
+	}
+
+	return (on_rms <= (off_rms * MOTOR_COMMISSION_DETENT_VALIDATE_MATCH_RATIO)) ?
+		       MOTOR_COMMISSION_DETENT_RECOMMEND_APPLY :
+		       MOTOR_COMMISSION_DETENT_RECOMMEND_DO_NOT_APPLY;
+}
+
 int cmd_motor_commission_detent_validate(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc != 3) {
@@ -945,12 +1091,21 @@ stop_restore:
 	(void)motor_commission_wait_ms_or_fault(500U);
 	motor_commission_detent_validate_print(sh, "detent_off", &off);
 	motor_commission_detent_validate_print(sh, "detent_on ", &on);
-	if (off.samples > 0U && on.samples > 0U) {
-		float32_t off_rms = sqrtf(off.sum_sq_vel_err_hz / (float32_t)off.samples);
-		float32_t on_rms = sqrtf(on.sum_sq_vel_err_hz / (float32_t)on.samples);
-		shell_print(sh, "  verdict: %s",
-			    (on_rms <= off_rms) ? "IMPROVED_OR_EQUAL" : "WORSE");
-	}
+	detent_result.validation_recommendation =
+		motor_commission_detent_validate_recommend(&off, &on,
+							   &detent_result.validation_off_rms_hz,
+							   &detent_result.validation_on_rms_hz,
+							   &detent_result.validation_improvement_pct,
+							   &detent_result.validation_encoder_errors);
+	detent_result.validation_complete = true;
+	shell_print(sh,
+		    "  recommendation: %s off_rms=%.4f Hz on_rms=%.4f Hz improvement=%.1f%% enc_err=%u",
+		    motor_commission_detent_recommendation_str(
+			    detent_result.validation_recommendation),
+		    (double)detent_result.validation_off_rms_hz,
+		    (double)detent_result.validation_on_rms_hz,
+		    (double)detent_result.validation_improvement_pct,
+		    detent_result.validation_encoder_errors);
 
 restore_runtime:
 	memcpy(g_motor_params->detent_map_iq_table_a, saved_table, sizeof(saved_table));

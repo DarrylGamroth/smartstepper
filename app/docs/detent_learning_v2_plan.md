@@ -112,3 +112,55 @@ Expected:
 - HIL logs compare at least `0.05 Hz x 3` and `0.10 Hz x 10`.
 - Apply recommendation is based on validation, not structural coverage alone.
 
+## Implementation Evidence
+
+Status: implemented with live HIL comparison deferred until the commissioning
+baseline is stable enough for repeatable velocity-encoder operation.
+
+Code changes:
+
+- `motor commission detent run` now prints the recommended starting command
+  when invoked incorrectly:
+  - `motor commission detent run 0.10 10 1 0.12`
+- Capture warns when speed is below `0.08 Hz` or cycles are below `10`, because
+  those runs are more likely to learn friction/stiction instead of position-
+  periodic detent torque.
+- Status reports accepted/total ratio, forward/reverse/both-direction coverage,
+  and the latest validation recommendation.
+- Validation now reports one of:
+  - `RECOMMEND_APPLY`
+  - `DO_NOT_APPLY`
+  - `INCONCLUSIVE`
+- Enabled apply is blocked unless validation recommends apply. Operators can
+  still apply the staged table disabled with `motor commission detent apply 0`
+  for inspection/debugging.
+
+Validation:
+
+```text
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_detent_map.unit
+```
+
+Result:
+
+```text
+7 of 7 executed test cases passed
+```
+
+Firmware build:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Result:
+
+```text
+zephyr/zephyr.elf linked successfully
+```
+
+HIL note:
+
+- The required `0.05 Hz x 3` versus `0.10 Hz x 10` comparison remains open
+  until velocity-encoder commissioning is stable enough to produce repeatable
+  validation passes.
