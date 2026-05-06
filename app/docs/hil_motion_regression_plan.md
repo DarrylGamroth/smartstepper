@@ -101,8 +101,14 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent --host 10.0.0.44 \
 
 ## Implementation Evidence
 
-Status: HIL workflow implemented; current hardware/control baseline is not yet
-fully passing.
+Status: HIL workflow implemented.
+
+Historical note: the first live gate runs below exposed real failures while the
+commissioning and encoder-control flow was still being stabilized. They should
+not be treated as the current MT6835 control baseline. Current MT6835
+commissioning and PI encoder-control evidence is recorded in
+`commissioning_workflow_refactor_plan.md` and
+`encoder_pi_tuning_hil_2026-05-05.md`.
 
 Implemented:
 
@@ -203,9 +209,11 @@ Report directory:
 
 Caveats and follow-up:
 
-- Current encoder validation is not a stable baseline yet. The gate now exposes
-  this instead of hiding it.
-- A separate system/control investigation is needed for the intermittent
-  "control ISR is not advancing" failure seen during boot commissioning.
+- The early failed reports remain useful as regression evidence for the HIL
+  runner and old commissioning bugs, but they are not the latest MT6835 motion
+  result.
+- MT6835 `current_encoder`, `velocity_encoder`, and initial `position_encoder`
+  PI evidence is tracked separately in `encoder_pi_tuning_hil_2026-05-05.md`.
+- AEAT-9955 encoder-path limitations must stay separate from MT6835 results.
 - Generated/open-loop trace validation is now strong enough to fail when no
   samples or no motion are captured.

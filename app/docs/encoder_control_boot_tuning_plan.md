@@ -96,13 +96,18 @@ motor position target <nearby absolute deg>
 
 ## Evidence
 
+Scope note: this document includes early boot-tuning attempts and later
+model-based tuning evidence. The final MT6835 PI baseline is summarized in
+`encoder_pi_tuning_hil_2026-05-05.md`; AEAT-9955 stabilization results are not
+part of the MT6835 baseline.
+
 - `python3 zephyr/scripts/twister -T chopper/tests/unit -p native_sim --outdir /tmp/twister-unit-pi --inline-logs -v -s chopper.pi_controller.unit`: passed, 8/8 cases.
 - `west build --build-dir /workspace/build/chopper/smartstepper_v2`: passed.
 - HIL `motor commission boot 0.15 0.10 1` with Id-axis sweep:
   - mapping valid, direction `-1`, commutation offset about `0.20 deg mechanical`.
   - `+Iq=0.060 A` validation produced positive control-coordinate motion.
   - one run observed `warn=1 err=1` during the short validation pulse, so the validation path now uses the same small error budget as mapping and reports the counts.
-- HIL `velocity_encoder` with the first retuned safe defaults showed the original profile-max-speed-based gains were too small, then the higher gains saturated and oscillated. Safe defaults were reduced to use a `0.060 A` current limit and a low-speed gain point. Further closed-loop velocity tuning is still required on hardware.
+- HIL `velocity_encoder` with the first retuned safe defaults showed the original profile-max-speed-based gains were too small, then the higher gains saturated and oscillated. Safe defaults were reduced to use a `0.060 A` current limit and a low-speed gain point. This was an intermediate result; later MT6835 model-based PI tuning produced an acceptable initial baseline.
 - `motor velocity gains defaults <safe|nominal>` and `motor position gains defaults <safe|nominal>` now prefer commissioned `psi_f/J/B/Kt` model gains when valid identification data or applied auto-tune data exists. The commands print `source=model` when those values are used and `source=empirical` when falling back to bring-up heuristics.
 - HIL command smoke test after flash, before identification data existed:
   - `motor velocity gains defaults safe`: `source=empirical`, `Kp=0.00955`, `Ki=0.00955`, `Iq limit=0.060 A`.

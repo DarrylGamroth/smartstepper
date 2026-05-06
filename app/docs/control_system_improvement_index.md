@@ -112,8 +112,13 @@ python3 scripts/hil/hil_telnet.py status --host 10.0.0.44 --json-report hil_logs
 
 Remaining caveat:
 
-- Full live motion HIL for detent, MPR, DOB, and velocity/position encoder
-  behavior remains blocked by the current commissioning/velocity-encoder
-  baseline stability issue. The plan set improved contracts, diagnostics,
-  safety gating, and repeatable evidence collection, but does not claim the
-  encoder motion-control loop is fully tuned.
+- MT6835 commissioning and PI encoder-control baseline evidence is captured in
+  `encoder_pi_tuning_hil_2026-05-05.md` and
+  `commissioning_workflow_refactor_plan.md`. Those results supersede earlier
+  generic "velocity encoder baseline unstable" notes for the MT6835 profile.
+- Full live motion HIL for detent, MPR, DOB, and feature combinations is still
+  not complete. That is an advanced-feature validation gap, not evidence that
+  MT6835 commissioning or PI `velocity_encoder` is currently failing.
+- AEAT-9955 encoder-control limitations are hardware/encoder-path specific and
+  are documented separately in the AEAT-focused stabilization and transport
+  plans.

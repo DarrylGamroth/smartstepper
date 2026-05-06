@@ -133,5 +133,9 @@ Autoload should remain disabled until all required checks pass on the target:
 - position_encoder validation pass once the position loop is stable.
 - no encoder acquisition hard errors above the accepted threshold.
 
-Current state on 2026-05-05: velocity_encoder validation still fails the HIL
-acceptance threshold, so persistence autoload must stay disabled.
+Current state on 2026-05-05: MT6835 commissioning and PI `velocity_encoder`
+validation have passed initial HIL checks, but persistence autoload must stay
+disabled until the full repeatable gate also covers current, velocity,
+position, reset/reboot behavior, and advanced-feature disabled/enabled
+combinations. AEAT-9955 encoder-control limitations are separate and must not
+be used to judge MT6835 persistence readiness.

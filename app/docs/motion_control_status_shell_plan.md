@@ -183,5 +183,8 @@ Result:
 VERDICT: PASS
 ```
 
-- Full motion HIL remains gated by the current commissioning/velocity-encoder
-  baseline.
+- Full motion HIL for the advanced feature matrix remains open. MT6835
+  commissioning and PI encoder-control baseline evidence is tracked in
+  `commissioning_workflow_refactor_plan.md` and
+  `encoder_pi_tuning_hil_2026-05-05.md`; AEAT-9955 encoder issues are a
+  separate hardware path.

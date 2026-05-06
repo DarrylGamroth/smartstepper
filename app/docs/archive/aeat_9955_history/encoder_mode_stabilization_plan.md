@@ -1,5 +1,10 @@
 # Encoder Mode Stabilization Plan
 
+Hardware scope: AEAT-9955-focused stabilization history. Do not use this file
+as the current MT6835 commissioning or PI `velocity_encoder` baseline. MT6835
+results are tracked in `commissioning_workflow_refactor_plan.md` and
+`encoder_pi_tuning_hil_2026-05-05.md`.
+
 ## Goal
 
 Make `_encoder` control modes deterministic and safe to enter from a fresh boot. Encoder-control modes must not start unless the commutation mapping and encoder transport are known good. Generated/open-loop modes must not regress.

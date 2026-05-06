@@ -114,8 +114,10 @@ Expected:
 
 ## Implementation Evidence
 
-Status: implemented with live HIL comparison deferred until the commissioning
-baseline is stable enough for repeatable velocity-encoder operation.
+Status: implemented with live detent-specific HIL comparison still open.
+MT6835 commissioning and PI `velocity_encoder` have separate initial-pass
+evidence; this plan still needs a repeatable off/on detent comparison before
+the map should be treated as proven.
 
 Code changes:
 
@@ -161,6 +163,6 @@ zephyr/zephyr.elf linked successfully
 
 HIL note:
 
-- The required `0.05 Hz x 3` versus `0.10 Hz x 10` comparison remains open
-  until velocity-encoder commissioning is stable enough to produce repeatable
-  validation passes.
+- The required `0.05 Hz x 3` versus `0.10 Hz x 10` comparison remains open as
+  a detent-validation task. Do not use older AEAT-9955 encoder limitations as
+  evidence against the MT6835 PI velocity baseline.
