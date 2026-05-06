@@ -293,15 +293,15 @@
 	pinctrl-0 = <&spi2_sck_pi1 &spi2_miso_pi2 &spi2_mosi_pi3 &spi2_nss_pi0>;
 	pinctrl-names = "default";
 	// cs-gpios = <&gpioi 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-	status = "okay";
+	status = "disabled";
 
-	mt6835: mt6835@0 {
-		compatible = "magntek,mt6835";
-		reg = <0>;
-		spi-max-frequency = <DT_FREQ_M(12)>;
-		cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
-		status = "okay";
-	};
+	// mt6835: mt6835@0 {
+	// 	compatible = "magntek,mt6835";
+	// 	reg = <0>;
+	// 	spi-max-frequency = <DT_FREQ_M(12)>;
+	// 	cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
+	// 	status = "okay";
+	// };
 };
 
 &spi3 {

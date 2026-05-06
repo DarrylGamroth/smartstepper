@@ -119,21 +119,24 @@ incorrect feedforward in unobserved regions.
 
 ### Recommended HIL Workflow
 
-Use a slower multi-cycle capture first:
+Use a moderate multi-cycle capture first. Avoid ultra-slow captures on hybrid
+steppers unless you are explicitly studying stiction; too-slow motion can learn
+friction/stick-slip instead of position-periodic detent torque.
 
 ```text
-motor commission run slow apply
+motor commission run confirm apply
 motor safety timeout 0
 motor arm
 motor commission detent clear
-motor commission detent run 0.05 3 1 0.12
+motor commission detent run 0.10 10 1 0.12
 motor commission detent status
 ```
 
-If coverage is still low, try:
+If motion is smooth and you need more averaging, increase speed and keep the
+cycle count high:
 
 ```text
-motor commission detent run 0.03 4 1 0.12
+motor commission detent run 0.20 10 1 0.12
 ```
 
 ### Acceptance
@@ -245,15 +248,16 @@ MPR tuning needs a repeatable sweep and objective metrics.
 
 ### Candidate Sweep Range
 
-Start with the current stable region:
+Use the bandwidth interface for operator-facing tuning:
 
 ```text
-motor velocity mpr set 0.010 50.0 8 0.0005 0.0
-motor velocity mpr set 0.015 30.0 8 0.0007 0.0
-motor velocity mpr set 0.020 20.0 8 0.0010 0.0
+motor velocity mpr bandwidth 1.0
+motor velocity mpr bandwidth 2.0
+motor velocity mpr bandwidth 3.0
 ```
 
-Only increase after `0.10 Hz` and `-0.10 Hz` pass cleanly.
+Raw `motor velocity mpr set ...` remains available for engineering diagnosis,
+but should not be the default HIL/operator interface.
 
 ### Acceptance
 
@@ -506,13 +510,14 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   --yes-live-motion \
   --feature-combo pi \
   --feature-combo mpr \
-  --mpr-bandwidth-hz 0.5 \
-  --detent-hz 0.05 \
-  --detent-cycles 3 \
+  --mpr-bandwidth-hz 1.0 \
+  --commission-profile confirm \
+  --detent-hz 0.10 \
+  --detent-cycles 10 \
   --detent-iq-limit 0.12 \
-  --detent-validate-hz 0.05 \
-  --detent-validate-ms 1000 \
-  --velocity-hz 0.05 \
+  --detent-validate-hz 0.10 \
+  --detent-validate-ms 3000 \
+  --velocity-hz 0.50 \
   --velocity-hold-ms 1000 \
   --json-report hil_logs/mpr_dob_detent/reduced_pi_mpr_after_fixes.json
 Result: PASS.
@@ -566,13 +571,13 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   --feature-combo pi \
   --feature-combo mpr \
   --feature-combo mpr_dob \
-  --mpr-bandwidth-hz 0.5 \
-  --velocity-hz 0.05 \
+  --mpr-bandwidth-hz 1.0 \
+  --velocity-hz 0.50 \
   --velocity-hold-ms 1000 \
   --detent-hz 0.10 \
-  --detent-cycles 3 \
+  --detent-cycles 10 \
   --detent-iq-limit 0.12 \
   --detent-validate-hz 0.10 \
-  --detent-validate-ms 1500 \
+  --detent-validate-ms 3000 \
   --json-report hil_logs/mpr_dob_detent/narrow_pi_mpr_mprdob_after_hold_fix.json
 ```
