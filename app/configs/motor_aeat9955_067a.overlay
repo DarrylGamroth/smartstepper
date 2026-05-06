@@ -53,6 +53,7 @@
 		velocity-max-accel-hz-per-s = <10>;
 		velocity-initial-hz = <0>;
 		commission-standard-min-auto-iq-ma = <250>;
+		commission-validate-current-default-iq-ma = <80>;
 		commission-auto-post-wait-ms = <2500>;
 		commission-auto-mech-runs = <3>;
 		commission-auto-mech-max-attempts = <5>;

@@ -772,10 +772,14 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 		    motor_calibration_mode_to_string(g_motor_params->calibration.mode));
 	shell_print(sh, "  Commissioned: %s",
 		    g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
-	shell_print(sh, "  Enc mapped:   %s",
-		    g_motor_params->calibration.encoder_mapping_complete ? "YES" : "NO");
-	shell_print(sh, "  Online mode:  %s",
-		    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
+		shell_print(sh, "  Enc mapped:   %s",
+			    g_motor_params->calibration.encoder_mapping_complete ? "YES" : "NO");
+		shell_print(sh, "  Active mode:  %s",
+			    motor_state_ptr_is_online_control_state(g_motor_params->state_for_isr) ?
+				    motor_state_to_string(state) :
+				    "none");
+		shell_print(sh, "  Requested:    %s",
+			    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
 	shell_print(sh, "  Enc dir sign: %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	struct motor_control_policy policy = {0};

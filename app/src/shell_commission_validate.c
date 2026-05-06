@@ -59,11 +59,28 @@ static int motor_commission_enter_mode_armed(const struct shell *sh,
 					     enum motor_state mode,
 					     uint32_t timeout_ms)
 {
-	int ret = motor_api_request_online();
+	int ret = motor_commission_request_idle_disarmed();
 	if (ret != 0) {
 		return ret;
 	}
-	ret = motor_post_mode_change(mode);
+
+	uint32_t start_ms = k_uptime_get_32();
+	while ((motor_encoder_acquisition_is_enabled() ||
+		motor_encoder_acquisition_is_busy()) &&
+	       (k_uptime_get_32() - start_ms) < MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS) {
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(MOTOR_COMMISSION_MOTION_SAMPLE_MS);
+	}
+	if (motor_encoder_acquisition_is_enabled() ||
+	    motor_encoder_acquisition_is_busy()) {
+		return -EBUSY;
+	}
+
+	if (g_motor_params != NULL) {
+		g_motor_params->calibration.requested_online_mode = (uint8_t)mode;
+	}
+
+	ret = motor_api_request_online();
 	if (ret != 0) {
 		return ret;
 	}

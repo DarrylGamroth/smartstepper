@@ -212,6 +212,14 @@ properties:
       conservative runtime velocity limits from starving the identification
       stage.
 
+  commission-validate-current-default-iq-ma:
+    type: int
+    default: 80
+    description: >
+      Default Iq used by `motor commission validate current` when no current is
+      specified. This is a per-motor smoke-test value and should exceed static
+      friction/detent torque without approaching the motor current limit.
+
   commission-auto-post-wait-ms:
     type: int
     default: 2500
