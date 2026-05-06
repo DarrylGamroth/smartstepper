@@ -230,6 +230,79 @@ Encoder Control Readiness:
         velocity = next(check for check in report.checks if check.name == "velocity_validation")
         self.assertGreater(velocity.values["overshoot_ratio"], 3.0)
 
+    def test_open_loop_trace_passes_with_observer_columns_and_clean_motion(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor encoder trace summary",
+                """
+Encoder raw trace summary:
+  Stored:       512 / 512
+  Raw delta:    -1045 mdeg, avg -114 mHz
+  Ctrl delta:   1045 mdeg, avg 114 mHz
+  Counts:       clean=512 fresh=512 ctrl_en=0 warn=0 err=0 io=0
+  Delta drops:  0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder trace dump 32",
+                """
+idx loop src raw_mdeg ctrl_mdeg obs_mech_mdeg obs_elec_mdeg gen_mech_mdeg gen_elec_mdeg q fresh warn err io status ctrl_en
+0 100 0 151397 -151397 206439 291934 206438 291844 0x03 1 0 0 0 0x00 0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor fault snapshot status",
+                "Fault snapshot:\n  Latched:    NO\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("encoder-trace-open-loop"), results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+        trace = next(check for check in report.checks if check.name == "open_loop_trace")
+        self.assertEqual(trace.values["ctrl_delta_mdeg"], 1045)
+
+    def test_open_loop_trace_fails_when_no_motion_was_captured(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor encoder trace summary",
+                """
+Encoder raw trace summary:
+  Stored:       512 / 512
+  Raw delta:    0 mdeg, avg 0 mHz
+  Ctrl delta:   0 mdeg, avg 0 mHz
+  Counts:       clean=512 fresh=512 ctrl_en=0 warn=0 err=0 io=0
+  Delta drops:  0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor fault snapshot status",
+                "Fault snapshot:\n  Latched:    NO\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("encoder-trace-open-loop"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        trace = next(check for check in report.checks if check.name == "open_loop_trace")
+        self.assertEqual(trace.values["ctrl_delta_mdeg"], 0)
+
     def test_encoder_robust_passes_with_valid_mapping_and_apply(self) -> None:
         results = [
             hil_telnet.ShellResult(

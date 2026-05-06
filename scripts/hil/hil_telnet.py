@@ -217,6 +217,10 @@ def timestamp() -> str:
 
 def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
     return [
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor state status", timeout_s=5.0),
         ShellCommand("motor state policy", timeout_s=5.0),
         ShellCommand("motor outer status", timeout_s=5.0),
@@ -232,6 +236,7 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
     return [
         ShellCommand("motor state status"),
         ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
         ShellCommand("motor velocity target 0", timeout_s=1.5),
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
@@ -242,6 +247,14 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
             f"motor commission boot {args.boot_current:.3f} {args.boot_hz:.3f} {args.cycles:.3f}",
             timeout_s=duration_s,
         ),
+        ShellCommand("motor encoder control_status"),
+        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor state status"),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 1000"),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor encoder acquisition"),
         ShellCommand("motor state status"),
@@ -269,6 +282,7 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
     return [
         ShellCommand("motor state status"),
         ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
         ShellCommand("motor velocity target 0", timeout_s=1.5),
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
@@ -379,6 +393,7 @@ def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellComm
     duration_s = max(1.0, args.trace_ms / 1000.0)
     return [
         ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor state mode velocity_generated"),
         ShellCommand("motor state online", timeout_s=3.0),
@@ -650,6 +665,36 @@ def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
     return samples
 
 
+def _parse_open_loop_trace_summary(response: str) -> dict[str, float | int] | None:
+    stored = re.search(r"Stored:\s+(\d+)\s*/\s*(\d+)", response)
+    raw_delta = re.search(r"Raw delta:\s+([-+0-9]+)\s+mdeg,\s+avg\s+([-+0-9]+)\s+mHz",
+                          response)
+    ctrl_delta = re.search(r"Ctrl delta:\s+([-+0-9]+)\s+mdeg,\s+avg\s+([-+0-9]+)\s+mHz",
+                           response)
+    counts = re.search(
+        r"Counts:\s+clean=(\d+)\s+fresh=(\d+)\s+ctrl_en=(\d+)\s+warn=(\d+)\s+err=(\d+)\s+io=(\d+)",
+        response,
+    )
+    drops = re.search(r"Delta drops:\s+(\d+)", response)
+    if stored is None or raw_delta is None or ctrl_delta is None or counts is None:
+        return None
+    return {
+        "stored": int(stored.group(1)),
+        "capacity": int(stored.group(2)),
+        "raw_delta_mdeg": int(raw_delta.group(1)),
+        "raw_avg_mhz": int(raw_delta.group(2)),
+        "ctrl_delta_mdeg": int(ctrl_delta.group(1)),
+        "ctrl_avg_mhz": int(ctrl_delta.group(2)),
+        "clean": int(counts.group(1)),
+        "fresh": int(counts.group(2)),
+        "ctrl_en": int(counts.group(3)),
+        "warn": int(counts.group(4)),
+        "err": int(counts.group(5)),
+        "io": int(counts.group(6)),
+        "delta_drops": int(drops.group(1)) if drops is not None else 0,
+    }
+
+
 def _evaluate_current_validation(args: argparse.Namespace, checks: list[VerdictCheck],
                                  results: Sequence[ShellResult]) -> None:
     current_response = _last_response(results, "motor commission validate current")
@@ -727,6 +772,30 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
                "max_err": max_err,
                "wrong_sign_samples": len(wrong_sign),
            })
+
+
+def _evaluate_open_loop_trace(args: argparse.Namespace, checks: list[VerdictCheck],
+                              results: Sequence[ShellResult]) -> None:
+    trace_response = _last_response(results, "motor encoder trace summary")
+    summary = _parse_open_loop_trace_summary(trace_response)
+    if summary is None:
+        checks.append(VerdictCheck("open_loop_trace", "FAIL",
+                                   "Open-loop trace summary not parsed"))
+        return
+
+    min_delta_mdeg = int(round(args.min_trace_control_delta_deg * 1000.0))
+    enough_motion = abs(int(summary["ctrl_delta_mdeg"])) >= min_delta_mdeg
+    clean = (
+        int(summary["clean"]) > 0 and
+        int(summary["err"]) <= args.max_sample_errors and
+        int(summary["warn"]) <= args.max_sample_warnings and
+        int(summary["io"]) <= args.max_transport_errors and
+        int(summary["delta_drops"]) == 0
+    )
+    _check(checks, "open_loop_trace", enough_motion and clean,
+           "Open-loop trace moved and samples are clean" if enough_motion and clean
+           else "Open-loop trace motion or sample quality failed",
+           summary)
 
 
 def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[VerdictCheck],
@@ -981,6 +1050,9 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
     ):
         _evaluate_position_validation(checks, results)
 
+    if args.scenario == "encoder-trace-open-loop":
+        _evaluate_open_loop_trace(args, checks, results)
+
     has_fail = any(check.status == "FAIL" for check in checks)
     has_inconclusive = any(check.status == "INCONCLUSIVE" for check in checks)
     verdict = "FAIL" if has_fail else ("INCONCLUSIVE" if has_inconclusive else "PASS")
@@ -1089,6 +1161,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--trace-ms", type=int, default=1000)
     parser.add_argument("--trace-decimation", type=int, default=1)
     parser.add_argument("--trace-dump", type=int, default=32)
+    parser.add_argument("--min-trace-control-delta-deg", type=float, default=0.05,
+                        help="Minimum absolute control-angle motion for open-loop trace validation.")
 
     parser.add_argument("--command", action="append", default=[],
                         help="Command for the custom scenario. Can be repeated.")

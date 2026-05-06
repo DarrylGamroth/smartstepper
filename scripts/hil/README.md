@@ -6,7 +6,7 @@ shell. It uses only Python's standard library socket module.
 Default target:
 
 ```bash
-python3 scripts/hil/hil_telnet.py status --host 10.0.0.171
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.44
 ```
 
 Motion-producing scenarios require an explicit safety acknowledgement:
@@ -90,7 +90,7 @@ Machine-readable evidence:
 
 ```bash
 python3 scripts/hil/hil_telnet.py status \
-  --host 10.0.0.171 \
+  --host 10.0.0.44 \
   --json-report hil_logs/status.json
 ```
 
@@ -103,6 +103,45 @@ Parser-only tests:
 ```bash
 python3 -m unittest scripts/hil/test_hil_telnet_parser.py
 ```
+
+Regression gate:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.44
+```
+
+The default gate is non-motion status only. The live gate runs the currently
+recommended safe baseline:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.44 --live
+```
+
+Live baseline scenarios:
+
+- `status`
+- `boot-commission`
+- `encoder-trace-open-loop`
+- `current-validate`
+
+Known-unstable encoder closed-loop checks are opt-in so they do not hide
+regressions in the generated/open-loop baseline:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.44 --live --include-velocity
+scripts/hil/run_hil_gate.sh --host 10.0.0.44 --live --include-position
+```
+
+If a known current-encoder issue is being investigated, keep the generated
+baseline independent:
+
+```bash
+scripts/hil/run_hil_gate.sh --host 10.0.0.44 --live --skip-current
+```
+
+Each scenario writes a JSON report under the timestamped log directory. The gate
+also writes `summary.json` with the selected options and aggregate failure
+count. Use `--keep-going` when collecting evidence across known failures.
 
 Thresholds for encoder errors, current motion, and velocity tracking are
 configurable with options such as `--max-crc-errors`,
