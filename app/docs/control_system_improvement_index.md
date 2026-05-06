@@ -74,3 +74,46 @@ For each completed plan, append:
 - log or JSON report path,
 - remaining caveats.
 
+## Completion Summary
+
+Completed through: plan 7, `motion_control_status_shell_plan.md`.
+
+Commits:
+
+- `3eb4af5` - Implement encoder sample trust contract.
+- `9ca4c6e` - Centralize angle observer contract.
+- `d04a302` - Improve HIL motion regression gate.
+- `0029ed8` - Add MPR bandwidth mapping helpers.
+- `2baaaa3` - Refine detent learning validation policy.
+- `2b7a103` - Define DOB readiness and reset policy.
+- `44c5e14` - Add concise control status shell commands.
+
+Validation summary:
+
+- Unit tests passed for encoder feedback/control kernel, angle observer, MPR,
+  detent map, DOB, and HIL telnet parser coverage.
+- Firmware build passed with:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+- Target flash passed with:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+```
+
+- Non-motion telnet status HIL passed after flashing:
+
+```text
+python3 scripts/hil/hil_telnet.py status --host 10.0.0.44 --json-report hil_logs/control_plan/status_shell_cleanup_after_flash.json
+```
+
+Remaining caveat:
+
+- Full live motion HIL for detent, MPR, DOB, and velocity/position encoder
+  behavior remains blocked by the current commissioning/velocity-encoder
+  baseline stability issue. The plan set improved contracts, diagnostics,
+  safety gating, and repeatable evidence collection, but does not claim the
+  encoder motion-control loop is fully tuned.
