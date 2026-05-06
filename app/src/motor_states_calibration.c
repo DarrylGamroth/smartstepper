@@ -26,6 +26,7 @@
 #include "motor/motion/angle_gen.h"
 #include "motor/math/angle_wrap.h"
 #include "motor_state_utils.h"
+#include "motor_state_transition.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -76,28 +77,28 @@ static inline bool motor_calibration_start_timer_or_fault(struct motor_parameter
 	return false;
 }
 
-static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
-{
-	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
-
-	if (params != NULL) {
-		mode = (enum motor_state)params->calibration.requested_online_mode;
-	}
-
-	if (!motor_state_is_online_submode(mode)) {
-		mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
-	}
-
-	return mode;
-}
-
 static inline enum smf_state_result
 motor_boot_calibration_complete(struct motor_parameters *params)
 {
-	enum motor_state online_mode = motor_resolve_requested_online_mode(params);
+	bool fallback_used = false;
+	char reason[96] = {0};
+	enum motor_state online_mode =
+		motor_state_resolve_requested_online_mode(params, true,
+							  &fallback_used,
+							  reason, sizeof(reason));
 
 	LOG_INF("Boot calibration complete: current offsets measured");
 	LOG_INF("Encoder commutation offset is not set by boot calibration; run generated-sweep encoder commissioning before encoder-control modes");
+	motor_transition_status_update(params, MOTOR_EVENT_CALIBRATE_REQUEST,
+				       params->calibration.requested_online_mode,
+				       MOTOR_STATE_CALIBRATION,
+				       online_mode,
+				       fallback_used ? online_mode : MOTOR_STATE_ONLINE,
+				       fallback_used ?
+				       MOTOR_TRANSITION_RESULT_FALLBACK :
+				       MOTOR_TRANSITION_RESULT_COMPLETED,
+				       ERROR_NONE,
+				       fallback_used ? reason : "boot calibration complete");
 	smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 	return SMF_EVENT_HANDLED;
 }
@@ -509,8 +510,22 @@ static inline enum smf_state_result motor_align_apply_offset_and_transition(
 	if (params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 	} else {
+		bool fallback_used = false;
+		char reason[96] = {0};
 		enum motor_state online_mode =
-			motor_resolve_requested_online_mode(params);
+			motor_state_resolve_requested_online_mode(params, true,
+								  &fallback_used,
+								  reason, sizeof(reason));
+		motor_transition_status_update(params, MOTOR_EVENT_CALIBRATE_REQUEST,
+					       params->calibration.requested_online_mode,
+					       MOTOR_STATE_ALIGN_POS_SAMPLE,
+					       online_mode,
+					       fallback_used ? online_mode : MOTOR_STATE_ONLINE,
+					       fallback_used ?
+					       MOTOR_TRANSITION_RESULT_FALLBACK :
+					       MOTOR_TRANSITION_RESULT_COMPLETED,
+					       ERROR_NONE,
+					       fallback_used ? reason : "alignment complete");
 		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 	}
 

@@ -21,6 +21,7 @@
 #include "motor/runtime/commission_runtime.h"
 #include "motor_events.h"
 #include "motor_states.h"
+#include "motor_state_transition.h"
 #include "motor/runtime/runtime_state.h"
 #include "motor/runtime/runtime_diag.h"
 #include "motor/runtime/outer_loop_runtime.h"
@@ -343,6 +344,7 @@ struct motor_parameters {
 	struct smf_ctx smf;
 	const struct smf_state *state_for_isr;
 	struct motor_event event;  /* Current event being processed */
+	struct motor_transition_status transition_status; /* Latest SMF transition result */
 	struct k_timer state_timer;  /* Timer for state timeouts */
 	/* P03 split scaffolding:
 	 * - rt_fast: ISR-rate mirrors for hot data migration.

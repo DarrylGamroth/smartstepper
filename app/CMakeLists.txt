@@ -29,6 +29,8 @@ target_sources(app PRIVATE
 	src/motor_control_api.c
 	src/motor_encoder_control.c
 	src/motor_encoder_acquisition.c
+	src/motor_operating_mode.c
+	src/motor_state_transition.c
 	src/motor_control_telemetry.c
 	src/motor_control_loop.c
 	src/motor_isr_io.c

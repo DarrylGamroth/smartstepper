@@ -26,6 +26,7 @@
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
 #include "motor_encoder_control.h"
+#include "motor_state_transition.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -223,6 +224,14 @@ enum smf_state_result motor_state_online_run(void *obj)
 		if (!motor_state_is_online_submode(params->event.target_mode)) {
 			LOG_ERR("Invalid mode change target: %s",
 				motor_state_to_string(params->event.target_mode));
+			motor_transition_status_update(params, MOTOR_EVENT_MODE_CHANGE,
+						       params->event.target_mode,
+						       motor_online_current_substate(params),
+						       motor_online_current_substate(params),
+						       motor_online_current_substate(params),
+						       MOTOR_TRANSITION_RESULT_REJECTED,
+						       ERROR_NONE,
+						       "target is not an online submode");
 			return SMF_EVENT_HANDLED;
 		}
 
@@ -236,10 +245,24 @@ enum smf_state_result motor_state_online_run(void *obj)
 				LOG_ERR("Encoder mode %s rejected: %s",
 					motor_state_to_string(params->event.target_mode),
 					reason);
+				motor_transition_status_update(params, MOTOR_EVENT_MODE_CHANGE,
+							       params->event.target_mode,
+							       motor_online_current_substate(params),
+							       motor_online_current_substate(params),
+							       motor_online_current_substate(params),
+							       MOTOR_TRANSITION_RESULT_REJECTED,
+							       ERROR_NONE, reason);
 				return SMF_EVENT_HANDLED;
 			}
 		}
 
+		motor_transition_status_update(params, MOTOR_EVENT_MODE_CHANGE,
+					       params->event.target_mode,
+					       motor_online_current_substate(params),
+					       params->event.target_mode,
+					       params->event.target_mode,
+					       MOTOR_TRANSITION_RESULT_COMPLETED,
+					       ERROR_NONE, "mode changed");
 		smf_set_state(SMF_CTX(params), &motor_states[params->event.target_mode]);
 		return SMF_EVENT_HANDLED;
 

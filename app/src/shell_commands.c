@@ -2334,6 +2334,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_state,
 	SHELL_CMD(clear_error, NULL, "Clear error state", cmd_motor_state_clear_error),
 	SHELL_CMD(status, NULL, "Show motor status", cmd_motor_state_status),
 	SHELL_CMD(policy, NULL, "Show active control policy", cmd_motor_state_policy),
+	SHELL_CMD(transition, NULL, "Show latest state/mode transition result",
+		  cmd_motor_state_transition),
 	SHELL_CMD(mode, &sub_motor_state_mode, "Switch control mode", NULL),
 	SHELL_SUBCMD_SET_END
 );

@@ -22,6 +22,7 @@
 #include "motor_hardware.h"
 #include "motor_encoder_control.h"
 #include "motor_encoder_acquisition.h"
+#include "motor_state_transition.h"
 #include "config.h"
 #include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
@@ -615,6 +616,16 @@ int cmd_motor_state_online(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	if (motor_api_request_online() == 0) {
+		enum motor_state requested =
+			(enum motor_state)g_motor_params->calibration.requested_online_mode;
+		motor_transition_status_update(g_motor_params, MOTOR_EVENT_ONLINE,
+					       requested,
+					       (enum motor_state)motor_api_get_state(),
+					       (enum motor_state)motor_api_get_state(),
+					       (enum motor_state)motor_api_get_state(),
+					       MOTOR_TRANSITION_RESULT_REQUESTED,
+					       ERROR_NONE,
+					       "online request posted; waiting for SMF");
 		shell_print(sh, "ONLINE state requested");
 		return 0;
 	} else {
@@ -792,6 +803,12 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 				    "none");
 		shell_print(sh, "  Requested:    %s",
 			    motor_state_to_string(g_motor_params->calibration.requested_online_mode));
+	shell_print(sh, "  Transition:   #%u %s requested=%s final=%s reason=%s",
+		    g_motor_params->transition_status.request_sequence,
+		    motor_transition_result_to_string(g_motor_params->transition_status.result),
+		    motor_state_to_string(g_motor_params->transition_status.requested_state),
+		    motor_state_to_string(g_motor_params->transition_status.final_state),
+		    g_motor_params->transition_status.reason);
 	shell_print(sh, "  Enc dir sign: %d",
 		    (g_motor_params->encoder_direction_sign >= 0) ? 1 : -1);
 	struct motor_control_policy policy = {0};
@@ -815,6 +832,35 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 				     (180.0f / PI_F32)));
 	}
 	
+	return 0;
+}
+
+/* motor state transition */
+int cmd_motor_state_transition(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	const struct motor_transition_status *st = &g_motor_params->transition_status;
+
+	shell_print(sh, "Transition Status:");
+	shell_print(sh, "  Sequence:     %u", st->request_sequence);
+	shell_print(sh, "  Event:        %s", motor_event_to_string(st->request_event));
+	shell_print(sh, "  Result:       %s", motor_transition_result_to_string(st->result));
+	shell_print(sh, "  Requested:    %s", motor_state_to_string(st->requested_state));
+	shell_print(sh, "  Source:       %s", motor_state_to_string(st->source_state));
+	shell_print(sh, "  Final:        %s", motor_state_to_string(st->final_state));
+	shell_print(sh, "  Fallback:     %s", motor_state_to_string(st->fallback_state));
+	shell_print(sh, "  Error:        %s (%u)", motor_error_to_string(st->error_code),
+		    st->error_code);
+	shell_print(sh, "  Timestamp:    %u ms", st->timestamp_ms);
+	shell_print(sh, "  Loop:         %u", st->loop_count);
+	shell_print(sh, "  Reason:       %s", st->reason);
 	return 0;
 }
 
@@ -869,8 +915,15 @@ static int motor_request_mode_change(const struct shell *sh, enum motor_state ta
 			    motor_state_is_online_submode(current_state);
 	if (!online_active) {
 		g_motor_params->calibration.requested_online_mode = (uint8_t)target_state;
+		motor_transition_status_update(g_motor_params, MOTOR_EVENT_MODE_CHANGE,
+					       target_state, (enum motor_state)current_state,
+					       (enum motor_state)current_state,
+					       (enum motor_state)current_state,
+					       MOTOR_TRANSITION_RESULT_REQUESTED,
+					       ERROR_NONE,
+					       "mode staged; run motor state online to enter");
 		shell_print(sh,
-			    "Online mode set to %s (will apply on next ONLINE entry)",
+			    "Online mode staged: %s (run 'motor state online' to enter)",
 			    mode_name);
 		return 0;
 	}

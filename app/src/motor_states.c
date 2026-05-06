@@ -40,8 +40,12 @@
 #include "motor_encoder_control.h"
 #include "motor_torque.h"
 #include "motor/runtime/config_snapshot.h"
+#include "motor_operating_mode.h"
+#include "motor_state_transition.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
+
+static inline enum motor_state motor_state_from_rt_mode_flags(uint32_t mode_flags);
 
 /**
  * @brief Stage ISR feature flags for the next stable state
@@ -114,20 +118,14 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 static inline enum motor_control_policy_mode
 motor_publish_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_GENERATED) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_GENERATED;
-	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_GENERATED) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_POSITION_GENERATED;
-	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_CURRENT_ENCODER;
-	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_VELOCITY_ENCODER;
-	}
-	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_ENCODER) != 0U) {
-		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_CONTROL) != 0U) {
+		const struct motor_operating_mode_descriptor *desc =
+			motor_operating_mode_descriptor_get(
+				motor_state_from_rt_mode_flags(mode_flags));
+
+		if (desc != NULL) {
+			return desc->policy_mode;
+		}
 	}
 	if ((mode_flags & (MOTOR_RT_MODE_OFFSET_MEAS |
 			   MOTOR_RT_MODE_RS_EST |
@@ -243,29 +241,25 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->live.detent_iq_ff_a = 0.0f;
 }
 
-static inline enum motor_state motor_resolve_requested_online_mode(const struct motor_parameters *params)
+static inline enum motor_state motor_state_from_rt_mode_flags(uint32_t mode_flags)
 {
-	enum motor_state mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
-
-	if (params != NULL) {
-		mode = (enum motor_state)params->calibration.requested_online_mode;
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_GENERATED) != 0U) {
+		return MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_GENERATED) != 0U) {
+		return MOTOR_STATE_ONLINE_POSITION_GENERATED;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_CURRENT_ENCODER) != 0U) {
+		return MOTOR_STATE_ONLINE_CURRENT_ENCODER;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_VELOCITY_ENCODER) != 0U) {
+		return MOTOR_STATE_ONLINE_VELOCITY_ENCODER;
+	}
+	if ((mode_flags & MOTOR_RT_MODE_ONLINE_POSITION_ENCODER) != 0U) {
+		return MOTOR_STATE_ONLINE_POSITION_ENCODER;
 	}
 
-	if (!motor_state_is_online_submode(mode)) {
-		mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
-	}
-	if (motor_encoder_control_mode_requires_encoder(mode)) {
-		char reason[96] = {0};
-
-		if (!motor_encoder_control_ready_for_mode(params, mode, true,
-							  reason, sizeof(reason))) {
-			LOG_WRN("Requested encoder online mode %s rejected: %s; using velocity_generated",
-				motor_state_to_string(mode), reason);
-			mode = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
-		}
-	}
-
-	return mode;
+	return MOTOR_STATE_ONLINE;
 }
 
 static struct motor_parameters motor_params;
@@ -740,6 +734,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 		params->calibration.align_sum_cos = align_acc.sum_cos;
 	}
 	params->calibration.align_mech_angle_rad = 0.0f;
+	motor_transition_status_init(&params->transition_status);
 	{
 		struct motor_commission_runtime_ctx commission_ctx;
 		motor_commission_runtime_ctx_init(&commission_ctx, params);
@@ -905,9 +900,33 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	switch (params->event.type) {
 	case MOTOR_EVENT_ONLINE:
 		if (params->calibration.complete) {
+			bool fallback_used = false;
+			char reason[96] = {0};
 			enum motor_state online_mode =
-				motor_resolve_requested_online_mode(params);
+				motor_state_resolve_requested_online_mode(params, true,
+									  &fallback_used,
+									  reason, sizeof(reason));
 			LOG_INF("ONLINE request received, transitioning to ONLINE");
+			if (fallback_used) {
+				LOG_WRN("Requested online mode %s rejected: %s; using %s",
+					motor_state_to_string(params->calibration.requested_online_mode),
+					reason, motor_state_to_string(online_mode));
+				motor_transition_status_update(params, MOTOR_EVENT_ONLINE,
+							       params->calibration.requested_online_mode,
+							       MOTOR_STATE_IDLE,
+							       online_mode,
+							       online_mode,
+							       MOTOR_TRANSITION_RESULT_FALLBACK,
+							       ERROR_NONE, reason);
+			} else {
+				motor_transition_status_update(params, MOTOR_EVENT_ONLINE,
+							       online_mode,
+							       MOTOR_STATE_IDLE,
+							       online_mode,
+							       online_mode,
+							       MOTOR_TRANSITION_RESULT_COMPLETED,
+							       ERROR_NONE, "online mode entered");
+			}
 			motor_reset_gate_driver_faults_before_enable(params);
 			smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 			return SMF_EVENT_HANDLED;
@@ -1027,8 +1046,23 @@ static enum smf_state_result motor_state_prepare_online_run(void *obj)
 	 * boot calibration has already completed.
 	 */
 	if (!params->calibration.running && params->calibration.complete) {
-		enum motor_state online_mode = motor_resolve_requested_online_mode(params);
+		bool fallback_used = false;
+		char reason[96] = {0};
+		enum motor_state online_mode =
+			motor_state_resolve_requested_online_mode(params, true,
+								  &fallback_used,
+								  reason, sizeof(reason));
 		LOG_INF("Calibration already complete, transitioning to ONLINE");
+		motor_transition_status_update(params, MOTOR_EVENT_PREPARE_ONLINE,
+					       params->calibration.requested_online_mode,
+					       MOTOR_STATE_PREPARE_ONLINE,
+					       online_mode,
+					       fallback_used ? online_mode : MOTOR_STATE_ONLINE,
+					       fallback_used ?
+					       MOTOR_TRANSITION_RESULT_FALLBACK :
+					       MOTOR_TRANSITION_RESULT_COMPLETED,
+					       ERROR_NONE,
+					       fallback_used ? reason : "online mode entered");
 		smf_set_state(SMF_CTX(params), &motor_states[online_mode]);
 		return SMF_EVENT_HANDLED;
 	}

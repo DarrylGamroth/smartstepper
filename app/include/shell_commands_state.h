@@ -17,6 +17,7 @@ int cmd_motor_state_commission(const struct shell *sh, size_t argc, char **argv)
 int cmd_motor_state_clear_error(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_policy(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_state_transition(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_observer_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_mode_current_encoder(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_state_mode_velocity_generated(const struct shell *sh, size_t argc, char **argv);
