@@ -545,6 +545,17 @@ Important caveat from HIL:
   responding after target reset/flash. No live pass is claimed for the
   2026-05-06 runtime fixes until the shell/target state is recovered and the
   narrowed PI/MPR/MPR+DOB validation is rerun.
+- 2026-05-06 resume attempt:
+  - flashed current firmware successfully through the J-Link runner,
+  - safe status check passed and confirmed the current command tree was present,
+  - the narrowed validation was started but commissioning immediately latched
+    `HARDWARE_BREAK`,
+  - `motor info live` reported `Vbus: 0.0 V`, so the power stage was not in a
+    state suitable for live motion,
+  - `motor gate reset` and `motor state clear_error` recovered the state machine
+    to `IDLE`, but `Vbus` remained `0.0 V`,
+  - command timeout was restored to `1000 ms`,
+  - no MPR/DOB/detent conclusion is drawn from this attempt.
 
 ### Current Completion State
 
@@ -561,8 +572,8 @@ Important caveat from HIL:
 
 ### Next Live Validation Command
 
-After recovering the target shell, rerun the narrowed validation before any full
-detent matrix:
+After confirming the power stage reports a valid `Vbus` and the target shell is
+responsive, rerun the narrowed validation before any full detent matrix:
 
 ```bash
 python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
