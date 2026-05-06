@@ -610,11 +610,7 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 	motor_dob_reset(&g_motor_params->velocity_dob_state,
 			g_motor_params->live.velocity_rad_s);
 
-	ret = motor_api_request_online();
-	if (ret != 0) {
-		goto restore_runtime;
-	}
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		goto restore_runtime;
 	}
@@ -1053,10 +1049,7 @@ int cmd_motor_commission_detent_validate(const struct shell *sh, size_t argc, ch
 	motor_dob_reset(&g_motor_params->velocity_dob_state,
 			g_motor_params->live.velocity_rad_s);
 
-	int ret = motor_api_request_online();
-	if (ret == 0) {
-		ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
-	}
+	int ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret == 0) {
 		ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
 						     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);

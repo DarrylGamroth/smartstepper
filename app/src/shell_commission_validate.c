@@ -77,11 +77,7 @@ static int motor_commission_enter_mode_armed(const struct shell *sh,
 		return -EBUSY;
 	}
 
-	if (g_motor_params != NULL) {
-		g_motor_params->calibration.requested_online_mode = (uint8_t)mode;
-	}
-
-	ret = motor_api_request_online();
+	ret = motor_commission_request_online_mode(mode);
 	if (ret != 0) {
 		return ret;
 	}

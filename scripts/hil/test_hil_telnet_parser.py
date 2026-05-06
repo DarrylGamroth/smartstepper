@@ -31,6 +31,14 @@ Motor Status:
 """,
             ),
             hil_telnet.ShellResult(
+                "motor state transition",
+                """
+Transition Status:
+  Result:       completed
+  Reason:       online mode entered
+""",
+            ),
+            hil_telnet.ShellResult(
                 "motor fault snapshot status",
                 """
 Fault snapshot:
@@ -49,6 +57,37 @@ Encoder acquisition:
         report = hil_telnet.evaluate_results(_args("status"), results, None)
 
         self.assertEqual(report.verdict, "PASS")
+
+    def test_status_fails_with_rejected_transition(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  State: IDLE (7)\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state transition",
+                """
+Transition Status:
+  Result:       rejected
+  Reason:       encoder mapping has not been applied
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor fault snapshot status",
+                "Fault snapshot:\n  Latched:    NO\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("status"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        transition = next(check for check in report.checks
+                          if check.name == "transition_not_rejected")
+        self.assertEqual(transition.values["result"], "rejected")
 
     def test_boot_commission_fails_without_completion_text(self) -> None:
         results = [

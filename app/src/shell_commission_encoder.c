@@ -16,6 +16,7 @@
 #include "shell_commission_internal.h"
 #include "motor_control_api.h"
 #include "motor_encoder_acquisition.h"
+#include "motor_state_utils.h"
 #include "shell_parse.h"
 #include "motor/math/math_constants.h"
 #include "motor/math/angle_wrap.h"
@@ -60,6 +61,42 @@ int motor_post_mode_change(enum motor_state target_mode)
 
 	return ret;
 }
+
+enum motor_state motor_commission_set_requested_online_mode(enum motor_state mode)
+{
+	enum motor_state previous = MOTOR_STATE_ONLINE_VELOCITY_GENERATED;
+
+	if (g_motor_params != NULL) {
+		previous = (enum motor_state)g_motor_params->calibration.requested_online_mode;
+		g_motor_params->calibration.requested_online_mode = (uint8_t)mode;
+	}
+
+	return previous;
+}
+
+void motor_commission_restore_requested_online_mode(enum motor_state saved_mode)
+{
+	if (g_motor_params != NULL) {
+		g_motor_params->calibration.requested_online_mode = (uint8_t)saved_mode;
+	}
+}
+
+int motor_commission_request_online_mode(enum motor_state mode)
+{
+	if (g_motor_params == NULL) {
+		return -ENODEV;
+	}
+
+	g_motor_params->calibration.requested_online_mode = (uint8_t)mode;
+
+	int state = motor_api_get_state();
+	if (state == MOTOR_STATE_ONLINE || motor_state_is_online_submode((enum motor_state)state)) {
+		return motor_post_mode_change(mode);
+	}
+
+	return motor_api_request_online();
+}
+
 static int motor_commission_wait_for_offset_calibration(uint32_t timeout_ms)
 {
 	uint32_t start_ms = k_uptime_get_32();
@@ -162,18 +199,12 @@ static int motor_commission_encoder_parse_required_sweep(
 
 static int motor_commission_encoder_prepare_generated_mode(const struct shell *sh)
 {
-	int ret = motor_api_request_online();
+	int ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
 	if (ret != 0) {
 		shell_error(sh, "Failed to request ONLINE state (err %d)", ret);
 		return ret;
 	}
 	if (motor_api_get_state() != MOTOR_STATE_ONLINE_VELOCITY_GENERATED) {
-		ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
-		if (ret != 0) {
-			shell_error(sh, "Failed to request velocity_generated mode (err %d)",
-				    ret);
-			return ret;
-		}
 		ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_GENERATED,
 						     MOTOR_COMMISSION_ENCODER_MODE_TIMEOUT_MS);
 		if (ret != 0) {
@@ -584,7 +615,7 @@ static int motor_commission_validate_positive_iq_motion(const struct shell *sh,
 	if (ret != 0) {
 		return ret;
 	}
-	ret = motor_api_request_online();
+	ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
@@ -790,7 +821,7 @@ int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv)
 	(void)motor_api_set_param("outer_loop_mode", (float32_t)MOTOR_OUTER_LOOP_MODE_PI);
 	(void)motor_api_set_param("velocity_dob_enable", 0.0f);
 
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
+	ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
 	if (ret == 0) {
 		ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_GENERATED,
 						     MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);

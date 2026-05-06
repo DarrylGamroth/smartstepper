@@ -49,6 +49,9 @@ struct motor_commission_encoder_trace_guard {
 };
 
 int motor_post_mode_change(enum motor_state target_mode);
+enum motor_state motor_commission_set_requested_online_mode(enum motor_state mode);
+void motor_commission_restore_requested_online_mode(enum motor_state saved_mode);
+int motor_commission_request_online_mode(enum motor_state mode);
 int motor_commission_wait_for_mode(enum motor_state mode, uint32_t timeout_ms);
 int motor_commission_wait_ms_or_fault(uint32_t hold_ms);
 int motor_commission_wait_for_control_loop(uint32_t timeout_ms);

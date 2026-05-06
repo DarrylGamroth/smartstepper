@@ -593,11 +593,7 @@ int motor_commission_run_motion_threshold(
 		return ret;
 	}
 
-	ret = cmd_motor_state_mode_current_encoder(sh, 0, NULL);
-	if (ret != 0) {
-		return ret;
-	}
-	ret = motor_api_request_online();
+	ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_CURRENT_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
@@ -997,8 +993,7 @@ int cmd_motor_commission_flux_run(const struct shell *sh, size_t argc, char **ar
 
 	/* Prepare expected control mode and limits; capture gating handles transitions. */
 	(void)motor_api_set_param("velocity_cl_iq_limit_A", cfg.iq_limit_a);
-	(void)motor_api_request_online();
-	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	(void)motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 
 	shell_print(sh,
 		    "Flux commissioning started: %.3f..%.3f Hz, steps=%u, settle=%u ms, sample=%u ms, iq_limit=%.3f A",
@@ -1038,8 +1033,7 @@ int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **ar
 		return ret;
 	}
 
-	(void)motor_api_request_online();
-	(void)motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	(void)motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 
 	shell_print(sh,
 		    "Mechanical commissioning started: base=%.3f Hz, dither=%.3f Hz, dither_period=%u ms, duration=%u ms",

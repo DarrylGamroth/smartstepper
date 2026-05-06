@@ -222,6 +222,7 @@ def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor state status", timeout_s=5.0),
+        ShellCommand("motor state transition", timeout_s=5.0),
         ShellCommand("motor state policy", timeout_s=5.0),
         ShellCommand("motor control status", timeout_s=5.0),
         ShellCommand("motor observer status", timeout_s=5.0),
@@ -474,7 +475,7 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
-        ShellCommand("motor commission run slow apply",
+        ShellCommand(f"motor commission run {args.commission_profile} apply",
                      timeout_s=args.standard_commission_timeout_s),
         ShellCommand("motor commission status", timeout_s=3.0),
         ShellCommand("motor encoder control_status", timeout_s=3.0),
@@ -581,6 +582,13 @@ def _parse_latch_field(response: str, label: str) -> bool | None:
     if match is None:
         return None
     return match.group(1) in ("YES", "SET")
+
+
+def _parse_field_value(response: str, label: str) -> str | None:
+    match = re.search(rf"^\s*{re.escape(label)}:\s+(.+?)\s*$", response, re.MULTILINE)
+    if match is None:
+        return None
+    return match.group(1).strip()
 
 
 def _parse_acquisition_errors(response: str) -> dict[str, int] | None:
@@ -967,6 +975,18 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                f"Motor error is {error_name} ({error_code})",
                {"error": error_name, "code": error_code})
 
+    transition_response = _last_response(results, "motor state transition")
+    if transition_response:
+        transition_result = _parse_field_value(transition_response, "Result")
+        transition_reason = _parse_field_value(transition_response, "Reason")
+        transition_ok = transition_result not in ("rejected", "fault", "timeout")
+        _check(checks, "transition_not_rejected", transition_ok,
+               f"Latest transition result is {transition_result or 'unknown'}",
+               {
+                   "result": transition_result or "",
+                   "reason": transition_reason or "",
+               })
+
     fault_response = _last_response(results, "motor fault snapshot status")
     if fault_response:
         latched = _parse_latch_field(fault_response, "Latched")
@@ -1133,15 +1153,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Minimum number of nonzero velocity samples that must move enough.")
 
     parser.add_argument("--boot-current", type=float, default=0.15)
-    parser.add_argument("--boot-hz", type=float, default=0.05)
+    parser.add_argument("--boot-hz", type=float, default=0.10)
     parser.add_argument("--cycles", type=float, default=1.0)
     parser.add_argument("--bidirectional", action="store_true",
                         help="Use forward+reverse generated sweeps for encoder-robust.")
     parser.add_argument("--current-iq", type=float, default=0.03)
     parser.add_argument("--current-hold-ms", type=int, default=160)
-    parser.add_argument("--velocity-hz", type=float, default=0.05)
+    parser.add_argument("--velocity-hz", type=float, default=0.50)
     parser.add_argument("--velocity-hold-ms", type=int, default=1000)
-    parser.add_argument("--mpr-bandwidth-hz", type=float, default=0.5,
+    parser.add_argument("--mpr-bandwidth-hz", type=float, default=1.0,
                         help="Velocity MPR bandwidth used by mpr-dob-detent feature combos.")
     parser.add_argument("--velocity-pi-kp", type=float,
                         help="Optional velocity PI Kp to set before velocity validation.")
@@ -1153,18 +1173,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--position-delta-deg", type=float, default=5.0)
     parser.add_argument("--position-hold-ms", type=int, default=2000)
     parser.add_argument("--standard-commission-timeout-s", type=float, default=120.0,
-                        help="Timeout for 'motor commission run slow apply'.")
-    parser.add_argument("--detent-hz", type=float, default=0.05,
+                        help="Timeout for 'motor commission run <profile> apply'.")
+    parser.add_argument("--commission-profile", choices=("slow", "confirm"), default="confirm",
+                        help="Auto-commissioning motion profile used by mpr-dob-detent.")
+    parser.add_argument("--detent-hz", type=float, default=0.10,
                         help="Mechanical Hz for detent map capture.")
-    parser.add_argument("--detent-cycles", type=float, default=3.0,
+    parser.add_argument("--detent-cycles", type=float, default=10.0,
                         help="Forward/reverse cycles for detent map capture.")
     parser.add_argument("--detent-decimation", type=int, default=1,
                         help="Detent capture decimation.")
     parser.add_argument("--detent-iq-limit", type=float, default=0.12,
                         help="Velocity Iq limit during detent capture.")
-    parser.add_argument("--detent-validate-hz", type=float, default=0.05,
+    parser.add_argument("--detent-validate-hz", type=float, default=0.10,
                         help="Mechanical Hz for detent off/on validation.")
-    parser.add_argument("--detent-validate-ms", type=int, default=1500,
+    parser.add_argument("--detent-validate-ms", type=int, default=3000,
                         help="Duration per detent validation pass.")
     parser.add_argument(
         "--feature-combo",

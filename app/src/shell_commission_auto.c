@@ -283,12 +283,7 @@ struct motor_commission_motion_threshold_result {
 static int motor_commission_auto_run_flux(const struct shell *sh,
 					  const struct motor_commission_flux_config *cfg)
 {
-	int ret = motor_api_request_online();
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	int ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
@@ -356,7 +351,7 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 					  const struct motor_commission_mech_config *cfg,
 					  bool require_fit)
 {
-	int ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	int ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		return ret;
 	}
@@ -736,7 +731,7 @@ int cmd_motor_commission_auto_validate(const struct shell *sh, size_t argc, char
 	(void)motor_api_set_param("outer_loop_mode", (float32_t)MOTOR_OUTER_LOOP_MODE_PI);
 	(void)motor_api_set_param("velocity_dob_enable", 0.0f);
 
-	ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	ret = motor_commission_request_online_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 	if (ret != 0) {
 		shell_error(sh, "Failed to request velocity_encoder mode (err %d)", ret);
 		return ret;
