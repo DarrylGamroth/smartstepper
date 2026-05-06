@@ -114,6 +114,12 @@ static bool motor_velocity_dob_ready(const struct motor_parameters *params,
 		}
 		return false;
 	}
+	if (params->detent_map_cfg.enabled) {
+		if (reason != NULL) {
+			*reason = "detent feedforward enabled";
+		}
+		return false;
+	}
 
 	bool encoder_mode =
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||

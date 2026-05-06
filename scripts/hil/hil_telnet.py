@@ -740,6 +740,10 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
         if abs(float(sample["target_hz"])) > 1.0e-6
     ]
     max_abs_err = max(abs(float(sample["err_hz"])) for sample in velocity_samples)
+    max_ref_err = max(
+        abs(float(sample["target_hz"]) - float(sample["ref_hz"]))
+        for sample in nonzero_samples
+    ) if nonzero_samples else 0.0
     max_warn = max(int(sample["warn"]) for sample in velocity_samples)
     max_err = max(int(sample["err"]) for sample in velocity_samples)
     tracking_samples = [
@@ -756,6 +760,7 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
     overshoot_ratio = max_meas_abs_hz / max(max_target_abs_hz, 1.0e-6)
     ok = (
         max_abs_err <= args.max_velocity_error_hz and
+        max_ref_err <= args.max_velocity_ref_error_hz and
         overshoot_ratio <= args.max_velocity_overshoot_ratio and
         max_warn <= args.max_sample_warnings and
         max_err <= args.max_sample_errors and
@@ -769,6 +774,7 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
                "samples": len(velocity_samples),
                "tracking_samples": len(tracking_samples),
                "max_abs_err_hz": max_abs_err,
+               "max_ref_err_hz": max_ref_err,
                "max_meas_abs_hz": max_meas_abs_hz,
                "overshoot_ratio": overshoot_ratio,
                "max_warn": max_warn,
@@ -815,6 +821,7 @@ def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[Ve
     failed = 0
     parsed = 0
     max_abs_err = 0.0
+    max_ref_err = 0.0
     max_warn = 0
     max_err = 0
     for idx, result in enumerate(validation_results):
@@ -825,14 +832,24 @@ def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[Ve
                                        "Velocity validation samples not parsed"))
             continue
         parsed += 1
+        nonzero_samples = [
+            sample for sample in samples
+            if abs(float(sample["target_hz"])) > 1.0e-6
+        ]
         sample_max_err = max(abs(float(sample["err_hz"])) for sample in samples)
+        sample_max_ref_err = max(
+            abs(float(sample["target_hz"]) - float(sample["ref_hz"]))
+            for sample in nonzero_samples
+        ) if nonzero_samples else 0.0
         sample_max_warn = max(int(sample["warn"]) for sample in samples)
         sample_max_sample_err = max(int(sample["err"]) for sample in samples)
         max_abs_err = max(max_abs_err, sample_max_err)
+        max_ref_err = max(max_ref_err, sample_max_ref_err)
         max_warn = max(max_warn, sample_max_warn)
         max_err = max(max_err, sample_max_sample_err)
         ok = (
             sample_max_err <= args.max_velocity_error_hz and
+            sample_max_ref_err <= args.max_velocity_ref_error_hz and
             sample_max_warn <= args.max_sample_warnings and
             sample_max_sample_err <= args.max_sample_errors
         )
@@ -844,6 +861,7 @@ def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[Ve
                {
                    "samples": len(samples),
                    "max_abs_err_hz": sample_max_err,
+                   "max_ref_err_hz": sample_max_ref_err,
                    "max_warn": sample_max_warn,
                    "max_err": sample_max_sample_err,
                })
@@ -852,13 +870,14 @@ def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[Ve
            "All feature-combination velocity validations passed" if failed == 0
            else "One or more feature-combination velocity validations failed",
            {
-               "validations": len(validation_results),
-               "parsed": parsed,
-               "failed": failed,
-               "max_abs_err_hz": max_abs_err,
-               "max_warn": max_warn,
-               "max_err": max_err,
-           })
+            "validations": len(validation_results),
+            "parsed": parsed,
+            "failed": failed,
+            "max_abs_err_hz": max_abs_err,
+            "max_ref_err_hz": max_ref_err,
+            "max_warn": max_warn,
+            "max_err": max_err,
+        })
 
 
 def _evaluate_position_validation(checks: list[VerdictCheck],
@@ -1104,6 +1123,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--max-sample-errors", type=int, default=0)
     parser.add_argument("--min-current-motion-deg", type=float, default=0.01)
     parser.add_argument("--max-velocity-error-hz", type=float, default=0.10)
+    parser.add_argument("--max-velocity-ref-error-hz", type=float, default=0.005,
+                        help="Maximum |target-ref| error tolerated after each hold.")
     parser.add_argument("--max-velocity-overshoot-ratio", type=float, default=3.0,
                         help="Maximum |measured velocity| / |target velocity| during validation.")
     parser.add_argument("--min-velocity-tracking-fraction", type=float, default=0.10,

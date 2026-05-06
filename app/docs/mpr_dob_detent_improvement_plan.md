@@ -405,7 +405,7 @@ This plan is complete when:
 
 ## Implementation Progress
 
-Updated: 2026-05-05
+Updated: 2026-05-06
 
 ### Completed
 
@@ -433,6 +433,9 @@ Updated: 2026-05-05
   - DOB defaults stage tuning without enabling,
   - `motor velocity dob enable 1` checks readiness,
   - status reports readiness reason,
+  - DOB is rejected while detent feedforward is enabled, because both are
+    disturbance compensation mechanisms and the combined path has not produced
+    repeatable improvement yet,
   - DOB state resets on disable, zero target, sign change, and large target
     steps.
 - Phase 5 combination testing:
@@ -442,6 +445,24 @@ Updated: 2026-05-05
   - `scripts/hil/hil_telnet.py mpr-dob-detent` runs standard commissioning,
     detent capture, detent validation, and selected feature-combination
     velocity checks.
+  - HIL velocity validation now fails if the internal velocity reference does
+    not follow the requested target. This catches a dead/stuck command path that
+    can otherwise appear to pass at very low speeds.
+
+### 2026-05-06 Runtime Fixes
+
+- Fixed degraded-feedback velocity hold behavior:
+  - before: transient untrusted encoder feedback cleared the velocity
+    trajectory target to zero,
+  - after: the requested target is preserved and the ramped reference is frozen
+    at measured speed until feedback becomes trusted again.
+- Tightened detent validation:
+  - detent-on validation must not worsen RMS velocity error by more than the
+    allowed match ratio,
+  - detent-on validation must also not worsen peak velocity error by more than
+    the allowed match ratio,
+  - status and recommendation output now report both RMS and peak off/on
+    errors.
 
 ### Validation Evidence
 
@@ -450,7 +471,7 @@ Updated: 2026-05-05
 ```text
 python3 -m py_compile scripts/hil/hil_telnet.py
 python3 -m unittest scripts/hil/test_hil_telnet_parser.py
-Result: PASS, 9/9 tests.
+Result: PASS, 13/13 tests.
 ```
 
 - Unit tests:
@@ -461,7 +482,7 @@ Result: PASS, 9/9 tests.
   -s chopper.motor_mpr.unit \
   -s chopper.motor_dob.unit \
   -s chopper.motor_commission_tune.unit
-Result: PASS, 4/4 suites, 29/29 test cases.
+Result: PASS, 4/4 suites, 38/38 test cases.
 ```
 
 - Firmware build:
@@ -470,8 +491,10 @@ Result: PASS, 4/4 suites, 29/29 test cases.
 podman exec wonderful_goldberg bash -lc \
   'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
 Result: PASS.
-FLASH: 451708 B / 2 MB
-RAM:   187568 B / 512 KB
+FLASH: 457192 B / 2 MB
+RAM:   199984 B / 512 KB
+DTCM:  5888 B / 128 KB
+SRAM3: 16 KB / 32 KB
 ```
 
 - HIL reduced PI/MPR scenario on MT6835 target:
@@ -507,3 +530,45 @@ Important caveat from HIL:
   validation at `0.05 Hz` reported `WORSE` for this run. Treat this map as an
   engineering artifact, not a default behavior, until repeated captures show
   consistent ripple improvement.
+- A later full matrix run exposed a false-pass condition: MPR validations could
+  show `ref=0.000 Hz` for nonzero targets and still pass the old HIL parser
+  because target/measured error remained below the loose low-speed threshold.
+  The HIL parser now checks `|target-ref|`.
+- A subsequent clean HIL rerun was blocked because the telnet shell stopped
+  responding after target reset/flash. No live pass is claimed for the
+  2026-05-06 runtime fixes until the shell/target state is recovered and the
+  narrowed PI/MPR/MPR+DOB validation is rerun.
+
+### Current Completion State
+
+- MPR safe presets, bandwidth interface, and unit-tested core implementation
+  are complete.
+- DOB readiness/status and conservative enable flow are complete.
+- Detent map capture/validation infrastructure is implemented but not accepted
+  as default behavior. The map must show repeatable RMS and peak improvement
+  before enabled apply should be used.
+- `MPR+DOB+detent` is intentionally blocked by readiness policy until detent
+  feedforward is validated independently and a combined compensation strategy is
+  retuned.
+
+### Next Live Validation Command
+
+After recovering the target shell, rerun the narrowed validation before any full
+detent matrix:
+
+```bash
+python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --feature-combo pi \
+  --feature-combo mpr \
+  --feature-combo mpr_dob \
+  --velocity-hz 0.05 \
+  --velocity-hold-ms 1000 \
+  --detent-hz 0.10 \
+  --detent-cycles 3 \
+  --detent-iq-limit 0.12 \
+  --detent-validate-hz 0.10 \
+  --detent-validate-ms 1500 \
+  --json-report hil_logs/mpr_dob_detent/narrow_pi_mpr_mprdob_after_hold_fix.json
+```

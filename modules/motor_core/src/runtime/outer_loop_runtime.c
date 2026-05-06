@@ -191,16 +191,24 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_plan_step(struct
 }
 
 static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_hold_on_bad_feedback(struct motor_outer_loop_runtime_ctx *ctx,
-						  const struct motor_outer_loop_inputs *in,
-						  struct motor_outer_loop_outputs *out)
+							  const struct motor_outer_loop_inputs *in,
+							  struct motor_outer_loop_outputs *out)
 {
 	out->id_ref_a = in->id_meas_a;
 	out->iq_ref_a = in->iq_meas_a;
-	out->velocity_target_rad_s = 0.0f;
-	out->velocity_ref_rad_s = 0.0f;
-	*ctx->live_velocity_target_rad_s = 0.0f;
-	*ctx->live_velocity_ref_rad_s = 0.0f;
-	traj_set_target_value(ctx->traj_velocity, 0.0f);
+	/* Do not erase the operator/requested target on a transient encoder issue.
+	 * Freeze the ramped reference at the measured speed and let the trajectory
+	 * resume toward the preserved target once feedback becomes trusted again.
+	 */
+	out->velocity_target_rad_s = in->velocity_target_rad_s;
+	out->velocity_ref_rad_s = out->speed_mech_filtered_rad_s;
+	if (ctx->live_velocity_target_rad_s != NULL) {
+		*ctx->live_velocity_target_rad_s = out->velocity_target_rad_s;
+	}
+	if (ctx->live_velocity_ref_rad_s != NULL) {
+		*ctx->live_velocity_ref_rad_s = out->velocity_ref_rad_s;
+	}
+	traj_set_int_value(ctx->traj_velocity, out->velocity_ref_rad_s);
 	motor_velocity_regulator_reset(ctx->velocity_reg_state, 0.0f);
 	motor_position_regulator_reset(ctx->position_reg_state, 0.0f);
 	motor_mpr_velocity_reset(ctx->velocity_mpr_state,

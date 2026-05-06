@@ -43,6 +43,7 @@
 #define MOTOR_COMMISSION_DETENT_MAX_ADJ_STEP_A 0.08f
 #define MOTOR_COMMISSION_DETENT_VALIDATE_MIN_SAMPLES 10U
 #define MOTOR_COMMISSION_DETENT_VALIDATE_MATCH_RATIO 1.02f
+#define MOTOR_COMMISSION_DETENT_VALIDATE_PEAK_MATCH_RATIO 1.02f
 
 enum motor_commission_detent_recommendation {
 	MOTOR_COMMISSION_DETENT_RECOMMEND_INCONCLUSIVE = 0,
@@ -88,6 +89,8 @@ struct motor_commission_detent_result {
 	enum motor_commission_detent_recommendation validation_recommendation;
 	float32_t validation_off_rms_hz;
 	float32_t validation_on_rms_hz;
+	float32_t validation_off_peak_hz;
+	float32_t validation_on_peak_hz;
 	float32_t validation_improvement_pct;
 	uint32_t validation_encoder_errors;
 	float32_t table_iq_a[MOTOR_DETENT_MAP_BINS];
@@ -774,11 +777,14 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    (double)detent_result.mean_abs_iq_ff_a,
 		    (double)detent_result.rms_iq_ff_a,
 		    (double)detent_result.recommended_limit_a);
-	shell_print(sh, "  Validate:  %s off_rms=%.4f Hz on_rms=%.4f Hz improve=%.1f%% enc_err=%u",
+	shell_print(sh,
+		    "  Validate:  %s off_rms=%.4f Hz on_rms=%.4f Hz off_peak=%.4f Hz on_peak=%.4f Hz improve=%.1f%% enc_err=%u",
 		    motor_commission_detent_recommendation_str(
 			    detent_result.validation_recommendation),
 		    (double)detent_result.validation_off_rms_hz,
 		    (double)detent_result.validation_on_rms_hz,
+		    (double)detent_result.validation_off_peak_hz,
+		    (double)detent_result.validation_on_peak_hz,
 		    (double)detent_result.validation_improvement_pct,
 		    detent_result.validation_encoder_errors);
 	return 0;
@@ -994,6 +1000,11 @@ motor_commission_detent_validate_recommend(
 		return MOTOR_COMMISSION_DETENT_RECOMMEND_INCONCLUSIVE;
 	}
 
+	if (on->peak_abs_vel_err_hz >
+	    (off->peak_abs_vel_err_hz * MOTOR_COMMISSION_DETENT_VALIDATE_PEAK_MATCH_RATIO)) {
+		return MOTOR_COMMISSION_DETENT_RECOMMEND_DO_NOT_APPLY;
+	}
+
 	return (on_rms <= (off_rms * MOTOR_COMMISSION_DETENT_VALIDATE_MATCH_RATIO)) ?
 		       MOTOR_COMMISSION_DETENT_RECOMMEND_APPLY :
 		       MOTOR_COMMISSION_DETENT_RECOMMEND_DO_NOT_APPLY;
@@ -1091,6 +1102,8 @@ stop_restore:
 	(void)motor_commission_wait_ms_or_fault(500U);
 	motor_commission_detent_validate_print(sh, "detent_off", &off);
 	motor_commission_detent_validate_print(sh, "detent_on ", &on);
+	detent_result.validation_off_peak_hz = off.peak_abs_vel_err_hz;
+	detent_result.validation_on_peak_hz = on.peak_abs_vel_err_hz;
 	detent_result.validation_recommendation =
 		motor_commission_detent_validate_recommend(&off, &on,
 							   &detent_result.validation_off_rms_hz,
@@ -1099,11 +1112,13 @@ stop_restore:
 							   &detent_result.validation_encoder_errors);
 	detent_result.validation_complete = true;
 	shell_print(sh,
-		    "  recommendation: %s off_rms=%.4f Hz on_rms=%.4f Hz improvement=%.1f%% enc_err=%u",
+		    "  recommendation: %s off_rms=%.4f Hz on_rms=%.4f Hz off_peak=%.4f Hz on_peak=%.4f Hz improvement=%.1f%% enc_err=%u",
 		    motor_commission_detent_recommendation_str(
 			    detent_result.validation_recommendation),
 		    (double)detent_result.validation_off_rms_hz,
 		    (double)detent_result.validation_on_rms_hz,
+		    (double)detent_result.validation_off_peak_hz,
+		    (double)detent_result.validation_on_peak_hz,
 		    (double)detent_result.validation_improvement_pct,
 		    detent_result.validation_encoder_errors);
 

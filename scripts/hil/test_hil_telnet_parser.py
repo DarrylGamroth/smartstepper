@@ -227,8 +227,82 @@ Encoder Control Readiness:
         report = hil_telnet.evaluate_results(_args("velocity-validate"), results, None)
 
         self.assertEqual(report.verdict, "FAIL")
+
+    def test_velocity_validate_fails_when_reference_does_not_follow_target(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor commission boot 0.150 0.050 1.000",
+                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission validate velocity 0.050 1000",
+                """
+Velocity encoder validation: active PI gains, max=0.050 Hz hold=1000 ms DOB=on detent=on
+  target=  0.010 Hz ref=  0.000 Hz meas=  0.004 Hz err=  0.006 Hz Iq_ref=0.0000 A Iq=0.0200 A Id=0.0000 A warn=0 err=0
+  target=  0.050 Hz ref=  0.000 Hz meas=  0.004 Hz err=  0.046 Hz Iq_ref=0.0000 A Iq=0.0200 A Id=0.0000 A warn=0 err=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder control_status",
+                """
+Encoder Control Readiness:
+  Ready:           YES
+  Mapping applied: YES
+  Protocol ok:     YES
+  Acquisition errors: transport=0 parity=0 crc=0 glitch=0 status=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("velocity-validate"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
         velocity = next(check for check in report.checks if check.name == "velocity_validation")
-        self.assertGreater(velocity.values["overshoot_ratio"], 3.0)
+        self.assertGreater(velocity.values["max_ref_err_hz"], 0.005)
+
+    def test_feature_matrix_fails_when_reference_does_not_follow_target(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor commission run slow apply",
+                "Standard commissioning workflow complete\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission detent status",
+                "Quality:   raw=PASS fill=PASS apply=PASS conf=0.55\n"
+                "Samples:   accepted=191617 rejected=2208638 bins=256/256 raw=215 filled=41\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission validate velocity 0.050 1000 active",
+                """
+Velocity encoder validation: max=0.050 Hz hold=1000 ms outer=MPR DOB=on detent=on
+  target=  0.010 Hz ref=  0.000 Hz meas=  0.004 Hz err=  0.006 Hz Iq_ref=0.0000 A Iq=0.0200 A Id=0.0000 A warn=0 err=0
+  target=  0.050 Hz ref=  0.000 Hz meas=  0.004 Hz err=  0.046 Hz Iq_ref=0.0000 A Iq=0.0200 A Id=0.0000 A warn=0 err=0
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("mpr-dob-detent"), results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        matrix = next(check for check in report.checks if check.name == "velocity_validation_matrix")
+        self.assertEqual(matrix.values["failed"], 1)
+        self.assertGreater(matrix.values["max_ref_err_hz"], 0.005)
 
     def test_open_loop_trace_passes_with_observer_columns_and_clean_motion(self) -> None:
         results = [
