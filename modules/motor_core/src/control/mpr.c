@@ -36,6 +36,64 @@ static float32_t motor_mpr_sign_with_deadband(float32_t value, float32_t deadban
 	return 0.0f;
 }
 
+static bool motor_mpr_bandwidth_model_valid(float32_t inertia_kgm2,
+					    float32_t torque_constant_nm_per_a)
+{
+	return motor_mpr_is_finite_positive(inertia_kgm2) &&
+	       motor_mpr_is_finite_positive(torque_constant_nm_per_a);
+}
+
+int motor_mpr_velocity_config_from_bandwidth(
+	const struct motor_mpr_velocity_bandwidth_input *in,
+	struct motor_mpr_velocity_config *cfg,
+	struct motor_mpr_bandwidth_result *result)
+{
+	if (in == NULL || cfg == NULL) {
+		return -EINVAL;
+	}
+	if (!motor_mpr_is_finite_positive(in->bandwidth_hz) ||
+	    !motor_mpr_is_finite_positive(in->iq_limit_a) ||
+	    !motor_mpr_is_finite_positive(in->dt_s)) {
+		return -EINVAL;
+	}
+
+	bool model_used =
+		motor_mpr_bandwidth_model_valid(in->inertia_kgm2,
+						in->torque_constant_nm_per_a);
+	float32_t q_speed = MOTOR_MPR_VELOCITY_BW_Q_MIN;
+	if (model_used) {
+		const float32_t omega = 2.0f * PI_F32 * in->bandwidth_hz;
+		q_speed = (omega * in->inertia_kgm2) / in->torque_constant_nm_per_a;
+	}
+
+	const float32_t q_unclamped = q_speed;
+	q_speed = clampf(q_speed, MOTOR_MPR_VELOCITY_BW_Q_MIN,
+			 MOTOR_MPR_VELOCITY_BW_Q_MAX);
+	const float32_t r_delta_iq =
+		clampf(1.0f / (4.0f * q_speed), MOTOR_MPR_VELOCITY_BW_R_MIN,
+		       MOTOR_MPR_VELOCITY_BW_R_MAX);
+	const float32_t max_delta_iq =
+		clampf(in->iq_limit_a * 0.003f, MOTOR_MPR_VELOCITY_BW_DI_MIN_A,
+		       fminf(in->iq_limit_a, MOTOR_MPR_VELOCITY_BW_DI_MAX_A));
+
+	cfg->dt_s = in->dt_s;
+	cfg->horizon = MOTOR_MPR_VELOCITY_BW_HORIZON;
+	cfg->q_speed = q_speed;
+	cfg->r_delta_iq = r_delta_iq;
+	cfg->iq_limit_a = in->iq_limit_a;
+	cfg->max_delta_iq_a = max_delta_iq;
+	cfg->disturbance_ki_nm_per_rad_s = MOTOR_MPR_VELOCITY_BW_DIST_KI_MIN;
+
+	if (result != NULL) {
+		result->requested_bandwidth_hz = in->bandwidth_hz;
+		result->applied_bandwidth_hz = in->bandwidth_hz;
+		result->model_used = model_used;
+		result->clamped = (q_unclamped != q_speed);
+	}
+
+	return 0;
+}
+
 static void motor_mpr_velocity_discretize(const struct motor_mpr_velocity_model *model,
 					  float32_t dt_s,
 					  float32_t *a_out,
@@ -253,6 +311,56 @@ int motor_mpr_position_validate(const struct motor_mpr_position_config *cfg)
 	if (!motor_mpr_is_finite_positive(cfg->velocity_limit_rad_s) ||
 	    !motor_mpr_is_finite_nonnegative(cfg->max_delta_velocity_rad_s)) {
 		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int motor_mpr_position_config_from_bandwidth(
+	const struct motor_mpr_position_bandwidth_input *in,
+	struct motor_mpr_position_config *cfg,
+	struct motor_mpr_bandwidth_result *result)
+{
+	if (in == NULL || cfg == NULL) {
+		return -EINVAL;
+	}
+	if (!motor_mpr_is_finite_positive(in->bandwidth_hz) ||
+	    !motor_mpr_is_finite_positive(in->velocity_limit_rad_s) ||
+	    !motor_mpr_is_finite_positive(in->accel_limit_rad_s2) ||
+	    !motor_mpr_is_finite_positive(in->dt_s)) {
+		return -EINVAL;
+	}
+
+	const float32_t omega = 2.0f * PI_F32 * in->bandwidth_hz;
+	const float32_t q_pos_unclamped = 2.0f * omega;
+	const float32_t q_vel_unclamped = 0.5f * omega;
+	const float32_t q_position =
+		clampf(q_pos_unclamped, MOTOR_MPR_POSITION_BW_Q_POS_MIN,
+		       MOTOR_MPR_POSITION_BW_Q_POS_MAX);
+	const float32_t q_velocity_ff =
+		clampf(q_vel_unclamped, MOTOR_MPR_POSITION_BW_Q_VEL_MIN,
+		       MOTOR_MPR_POSITION_BW_Q_VEL_MAX);
+	const float32_t r_delta_velocity =
+		clampf(1.0f / (5.0f * q_position), MOTOR_MPR_POSITION_BW_R_MIN,
+		       MOTOR_MPR_POSITION_BW_R_MAX);
+	const float32_t max_delta_velocity =
+		clampf(in->accel_limit_rad_s2 * in->dt_s, 0.001f,
+		       in->velocity_limit_rad_s);
+
+	cfg->dt_s = in->dt_s;
+	cfg->horizon = MOTOR_MPR_POSITION_BW_HORIZON;
+	cfg->q_position = q_position;
+	cfg->q_velocity_ff = q_velocity_ff;
+	cfg->r_delta_velocity = r_delta_velocity;
+	cfg->velocity_limit_rad_s = in->velocity_limit_rad_s;
+	cfg->max_delta_velocity_rad_s = max_delta_velocity;
+
+	if (result != NULL) {
+		result->requested_bandwidth_hz = in->bandwidth_hz;
+		result->applied_bandwidth_hz = in->bandwidth_hz;
+		result->model_used = false;
+		result->clamped = (q_pos_unclamped != q_position) ||
+				  (q_vel_unclamped != q_velocity_ff);
 	}
 
 	return 0;

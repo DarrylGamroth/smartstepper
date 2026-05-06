@@ -121,3 +121,51 @@ Expected:
 - Unit tests cover mapping and clamps.
 - HIL evidence documents safe bandwidth values.
 
+## Implementation Evidence
+
+Status: implemented with HIL execution deferred until the current HIL baseline
+is stable again.
+
+Code changes:
+
+- Added `motor_mpr_velocity_config_from_bandwidth()` and
+  `motor_mpr_position_config_from_bandwidth()` in `motor_core`.
+- Moved bandwidth clamp constants out of `app/src/shell_commands.c` and into
+  `modules/motor_core/include/motor/control/mpr.h`.
+- Updated shell commands to call the `motor_core` mapping helpers:
+  - `motor velocity mpr bandwidth <hz>`
+  - `motor position mpr bandwidth <hz>`
+- Velocity MPR bandwidth now uses commissioned `J`/`Kt` when valid and falls
+  back to conservative limits when the active model is not valid.
+- MPR status prints an estimated bandwidth derived from the active raw tuning.
+
+Validation:
+
+```text
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_mpr.unit
+```
+
+Result:
+
+```text
+18 of 18 executed test cases passed
+```
+
+Firmware build:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Result:
+
+```text
+zephyr/zephyr.elf linked successfully
+```
+
+HIL note:
+
+- Live MPR sweep was not run in this step because the preceding HIL regression
+  work exposed a baseline boot/current-validation issue unrelated to the MPR
+  bandwidth mapping. Run the sweep once the commissioning/current validation
+  baseline is stable.

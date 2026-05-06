@@ -19,6 +19,7 @@
 #include "config.h"
 #include "motor_torque.h"
 #include "motor/control/dob.h"
+#include "motor/control/mpr.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor/runtime/commission_tune.h"
@@ -85,22 +86,6 @@ enum motor_gains_profile {
 #define POSITION_MODEL_SAFE_BW_RATIO 0.10f
 #define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
 #define POSITION_TARGET_MIN_DURATION_S 0.20f
-#define VELOCITY_MPR_BW_Q_MIN 0.003f
-#define VELOCITY_MPR_BW_Q_MAX 0.05f
-#define VELOCITY_MPR_BW_R_MIN 20.0f
-#define VELOCITY_MPR_BW_R_MAX 100.0f
-#define VELOCITY_MPR_BW_HORIZON 8U
-#define VELOCITY_MPR_DI_MIN_A 0.0005f
-#define VELOCITY_MPR_DI_MAX_A 0.0020f
-#define VELOCITY_MPR_DIST_KI_MIN 0.0f
-#define VELOCITY_MPR_DIST_KI_MAX 0.05f
-#define POSITION_MPR_BW_Q_POS_MIN 0.5f
-#define POSITION_MPR_BW_Q_POS_MAX 20.0f
-#define POSITION_MPR_BW_Q_VEL_MIN 0.1f
-#define POSITION_MPR_BW_Q_VEL_MAX 10.0f
-#define POSITION_MPR_BW_R_MIN 0.02f
-#define POSITION_MPR_BW_R_MAX 0.5f
-#define POSITION_MPR_BW_HORIZON 16U
 
 static int motor_parse_gains_profile(const char *token, enum motor_gains_profile *profile)
 {
@@ -1253,6 +1238,17 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 			    (double)g_motor_params->velocity_mpr_state.omega_model_rad_s);
 		shell_print(sh, "  Iq limit:      %.6f A",
 			    (double)g_motor_params->velocity_mpr_cfg.iq_limit_a);
+		const float j = g_motor_params->inertia_kgm2_active;
+		const float kt = motor_torque_gain_resolve_active(g_motor_params);
+		if (isfinite(j) && j > 0.0f && isfinite(kt) && kt > 0.0f) {
+			const float bw_hz =
+				(g_motor_params->velocity_mpr_cfg.q_speed * kt) /
+				(2.0f * PI_F32 * j);
+
+			shell_print(sh, "  Bandwidth est: %.3f Hz", (double)bw_hz);
+		} else {
+			shell_print(sh, "  Bandwidth est: unavailable (model invalid)");
+		}
 		return 0;
 	}
 
@@ -1330,7 +1326,7 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
 		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
 		ret |= motor_set_param_checked("velocity_mpr_horizon",
-					       (float)VELOCITY_MPR_BW_HORIZON);
+					       (float)MOTOR_MPR_VELOCITY_BW_HORIZON);
 		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
 		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s", 0.0f);
 		if (ret != 0) {
@@ -1342,7 +1338,7 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 		shell_print(sh,
 			    "Velocity MPR %s preset applied: q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=0",
 			    argv[2], (double)q_speed, (double)r_delta_iq,
-			    VELOCITY_MPR_BW_HORIZON, (double)max_delta_iq);
+			    MOTOR_MPR_VELOCITY_BW_HORIZON, (double)max_delta_iq);
 		return 0;
 	}
 
@@ -1358,31 +1354,31 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 			return -EINVAL;
 		}
 
-		float j = g_motor_params->inertia_kgm2_active;
-		float kt = motor_torque_gain_resolve_active(g_motor_params);
-		if (!isfinite(j) || j <= 0.0f || !isfinite(kt) || kt <= 0.0f) {
-			shell_error(sh, "Need valid active commissioning params (J, torque_gain)");
-			return -ERANGE;
+		struct motor_mpr_velocity_config cfg = g_motor_params->velocity_mpr_cfg;
+		struct motor_mpr_bandwidth_result result = {0};
+		const struct motor_mpr_velocity_bandwidth_input input = {
+			.bandwidth_hz = bw_hz,
+			.inertia_kgm2 = g_motor_params->inertia_kgm2_active,
+			.torque_constant_nm_per_a = motor_torque_gain_resolve_active(g_motor_params),
+			.iq_limit_a = g_motor_params->velocity_cl_iq_limit_A,
+			.dt_s = g_motor_params->velocity_mpr_cfg.dt_s,
+		};
+
+		int ret = motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result);
+		if (ret != 0) {
+			shell_error(sh, "Failed to derive velocity MPR bandwidth params (err %d)",
+				    ret);
+			return ret;
 		}
 
-		float omega = 2.0f * PI_F32 * bw_hz;
-		float q_speed = clampf((omega * j) / kt,
-				       VELOCITY_MPR_BW_Q_MIN, VELOCITY_MPR_BW_Q_MAX);
-		float r_delta_iq = clampf(1.0f / (4.0f * q_speed),
-					  VELOCITY_MPR_BW_R_MIN, VELOCITY_MPR_BW_R_MAX);
-		float max_delta_iq = clampf(g_motor_params->velocity_cl_iq_limit_A * 0.003f,
-					    VELOCITY_MPR_DI_MIN_A,
-					    fminf(g_motor_params->velocity_cl_iq_limit_A,
-						  VELOCITY_MPR_DI_MAX_A));
-		float disturbance_ki = VELOCITY_MPR_DIST_KI_MIN;
-
-		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
-		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
+		ret = motor_set_param_checked("velocity_mpr_q_speed", cfg.q_speed);
+		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", cfg.r_delta_iq);
 		ret |= motor_set_param_checked("velocity_mpr_horizon",
-					       (float)VELOCITY_MPR_BW_HORIZON);
-		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
+					       (float)cfg.horizon);
+		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a",
+					       cfg.max_delta_iq_a);
 		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s",
-					       disturbance_ki);
+					       cfg.disturbance_ki_nm_per_rad_s);
 		if (ret != 0) {
 			shell_error(sh, "Failed to apply velocity MPR bandwidth params (err %d)", ret);
 			return ret;
@@ -1390,10 +1386,13 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Velocity MPR bandwidth tuned: bw=%.2f Hz -> q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=%.6f",
-			    (double)bw_hz, (double)q_speed, (double)r_delta_iq,
-			    VELOCITY_MPR_BW_HORIZON, (double)max_delta_iq,
-			    (double)disturbance_ki);
+			    "Velocity MPR bandwidth tuned: bw=%.2f Hz -> q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=%.6f model=%s%s",
+			    (double)result.applied_bandwidth_hz, (double)cfg.q_speed,
+			    (double)cfg.r_delta_iq, cfg.horizon,
+			    (double)cfg.max_delta_iq_a,
+			    (double)cfg.disturbance_ki_nm_per_rad_s,
+			    result.model_used ? "active" : "fallback",
+			    result.clamped ? " clamped" : "");
 		return 0;
 	}
 
@@ -1952,6 +1951,15 @@ static int cmd_motor_position_mpr(const struct shell *sh, size_t argc, char **ar
 			    (double)g_motor_params->position_mpr_cfg.dt_s);
 		shell_print(sh, "  Velocity cmd:     %.6f rad/s",
 			    (double)g_motor_params->position_mpr_state.velocity_cmd_rad_s);
+		if (g_motor_params->position_mpr_cfg.q_position > 0.0f) {
+			const float bw_hz =
+				g_motor_params->position_mpr_cfg.q_position /
+				(4.0f * PI_F32);
+
+			shell_print(sh, "  Bandwidth est:    %.3f Hz", (double)bw_hz);
+		} else {
+			shell_print(sh, "  Bandwidth est:    unavailable");
+		}
 		return 0;
 	}
 
@@ -2017,30 +2025,31 @@ static int cmd_motor_position_mpr(const struct shell *sh, size_t argc, char **ar
 			return -EINVAL;
 		}
 
-		float omega = 2.0f * PI_F32 * bw_hz;
-		float q_position = clampf(2.0f * omega,
-					  POSITION_MPR_BW_Q_POS_MIN,
-					  POSITION_MPR_BW_Q_POS_MAX);
-		float q_velocity_ff = clampf(0.5f * omega,
-					     POSITION_MPR_BW_Q_VEL_MIN,
-					     POSITION_MPR_BW_Q_VEL_MAX);
-		float r_delta_velocity = clampf(1.0f / (5.0f * q_position),
-						POSITION_MPR_BW_R_MIN,
-						POSITION_MPR_BW_R_MAX);
-		float max_delta_velocity =
-			g_motor_params->profile_max_accel_rad_s2 *
-			g_motor_params->position_mpr_cfg.dt_s;
-		max_delta_velocity = clampf(max_delta_velocity, 0.001f,
-					    g_motor_params->profile_max_velocity_rad_s);
+		struct motor_mpr_position_config cfg = g_motor_params->position_mpr_cfg;
+		struct motor_mpr_bandwidth_result result = {0};
+		const struct motor_mpr_position_bandwidth_input input = {
+			.bandwidth_hz = bw_hz,
+			.velocity_limit_rad_s = g_motor_params->profile_max_velocity_rad_s,
+			.accel_limit_rad_s2 = g_motor_params->profile_max_accel_rad_s2,
+			.dt_s = g_motor_params->position_mpr_cfg.dt_s,
+		};
 
-		int ret = motor_set_param_checked("position_mpr_q_position", q_position);
-		ret |= motor_set_param_checked("position_mpr_q_velocity_ff", q_velocity_ff);
+		int ret = motor_mpr_position_config_from_bandwidth(&input, &cfg, &result);
+		if (ret != 0) {
+			shell_error(sh, "Failed to derive position MPR bandwidth params (err %d)",
+				    ret);
+			return ret;
+		}
+
+		ret = motor_set_param_checked("position_mpr_q_position", cfg.q_position);
+		ret |= motor_set_param_checked("position_mpr_q_velocity_ff",
+					       cfg.q_velocity_ff);
 		ret |= motor_set_param_checked("position_mpr_r_delta_velocity",
-					       r_delta_velocity);
+					       cfg.r_delta_velocity);
 		ret |= motor_set_param_checked("position_mpr_horizon",
-					       (float)POSITION_MPR_BW_HORIZON);
+					       (float)cfg.horizon);
 		ret |= motor_set_param_checked("position_mpr_max_delta_velocity_rad_s",
-					       max_delta_velocity);
+					       cfg.max_delta_velocity_rad_s);
 		if (ret != 0) {
 			shell_error(sh, "Failed to apply position MPR bandwidth params (err %d)", ret);
 			return ret;
@@ -2048,10 +2057,12 @@ static int cmd_motor_position_mpr(const struct shell *sh, size_t argc, char **ar
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Position MPR bandwidth tuned: bw=%.2f Hz -> q_pos=%.6f q_vel=%.6f r=%.6f horizon=%u dVel=%.6f rad/s/sample",
-			    (double)bw_hz, (double)q_position, (double)q_velocity_ff,
-			    (double)r_delta_velocity, POSITION_MPR_BW_HORIZON,
-			    (double)max_delta_velocity);
+			    "Position MPR bandwidth tuned: bw=%.2f Hz -> q_pos=%.6f q_vel=%.6f r=%.6f horizon=%u dVel=%.6f rad/s/sample%s",
+			    (double)result.applied_bandwidth_hz,
+			    (double)cfg.q_position, (double)cfg.q_velocity_ff,
+			    (double)cfg.r_delta_velocity, cfg.horizon,
+			    (double)cfg.max_delta_velocity_rad_s,
+			    result.clamped ? " clamped" : "");
 		return 0;
 	}
 

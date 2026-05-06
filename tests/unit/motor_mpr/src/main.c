@@ -98,6 +98,90 @@ ZTEST(motor_mpr, test_velocity_validate_rejects_invalid_inputs)
 	zassert_equal(motor_mpr_velocity_validate(&cfg, &model), -EINVAL, NULL);
 }
 
+ZTEST(motor_mpr, test_velocity_bandwidth_config_uses_model)
+{
+	const struct motor_mpr_velocity_bandwidth_input input = {
+		.bandwidth_hz = 0.5f,
+		.inertia_kgm2 = 0.001f,
+		.torque_constant_nm_per_a = 0.1f,
+		.iq_limit_a = 1.0f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_velocity_config cfg = {0};
+	struct motor_mpr_bandwidth_result result = {0};
+
+	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result), NULL);
+	zassert_equal(cfg.horizon, MOTOR_MPR_VELOCITY_BW_HORIZON, NULL);
+	zassert_true(cfg.q_speed > MOTOR_MPR_VELOCITY_BW_Q_MIN, NULL);
+	zassert_true(cfg.q_speed < MOTOR_MPR_VELOCITY_BW_Q_MAX, NULL);
+	zassert_true(cfg.r_delta_iq >= MOTOR_MPR_VELOCITY_BW_R_MIN, NULL);
+	zassert_true(cfg.r_delta_iq <= MOTOR_MPR_VELOCITY_BW_R_MAX, NULL);
+	zassert_equal(cfg.iq_limit_a, input.iq_limit_a, NULL);
+	zassert_equal(cfg.dt_s, input.dt_s, NULL);
+	zassert_true(result.model_used, NULL);
+	zassert_false(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_velocity_bandwidth_config_clamps_high_bandwidth)
+{
+	const struct motor_mpr_velocity_bandwidth_input input = {
+		.bandwidth_hz = 100.0f,
+		.inertia_kgm2 = 0.01f,
+		.torque_constant_nm_per_a = 0.05f,
+		.iq_limit_a = 1.0f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_velocity_config cfg = {0};
+	struct motor_mpr_bandwidth_result result = {0};
+
+	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result), NULL);
+	zassert_true(fabsf(cfg.q_speed - MOTOR_MPR_VELOCITY_BW_Q_MAX) < EPS, NULL);
+	zassert_true(result.model_used, NULL);
+	zassert_true(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_velocity_bandwidth_config_falls_back_without_model)
+{
+	const struct motor_mpr_velocity_bandwidth_input input = {
+		.bandwidth_hz = 1.0f,
+		.inertia_kgm2 = 0.0f,
+		.torque_constant_nm_per_a = 0.0f,
+		.iq_limit_a = 0.5f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_velocity_config cfg = {0};
+	struct motor_mpr_bandwidth_result result = {0};
+
+	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result), NULL);
+	zassert_true(fabsf(cfg.q_speed - MOTOR_MPR_VELOCITY_BW_Q_MIN) < EPS, NULL);
+	zassert_false(result.model_used, NULL);
+	zassert_false(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_velocity_bandwidth_config_rejects_invalid_inputs)
+{
+	struct motor_mpr_velocity_bandwidth_input input = {
+		.bandwidth_hz = 1.0f,
+		.inertia_kgm2 = 0.001f,
+		.torque_constant_nm_per_a = 0.1f,
+		.iq_limit_a = 0.5f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_velocity_config cfg = {0};
+
+	zassert_equal(motor_mpr_velocity_config_from_bandwidth(NULL, &cfg, NULL), -EINVAL, NULL);
+	zassert_equal(motor_mpr_velocity_config_from_bandwidth(&input, NULL, NULL), -EINVAL, NULL);
+
+	input.bandwidth_hz = 0.0f;
+	zassert_equal(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+	input.bandwidth_hz = 1.0f;
+	input.iq_limit_a = 0.0f;
+	zassert_equal(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+	input.iq_limit_a = 0.5f;
+	input.dt_s = 0.0f;
+	zassert_equal(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+}
+
 ZTEST(motor_mpr, test_velocity_step_rejects_bad_inputs)
 {
 	struct motor_mpr_velocity_config cfg = {
@@ -414,6 +498,74 @@ ZTEST(motor_mpr, test_position_step_rejects_bad_inputs)
 	zassert_equal(motor_mpr_position_step(NULL, &state, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
 	zassert_equal(motor_mpr_position_step(&cfg, NULL, 0.0f, 0.0f, &vel_cmd), -EINVAL, NULL);
 	zassert_equal(motor_mpr_position_step(&cfg, &state, 0.0f, 0.0f, NULL), -EINVAL, NULL);
+}
+
+ZTEST(motor_mpr, test_position_bandwidth_config_nominal)
+{
+	const struct motor_mpr_position_bandwidth_input input = {
+		.bandwidth_hz = 0.5f,
+		.velocity_limit_rad_s = 20.0f,
+		.accel_limit_rad_s2 = 100.0f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_position_config cfg = {0};
+	struct motor_mpr_bandwidth_result result = {0};
+
+	zassert_ok(motor_mpr_position_config_from_bandwidth(&input, &cfg, &result), NULL);
+	zassert_equal(cfg.horizon, MOTOR_MPR_POSITION_BW_HORIZON, NULL);
+	zassert_true(cfg.q_position > MOTOR_MPR_POSITION_BW_Q_POS_MIN, NULL);
+	zassert_true(cfg.q_position < MOTOR_MPR_POSITION_BW_Q_POS_MAX, NULL);
+	zassert_true(cfg.q_velocity_ff > MOTOR_MPR_POSITION_BW_Q_VEL_MIN, NULL);
+	zassert_true(cfg.q_velocity_ff < MOTOR_MPR_POSITION_BW_Q_VEL_MAX, NULL);
+	zassert_true(cfg.r_delta_velocity >= MOTOR_MPR_POSITION_BW_R_MIN, NULL);
+	zassert_true(cfg.r_delta_velocity <= MOTOR_MPR_POSITION_BW_R_MAX, NULL);
+	zassert_equal(cfg.velocity_limit_rad_s, input.velocity_limit_rad_s, NULL);
+	zassert_true(cfg.max_delta_velocity_rad_s > 0.0f, NULL);
+	zassert_false(result.model_used, NULL);
+	zassert_false(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_position_bandwidth_config_clamps_high_bandwidth)
+{
+	const struct motor_mpr_position_bandwidth_input input = {
+		.bandwidth_hz = 20.0f,
+		.velocity_limit_rad_s = 20.0f,
+		.accel_limit_rad_s2 = 100.0f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_position_config cfg = {0};
+	struct motor_mpr_bandwidth_result result = {0};
+
+	zassert_ok(motor_mpr_position_config_from_bandwidth(&input, &cfg, &result), NULL);
+	zassert_true(fabsf(cfg.q_position - MOTOR_MPR_POSITION_BW_Q_POS_MAX) < EPS, NULL);
+	zassert_true(fabsf(cfg.q_velocity_ff - MOTOR_MPR_POSITION_BW_Q_VEL_MAX) < EPS, NULL);
+	zassert_true(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_position_bandwidth_config_rejects_invalid_inputs)
+{
+	struct motor_mpr_position_bandwidth_input input = {
+		.bandwidth_hz = 1.0f,
+		.velocity_limit_rad_s = 20.0f,
+		.accel_limit_rad_s2 = 100.0f,
+		.dt_s = 0.001f,
+	};
+	struct motor_mpr_position_config cfg = {0};
+
+	zassert_equal(motor_mpr_position_config_from_bandwidth(NULL, &cfg, NULL), -EINVAL, NULL);
+	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, NULL, NULL), -EINVAL, NULL);
+
+	input.bandwidth_hz = 0.0f;
+	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+	input.bandwidth_hz = 1.0f;
+	input.velocity_limit_rad_s = 0.0f;
+	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+	input.velocity_limit_rad_s = 20.0f;
+	input.accel_limit_rad_s2 = 0.0f;
+	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
+	input.accel_limit_rad_s2 = 100.0f;
+	input.dt_s = 0.0f;
+	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
 }
 
 ZTEST_SUITE(motor_mpr, NULL, NULL, NULL, NULL, NULL);

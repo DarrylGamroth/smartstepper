@@ -39,6 +39,43 @@ extern "C" {
  */
 
 #define MOTOR_MPR_HORIZON_MAX 64U
+#define MOTOR_MPR_VELOCITY_BW_Q_MIN 0.003f
+#define MOTOR_MPR_VELOCITY_BW_Q_MAX 0.05f
+#define MOTOR_MPR_VELOCITY_BW_R_MIN 20.0f
+#define MOTOR_MPR_VELOCITY_BW_R_MAX 100.0f
+#define MOTOR_MPR_VELOCITY_BW_HORIZON 8U
+#define MOTOR_MPR_VELOCITY_BW_DI_MIN_A 0.0005f
+#define MOTOR_MPR_VELOCITY_BW_DI_MAX_A 0.0020f
+#define MOTOR_MPR_VELOCITY_BW_DIST_KI_MIN 0.0f
+#define MOTOR_MPR_POSITION_BW_Q_POS_MIN 0.5f
+#define MOTOR_MPR_POSITION_BW_Q_POS_MAX 20.0f
+#define MOTOR_MPR_POSITION_BW_Q_VEL_MIN 0.1f
+#define MOTOR_MPR_POSITION_BW_Q_VEL_MAX 10.0f
+#define MOTOR_MPR_POSITION_BW_R_MIN 0.02f
+#define MOTOR_MPR_POSITION_BW_R_MAX 0.5f
+#define MOTOR_MPR_POSITION_BW_HORIZON 16U
+
+struct motor_mpr_velocity_bandwidth_input {
+	float32_t bandwidth_hz;
+	float32_t inertia_kgm2;
+	float32_t torque_constant_nm_per_a;
+	float32_t iq_limit_a;
+	float32_t dt_s;
+};
+
+struct motor_mpr_position_bandwidth_input {
+	float32_t bandwidth_hz;
+	float32_t velocity_limit_rad_s;
+	float32_t accel_limit_rad_s2;
+	float32_t dt_s;
+};
+
+struct motor_mpr_bandwidth_result {
+	float32_t requested_bandwidth_hz;
+	float32_t applied_bandwidth_hz;
+	bool model_used;
+	bool clamped;
+};
 
 /**
  * @brief Mechanical speed plant parameters for velocity MPR.
@@ -109,6 +146,11 @@ struct motor_mpr_position_state {
 int motor_mpr_velocity_validate(const struct motor_mpr_velocity_config *cfg,
 				const struct motor_mpr_velocity_model *model);
 
+int motor_mpr_velocity_config_from_bandwidth(
+	const struct motor_mpr_velocity_bandwidth_input *in,
+	struct motor_mpr_velocity_config *cfg,
+	struct motor_mpr_bandwidth_result *result);
+
 int motor_mpr_velocity_init(const struct motor_mpr_velocity_config *cfg,
 			    const struct motor_mpr_velocity_model *model,
 			    struct motor_mpr_velocity_state *state,
@@ -136,6 +178,11 @@ int motor_mpr_velocity_step_fast(const struct motor_mpr_velocity_config *cfg,
 				 float32_t *iq_cmd_a_out);
 
 int motor_mpr_position_validate(const struct motor_mpr_position_config *cfg);
+
+int motor_mpr_position_config_from_bandwidth(
+	const struct motor_mpr_position_bandwidth_input *in,
+	struct motor_mpr_position_config *cfg,
+	struct motor_mpr_bandwidth_result *result);
 
 int motor_mpr_position_init(const struct motor_mpr_position_config *cfg,
 			    struct motor_mpr_position_state *state,
