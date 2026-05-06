@@ -42,6 +42,19 @@ int motor_hardware_init_gpio(void);
 int motor_hardware_check_devices(void);
 
 /**
+ * @brief Restart the PWM timer path that triggers injected ADC control.
+ *
+ * The injected ADC control ISR is triggered by PWM timer compare/update
+ * hardware. Gate-driver faults, break recovery, and mode transitions can leave
+ * timer outputs/counter state in a safe but non-running state, so powered state
+ * entries should explicitly restart the PWM/ADC trigger path instead of relying
+ * on one-time HW_INIT setup.
+ *
+ * @return 0 on success, negative error code otherwise
+ */
+int motor_hardware_restart_pwm_adc_trigger(void);
+
+/**
  * @brief Pulse DRV8328 nSLEEP pins to clear latched gate-driver faults.
  *
  * This uses k_usleep/k_busy_wait internally through the DRV8328 driver, so it

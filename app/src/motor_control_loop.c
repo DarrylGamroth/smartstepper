@@ -118,6 +118,14 @@ static inline bool motor_vbus_fault_required(uint32_t mode_flags)
 	       motor_is_align_active_state(mode_flags);
 }
 
+static inline bool motor_current_fault_required(uint32_t mode_flags)
+{
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
+	       motor_is_align_active_state(mode_flags);
+}
+
 static inline enum motor_control_policy_mode
 motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 {
@@ -792,6 +800,8 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 	meas->vbus_v = adc_to_vbus_v(values[VBUS_ADC_BUFFER_INDEX]);
 	commission_obs->vbus_v = meas->vbus_v;
 	params->live.dc_bus_voltage_V = meas->vbus_v;
+	params->live.Ia_A = meas->ia_a;
+	params->live.Ib_A = meas->ib_a;
 
 	bool vbus_fault_required = motor_vbus_fault_required(mode_flags);
 	if (vbus_fault_required && meas->vbus_v < VBUS_MIN_VALID_V) {
@@ -843,8 +853,9 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 					     params->live.position_quality_flags);
 	}
 
-	if (fabsf(meas->ia_a) > OVERCURRENT_THRESHOLD_A ||
-	    fabsf(meas->ib_a) > OVERCURRENT_THRESHOLD_A) {
+	if (motor_current_fault_required(mode_flags) &&
+	    (fabsf(meas->ia_a) > OVERCURRENT_THRESHOLD_A ||
+	     fabsf(meas->ib_a) > OVERCURRENT_THRESHOLD_A)) {
 		motor_step_report_post_error(report, ERROR_OVERCURRENT);
 		return true;
 	}

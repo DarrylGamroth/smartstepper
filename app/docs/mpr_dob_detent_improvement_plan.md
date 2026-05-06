@@ -609,3 +609,33 @@ python3 -u scripts/hil/hil_telnet.py mpr-dob-detent \
   - `motor info live` in `IDLE` reports `Vbus: 23.6 V`.
   - Controller recovered to `IDLE`, `Error: NONE`, command timeout restored to
     `1000 ms` after the interrupted live commissioning attempt.
+
+### 2026-05-06 State-Machine PWM/ADC Trigger Regression Fix
+
+- Root cause: after the state-machine/safety refactors, the logical state could
+  report `ONLINE_VELOCITY_GENERATED` while the PWM timer path that triggers the
+  injected ADC control ISR was not advancing. This froze `control_loop_count`,
+  made generated-mode commands ineffective, and caused boot encoder mapping to
+  time out waiting for the control ISR.
+- Fix: powered state entries now explicitly restart the PWM/ADC trigger path via
+  `motor_hardware_restart_pwm_adc_trigger()`. This re-enables the injected ADC,
+  enables the PWM1 channel-4 ADC trigger, starts the slave timer, then starts the
+  master timer. The helper is called from `HW_INIT`, `PREPARE_ONLINE`, and
+  `ONLINE` entry so fault recovery and mode transitions reassert the real-time
+  control cadence.
+- Related current-safety fix: software overcurrent detection is only active once
+  current offsets are meaningful (`ONLINE`, `RS_EST`, `ROVERL_MEAS`, and ALIGN),
+  not during `IDLE`, `PREPARE_ONLINE`, or offset measurement raw-midpoint
+  sampling.
+- Validation:
+  - MT6835 west build passed.
+  - Firmware flashed successfully.
+  - After `motor state calibrate` and entering `ONLINE_VELOCITY_GENERATED`, ISR
+    count advanced from `1,918,253` to `2,246,090` across a 1 s sleep.
+  - `boot-commission` HIL passed end-to-end with `--boot-current 0.15 --boot-hz
+    0.10 --cycles 1`.
+  - Encoder mapping result: `valid=YES`, `dir=-1`, `corr=-0.9073`,
+    `off_mech=0.990 deg`, `motion=361.827 deg`, `samples=500`, `warn=0`,
+    `err=0`.
+  - Final state returned to `IDLE`, `Error: NONE`, encoder acquisition errors
+    all zero, and fault snapshot clear.

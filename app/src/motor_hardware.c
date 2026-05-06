@@ -10,6 +10,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/devicetree.h>
 #include <drivers/mcpwm.h>
+#include <drivers/adc_injected.h>
 #include <drivers/gate_driver/ti_drv8328.h>
 
 #include "motor_hardware.h"
@@ -88,6 +89,35 @@ int motor_hardware_check_devices(void)
 	}
 
 	return 0;
+}
+
+int motor_hardware_restart_pwm_adc_trigger(void)
+{
+	int ret;
+
+	ret = adc_injected_enable(adc1);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Channel 4 on pwm1 is the injected-ADC trigger. Keep it enabled even
+	 * when phase outputs are disabled so the control ISR can keep telemetry
+	 * and safety state fresh in powered modes.
+	 */
+	ret = mcpwm_enable(pwm1, 4);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Start the slave before the master. `mcpwm_start()` also restores MOE
+	 * on advanced timers, which is required after break/fault recovery.
+	 */
+	ret = mcpwm_start(pwm8);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return mcpwm_start(pwm1);
 }
 
 int motor_hardware_reset_gate_driver_faults(void)

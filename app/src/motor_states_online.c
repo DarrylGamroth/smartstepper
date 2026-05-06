@@ -157,6 +157,11 @@ void motor_state_online_entry(void *obj)
 	/* ONLINE modes require power-stage channels enabled.
 	 * IDLE entry disables them, so re-enable on every ONLINE entry.
 	 */
+	if (motor_hardware_restart_pwm_adc_trigger() < 0) {
+		LOG_ERR("Failed to restart PWM/ADC trigger path");
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		return;
+	}
 	drv8328_enable_channel(gate_driver_a, 0);
 	drv8328_enable_channel(gate_driver_a, 1);
 	drv8328_enable_channel(gate_driver_b, 0);

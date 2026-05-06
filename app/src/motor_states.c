@@ -542,18 +542,16 @@ static void motor_state_hw_init_entry(void *obj)
 
 	/* Set up ADC callback */
 	adc_injected_set_callback(adc1, adc_callback, params);
-	adc_injected_enable(adc1);
-
 	/* Initialize timing subsystem for ISR performance measurement */
 	timing_init();
 	timing_start();
 
-	/* Enable PWM outputs used by the injected-ADC control cadence. */
-	mcpwm_enable(pwm1, 4);
-
-	/* Start master timers. pwm1 is the master timer */
-	mcpwm_start(pwm8);
-	mcpwm_start(pwm1);
+	if (motor_hardware_restart_pwm_adc_trigger() < 0) {
+		LOG_ERR("Failed to start PWM/ADC trigger path");
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		return;
+	}
 }
 
 static enum smf_state_result motor_state_hw_init_run(void *obj)
@@ -983,6 +981,12 @@ static void motor_state_prepare_online_entry(void *obj)
 	motor_reset_control_runtime(params);
 	motor_force_safe_pwm_outputs();
 	motor_reset_gate_driver_faults_before_enable(params);
+	if (motor_hardware_restart_pwm_adc_trigger() < 0) {
+		LOG_ERR("Failed to restart PWM/ADC trigger path");
+		motor_api_post_error(ERROR_HARDWARE_BREAK);
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ERROR]);
+		return;
+	}
 
 	/* Enable gate driver channels - motor now energized */
 	drv8328_enable_channel(gate_driver_a, 0);
