@@ -1,0 +1,20 @@
+id: SMF0002
+phase: P00
+status: pending
+title: Add transition status observability baseline
+objective: Identify existing shell/API visibility gaps and define the minimum transition status fields
+touch_files:
+  - app/docs/state_machine_refactor_plan/transition_status_contract.md
+  - app/docs/state_machine_refactor_plan/execution_log.md
+do_not_touch:
+  - app/src
+  - modules/motor_core
+constraints:
+  - documentation-only
+validation:
+  - "test -f app/docs/state_machine_refactor_plan/transition_status_contract.md"
+  - "rg -n 'request_sequence|result|reason|final_state' app/docs/state_machine_refactor_plan/transition_status_contract.md"
+done_when:
+  - transition status fields are specified
+  - shell/HIL consumers are listed
+commit_message: "docs(smf): define transition status contract"

@@ -1,0 +1,22 @@
+id: SMF0502
+phase: P05
+status: pending
+title: Split fault clear from gate and encoder recovery
+objective: Make `clear_error`, gate reset, and encoder recovery separate operations with deterministic final state
+touch_files:
+  - app/src/motor_states.c
+  - app/src/shell_commands_state.c
+  - app/src/motor_encoder_acquisition.c
+  - app/include/motor_encoder_acquisition.h
+  - app/src/motor_encoder_control.c
+do_not_touch:
+  - drivers unless required for existing recovery API calls
+constraints:
+  - clear_error must not enter run/online directly
+  - stale acquisition hard errors must require explicit recovery or reset
+validation:
+  - "podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE=\"boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay\"'"
+done_when:
+  - fault clear leaves system in safe idle only after recovery guards pass
+  - shell has explicit gate and encoder recovery commands/status
+commit_message: "fault: separate clear from hardware recovery"

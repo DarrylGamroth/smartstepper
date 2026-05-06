@@ -1,0 +1,24 @@
+id: SMF0101
+phase: P01
+status: pending
+title: Consolidate requested online mode resolver
+objective: Replace duplicate requested-mode resolver logic with one shared guarded implementation
+touch_files:
+  - app/include/motor_state_transition.h
+  - app/src/motor_state_transition.c
+  - app/src/motor_states.c
+  - app/src/motor_states_calibration.c
+  - app/CMakeLists.txt
+do_not_touch:
+  - modules/motor_core/src/control
+  - drivers
+constraints:
+  - preserve generated/open-loop behavior
+  - encoder modes must use the same readiness guard in every entry path
+validation:
+  - "rg -n 'motor_resolve_requested_online_mode' app/src app/include"
+  - "podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE=\"boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay\"'"
+done_when:
+  - only one resolver implementation remains
+  - calibration and idle online entry use identical fallback/reject behavior
+commit_message: "smf: consolidate requested online mode guard"

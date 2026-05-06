@@ -1,0 +1,23 @@
+id: SMF0601
+phase: P06
+status: pending
+title: Update operator workflow documentation
+objective: Document the final command model for setup, run, stop, transition status, and recovery
+touch_files:
+  - app/docs/operating_mode_taxonomy.md
+  - app/docs/commissioning_workflow_refactor_plan.md
+  - app/docs/motor_shell_command_tree.md
+  - scripts/hil/README.md
+  - AGENTS.md
+do_not_touch:
+  - app/src
+  - modules/motor_core
+constraints:
+  - documentation-only
+  - include telnet preference and safe stop sequence
+validation:
+  - "rg -n 'transition status|recover|motor state online|velocity_encoder' app/docs scripts/hil/README.md AGENTS.md"
+done_when:
+  - docs describe setup before encoder modes
+  - docs distinguish mode staging from online entry or describe replacement commands
+commit_message: "docs: update motor state workflow"

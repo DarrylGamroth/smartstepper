@@ -1,0 +1,22 @@
+id: SMF0501
+phase: P05
+status: pending
+title: Add explicit recovery status and actions
+objective: Track fault latch, gate recovery requirement, encoder recovery requirement, and safe-idle readiness
+touch_files:
+  - app/include/config.h
+  - app/src/motor_states.c
+  - app/src/shell_commands_state.c
+  - app/src/motor_hardware.c
+  - app/include/motor_hardware.h
+do_not_touch:
+  - motor_core control algorithms
+constraints:
+  - recovery status must be visible from shell
+  - fault ISR path must remain ISR-safe
+validation:
+  - "podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE=\"boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay\"'"
+done_when:
+  - shell shows recovery status separate from motor state status
+  - fault entry records which recovery actions are required
+commit_message: "fault: add explicit recovery status"

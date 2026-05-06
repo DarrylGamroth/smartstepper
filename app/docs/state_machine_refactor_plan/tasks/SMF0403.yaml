@@ -1,0 +1,22 @@
+id: SMF0403
+phase: P04
+status: pending
+title: Add mode transition tests and generated-mode regression HIL
+objective: Add tests/evidence proving generated mode still works and encoder-current mode enters only after setup
+touch_files:
+  - tests/unit
+  - scripts/hil/hil_telnet.py
+  - scripts/hil/README.md
+  - app/docs/state_machine_refactor_plan/execution_log.md
+do_not_touch:
+  - drivers
+constraints:
+  - tests should focus on pure helpers when possible
+  - HIL must stop motor safely after every run
+validation:
+  - "./tests/run_unit_tests.sh"
+  - "python3 -m unittest scripts/hil/test_hil_telnet_parser.py"
+done_when:
+  - unit tests cover descriptor/guard behavior
+  - execution log includes generated-mode HIL smoke after refactor
+commit_message: "test: add state transition guard coverage"

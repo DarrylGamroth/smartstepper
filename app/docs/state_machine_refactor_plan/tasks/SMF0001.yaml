@@ -1,0 +1,21 @@
+id: SMF0001
+phase: P00
+status: pending
+title: Record current transition matrix and baseline evidence
+objective: Document current lifecycle states, online modes, setup paths, and observed HIL behavior before refactor
+touch_files:
+  - app/docs/state_machine_refactor_plan/execution_log.md
+  - app/docs/state_machine_refactor_plan/current_transition_matrix.md
+do_not_touch:
+  - app/src
+  - modules/motor_core
+constraints:
+  - documentation-only
+validation:
+  - "test -f app/docs/state_machine_refactor_plan/current_transition_matrix.md"
+  - "rg -n 'velocity_generated|current_encoder|commission' app/docs/state_machine_refactor_plan/current_transition_matrix.md"
+done_when:
+  - transition matrix lists valid source and target states
+  - ambiguity around staged mode versus online entry is documented
+  - execution log includes generated-mode and encoder-current baseline commands/results
+commit_message: "docs(smf): record transition baseline"

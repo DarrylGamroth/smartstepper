@@ -1,0 +1,24 @@
+id: SMF0303
+phase: P03
+status: pending
+title: Gate encoder modes on complete setup result set
+objective: Require current offsets, encoder mapping, encoder device/protocol, and clean acquisition state before encoder modes
+touch_files:
+  - app/src/motor_encoder_control.c
+  - app/include/motor_encoder_control.h
+  - app/src/motor_state_transition.c
+  - app/src/shell_commands_state.c
+  - scripts/hil/hil_telnet.py
+do_not_touch:
+  - motor_core control algorithms
+constraints:
+  - generated modes must not require encoder setup
+  - warning/magnet quality must not fault by default
+validation:
+  - "python3 -m py_compile scripts/hil/hil_telnet.py"
+  - "python3 -m unittest scripts/hil/test_hil_telnet_parser.py"
+  - "podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE=\"boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay\"'"
+done_when:
+  - encoder mode rejection reason names the missing setup prerequisite
+  - generated mode still runs without encoder mapping
+commit_message: "encoder: gate online modes on setup readiness"

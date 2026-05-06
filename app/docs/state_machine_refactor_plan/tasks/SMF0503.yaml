@@ -1,0 +1,22 @@
+id: SMF0503
+phase: P05
+status: pending
+title: Add fault and recovery HIL regression
+objective: Add repeatable HIL command flow that validates fault snapshot, gate reset, encoder recovery, and safe idle
+touch_files:
+  - scripts/hil/hil_telnet.py
+  - scripts/hil/test_hil_telnet_parser.py
+  - scripts/hil/README.md
+  - app/docs/state_machine_refactor_plan/execution_log.md
+do_not_touch:
+  - app/src/motor_control_loop.c
+constraints:
+  - live fault injection must be opt-in
+  - HIL script must safely disarm on failure
+validation:
+  - "python3 -m py_compile scripts/hil/hil_telnet.py"
+  - "python3 -m unittest scripts/hil/test_hil_telnet_parser.py"
+done_when:
+  - HIL can verify recovery status from telnet
+  - execution log captures a recovery smoke result
+commit_message: "hil: add fault recovery regression"

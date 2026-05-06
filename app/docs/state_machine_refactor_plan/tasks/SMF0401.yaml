@@ -1,0 +1,23 @@
+id: SMF0401
+phase: P04
+status: pending
+title: Derive ISR feature flags from operating mode descriptors
+objective: Replace scattered online substate feature flag deltas with descriptor-derived feature masks where practical
+touch_files:
+  - app/src/motor_operating_mode.c
+  - app/include/motor_operating_mode.h
+  - app/src/motor_states.c
+  - app/src/motor_states_online.c
+do_not_touch:
+  - app/src/motor_control_loop.c
+  - drivers
+constraints:
+  - preserve coherent snapshot publish behavior
+  - do not add dynamic allocation
+validation:
+  - "podman exec wonderful_goldberg bash -lc 'cd /workspace && west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE=\"boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay\"'"
+  - "./tests/run_unit_tests.sh"
+done_when:
+  - online mode feature masks are auditable from one table
+  - entry/exit handlers no longer duplicate obvious feature mask knowledge
+commit_message: "smf: derive online ISR features from mode descriptors"
