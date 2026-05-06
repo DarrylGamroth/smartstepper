@@ -218,7 +218,6 @@ void config_init_runtime_adapters(struct motor_parameters *params)
 		.position_trust_state = &params->live.position_trust_state,
 		.encoder_fault_threshold = ENCODER_FAULT_THRESHOLD,
 		.encoder_delay_samples = ENCODER_SAMPLE_DELAY_SAMPLES,
-		.pole_pairs = MOTOR_POLE_PAIRS,
 	};
 
 	params->rt_adapters.commission = (struct motor_commission_runtime_ctx){

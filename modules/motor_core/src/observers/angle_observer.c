@@ -23,14 +23,13 @@ static void angle_observer_update_outputs(struct angle_observer_state *obs)
 	obs->mech_angle_rad = obs->angle_est_rad;
 	obs->mech_speed_rad_s = obs->speed_est_rad_s;
 
-	float32_t mech_angle_offset = obs->mech_angle_rad + obs->mech_angle_offset_rad;
-	obs->elec_angle_rad = wrap_rad_2pi(mech_angle_offset * obs->pole_pairs);
+	obs->elec_angle_rad = angle_observer_mech_to_elec_angle(obs, obs->mech_angle_rad);
 
 	float32_t mech_angle_pred = obs->angle_est_rad + Ts * obs->speed_est_rad_s;
 	obs->mech_angle_pred_rad = wrap_rad_2pi(mech_angle_pred);
 
-	float32_t mech_angle_pred_offset = obs->mech_angle_pred_rad + obs->mech_angle_offset_rad;
-	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
+	obs->elec_angle_pred_rad =
+		angle_observer_mech_to_elec_angle(obs, obs->mech_angle_pred_rad);
 }
 
 void angle_observer_init(struct angle_observer_state *obs,
@@ -63,6 +62,7 @@ void angle_observer_init(struct angle_observer_state *obs,
 
 	/* Zero mechanical angle offset */
 	obs->mech_angle_offset_rad = 0.0f;
+	obs->prediction_age_samples = 0.0f;
 }
 
 void angle_observer_set_offset(struct angle_observer_state *obs,
@@ -72,6 +72,24 @@ void angle_observer_set_offset(struct angle_observer_state *obs,
 		angle_observer_f32_is_plausible(offset_rad, 2.0f * PI_F32) ?
 			wrap_rad_pi(offset_rad) :
 			0.0f;
+}
+
+float32_t angle_observer_mech_to_elec_angle(const struct angle_observer_state *obs,
+					    float32_t mech_angle_rad)
+{
+	if (obs == NULL) {
+		return 0.0f;
+	}
+
+	const float32_t mech = angle_observer_f32_is_plausible(mech_angle_rad, 1.0e6f) ?
+				       wrap_rad_2pi(mech_angle_rad) :
+				       0.0f;
+	const float32_t offset =
+		angle_observer_f32_is_plausible(obs->mech_angle_offset_rad, 2.0f * PI_F32) ?
+			obs->mech_angle_offset_rad :
+			0.0f;
+
+	return wrap_rad_2pi((mech + offset) * (float32_t)obs->pole_pairs);
 }
 
 void angle_observer_update(struct angle_observer_state *obs,
@@ -133,6 +151,7 @@ void angle_observer_update(struct angle_observer_state *obs,
 	/* Observer update (forward Euler discretization) */
 	obs->angle_est_rad += Ts * obs->speed_est_rad_s + obs->L1Ts * err_rad;
 	obs->speed_est_rad_s += obs->L2Ts * err_rad;
+	obs->prediction_age_samples = 0.0f;
 
 	angle_observer_update_outputs(obs);
 
@@ -162,6 +181,9 @@ void angle_observer_predict(struct angle_observer_state *obs)
 	}
 
 	obs->angle_est_rad += obs->sample_period_s * obs->speed_est_rad_s;
+	if (obs->prediction_age_samples < 65535.0f) {
+		obs->prediction_age_samples += 1.0f;
+	}
 	angle_observer_update_outputs(obs);
 
 	if (!angle_observer_f32_is_plausible(obs->mech_angle_rad, 2.0f * PI_F32) ||
@@ -183,17 +205,16 @@ void angle_observer_reset_tracking(struct angle_observer_state *obs,
 
 	float32_t seeded_angle = isfinite(mech_angle_rad) ? wrap_rad_2pi(mech_angle_rad) : 0.0f;
 	float32_t seeded_speed = isfinite(mech_speed_rad_s) ? mech_speed_rad_s : 0.0f;
-	float32_t mech_angle_offset = seeded_angle + obs->mech_angle_offset_rad;
-	float32_t elec_angle = wrap_rad_2pi(mech_angle_offset * obs->pole_pairs);
+	float32_t elec_angle = angle_observer_mech_to_elec_angle(obs, seeded_angle);
 	float32_t Ts = obs->sample_period_s;
 	float32_t mech_angle_pred = wrap_rad_2pi(seeded_angle + Ts * seeded_speed);
-	float32_t mech_angle_pred_offset = mech_angle_pred + obs->mech_angle_offset_rad;
 
 	obs->angle_est_rad = seeded_angle;
 	obs->speed_est_rad_s = seeded_speed;
+	obs->prediction_age_samples = 0.0f;
 	obs->mech_angle_rad = seeded_angle;
 	obs->mech_speed_rad_s = seeded_speed;
 	obs->elec_angle_rad = elec_angle;
 	obs->mech_angle_pred_rad = mech_angle_pred;
-	obs->elec_angle_pred_rad = wrap_rad_2pi(mech_angle_pred_offset * obs->pole_pairs);
+	obs->elec_angle_pred_rad = angle_observer_mech_to_elec_angle(obs, mech_angle_pred);
 }

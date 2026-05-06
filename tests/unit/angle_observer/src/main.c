@@ -26,6 +26,7 @@ ZTEST(angle_observer, test_init_sets_zero_state_and_gains)
 	zassert_true(obs.L2Ts > 0.0f, NULL);
 	zassert_equal(obs.pole_pairs, 7u, NULL);
 	zassert_within(obs.delay_samples, 1.0f, 1e-6f, NULL);
+	zassert_within(angle_observer_get_prediction_age_samples(&obs), 0.0f, 1e-6f, NULL);
 }
 
 ZTEST(angle_observer, test_converges_on_constant_angle)
@@ -88,6 +89,20 @@ ZTEST(angle_observer, test_offset_applies_to_electrical_angle)
 
 	float32_t expected = wrap_rad_2pi(offset * 5.0f);
 	zassert_within(angle_observer_get_elec_angle(&obs), expected, 0.05f, NULL);
+}
+
+ZTEST(angle_observer, test_mech_to_elec_helper_applies_offset_and_wrap)
+{
+	struct angle_observer_state obs = {0};
+	const float32_t offset = -0.3f;
+
+	angle_observer_init(&obs, 0.001f, 60.0f, 50u, 0.0f);
+	angle_observer_set_offset(&obs, offset);
+
+	float32_t elec = angle_observer_mech_to_elec_angle(&obs, 2.0f * PI_F32 + 0.4f);
+	float32_t expected = wrap_rad_2pi((0.4f + offset) * 50.0f);
+
+	zassert_within(elec, expected, 1.0e-5f, NULL);
 }
 
 ZTEST(angle_observer, test_delay_compensation_changes_single_step_update)
@@ -170,6 +185,10 @@ ZTEST(angle_observer, test_predict_advances_without_measurement_correction)
 		       wrap_rad_2pi((expected_mech + offset) * 5.0f), 1e-6f, NULL);
 	zassert_within(angle_observer_get_elec_angle_pred(&obs),
 		       wrap_rad_2pi((expected_pred + offset) * 5.0f), 1e-6f, NULL);
+	zassert_within(angle_observer_get_prediction_age_samples(&obs), 1.0f, 1e-6f, NULL);
+
+	angle_observer_update(&obs, expected_mech);
+	zassert_within(angle_observer_get_prediction_age_samples(&obs), 0.0f, 1e-6f, NULL);
 }
 
 ZTEST(angle_observer, test_delay_setter_and_electrical_speed_accessor)

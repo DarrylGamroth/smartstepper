@@ -43,6 +43,7 @@ struct angle_observer_state {
 	float32_t L2Ts;                  /**< Cached velocity gain × Ts (wo^2*Ts) */
 	float32_t mech_angle_offset_rad; /**< Mechanical angle offset from alignment (for NV storage) */
 	float32_t delay_samples;         /**< Encoder measurement delay in sample periods (e.g., 1.0 for pipelined SPI) */
+	float32_t prediction_age_samples; /**< Consecutive observer-only prediction age in sample periods */
 };
 
 /**
@@ -78,6 +79,20 @@ void angle_observer_set_offset(struct angle_observer_state *obs,
 			       float32_t offset_rad);
 
 /**
+ * @brief Convert a mechanical angle to electrical angle using observer config.
+ *
+ * This is the single helper for applying observer-owned mechanical offset,
+ * pole-pair multiplication, and electrical wrapping outside the observer step.
+ * Control code should normally consume angle_observer_get_elec_angle() instead.
+ *
+ * @param obs Pointer to observer state structure
+ * @param mech_angle_rad Mechanical angle in radians
+ * @return Electrical angle in radians [0, 2π)
+ */
+float32_t angle_observer_mech_to_elec_angle(const struct angle_observer_state *obs,
+					    float32_t mech_angle_rad);
+
+/**
  * @brief Set encoder measurement delay compensation
  *
  * Configures delay compensation for the angle measurement source.
@@ -97,6 +112,12 @@ static inline void angle_observer_set_delay(struct angle_observer_state *obs,
 			      delay_samples <= 16.0f) ?
 				      delay_samples :
 				      0.0f;
+}
+
+static inline float32_t angle_observer_get_delay_samples(
+	const struct angle_observer_state *obs)
+{
+	return obs->delay_samples;
 }
 
 /**
@@ -212,6 +233,12 @@ static inline float32_t angle_observer_get_elec_speed(
 	const struct angle_observer_state *obs)
 {
 	return obs->mech_speed_rad_s * obs->pole_pairs;
+}
+
+static inline float32_t angle_observer_get_prediction_age_samples(
+	const struct angle_observer_state *obs)
+{
+	return obs->prediction_age_samples;
 }
 
 #endif /* ANGLE_OBSERVER_H_ */

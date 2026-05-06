@@ -93,6 +93,9 @@ int motor_angle_path_step(struct angle_observer_state *observer,
 	out->control.speed_mech_rad_s = angle_observer_get_mech_speed(observer);
 	out->control.accel_mech_rad_s2 = 0.0f;
 	out->control.speed_mech_filtered_rad_s = out->control.speed_mech_rad_s;
+	out->control.observer_delay_samples = angle_observer_get_delay_samples(observer);
+	out->control.prediction_age_samples =
+		angle_observer_get_prediction_age_samples(observer);
 	out->control.input_source = source;
 	out->control.quality_flags = quality_flags;
 	out->control.trust_state = (uint8_t)trust_state;

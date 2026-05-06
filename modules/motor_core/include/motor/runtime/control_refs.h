@@ -50,6 +50,8 @@ struct motor_feedback_ref {
 	float32_t velocity_rad_s;
 	float32_t acceleration_rad_s2;
 	float32_t velocity_filtered_rad_s;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 };
 
 enum motor_actuator_effort_kind {

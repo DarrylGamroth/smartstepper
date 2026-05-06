@@ -96,6 +96,8 @@ struct motor_encoder_capture_sample {
 	float32_t encoder_elec_rad;
 	float32_t observer_mech_rad;
 	float32_t observer_elec_rad;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 	float32_t generated_mech_rad;
 	float32_t generated_elec_rad;
 	float32_t mech_error_rad;
@@ -118,6 +120,10 @@ struct motor_encoder_raw_trace_sample {
 	float32_t generated_mech_rad;
 	float32_t generated_elec_rad;
 	float32_t observer_input_rad;
+	float32_t observer_mech_rad;
+	float32_t observer_elec_rad;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 	uint8_t input_source;
 	uint8_t quality_flags;
 	uint8_t sample_enabled;
@@ -287,6 +293,8 @@ struct motor_live_telemetry_ctx {
 	float32_t observer_elec_rad;
 	float32_t observer_elec_pred_rad;
 	float32_t observer_elec_speed_rad_s;
+	float32_t observer_delay_samples;
+	float32_t observer_prediction_age_samples;
 	float32_t velocity_target_rad_s; /* Velocity target before profile limiting */
 	float32_t velocity_ref_rad_s;    /* Velocity reference after profile limiting */
 	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */

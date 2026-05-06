@@ -94,8 +94,7 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	float32_t generated_angle_rad = angle_gen_get_angle(ctx->angle_gen);
 	float32_t generated_mech_rad = wrap_rad_2pi(generated_angle_rad);
 	float32_t generated_elec_rad =
-		wrap_rad_2pi((generated_mech_rad + ctx->observer->mech_angle_offset_rad) *
-			     (float32_t)ctx->pole_pairs);
+		angle_observer_mech_to_elec_angle(ctx->observer, generated_mech_rad);
 	uint8_t previous_source = *ctx->encoder_input_source;
 	bool propagated_valid =
 		raw_sample_enabled && !threshold_exceeded &&
@@ -168,6 +167,8 @@ int motor_encoder_feedback_update(struct motor_encoder_feedback_ctx *ctx,
 	feedback->speed_mech_rad_s = feedback->control.speed_mech_rad_s;
 	feedback->accel_mech_rad_s2 = feedback->control.accel_mech_rad_s2;
 	feedback->speed_mech_filtered_rad_s = feedback->control.speed_mech_filtered_rad_s;
+	feedback->observer_delay_samples = feedback->control.observer_delay_samples;
+	feedback->prediction_age_samples = feedback->control.prediction_age_samples;
 
 	return threshold_exceeded ? -EIO : 0;
 }
@@ -183,7 +184,6 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 	memset(capture, 0, sizeof(*capture));
 
 	float32_t generated_mech_rad = angle_gen_get_angle(ctx->angle_gen);
-	float32_t observer_mech_offset_rad = ctx->observer->mech_angle_offset_rad;
 
 	bool raw_sample_valid = feedback->fresh && !feedback->error;
 
@@ -195,17 +195,19 @@ int motor_encoder_feedback_prepare_capture(const struct motor_encoder_feedback_c
 				     (feedback->observer_input_rad * (180.0f / PI_F32));
 	capture->observer_mech_rad = feedback->observer_mech_rad;
 	capture->observer_elec_rad = feedback->observer_elec_rad;
+	capture->observer_delay_samples = feedback->observer_delay_samples;
+	capture->prediction_age_samples = feedback->prediction_age_samples;
 	capture->generated_mech_rad = wrap_rad_2pi(generated_mech_rad);
 	capture->generated_elec_rad =
-		wrap_rad_2pi((capture->generated_mech_rad + observer_mech_offset_rad) *
-			     (float32_t)ctx->pole_pairs);
+		angle_observer_mech_to_elec_angle(ctx->observer,
+						  capture->generated_mech_rad);
 	capture->input_source = feedback->input_source;
 
 	if (raw_sample_valid) {
 		capture->encoder_mech_rad = wrap_rad_2pi(capture->angle_rad);
 		capture->encoder_elec_rad =
-			wrap_rad_2pi((capture->encoder_mech_rad + observer_mech_offset_rad) *
-				     (float32_t)ctx->pole_pairs);
+			angle_observer_mech_to_elec_angle(ctx->observer,
+							  capture->encoder_mech_rad);
 		capture->mech_error_rad =
 			wrap_rad_pi(capture->encoder_mech_rad - capture->generated_mech_rad);
 		capture->elec_error_rad =

@@ -106,3 +106,90 @@ Expected:
   bad-sample prediction, and recovery.
 - HIL trace confirms expected angle behavior.
 
+## Implementation Evidence
+
+Status: implemented and validated, with one existing encoder-velocity caveat
+outside this plan.
+
+Implemented:
+
+- Added observer-owned `angle_observer_mech_to_elec_angle()` for applying
+  mechanical offset, pole-pair conversion, and electrical wrapping.
+- Added observer prediction-age tracking and propagated observer delay and
+  prediction age through control feedback, live telemetry, and raw trace
+  diagnostics.
+- Routed generated/encoder diagnostic electrical-angle conversion through the
+  observer helper instead of duplicating offset math in encoder feedback code.
+- Added raw trace columns for observer mechanical and electrical angles so HIL
+  traces can compare raw/control, observer, and generated references directly.
+
+Validation:
+
+```bash
+./tests/run_unit_tests.sh wonderful_goldberg \
+  -s chopper.angle_observer.unit \
+  -s chopper.motor_encoder_feedback_core.unit \
+  -s chopper.motor_control_kernel.unit
+```
+
+Result: PASS, 3 suites, 40/40 tests.
+
+```bash
+podman exec wonderful_goldberg bash -lc \
+  'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2'
+```
+
+Result: PASS.
+
+```bash
+podman exec wonderful_goldberg bash -lc \
+  'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+```
+
+Result: PASS.
+
+Bootstrap before trace:
+
+```bash
+python3 -u scripts/hil/hil_telnet.py encoder-validate \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --boot-current 0.15 \
+  --boot-hz 0.05 \
+  --cycles 1 \
+  --json-report hil_logs/control_plan/angle_observer_bootstrap_after_trace_update.json
+```
+
+Result: FAIL overall due to existing velocity tracking threshold, but PASS for
+boot mapping, current validation, protocol, no motor fault, and zero encoder
+acquisition errors.
+
+Generated trace:
+
+```bash
+python3 -u scripts/hil/hil_telnet.py encoder-trace-open-loop \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --open-loop-iq 0.12 \
+  --open-loop-hz 0.10 \
+  --trace-ms 1000 \
+  --trace-decimation 1 \
+  --json-report hil_logs/control_plan/angle_observer_contract.json
+```
+
+Result: PASS.
+
+Trace evidence:
+
+- raw trace dump includes `raw_mdeg`, `ctrl_mdeg`, `obs_mech_mdeg`,
+  `obs_elec_mdeg`, `gen_mech_mdeg`, and `gen_elec_mdeg`.
+- no fatal/fault-stop text,
+- motor error `NONE`,
+- fault snapshot clear,
+- encoder acquisition errors all zero.
+
+Caveat:
+
+- Encoder velocity validation remains unstable/underpowered and is tracked by
+  later encoder-control/tuning work. This plan only changes observer ownership,
+  trace visibility, and angle contract propagation.

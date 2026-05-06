@@ -22,6 +22,8 @@ struct motor_capture_feedback {
 	float32_t encoder_elec_rad;
 	float32_t observer_mech_rad;
 	float32_t observer_elec_rad;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 	float32_t generated_mech_rad;
 	float32_t generated_elec_rad;
 	float32_t mech_error_rad;

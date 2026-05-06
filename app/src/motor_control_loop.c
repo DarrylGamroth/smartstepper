@@ -286,6 +286,8 @@ static inline void motor_control_feedback_from_encoder(
 	control_fb->speed_mech_rad_s = encoder_fb->control.speed_mech_rad_s;
 	control_fb->accel_mech_rad_s2 = encoder_fb->control.accel_mech_rad_s2;
 	control_fb->speed_mech_filtered_rad_s = encoder_fb->control.speed_mech_filtered_rad_s;
+	control_fb->observer_delay_samples = encoder_fb->control.observer_delay_samples;
+	control_fb->prediction_age_samples = encoder_fb->control.prediction_age_samples;
 	control_fb->input_source = encoder_fb->control.input_source;
 	control_fb->trust_state = encoder_fb->control.trust_state;
 }
@@ -306,6 +308,8 @@ static inline void motor_control_publish_encoder_live(
 	params->live.observer_elec_rad = control_fb->observer_elec_rad;
 	params->live.observer_elec_pred_rad = control_fb->observer_elec_pred_rad;
 	params->live.observer_elec_speed_rad_s = control_fb->observer_elec_speed_rad_s;
+	params->live.observer_delay_samples = control_fb->observer_delay_samples;
+	params->live.observer_prediction_age_samples = control_fb->prediction_age_samples;
 	params->live.encoder_input_source = control_fb->input_source;
 	params->live.position_rad = control_fb->position_mech_rad;
 	params->live.position_unwrapped_rad = control_fb->position_mech_rad;
@@ -457,6 +461,8 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 	ctx->meas.speed_mech_rad_s = ctx->speed_mech_rad_s;
 	ctx->meas.accel_mech_rad_s2 = ctx->accel_mech_rad_s2;
 	ctx->meas.speed_mech_filtered_rad_s = ctx->speed_mech_filtered_rad_s;
+	ctx->meas.observer_delay_samples = 0.0f;
+	ctx->meas.prediction_age_samples = 0.0f;
 	ctx->meas.encoder_input_source = MOTOR_ANGLE_INPUT_SRC_PROPAGATED;
 
 	ctx->motion_ref.position_rad = ctx->position_mech_rad;
@@ -474,6 +480,8 @@ static inline void motor_rt_control_ctx_refresh(struct motor_rt_control_ctx *ctx
 	ctx->feedback_ref.velocity_rad_s = ctx->speed_mech_rad_s;
 	ctx->feedback_ref.acceleration_rad_s2 = ctx->accel_mech_rad_s2;
 	ctx->feedback_ref.velocity_filtered_rad_s = ctx->speed_mech_filtered_rad_s;
+	ctx->feedback_ref.observer_delay_samples = 0.0f;
+	ctx->feedback_ref.prediction_age_samples = 0.0f;
 
 	ctx->angle_ref.source = ctx->policy.angle_source;
 	ctx->current_ref.id_ref_a = params->live.Id_ref_A;
@@ -516,6 +524,8 @@ static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor
 	enc_res->observer_elec_rad = enc_res->control_fb.observer_elec_rad;
 	enc_res->observer_elec_pred_rad = enc_res->control_fb.observer_elec_pred_rad;
 	enc_res->observer_elec_speed_rad_s = enc_res->control_fb.observer_elec_speed_rad_s;
+	enc_res->observer_delay_samples = enc_res->control_fb.observer_delay_samples;
+	enc_res->prediction_age_samples = enc_res->control_fb.prediction_age_samples;
 	enc_res->fresh = enc_res->control_fb.fresh;
 	enc_res->frame_status = enc_res->control_fb.status;
 	enc_res->frame_warning = enc_res->control_fb.warning;
@@ -716,6 +726,8 @@ static inline void motor_control_measurements_from_encoder(
 	meas->speed_mech_rad_s = enc_stage->control_fb.speed_mech_rad_s;
 	meas->accel_mech_rad_s2 = enc_stage->control_fb.accel_mech_rad_s2;
 	meas->speed_mech_filtered_rad_s = enc_stage->control_fb.speed_mech_filtered_rad_s;
+	meas->observer_delay_samples = enc_stage->control_fb.observer_delay_samples;
+	meas->prediction_age_samples = enc_stage->control_fb.prediction_age_samples;
 }
 
 static inline void motor_feedback_ref_from_measurements(
@@ -753,6 +765,8 @@ static inline void motor_feedback_ref_from_measurements(
 	feedback_ref->velocity_rad_s = meas->speed_mech_rad_s;
 	feedback_ref->acceleration_rad_s2 = meas->accel_mech_rad_s2;
 	feedback_ref->velocity_filtered_rad_s = meas->speed_mech_filtered_rad_s;
+	feedback_ref->observer_delay_samples = meas->observer_delay_samples;
+	feedback_ref->prediction_age_samples = meas->prediction_age_samples;
 }
 
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct motor_parameters *params,

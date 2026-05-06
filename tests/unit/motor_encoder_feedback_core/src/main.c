@@ -280,6 +280,8 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_encoder_fresh_updates_observe
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U, NULL);
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U, NULL);
 	zassert_equal(out.control.trust_state, MOTOR_FEEDBACK_TRUST_TRUSTED, NULL);
+	zassert_within(out.control.observer_delay_samples, 1.0f, 1e-6f, NULL);
+	zassert_within(out.control.prediction_age_samples, 0.0f, 1e-6f, NULL);
 	zassert_true(isfinite(out.control.speed_mech_rad_s), NULL);
 }
 
@@ -308,6 +310,8 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_generated_has_priority_and_ze
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) != 0U, NULL);
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) != 0U, NULL);
 	zassert_equal(out.control.trust_state, MOTOR_FEEDBACK_TRUST_TRUSTED, NULL);
+	zassert_within(out.control.observer_delay_samples, 0.0f, 1e-6f, NULL);
+	zassert_within(out.control.prediction_age_samples, 0.0f, 1e-6f, NULL);
 }
 
 ZTEST(motor_encoder_feedback_core, test_angle_path_error_clears_valid)
@@ -362,6 +366,7 @@ ZTEST(motor_encoder_feedback_core, test_angle_path_propagates_valid_for_bounded_
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) == 0U, NULL);
 	zassert_true((out.control.quality_flags & MOTOR_FEEDBACK_QUALITY_ERROR) == 0U, NULL);
 	zassert_equal(out.control.trust_state, MOTOR_FEEDBACK_TRUST_PREDICTED, NULL);
+	zassert_within(out.control.prediction_age_samples, 1.0f, 1e-6f, NULL);
 	zassert_within(out.control.position_mech_rad, wrap_rad_2pi(1.0f + 0.002f), 1e-6f,
 		       NULL);
 	zassert_within(out.control.speed_mech_rad_s, 2.0f, 1e-6f, NULL);

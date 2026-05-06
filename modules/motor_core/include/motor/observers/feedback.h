@@ -41,6 +41,8 @@ struct motor_control_feedback {
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 };
 
 #endif /* MOTOR_FEEDBACK_H_ */

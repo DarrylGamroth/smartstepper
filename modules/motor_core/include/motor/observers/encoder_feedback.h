@@ -41,7 +41,6 @@ struct motor_encoder_feedback_ctx {
 	uint8_t *position_trust_state;
 	uint32_t encoder_fault_threshold;
 	uint8_t encoder_delay_samples;
-	uint16_t pole_pairs;
 };
 
 /**
@@ -77,6 +76,8 @@ struct motor_encoder_feedback {
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 };
 
 /**

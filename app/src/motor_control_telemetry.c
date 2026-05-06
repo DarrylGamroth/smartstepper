@@ -66,6 +66,8 @@ void motor_control_telemetry_store_encoder_capture(struct motor_parameters *para
 	sample->encoder_elec_rad = capture->encoder_elec_rad;
 	sample->observer_mech_rad = capture->observer_mech_rad;
 	sample->observer_elec_rad = capture->observer_elec_rad;
+	sample->observer_delay_samples = capture->observer_delay_samples;
+	sample->prediction_age_samples = capture->prediction_age_samples;
 	sample->generated_mech_rad = capture->generated_mech_rad;
 	sample->generated_elec_rad = capture->generated_elec_rad;
 	sample->mech_error_rad = capture->mech_error_rad;
@@ -126,6 +128,10 @@ void motor_control_telemetry_store_encoder_raw_trace(
 	sample->generated_mech_rad = control_fb->generated_mech_rad;
 	sample->generated_elec_rad = control_fb->generated_elec_rad;
 	sample->observer_input_rad = control_fb->observer_input_rad;
+	sample->observer_mech_rad = control_fb->observer_mech_rad;
+	sample->observer_elec_rad = control_fb->observer_elec_rad;
+	sample->observer_delay_samples = control_fb->observer_delay_samples;
+	sample->prediction_age_samples = control_fb->prediction_age_samples;
 	sample->input_source = control_fb->input_source;
 	sample->quality_flags = position_quality_flags;
 	sample->sample_enabled = raw_sample->enabled ? 1U : 0U;

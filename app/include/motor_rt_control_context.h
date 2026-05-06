@@ -38,6 +38,8 @@ struct motor_control_measurements {
 	float32_t speed_mech_rad_s;
 	float32_t accel_mech_rad_s2;
 	float32_t speed_mech_filtered_rad_s;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 	uint8_t encoder_input_source;
 	uint8_t position_quality_flags;
 	uint8_t position_trust_state;
@@ -57,6 +59,8 @@ struct motor_encoder_stage_result {
 	float32_t observer_elec_rad;
 	float32_t observer_elec_pred_rad;
 	float32_t observer_elec_speed_rad_s;
+	float32_t observer_delay_samples;
+	float32_t prediction_age_samples;
 	bool fresh;
 	uint8_t frame_status;
 	bool frame_warning;

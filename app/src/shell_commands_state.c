@@ -1168,6 +1168,9 @@ int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv)
 		    motor_shell_f32_bits(obs_mech_rad),
 		    motor_shell_f32_bits(obs_elec_rad),
 		    motor_shell_f32_bits(obs_elec_pred_rad));
+	shell_print(sh, "  Obs timing:     delay=%.2f samples pred_age=%.0f samples",
+		    (double)g_motor_params->live.observer_delay_samples,
+		    (double)g_motor_params->live.observer_prediction_age_samples);
 	shell_print(sh, "  Obs offset:     %.3f deg",
 		    motor_shell_rad_to_deg(obs_offset_rad));
 	shell_print(sh, "  Obs off raw:    %.6f rad bits=0x%08X",
@@ -2395,18 +2398,20 @@ int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "Raw trace dump: stored=%u count=%u max_chunk=%u",
 		    stored, count, MOTOR_ENCODER_SHELL_DUMP_MAX_ROWS);
 	shell_print(sh,
-		    "idx loop src raw_mdeg ctrl_mdeg gen_mech_mdeg gen_elec_mdeg q fresh warn err io status ctrl_en");
+		    "idx loop src raw_mdeg ctrl_mdeg obs_mech_mdeg obs_elec_mdeg gen_mech_mdeg gen_elec_mdeg q fresh warn err io status ctrl_en");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES);
 		const struct motor_encoder_raw_trace_sample *sample =
 			&g_motor_params->encoder_raw_trace.samples[idx];
 		shell_print(sh,
-			    "%u %u %u %d %d %d %d 0x%02X %u %u %u %u 0x%02X %u",
+			    "%u %u %u %d %d %d %d %d %d 0x%02X %u %u %u %u 0x%02X %u",
 			    i,
 			    sample->control_loop_count,
 			    sample->input_source,
 			    motor_encoder_rad_to_mdeg(sample->raw_angle_rad),
 			    motor_encoder_deg_to_mdeg((double)sample->control_angle_deg),
+			    motor_encoder_rad_to_mdeg(sample->observer_mech_rad),
+			    motor_encoder_rad_to_mdeg(sample->observer_elec_rad),
 			    motor_encoder_rad_to_mdeg(sample->generated_mech_rad),
 			    motor_encoder_rad_to_mdeg(sample->generated_elec_rad),
 			    sample->quality_flags,
