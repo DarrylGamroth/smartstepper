@@ -15,27 +15,31 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../modules/motor_core
 target_sources(app PRIVATE 
 	src/main.c
 	src/config.c
-	src/shell_commands.c
-	src/shell_control.c
-	src/shell_state.c
-	src/shell_safety.c
-	src/shell_gate.c
-	src/shell_info.c
-	src/shell_observer.c
-	src/shell_encoder.c
-	src/shell_encoder_protocol.c
-	src/shell_encoder_trace.c
-	src/shell_encoder_capture.c
-	src/shell_fault.c
-	src/shell_parse.c
-	src/shell_motion_profile.c
-	src/shell_motion_sequence.c
-	src/shell_motion_chopper_calib.c
-	src/shell_motion_commission.c
-	src/shell_commission_auto.c
-	src/shell_commission_detent.c
-	src/shell_commission_encoder.c
-	src/shell_commission_validate.c
+	src/shell/shell_commands.c
+	src/shell/shell_params.c
+	src/shell/shell_current.c
+	src/shell/shell_velocity.c
+	src/shell/shell_position.c
+	src/shell/shell_regulators.c
+	src/shell/shell_state.c
+	src/shell/shell_safety.c
+	src/shell/shell_gate.c
+	src/shell/shell_info.c
+	src/shell/shell_observer.c
+	src/shell/shell_encoder.c
+	src/shell/shell_encoder_protocol.c
+	src/shell/shell_encoder_trace.c
+	src/shell/shell_encoder_capture.c
+	src/shell/shell_fault.c
+	src/shell/shell_parse.c
+	src/shell/shell_motion_profile.c
+	src/shell/shell_motion_sequence.c
+	src/shell/shell_motion_chopper_calib.c
+	src/shell/shell_motion_commission.c
+	src/shell/shell_commission_auto.c
+	src/shell/shell_commission_detent.c
+	src/shell/shell_commission_encoder.c
+	src/shell/shell_commission_validate.c
 	src/motor_control_api.c
 	src/motor_encoder_control.c
 	src/motor_encoder_acquisition.c

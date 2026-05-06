@@ -59,3 +59,21 @@ Notes:
   - `./tests/run_unit_tests.sh`: PASS, 31/31 configurations and 274/274 test cases.
   - `python3 -m unittest scripts/hil/test_hil_telnet_parser.py`: PASS, 15 tests.
   - MT6835 west build: PASS.
+
+## Follow-up - Shell source directory and control-domain split
+
+- Moved shell implementation sources into `app/src/shell/`.
+- Kept public shell headers in `app/include/`.
+- Split former monolithic `shell_control.c` into:
+  - `shell_params.c`
+  - `shell_current.c`
+  - `shell_velocity.c`
+  - `shell_position.c`
+  - `shell_regulators.c`
+  - private shared helper header `shell_control_common.h`
+- Validation: MT6835 west build passed using `west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"`.
+- Remaining large shell files are workflow-heavy commissioning/motion files. Recommended future splits:
+  - `shell_commission_auto.c`: split planner/status/apply/validate helpers if workflow grows further.
+  - `shell_commission_detent.c`: split capture, apply, validate, and dump/report helpers.
+  - `shell_motion_commission.c`: split electrical, mechanical, and motion-threshold commissioning commands.
+  - `shell_motion_sequence.c`: split sequence configuration from trigger/runtime control.
