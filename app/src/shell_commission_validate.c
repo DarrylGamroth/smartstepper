@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 
@@ -177,9 +178,10 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 {
 	float32_t max_hz = 0.10f;
 	uint32_t hold_ms = 1000U;
+	bool preserve_active_features = false;
 
-	if (argc > 3) {
-		shell_error(sh, "Usage: motor commission validate velocity [max_hz] [hold_ms]");
+	if (argc > 4) {
+		shell_error(sh, "Usage: motor commission validate velocity [max_hz] [hold_ms] [active]");
 		return -EINVAL;
 	}
 	if (argc >= 2 && !shell_parse_finite_float(argv[1], &max_hz)) {
@@ -190,6 +192,13 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 		shell_error(sh, "hold_ms must be an integer");
 		return -EINVAL;
 	}
+	if (argc >= 4) {
+		if (strcmp(argv[3], "active") != 0) {
+			shell_error(sh, "third optional argument must be 'active'");
+			return -EINVAL;
+		}
+		preserve_active_features = true;
+	}
 	if (!isfinite(max_hz) || max_hz <= 0.0f) {
 		shell_error(sh, "max_hz must be positive");
 		return -EINVAL;
@@ -197,11 +206,38 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 	hold_ms = CLAMP(hold_ms, MOTOR_COMMISSION_AUTO_VALIDATE_MIN_HOLD_MS,
 			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
 
-	shell_print(sh,
-		    "Validate velocity_encoder PI: requires boot mapping; uses active velocity PI gains.");
-	int ret = motor_commission_prepare_pi_encoder_validation(sh);
-	if (ret != 0) {
-		return ret;
+	int ret;
+	if (preserve_active_features) {
+		if (!g_motor_params) {
+			shell_error(sh, "Motor not initialized");
+			return -ENODEV;
+		}
+		if (!g_motor_params->calibration.complete ||
+		    !g_motor_params->calibration.encoder_mapping_complete) {
+			shell_error(sh, "Calibration/mapping incomplete; run commissioning first");
+			return -EACCES;
+		}
+		if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+			shell_error(sh, "Motor is in ERROR state; clear error first");
+			return -EFAULT;
+		}
+		motor_encoder_acquisition_reset_stats();
+		motor_commission_motion_stop_current();
+		motor_commission_set_velocity_target_hz(0.0f);
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Validate velocity_encoder active features: outer=%s DOB=%s detent=%s.",
+			    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?
+				    "MPR" : "PI",
+			    g_motor_params->velocity_dob_cfg.enabled ? "on" : "off",
+			    g_motor_params->detent_map_cfg.enabled ? "on" : "off");
+	} else {
+		shell_print(sh,
+			    "Validate velocity_encoder PI: requires boot mapping; uses active velocity PI gains.");
+		ret = motor_commission_prepare_pi_encoder_validation(sh);
+		if (ret != 0) {
+			return ret;
+		}
 	}
 	ret = motor_commission_enter_mode_armed(sh, MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
 					       MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
@@ -214,8 +250,12 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 		g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
 	float32_t limited_max_hz = clampf(max_hz, 0.01f, profile_max_hz);
 	shell_print(sh,
-		    "Velocity encoder validation: active PI gains, max=%.3f Hz hold=%u ms DOB=off detent=off",
-		    (double)limited_max_hz, hold_ms);
+		    "Velocity encoder validation: max=%.3f Hz hold=%u ms outer=%s DOB=%s detent=%s",
+		    (double)limited_max_hz, hold_ms,
+		    g_motor_params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ?
+			    "MPR" : "PI",
+		    g_motor_params->velocity_dob_cfg.enabled ? "on" : "off",
+		    g_motor_params->detent_map_cfg.enabled ? "on" : "off");
 
 	for (uint32_t i = 0U; i < ARRAY_SIZE(motor_commission_validate_step_scale); i++) {
 		float32_t target_hz = limited_max_hz * motor_commission_validate_step_scale[i];

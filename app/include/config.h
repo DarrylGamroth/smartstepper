@@ -53,12 +53,26 @@ struct motor_detent_capture_ctx {
 	uint32_t decimation_counter;
 	uint32_t sample_count;
 	uint32_t rejected_samples;
+	uint32_t rejected_quality;
+	uint32_t rejected_velocity;
+	uint32_t rejected_accel;
+	uint32_t rejected_saturation;
+	uint32_t accepted_forward;
+	uint32_t accepted_reverse;
 	float32_t kt_nm_per_a;
 	float32_t inertia_kgm2;
 	float32_t viscous_friction_nm_per_rad_s;
 	float32_t coulomb_friction_nm;
+	float32_t target_speed_rad_s;
+	float32_t velocity_band_rad_s;
+	float32_t accel_limit_rad_s2;
+	float32_t iq_saturation_limit_a;
 	float32_t sum_iq_a[MOTOR_DETENT_MAP_BINS];
+	float32_t sum_iq_forward_a[MOTOR_DETENT_MAP_BINS];
+	float32_t sum_iq_reverse_a[MOTOR_DETENT_MAP_BINS];
 	uint16_t bin_counts[MOTOR_DETENT_MAP_BINS];
+	uint16_t bin_counts_forward[MOTOR_DETENT_MAP_BINS];
+	uint16_t bin_counts_reverse[MOTOR_DETENT_MAP_BINS];
 };
 
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U

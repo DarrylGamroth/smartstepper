@@ -19,6 +19,7 @@ python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-trace-open-loop --yes-live-motion
+python3 scripts/hil/hil_telnet.py mpr-dob-detent --yes-live-motion
 ```
 
 Useful options:
@@ -54,6 +55,32 @@ and apply, without running current/velocity/position validation afterward:
 ```bash
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
   --boot-current 0.15 --boot-hz 0.05 --cycles 1 --bidirectional
+```
+
+Use the advanced motion scenario after basic encoder validation is passing. It
+runs standard commissioning, captures a forward/reverse detent map, validates
+detent off/on ripple, then checks selected PI/MPR/DOB/detent combinations with
+the same velocity-validation command:
+
+```bash
+python3 scripts/hil/hil_telnet.py mpr-dob-detent \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --detent-hz 0.05 \
+  --detent-cycles 3 \
+  --velocity-hz 0.05 \
+  --velocity-hold-ms 1000
+```
+
+Run a shorter subset while tuning:
+
+```bash
+python3 scripts/hil/hil_telnet.py mpr-dob-detent \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --feature-combo pi \
+  --feature-combo mpr \
+  --feature-combo mpr_detent
 ```
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file

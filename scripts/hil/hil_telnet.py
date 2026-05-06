@@ -217,13 +217,13 @@ def timestamp() -> str:
 
 def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
     return [
-        ShellCommand("motor state status"),
-        ShellCommand("motor state policy"),
-        ShellCommand("motor outer status"),
-        ShellCommand("motor encoder control_status"),
-        ShellCommand("motor encoder acquisition"),
-        ShellCommand("motor fault snapshot status"),
-        ShellCommand("motor info live"),
+        ShellCommand("motor state status", timeout_s=5.0),
+        ShellCommand("motor state policy", timeout_s=5.0),
+        ShellCommand("motor outer status", timeout_s=5.0),
+        ShellCommand("motor encoder control_status", timeout_s=5.0),
+        ShellCommand("motor encoder acquisition", timeout_s=5.0),
+        ShellCommand("motor fault snapshot status", timeout_s=5.0),
+        ShellCommand("motor info live", timeout_s=5.0),
     ]
 
 
@@ -400,6 +400,111 @@ def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellComm
     ]
 
 
+def _feature_velocity_validate_commands(args: argparse.Namespace,
+                                        label: str,
+                                        outer_mode: str,
+                                        detent_enable: bool,
+                                        dob_enable: bool,
+                                        mpr_preset: str = "safe") -> list[ShellCommand]:
+    commands = [
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor arm", timeout_s=2.0),
+        ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
+        ShellCommand(f"motor commission detent apply {1 if detent_enable else 0}",
+                     timeout_s=3.0),
+    ]
+    if outer_mode == "mpr":
+        commands.extend([
+            ShellCommand(f"motor velocity mpr preset {mpr_preset}", timeout_s=2.0),
+            ShellCommand("motor outer mode mpr", timeout_s=2.0),
+        ])
+    else:
+        commands.append(ShellCommand("motor outer mode pi", timeout_s=2.0))
+    if dob_enable:
+        commands.extend([
+            ShellCommand("motor velocity dob defaults safe", timeout_s=2.0),
+            ShellCommand("motor velocity dob status", timeout_s=2.0),
+            ShellCommand("motor velocity dob enable 1", timeout_s=2.0),
+            ShellCommand("motor velocity dob status", timeout_s=2.0),
+        ])
+    commands.extend([
+        ShellCommand("motor outer status", timeout_s=2.0),
+        ShellCommand(f"motor commission validate velocity {args.velocity_hz:.3f} "
+                     f"{args.velocity_hold_ms} active",
+                     timeout_s=max(12.0, args.velocity_hold_ms / 1000.0 * 9.0 + 4.0)),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
+        ShellCommand("motor outer status", timeout_s=2.0),
+    ])
+    return [ShellCommand("kernel uptime", timeout_s=1.5)] + commands
+
+
+def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
+    detent_timeout_s = max(
+        20.0,
+        (2.0 * float(args.detent_cycles) / max(abs(float(args.detent_hz)), 0.001)) + 20.0,
+    )
+    commands = [
+        ShellCommand("motor state status"),
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 0"),
+        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        ShellCommand("motor commission run slow apply",
+                     timeout_s=args.standard_commission_timeout_s),
+        ShellCommand("motor commission status", timeout_s=3.0),
+        ShellCommand("motor encoder control_status", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor arm", timeout_s=2.0),
+        ShellCommand("motor outer mode pi", timeout_s=2.0),
+        ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
+        ShellCommand("motor commission detent clear", timeout_s=2.0),
+        ShellCommand(
+            f"motor commission detent run {args.detent_hz:.3f} "
+            f"{args.detent_cycles:.3f} {args.detent_decimation} "
+            f"{args.detent_iq_limit:.3f}",
+            timeout_s=detent_timeout_s,
+        ),
+        ShellCommand("motor commission detent status", timeout_s=3.0),
+        ShellCommand("motor commission detent dump 0 16", timeout_s=4.0),
+        ShellCommand("motor commission detent apply 0", timeout_s=3.0),
+        ShellCommand(
+            f"motor commission detent validate {args.detent_validate_hz:.3f} "
+            f"{args.detent_validate_ms}",
+            timeout_s=max(12.0, args.detent_validate_ms / 1000.0 * 5.0 + 8.0),
+        ),
+    ]
+
+    combo_names = args.feature_combo
+    combo_builders = {
+        "pi": lambda: _feature_velocity_validate_commands(args, "pi", "pi", False, False),
+        "pi_detent": lambda: _feature_velocity_validate_commands(args, "pi_detent", "pi", True, False),
+        "pi_dob": lambda: _feature_velocity_validate_commands(args, "pi_dob", "pi", False, True),
+        "mpr": lambda: _feature_velocity_validate_commands(args, "mpr", "mpr", False, False),
+        "mpr_detent": lambda: _feature_velocity_validate_commands(args, "mpr_detent", "mpr", True, False),
+        "mpr_dob": lambda: _feature_velocity_validate_commands(args, "mpr_dob", "mpr", False, True),
+        "mpr_dob_detent": lambda: _feature_velocity_validate_commands(
+            args, "mpr_dob_detent", "mpr", True, True),
+    }
+    for name in combo_names:
+        commands.extend(combo_builders[name]())
+    commands.extend([
+        ShellCommand("motor commission detent status", timeout_s=3.0),
+        ShellCommand("motor velocity mpr status", timeout_s=2.0),
+        ShellCommand("motor velocity dob status", timeout_s=2.0),
+        ShellCommand("motor outer status", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor state status", timeout_s=3.0),
+    ])
+    return commands
+
+
 def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
     return [ShellCommand(cmd, timeout_s=args.command_timeout) for cmd in args.command]
 
@@ -411,6 +516,7 @@ SCENARIOS = {
     "encoder-robust": (scenario_encoder_robust, True),
     "encoder-validate": (scenario_encoder_validate, True),
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
+    "mpr-dob-detent": (scenario_mpr_dob_detent, True),
     "position-validate": (scenario_position_validate, True),
     "velocity-validate": (scenario_velocity_validate, True),
     "custom": (scenario_custom, False),
@@ -623,6 +729,66 @@ def _evaluate_velocity_validation(args: argparse.Namespace, checks: list[Verdict
            })
 
 
+def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[VerdictCheck],
+                                       results: Sequence[ShellResult]) -> None:
+    validation_results = [
+        result for result in results
+        if result.command.startswith("motor commission validate velocity")
+    ]
+    if not validation_results:
+        checks.append(VerdictCheck("velocity_validation_matrix", "FAIL",
+                                   "No velocity validation commands were run"))
+        return
+
+    failed = 0
+    parsed = 0
+    max_abs_err = 0.0
+    max_warn = 0
+    max_err = 0
+    for idx, result in enumerate(validation_results):
+        samples = _parse_velocity_samples(result.response)
+        if not samples:
+            failed += 1
+            checks.append(VerdictCheck(f"velocity_validation_{idx}", "FAIL",
+                                       "Velocity validation samples not parsed"))
+            continue
+        parsed += 1
+        sample_max_err = max(abs(float(sample["err_hz"])) for sample in samples)
+        sample_max_warn = max(int(sample["warn"]) for sample in samples)
+        sample_max_sample_err = max(int(sample["err"]) for sample in samples)
+        max_abs_err = max(max_abs_err, sample_max_err)
+        max_warn = max(max_warn, sample_max_warn)
+        max_err = max(max_err, sample_max_sample_err)
+        ok = (
+            sample_max_err <= args.max_velocity_error_hz and
+            sample_max_warn <= args.max_sample_warnings and
+            sample_max_sample_err <= args.max_sample_errors
+        )
+        if not ok:
+            failed += 1
+        _check(checks, f"velocity_validation_{idx}", ok,
+               "Velocity validation samples are within thresholds" if ok
+               else "Velocity validation samples exceed thresholds",
+               {
+                   "samples": len(samples),
+                   "max_abs_err_hz": sample_max_err,
+                   "max_warn": sample_max_warn,
+                   "max_err": sample_max_sample_err,
+               })
+
+    _check(checks, "velocity_validation_matrix", failed == 0,
+           "All feature-combination velocity validations passed" if failed == 0
+           else "One or more feature-combination velocity validations failed",
+           {
+               "validations": len(validation_results),
+               "parsed": parsed,
+               "failed": failed,
+               "max_abs_err_hz": max_abs_err,
+               "max_warn": max_warn,
+               "max_err": max_err,
+           })
+
+
 def _evaluate_position_validation(checks: list[VerdictCheck],
                                   results: Sequence[ShellResult]) -> None:
     position_response = _last_response(results, "motor commission validate position")
@@ -651,6 +817,34 @@ def _evaluate_encoder_robust(checks: list[VerdictCheck],
     _check(checks, "encoder_robust_mapping_applied", mapping_applied,
            "Robust encoder mapping applied" if mapping_applied
            else "Robust encoder mapping was not applied")
+
+
+def _evaluate_detent_capture(checks: list[VerdictCheck],
+                             results: Sequence[ShellResult]) -> None:
+    status_response = _last_response(results, "motor commission detent status")
+    run_response = _last_response(results, "motor commission detent run")
+    response = "\n".join((run_response, status_response))
+
+    raw_valid = re.search(r"raw=PASS", response) is not None
+    fill_valid = re.search(r"fill=PASS", response) is not None
+    apply_valid = re.search(r"apply=PASS", response) is not None
+    bins_match = re.search(r"bins=(\d+)/(\d+)", response)
+    raw_match = re.search(r"raw=(\d+)", response)
+    populated_bins = int(bins_match.group(1)) if bins_match else 0
+    total_bins = int(bins_match.group(2)) if bins_match else 0
+    raw_bins = int(raw_match.group(1)) if raw_match else 0
+
+    _check(checks, "detent_capture_apply_valid", apply_valid,
+           "Detent map passed apply-quality gate" if apply_valid
+           else "Detent map did not pass apply-quality gate",
+           {
+               "raw_valid": raw_valid,
+               "fill_valid": fill_valid,
+               "apply_valid": apply_valid,
+               "populated_bins": populated_bins,
+               "raw_bins": raw_bins,
+               "total_bins": total_bins,
+           })
 
 
 def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
@@ -768,6 +962,14 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
     if args.scenario == "encoder-robust":
         _evaluate_encoder_robust(checks, results)
 
+    if args.scenario == "mpr-dob-detent":
+        complete = "Standard commissioning workflow complete" in text
+        _check(checks, "standard_commission_complete", complete,
+               "Standard commissioning completed" if complete
+               else "Standard commissioning completion text not found")
+        _evaluate_detent_capture(checks, results)
+        _evaluate_all_velocity_validations(args, checks, results)
+
     if args.scenario in ("current-validate", "encoder-validate"):
         _evaluate_current_validation(args, checks, results)
 
@@ -852,6 +1054,35 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--include-position", action="store_true")
     parser.add_argument("--position-delta-deg", type=float, default=5.0)
     parser.add_argument("--position-hold-ms", type=int, default=2000)
+    parser.add_argument("--standard-commission-timeout-s", type=float, default=120.0,
+                        help="Timeout for 'motor commission run slow apply'.")
+    parser.add_argument("--detent-hz", type=float, default=0.05,
+                        help="Mechanical Hz for detent map capture.")
+    parser.add_argument("--detent-cycles", type=float, default=3.0,
+                        help="Forward/reverse cycles for detent map capture.")
+    parser.add_argument("--detent-decimation", type=int, default=1,
+                        help="Detent capture decimation.")
+    parser.add_argument("--detent-iq-limit", type=float, default=0.12,
+                        help="Velocity Iq limit during detent capture.")
+    parser.add_argument("--detent-validate-hz", type=float, default=0.05,
+                        help="Mechanical Hz for detent off/on validation.")
+    parser.add_argument("--detent-validate-ms", type=int, default=1500,
+                        help="Duration per detent validation pass.")
+    parser.add_argument(
+        "--feature-combo",
+        action="append",
+        choices=(
+            "pi",
+            "pi_detent",
+            "pi_dob",
+            "mpr",
+            "mpr_detent",
+            "mpr_dob",
+            "mpr_dob_detent",
+        ),
+        default=None,
+        help="Feature combo for mpr-dob-detent. Can be repeated. Default runs all.",
+    )
 
     parser.add_argument("--open-loop-iq", type=float, default=0.12)
     parser.add_argument("--open-loop-hz", type=float, default=0.10)
@@ -879,6 +1110,16 @@ def main(argv: Sequence[str]) -> int:
     if args.scenario == "custom" and not args.command:
         print("ERROR: custom scenario requires at least one --command", file=sys.stderr)
         return 2
+    if args.feature_combo is None:
+        args.feature_combo = [
+            "pi",
+            "pi_detent",
+            "pi_dob",
+            "mpr",
+            "mpr_detent",
+            "mpr_dob",
+            "mpr_dob_detent",
+        ]
 
     log_path = None
     if not args.no_log:

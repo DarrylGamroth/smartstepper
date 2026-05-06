@@ -28,20 +28,46 @@
 #define MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MIN_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MAX_DECIMATION 128U
-#define MOTOR_COMMISSION_DETENT_MIN_BIN_COVERAGE_MPU 650U
-#define MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN 2U
+#define MOTOR_COMMISSION_DETENT_MIN_APPLY_BINS 250U
+#define MOTOR_COMMISSION_DETENT_MIN_RAW_BINS 192U
+#define MOTOR_COMMISSION_DETENT_MAX_FILL_GAP_BINS 4U
+#define MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN 4U
 #define MOTOR_COMMISSION_DETENT_MAX_RUN_MS 60000U
+#define MOTOR_COMMISSION_DETENT_VELOCITY_BAND_RATIO 0.40f
+#define MOTOR_COMMISSION_DETENT_MIN_VELOCITY_BAND_HZ 0.03f
+#define MOTOR_COMMISSION_DETENT_ACCEL_LIMIT_FACTOR 3.0f
+#define MOTOR_COMMISSION_DETENT_MAX_REJECT_RATIO 0.95f
+#define MOTOR_COMMISSION_DETENT_MAX_ADJ_STEP_A 0.08f
+
 struct motor_commission_detent_result {
 	bool valid;
+	bool raw_valid;
+	bool fill_valid;
+	bool apply_valid;
 	uint32_t sample_count;
 	uint32_t rejected_samples;
+	uint32_t rejected_quality;
+	uint32_t rejected_velocity;
+	uint32_t rejected_accel;
+	uint32_t rejected_saturation;
+	uint32_t accepted_forward;
+	uint32_t accepted_reverse;
 	uint16_t populated_bins;
+	uint16_t raw_populated_bins;
+	uint16_t filled_bins;
+	uint16_t forward_bins;
+	uint16_t reverse_bins;
+	uint16_t both_direction_bins;
 	uint16_t min_bin_count;
 	uint16_t max_bin_count;
 	uint32_t run_ms;
 	uint32_t decimation;
 	float32_t speed_hz;
 	float32_t cycles;
+	float32_t confidence;
+	float32_t reject_ratio;
+	float32_t max_adjacent_step_a;
+	float32_t forward_reverse_rms_a;
 	float32_t min_iq_ff_a;
 	float32_t max_iq_ff_a;
 	float32_t mean_abs_iq_ff_a;
@@ -49,9 +75,16 @@ struct motor_commission_detent_result {
 	float32_t recommended_limit_a;
 	float32_t table_iq_a[MOTOR_DETENT_MAP_BINS];
 	uint16_t bin_counts[MOTOR_DETENT_MAP_BINS];
+	uint8_t bin_flags[MOTOR_DETENT_MAP_BINS];
 };
 
 static struct motor_commission_detent_result detent_result;
+
+enum motor_commission_detent_bin_flag {
+	MOTOR_COMMISSION_DETENT_BIN_RAW = BIT(0),
+	MOTOR_COMMISSION_DETENT_BIN_FILLED = BIT(1),
+	MOTOR_COMMISSION_DETENT_BIN_BOTH_DIR = BIT(2),
+};
 
 struct motor_commission_velocity_gain_restore {
 	float32_t kp_a_per_rad_s;
@@ -125,23 +158,47 @@ static void motor_commission_detent_capture_reset(float32_t kt_nm_per_a, uint32_
 
 	cap->active = false;
 	memset(cap->sum_iq_a, 0, sizeof(cap->sum_iq_a));
+	memset(cap->sum_iq_forward_a, 0, sizeof(cap->sum_iq_forward_a));
+	memset(cap->sum_iq_reverse_a, 0, sizeof(cap->sum_iq_reverse_a));
 	memset(cap->bin_counts, 0, sizeof(cap->bin_counts));
+	memset(cap->bin_counts_forward, 0, sizeof(cap->bin_counts_forward));
+	memset(cap->bin_counts_reverse, 0, sizeof(cap->bin_counts_reverse));
 	cap->decimation = decimation;
 	cap->decimation_counter = 0U;
 	cap->sample_count = 0U;
 	cap->rejected_samples = 0U;
+	cap->rejected_quality = 0U;
+	cap->rejected_velocity = 0U;
+	cap->rejected_accel = 0U;
+	cap->rejected_saturation = 0U;
+	cap->accepted_forward = 0U;
+	cap->accepted_reverse = 0U;
 	cap->kt_nm_per_a = kt_nm_per_a;
 	cap->inertia_kgm2 = g_motor_params->inertia_kgm2_active;
 	cap->viscous_friction_nm_per_rad_s =
 		g_motor_params->viscous_friction_nm_per_rad_s_active;
 	cap->coulomb_friction_nm = g_motor_params->coulomb_friction_nm_active;
+	cap->target_speed_rad_s = 0.0f;
+	cap->velocity_band_rad_s = 0.0f;
+	cap->accel_limit_rad_s2 = 0.0f;
+	cap->iq_saturation_limit_a = 0.0f;
 }
 
-static void motor_commission_detent_capture_enable(void)
+static void motor_commission_detent_capture_enable(float32_t target_hz)
 {
 	struct motor_detent_capture_ctx *cap = &g_motor_params->detent_capture;
 
 	cap->decimation_counter = 0U;
+	cap->target_speed_rad_s = target_hz * 2.0f * PI_F32;
+	float32_t band_hz =
+		fmaxf(fabsf(target_hz) * MOTOR_COMMISSION_DETENT_VELOCITY_BAND_RATIO,
+		      MOTOR_COMMISSION_DETENT_MIN_VELOCITY_BAND_HZ);
+	cap->velocity_band_rad_s = band_hz * 2.0f * PI_F32;
+	cap->accel_limit_rad_s2 =
+		MOTOR_COMMISSION_DETENT_ACCEL_LIMIT_FACTOR *
+		fmaxf(g_motor_params->profile_max_accel_rad_s2, 1.0f);
+	cap->iq_saturation_limit_a =
+		fmaxf(0.0f, 0.98f * g_motor_params->velocity_cl_iq_limit_A);
 	cap->active = true;
 }
 
@@ -162,73 +219,238 @@ static int motor_commission_detent_collect_pass(float32_t target_hz,
 		return ret;
 	}
 
-	motor_commission_detent_capture_enable();
+	motor_commission_detent_capture_enable(target_hz);
 	ret = motor_commission_wait_ms_or_fault(collect_ms);
 	motor_commission_detent_capture_disable();
 
 	return ret;
 }
 
-static int motor_commission_detent_finalize(const float32_t *sum_iq,
-					    const uint16_t *count)
+static uint16_t motor_commission_detent_prev_raw(uint16_t start)
 {
-	if (sum_iq == NULL || count == NULL) {
-		return -EINVAL;
+	for (uint16_t step = 1U; step < MOTOR_DETENT_MAP_BINS; step++) {
+		uint16_t idx = (uint16_t)((start + MOTOR_DETENT_MAP_BINS - step) %
+					  MOTOR_DETENT_MAP_BINS);
+		if ((detent_result.bin_flags[idx] & MOTOR_COMMISSION_DETENT_BIN_RAW) != 0U) {
+			return idx;
+		}
 	}
 
-	detent_result.sample_count = g_motor_params->detent_capture.sample_count;
-	detent_result.rejected_samples = g_motor_params->detent_capture.rejected_samples;
+	return UINT16_MAX;
+}
+
+static uint16_t motor_commission_detent_next_raw(uint16_t start)
+{
+	for (uint16_t step = 1U; step < MOTOR_DETENT_MAP_BINS; step++) {
+		uint16_t idx = (uint16_t)((start + step) % MOTOR_DETENT_MAP_BINS);
+		if ((detent_result.bin_flags[idx] & MOTOR_COMMISSION_DETENT_BIN_RAW) != 0U) {
+			return idx;
+		}
+	}
+
+	return UINT16_MAX;
+}
+
+static void motor_commission_detent_fill_short_holes(void)
+{
+	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
+		if ((detent_result.bin_flags[i] & MOTOR_COMMISSION_DETENT_BIN_RAW) != 0U) {
+			continue;
+		}
+
+		uint16_t prev = motor_commission_detent_prev_raw(i);
+		uint16_t next = motor_commission_detent_next_raw(i);
+		if (prev == UINT16_MAX || next == UINT16_MAX) {
+			continue;
+		}
+
+		uint16_t gap = (uint16_t)((next + MOTOR_DETENT_MAP_BINS - prev) %
+					  MOTOR_DETENT_MAP_BINS);
+		if (gap == 0U || gap > (MOTOR_COMMISSION_DETENT_MAX_FILL_GAP_BINS + 1U)) {
+			continue;
+		}
+
+		uint16_t from_prev = (uint16_t)((i + MOTOR_DETENT_MAP_BINS - prev) %
+						MOTOR_DETENT_MAP_BINS);
+		float32_t frac = (float32_t)from_prev / (float32_t)gap;
+		float32_t y0 = detent_result.table_iq_a[prev];
+		float32_t y1 = detent_result.table_iq_a[next];
+		detent_result.table_iq_a[i] = y0 + frac * (y1 - y0);
+		detent_result.bin_flags[i] |= MOTOR_COMMISSION_DETENT_BIN_FILLED;
+		detent_result.filled_bins++;
+	}
+}
+
+static void motor_commission_detent_smooth_table(void)
+{
+	float32_t smoothed[MOTOR_DETENT_MAP_BINS];
+
+	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
+		uint16_t prev = (uint16_t)((i + MOTOR_DETENT_MAP_BINS - 1U) %
+					   MOTOR_DETENT_MAP_BINS);
+		uint16_t next = (uint16_t)((i + 1U) % MOTOR_DETENT_MAP_BINS);
+
+		if (detent_result.bin_flags[i] == 0U ||
+		    detent_result.bin_flags[prev] == 0U ||
+		    detent_result.bin_flags[next] == 0U) {
+			smoothed[i] = detent_result.table_iq_a[i];
+			continue;
+		}
+
+		smoothed[i] = (0.25f * detent_result.table_iq_a[prev]) +
+			      (0.50f * detent_result.table_iq_a[i]) +
+			      (0.25f * detent_result.table_iq_a[next]);
+	}
+
+	memcpy(detent_result.table_iq_a, smoothed, sizeof(smoothed));
+}
+
+static int motor_commission_detent_finalize(void)
+{
+	struct motor_detent_capture_ctx *cap = &g_motor_params->detent_capture;
+
+	detent_result.sample_count = cap->sample_count;
+	detent_result.rejected_samples = cap->rejected_samples;
+	detent_result.rejected_quality = cap->rejected_quality;
+	detent_result.rejected_velocity = cap->rejected_velocity;
+	detent_result.rejected_accel = cap->rejected_accel;
+	detent_result.rejected_saturation = cap->rejected_saturation;
+	detent_result.accepted_forward = cap->accepted_forward;
+	detent_result.accepted_reverse = cap->accepted_reverse;
 
 	float32_t sum_abs = 0.0f;
 	float32_t sum_sq = 0.0f;
 	float32_t max_abs = 0.0f;
+	float32_t sum_fr_sq = 0.0f;
 	uint32_t populated = 0U;
+	uint32_t raw_populated = 0U;
+	uint32_t forward_bins = 0U;
+	uint32_t reverse_bins = 0U;
+	uint32_t both_bins = 0U;
 	uint16_t min_count = UINT16_MAX;
 	uint16_t max_count = 0U;
 
 	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
-		if (count[i] >= MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN) {
-			float32_t iq = sum_iq[i] / (float32_t)count[i];
+		uint16_t fwd_count = cap->bin_counts_forward[i];
+		uint16_t rev_count = cap->bin_counts_reverse[i];
+		bool has_fwd = fwd_count >= MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN;
+		bool has_rev = rev_count >= MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN;
+		float32_t iq = 0.0f;
+		uint16_t total_count = (uint16_t)MIN((uint32_t)fwd_count + (uint32_t)rev_count,
+						     UINT16_MAX);
 
-			detent_result.table_iq_a[i] = iq;
-			detent_result.bin_counts[i] = count[i];
-			populated++;
-			min_count = MIN(min_count, count[i]);
-			max_count = MAX(max_count, count[i]);
-			detent_result.min_iq_ff_a = (populated == 1U) ?
-							    iq :
-							    fminf(detent_result.min_iq_ff_a, iq);
-			detent_result.max_iq_ff_a = (populated == 1U) ?
-							    iq :
-							    fmaxf(detent_result.max_iq_ff_a, iq);
-			sum_abs += fabsf(iq);
-			sum_sq += iq * iq;
-			max_abs = fmaxf(max_abs, fabsf(iq));
+		if (has_fwd) {
+			forward_bins++;
+		}
+		if (has_rev) {
+			reverse_bins++;
+		}
+		if (has_fwd && has_rev) {
+			float32_t iq_fwd = cap->sum_iq_forward_a[i] / (float32_t)fwd_count;
+			float32_t iq_rev = cap->sum_iq_reverse_a[i] / (float32_t)rev_count;
+			iq = 0.5f * (iq_fwd + iq_rev);
+			float32_t diff = iq_fwd - iq_rev;
+			sum_fr_sq += diff * diff;
+			both_bins++;
+		} else if (has_fwd) {
+			iq = cap->sum_iq_forward_a[i] / (float32_t)fwd_count;
+		} else if (has_rev) {
+			iq = cap->sum_iq_reverse_a[i] / (float32_t)rev_count;
 		} else {
 			detent_result.table_iq_a[i] = 0.0f;
-			detent_result.bin_counts[i] = count[i];
+			detent_result.bin_counts[i] = total_count;
+			detent_result.bin_flags[i] = 0U;
+			continue;
 		}
+
+		detent_result.table_iq_a[i] = iq;
+		detent_result.bin_counts[i] = total_count;
+		detent_result.bin_flags[i] = MOTOR_COMMISSION_DETENT_BIN_RAW;
+		if (has_fwd && has_rev) {
+			detent_result.bin_flags[i] |= MOTOR_COMMISSION_DETENT_BIN_BOTH_DIR;
+		}
+		raw_populated++;
+		min_count = MIN(min_count, total_count);
+		max_count = MAX(max_count, total_count);
 	}
 
-	if (populated == 0U) {
+	if (raw_populated == 0U) {
 		detent_result.min_bin_count = 0U;
 		detent_result.max_bin_count = 0U;
 		return -ENODATA;
 	}
 
-	float32_t coverage_mpu =
-		1000.0f * (float32_t)populated / (float32_t)MOTOR_DETENT_MAP_BINS;
+	motor_commission_detent_fill_short_holes();
+	motor_commission_detent_smooth_table();
+
+	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
+		if (detent_result.bin_flags[i] == 0U) {
+			continue;
+		}
+		float32_t iq = detent_result.table_iq_a[i];
+		populated++;
+		detent_result.min_iq_ff_a = (populated == 1U) ?
+						    iq :
+						    fminf(detent_result.min_iq_ff_a, iq);
+		detent_result.max_iq_ff_a = (populated == 1U) ?
+						    iq :
+						    fmaxf(detent_result.max_iq_ff_a, iq);
+		sum_abs += fabsf(iq);
+		sum_sq += iq * iq;
+		max_abs = fmaxf(max_abs, fabsf(iq));
+
+		uint16_t next = (uint16_t)((i + 1U) % MOTOR_DETENT_MAP_BINS);
+		if (detent_result.bin_flags[next] != 0U) {
+			detent_result.max_adjacent_step_a =
+				fmaxf(detent_result.max_adjacent_step_a,
+				      fabsf(detent_result.table_iq_a[i] -
+					    detent_result.table_iq_a[next]));
+		}
+	}
+
 	detent_result.populated_bins = (uint16_t)populated;
+	detent_result.raw_populated_bins = (uint16_t)raw_populated;
+	detent_result.forward_bins = (uint16_t)forward_bins;
+	detent_result.reverse_bins = (uint16_t)reverse_bins;
+	detent_result.both_direction_bins = (uint16_t)both_bins;
 	detent_result.min_bin_count = min_count;
 	detent_result.max_bin_count = max_count;
 	detent_result.mean_abs_iq_ff_a = sum_abs / (float32_t)populated;
 	detent_result.rms_iq_ff_a = sqrtf(sum_sq / (float32_t)populated);
+	detent_result.forward_reverse_rms_a =
+		(both_bins > 0U) ? sqrtf(sum_fr_sq / (float32_t)both_bins) : 0.0f;
+	uint32_t total_candidate_samples =
+		detent_result.sample_count + detent_result.rejected_samples;
+	detent_result.reject_ratio =
+		(total_candidate_samples > 0U) ?
+			((float32_t)detent_result.rejected_samples /
+			 (float32_t)total_candidate_samples) :
+			0.0f;
 	detent_result.recommended_limit_a =
 		fminf(fmaxf(1.25f * max_abs, 0.0f), g_motor_params->velocity_cl_iq_limit_A);
-	detent_result.valid =
-		detent_result.sample_count >= populated &&
-		coverage_mpu >= (float32_t)MOTOR_COMMISSION_DETENT_MIN_BIN_COVERAGE_MPU &&
+	float32_t coverage = (float32_t)detent_result.populated_bins /
+			     (float32_t)MOTOR_DETENT_MAP_BINS;
+	float32_t both_dir_score = (float32_t)detent_result.both_direction_bins /
+				   (float32_t)MOTOR_DETENT_MAP_BINS;
+	float32_t reject_penalty = clampf(detent_result.reject_ratio /
+					  MOTOR_COMMISSION_DETENT_MAX_REJECT_RATIO,
+					  0.0f, 1.0f);
+	detent_result.confidence =
+		clampf((0.70f * coverage) + (0.30f * both_dir_score) -
+		       (0.20f * reject_penalty),
+		       0.0f, 1.0f);
+	detent_result.raw_valid =
+		detent_result.raw_populated_bins >= MOTOR_COMMISSION_DETENT_MIN_RAW_BINS &&
+		detent_result.sample_count >= raw_populated &&
 		detent_result.recommended_limit_a > 0.0f;
+	detent_result.fill_valid =
+		detent_result.raw_valid &&
+		detent_result.populated_bins >= MOTOR_COMMISSION_DETENT_MIN_APPLY_BINS;
+	detent_result.apply_valid =
+		detent_result.fill_valid &&
+		detent_result.reject_ratio <= MOTOR_COMMISSION_DETENT_MAX_REJECT_RATIO &&
+		detent_result.max_adjacent_step_a <= MOTOR_COMMISSION_DETENT_MAX_ADJ_STEP_A;
+	detent_result.valid = detent_result.apply_valid;
 
 	return detent_result.valid ? 0 : -ERANGE;
 }
@@ -372,8 +594,7 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		detent_result.cycles = cycles;
 		detent_result.decimation = decimation;
 		detent_result.run_ms = 2U * collect_ms;
-		ret = motor_commission_detent_finalize(g_motor_params->detent_capture.sum_iq_a,
-						       g_motor_params->detent_capture.bin_counts);
+		ret = motor_commission_detent_finalize();
 	}
 
 restore_runtime:
@@ -392,16 +613,26 @@ restore_runtime:
 		detent_result.sample_count = g_motor_params->detent_capture.sample_count;
 		detent_result.rejected_samples = g_motor_params->detent_capture.rejected_samples;
 		shell_error(sh,
-			    "Detent capture failed (err %d): samples=%u rejected=%u bins=%u/%u",
+			    "Detent capture failed (err %d): samples=%u rejected=%u bins=%u/%u raw=%u/%u conf=%.2f",
 			    ret, detent_result.sample_count, detent_result.rejected_samples,
-			    detent_result.populated_bins, MOTOR_DETENT_MAP_BINS);
+			    detent_result.populated_bins, MOTOR_DETENT_MAP_BINS,
+			    detent_result.raw_populated_bins, MOTOR_DETENT_MAP_BINS,
+			    (double)detent_result.confidence);
+		shell_error(sh,
+			    "  quality: raw=%s fill=%s apply=%s reject_ratio=%.2f max_step=%.5f A",
+			    detent_result.raw_valid ? "PASS" : "FAIL",
+			    detent_result.fill_valid ? "PASS" : "FAIL",
+			    detent_result.apply_valid ? "PASS" : "FAIL",
+			    (double)detent_result.reject_ratio,
+			    (double)detent_result.max_adjacent_step_a);
 		return ret;
 	}
 
 	shell_print(sh,
-		    "Detent capture staged: samples=%u rejected=%u bins=%u/%u minN=%u maxN=%u",
+		    "Detent capture staged: samples=%u rejected=%u bins=%u/%u raw=%u filled=%u minN=%u maxN=%u",
 		    detent_result.sample_count, detent_result.rejected_samples,
 		    detent_result.populated_bins, MOTOR_DETENT_MAP_BINS,
+		    detent_result.raw_populated_bins, detent_result.filled_bins,
 		    detent_result.min_bin_count, detent_result.max_bin_count);
 	shell_print(sh,
 		    "  iq_ff: min=%.5f max=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
@@ -410,7 +641,17 @@ restore_runtime:
 		    (double)detent_result.mean_abs_iq_ff_a,
 		    (double)detent_result.rms_iq_ff_a,
 		    (double)detent_result.recommended_limit_a);
-	shell_print(sh, "Run 'motor commission detent apply 1' to apply and enable.");
+	shell_print(sh,
+		    "  quality: raw=%s fill=%s apply=%s conf=%.2f reject_ratio=%.2f fr_rms=%.5f max_step=%.5f A",
+		    detent_result.raw_valid ? "PASS" : "FAIL",
+		    detent_result.fill_valid ? "PASS" : "FAIL",
+		    detent_result.apply_valid ? "PASS" : "FAIL",
+		    (double)detent_result.confidence,
+		    (double)detent_result.reject_ratio,
+		    (double)detent_result.forward_reverse_rms_a,
+		    (double)detent_result.max_adjacent_step_a);
+	shell_print(sh,
+		    "Run 'motor commission detent validate <hz> <ms>' before applying; apply only if validation improves or matches baseline.");
 	return 0;
 }
 
@@ -432,18 +673,37 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    (double)g_motor_params->live.detent_iq_ff_a,
 		    g_motor_params->detent_map_state.last_index);
 	shell_print(sh, "  Staged:    %s", detent_result.valid ? "YES" : "NO");
+	shell_print(sh, "  Quality:   raw=%s fill=%s apply=%s conf=%.2f reject_ratio=%.2f max_step=%.5f A",
+		    detent_result.raw_valid ? "PASS" : "FAIL",
+		    detent_result.fill_valid ? "PASS" : "FAIL",
+		    detent_result.apply_valid ? "PASS" : "FAIL",
+		    (double)detent_result.confidence,
+		    (double)detent_result.reject_ratio,
+		    (double)detent_result.max_adjacent_step_a);
 	shell_print(sh, "  Capture:   speed=%.3f Hz cycles=%.2f run=%u ms decimation=%u",
 		    (double)detent_result.speed_hz,
 		    (double)detent_result.cycles,
 		    detent_result.run_ms,
 		    detent_result.decimation);
-	shell_print(sh, "  Samples:   accepted=%u rejected=%u bins=%u/%u minN=%u maxN=%u",
+	shell_print(sh, "  Samples:   accepted=%u rejected=%u bins=%u/%u raw=%u filled=%u minN=%u maxN=%u",
 		    detent_result.sample_count,
 		    detent_result.rejected_samples,
 		    detent_result.populated_bins,
 		    MOTOR_DETENT_MAP_BINS,
+		    detent_result.raw_populated_bins,
+		    detent_result.filled_bins,
 		    detent_result.min_bin_count,
 		    detent_result.max_bin_count);
+	shell_print(sh, "  Direction: fwd=%u rev=%u both_bins=%u fr_rms=%.5f A",
+		    detent_result.accepted_forward,
+		    detent_result.accepted_reverse,
+		    detent_result.both_direction_bins,
+		    (double)detent_result.forward_reverse_rms_a);
+	shell_print(sh, "  Rejects:   quality=%u velocity=%u accel=%u saturation=%u",
+		    detent_result.rejected_quality,
+		    detent_result.rejected_velocity,
+		    detent_result.rejected_accel,
+		    detent_result.rejected_saturation);
 	shell_print(sh, "  Iq FF:     min=%.5f max=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
 		    (double)detent_result.min_iq_ff_a,
 		    (double)detent_result.max_iq_ff_a,
@@ -501,6 +761,244 @@ int cmd_motor_commission_detent_apply(const struct shell *sh, size_t argc, char 
 
 	shell_print(sh, "Detent table applied: enable=%s gain=%.3f limit=%.5f A",
 		    enable ? "YES" : "NO", (double)gain, (double)limit_a);
+	return 0;
+}
+
+struct motor_commission_detent_validate_metrics {
+	uint32_t samples;
+	float32_t sum_abs_vel_err_hz;
+	float32_t sum_sq_vel_err_hz;
+	float32_t peak_abs_vel_err_hz;
+	float32_t sum_sq_iq_a;
+	float32_t peak_abs_iq_a;
+	uint32_t encoder_errors_start;
+	uint32_t encoder_errors_end;
+};
+
+static void motor_commission_detent_validate_sample(
+	struct motor_commission_detent_validate_metrics *m,
+	float32_t target_hz)
+{
+	float32_t measured_hz = g_motor_params->live.velocity_rad_s / (2.0f * PI_F32);
+	float32_t err_hz = target_hz - measured_hz;
+	float32_t iq_ref_a = g_motor_params->live.Iq_ref_A;
+
+	if (!isfinite(err_hz) || !isfinite(iq_ref_a)) {
+		return;
+	}
+
+	m->samples++;
+	m->sum_abs_vel_err_hz += fabsf(err_hz);
+	m->sum_sq_vel_err_hz += err_hz * err_hz;
+	m->peak_abs_vel_err_hz = fmaxf(m->peak_abs_vel_err_hz, fabsf(err_hz));
+	m->sum_sq_iq_a += iq_ref_a * iq_ref_a;
+	m->peak_abs_iq_a = fmaxf(m->peak_abs_iq_a, fabsf(iq_ref_a));
+}
+
+static uint32_t motor_commission_detent_encoder_error_total(void)
+{
+	return g_motor_params->encoder_error_count +
+	       g_motor_params->live.position_glitch_count;
+}
+
+static int motor_commission_detent_validate_pass(float32_t target_hz,
+						 uint32_t duration_ms,
+						 struct motor_commission_detent_validate_metrics *m)
+{
+	m->encoder_errors_start = motor_commission_detent_encoder_error_total();
+	motor_commission_set_velocity_target_hz(target_hz);
+	motor_command_feed_watchdog(g_motor_params);
+
+	int ret = motor_commission_wait_ms_or_fault(500U);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint32_t elapsed_ms = 0U;
+	while (elapsed_ms < duration_ms) {
+		ret = motor_commission_wait_ms_or_fault(20U);
+		if (ret != 0) {
+			return ret;
+		}
+		elapsed_ms += 20U;
+		motor_commission_detent_validate_sample(m, target_hz);
+	}
+	m->encoder_errors_end = motor_commission_detent_encoder_error_total();
+
+	return 0;
+}
+
+static void motor_commission_detent_validate_print(
+	const struct shell *sh,
+	const char *label,
+	const struct motor_commission_detent_validate_metrics *m)
+{
+	float32_t n = (m->samples == 0U) ? 1.0f : (float32_t)m->samples;
+	float32_t mean_abs_err = m->sum_abs_vel_err_hz / n;
+	float32_t rms_err = sqrtf(m->sum_sq_vel_err_hz / n);
+	float32_t rms_iq = sqrtf(m->sum_sq_iq_a / n);
+	uint32_t encoder_delta =
+		(m->encoder_errors_end >= m->encoder_errors_start) ?
+			(m->encoder_errors_end - m->encoder_errors_start) : 0U;
+
+	shell_print(sh,
+		    "  %s: N=%u mean_abs_err=%.4f Hz rms_err=%.4f Hz peak_err=%.4f Hz rms_iq=%.5f A peak_iq=%.5f A enc_err_delta=%u",
+		    label,
+		    m->samples,
+		    (double)mean_abs_err,
+		    (double)rms_err,
+		    (double)m->peak_abs_vel_err_hz,
+		    (double)rms_iq,
+		    (double)m->peak_abs_iq_a,
+		    encoder_delta);
+}
+
+int cmd_motor_commission_detent_validate(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 3) {
+		shell_error(sh, "Usage: motor commission detent validate <mech_hz> <duration_ms>");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' first");
+		return -EACCES;
+	}
+	if (!g_motor_params->calibration.encoder_mapping_complete) {
+		shell_error(sh, "Encoder mapping is not complete");
+		return -EACCES;
+	}
+
+	float32_t speed_hz = 0.0f;
+	uint32_t duration_ms = 0U;
+	if (!shell_parse_finite_float(argv[1], &speed_hz) ||
+	    !shell_parse_u32(argv[2], &duration_ms) ||
+	    speed_hz <= 0.0f ||
+	    duration_ms < 500U ||
+	    duration_ms > 30000U) {
+		shell_error(sh, "mech_hz must be positive and duration_ms must be 500..30000");
+		return -EINVAL;
+	}
+
+	float32_t saved_table[MOTOR_DETENT_MAP_BINS];
+	struct motor_detent_map_config saved_cfg = g_motor_params->detent_map_cfg;
+	bool saved_dob_enable = g_motor_params->velocity_dob_cfg.enabled;
+	uint8_t saved_outer_loop = g_motor_params->outer_loop_mode;
+
+	memcpy(saved_table, g_motor_params->detent_map_iq_table_a, sizeof(saved_table));
+	g_motor_params->velocity_dob_cfg.enabled = false;
+	g_motor_params->outer_loop_mode = MOTOR_OUTER_LOOP_MODE_PI;
+	g_motor_params->detent_map_cfg.enabled = false;
+	motor_detent_map_reset(&g_motor_params->detent_map_state);
+	motor_dob_reset(&g_motor_params->velocity_dob_state,
+			g_motor_params->live.velocity_rad_s);
+
+	int ret = motor_api_request_online();
+	if (ret == 0) {
+		ret = motor_post_mode_change(MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	}
+	if (ret == 0) {
+		ret = motor_commission_wait_for_mode(MOTOR_STATE_ONLINE_VELOCITY_ENCODER,
+						     MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS);
+	}
+	if (ret != 0) {
+		goto restore_runtime;
+	}
+
+	struct motor_commission_detent_validate_metrics off = {0};
+	struct motor_commission_detent_validate_metrics on = {0};
+
+	shell_print(sh, "Detent validation: speed=+/-%.3f Hz duration=%u ms/pass",
+		    (double)speed_hz, duration_ms);
+	ret = motor_commission_detent_validate_pass(speed_hz, duration_ms, &off);
+	if (ret == 0) {
+		ret = motor_commission_detent_validate_pass(-speed_hz, duration_ms, &off);
+	}
+	if (ret != 0) {
+		goto stop_restore;
+	}
+
+	if (detent_result.valid) {
+		memcpy(g_motor_params->detent_map_iq_table_a,
+		       detent_result.table_iq_a,
+		       sizeof(g_motor_params->detent_map_iq_table_a));
+		g_motor_params->detent_map_cfg.table_iq_a = g_motor_params->detent_map_iq_table_a;
+		g_motor_params->detent_map_cfg.table_len = MOTOR_DETENT_MAP_BINS;
+		g_motor_params->detent_map_cfg.gain = 1.0f;
+		g_motor_params->detent_map_cfg.iq_ff_limit_a = detent_result.recommended_limit_a;
+	}
+	if (detent_result.valid || saved_cfg.iq_ff_limit_a > 0.0f) {
+		g_motor_params->detent_map_cfg.enabled = true;
+	}
+	motor_detent_map_reset(&g_motor_params->detent_map_state);
+
+	ret = motor_commission_detent_validate_pass(speed_hz, duration_ms, &on);
+	if (ret == 0) {
+		ret = motor_commission_detent_validate_pass(-speed_hz, duration_ms, &on);
+	}
+
+stop_restore:
+	motor_commission_set_velocity_target_hz(0.0f);
+	(void)motor_commission_wait_ms_or_fault(500U);
+	motor_commission_detent_validate_print(sh, "detent_off", &off);
+	motor_commission_detent_validate_print(sh, "detent_on ", &on);
+	if (off.samples > 0U && on.samples > 0U) {
+		float32_t off_rms = sqrtf(off.sum_sq_vel_err_hz / (float32_t)off.samples);
+		float32_t on_rms = sqrtf(on.sum_sq_vel_err_hz / (float32_t)on.samples);
+		shell_print(sh, "  verdict: %s",
+			    (on_rms <= off_rms) ? "IMPROVED_OR_EQUAL" : "WORSE");
+	}
+
+restore_runtime:
+	memcpy(g_motor_params->detent_map_iq_table_a, saved_table, sizeof(saved_table));
+	g_motor_params->detent_map_cfg = saved_cfg;
+	g_motor_params->velocity_dob_cfg.enabled = saved_dob_enable;
+	g_motor_params->outer_loop_mode = saved_outer_loop;
+	motor_detent_map_reset(&g_motor_params->detent_map_state);
+	motor_dob_reset(&g_motor_params->velocity_dob_state,
+			g_motor_params->live.velocity_rad_s);
+	motor_command_feed_watchdog(g_motor_params);
+
+	return ret;
+}
+
+int cmd_motor_commission_detent_dump(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t start = 0U;
+	uint32_t count = 32U;
+
+	if (argc > 3) {
+		shell_error(sh, "Usage: motor commission detent dump [start_bin] [count]");
+		return -EINVAL;
+	}
+	if (argc >= 2 && !shell_parse_u32(argv[1], &start)) {
+		shell_error(sh, "start_bin must be an integer");
+		return -EINVAL;
+	}
+	if (argc >= 3 && !shell_parse_u32(argv[2], &count)) {
+		shell_error(sh, "count must be an integer");
+		return -EINVAL;
+	}
+	if (start >= MOTOR_DETENT_MAP_BINS || count == 0U) {
+		shell_error(sh, "start_bin must be < %u and count must be positive",
+			    MOTOR_DETENT_MAP_BINS);
+		return -EINVAL;
+	}
+	count = MIN(count, MOTOR_DETENT_MAP_BINS);
+
+	shell_print(sh, "Detent bins: start=%u count=%u", start, count);
+	for (uint32_t n = 0U; n < count; n++) {
+		uint32_t idx = (start + n) % MOTOR_DETENT_MAP_BINS;
+		shell_print(sh, "  %3u: iq=% .6f count=%u flags=0x%02x",
+			    idx,
+			    (double)detent_result.table_iq_a[idx],
+			    detent_result.bin_counts[idx],
+			    detent_result.bin_flags[idx]);
+	}
+
 	return 0;
 }
 

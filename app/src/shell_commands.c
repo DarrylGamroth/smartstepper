@@ -18,6 +18,7 @@
 #include "motor_hardware.h"
 #include "config.h"
 #include "motor_torque.h"
+#include "motor/control/dob.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor/runtime/commission_tune.h"
@@ -117,6 +118,69 @@ static int motor_parse_gains_profile(const char *token, enum motor_gains_profile
 	}
 
 	return -EINVAL;
+}
+
+static bool motor_velocity_dob_ready(const struct motor_parameters *params,
+				     const char **reason)
+{
+	if (params == NULL) {
+		if (reason != NULL) {
+			*reason = "motor not initialized";
+		}
+		return false;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		if (reason != NULL) {
+			*reason = "motor in ERROR";
+		}
+		return false;
+	}
+	if (!params->calibration.complete || !params->calibration.encoder_mapping_complete) {
+		if (reason != NULL) {
+			*reason = "commissioning or encoder mapping incomplete";
+		}
+		return false;
+	}
+	if (!isfinite(params->torque_gain_nm_per_a_active) ||
+	    params->torque_gain_nm_per_a_active <= 0.0f ||
+	    !isfinite(params->inertia_kgm2_active) ||
+	    params->inertia_kgm2_active <= 0.0f ||
+	    !isfinite(params->velocity_cl_iq_limit_A) ||
+	    params->velocity_cl_iq_limit_A <= 0.0f) {
+		if (reason != NULL) {
+			*reason = "invalid Kt/J/current limit";
+		}
+		return false;
+	}
+	if (!isfinite(params->velocity_dob_cfg.observer_gain_nm_per_rad_s) ||
+	    params->velocity_dob_cfg.observer_gain_nm_per_rad_s < 0.0f ||
+	    !isfinite(params->velocity_dob_cfg.torque_limit_nm) ||
+	    params->velocity_dob_cfg.torque_limit_nm <= 0.0f ||
+	    !isfinite(params->velocity_dob_cfg.iq_ff_limit_a) ||
+	    params->velocity_dob_cfg.iq_ff_limit_a < 0.0f) {
+		if (reason != NULL) {
+			*reason = "invalid DOB tuning";
+		}
+		return false;
+	}
+
+	bool encoder_mode =
+		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER) ||
+		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
+	if (encoder_mode &&
+	    ((params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U ||
+	     (params->live.position_quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) == 0U ||
+	     params->live.encoder_sample_error != 0U)) {
+		if (reason != NULL) {
+			*reason = "encoder feedback not fresh/valid";
+		}
+		return false;
+	}
+
+	if (reason != NULL) {
+		*reason = "ready";
+	}
+	return true;
 }
 
 static void motor_compute_nominal_outer_gains(const struct motor_parameters *params,
@@ -795,6 +859,20 @@ static int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char *
 	float32_t target_clamped = clampf(target_rad_s,
 					  -g_motor_params->profile_max_velocity_rad_s,
 					  g_motor_params->profile_max_velocity_rad_s);
+	float32_t prev_target = g_motor_params->live.velocity_target_rad_s;
+	bool sign_change =
+		(prev_target > 1e-6f && target_clamped < -1e-6f) ||
+		(prev_target < -1e-6f && target_clamped > 1e-6f);
+	bool large_step =
+		fabsf(target_clamped - prev_target) > (0.25f * 2.0f * PI_F32);
+	if (g_motor_params->velocity_dob_cfg.enabled &&
+	    (sign_change || large_step || fabsf(target_clamped) <= 1e-6f)) {
+		motor_dob_reset(&g_motor_params->velocity_dob_state,
+				g_motor_params->live.velocity_rad_s);
+		g_motor_params->live.velocity_dob_iq_ff_a = 0.0f;
+		g_motor_params->live.velocity_dob_disturbance_nm = 0.0f;
+		g_motor_params->live.velocity_dob_residual_rad_s = 0.0f;
+	}
 
 	/* Set trajectory target (thread-safe access) */
 	traj_set_target_value(&g_motor_params->traj_velocity, target_clamped);
@@ -1137,13 +1215,15 @@ static int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **arg
 /* motor velocity mpr status
  * motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki]
  * motor velocity mpr bandwidth <hz>
+ * motor velocity mpr preset <safe|medium|fast>
  */
 static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc < 2 || argc > 7) {
 		shell_error(sh, "Usage: motor velocity mpr status | "
 			    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
-			    "motor velocity mpr bandwidth <hz>");
+			    "motor velocity mpr bandwidth <hz> | "
+			    "motor velocity mpr preset <safe|medium|fast>");
 		return -EINVAL;
 	}
 
@@ -1225,6 +1305,51 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 		return 0;
 	}
 
+	if (strcmp(argv[1], "preset") == 0) {
+		if (argc != 3) {
+			shell_error(sh, "Usage: motor velocity mpr preset <safe|medium|fast>");
+			return -EINVAL;
+		}
+
+		float q_speed;
+		float r_delta_iq;
+		float max_delta_iq;
+		if (strcmp(argv[2], "safe") == 0) {
+			q_speed = 0.010f;
+			r_delta_iq = 50.0f;
+			max_delta_iq = 0.0005f;
+		} else if (strcmp(argv[2], "medium") == 0) {
+			q_speed = 0.015f;
+			r_delta_iq = 30.0f;
+			max_delta_iq = 0.0007f;
+		} else if (strcmp(argv[2], "fast") == 0) {
+			q_speed = 0.020f;
+			r_delta_iq = 20.0f;
+			max_delta_iq = 0.0010f;
+		} else {
+			shell_error(sh, "Preset must be safe, medium, or fast");
+			return -EINVAL;
+		}
+
+		int ret = motor_set_param_checked("velocity_mpr_q_speed", q_speed);
+		ret |= motor_set_param_checked("velocity_mpr_r_delta_iq", r_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_horizon",
+					       (float)VELOCITY_MPR_BW_HORIZON);
+		ret |= motor_set_param_checked("velocity_mpr_max_delta_iq_a", max_delta_iq);
+		ret |= motor_set_param_checked("velocity_mpr_disturbance_ki_nm_per_rad_s", 0.0f);
+		if (ret != 0) {
+			shell_error(sh, "Failed to apply velocity MPR preset (err %d)", ret);
+			return ret;
+		}
+
+		motor_command_feed_watchdog(g_motor_params);
+		shell_print(sh,
+			    "Velocity MPR %s preset applied: q=%.6f r=%.6f horizon=%u dIq=%.6f A/sample dist_ki=0",
+			    argv[2], (double)q_speed, (double)r_delta_iq,
+			    VELOCITY_MPR_BW_HORIZON, (double)max_delta_iq);
+		return 0;
+	}
+
 	if (strcmp(argv[1], "bandwidth") == 0) {
 		if (argc != 3) {
 			shell_error(sh, "Usage: motor velocity mpr bandwidth <hz>");
@@ -1278,7 +1403,8 @@ static int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **ar
 
 	shell_error(sh, "Usage: motor velocity mpr status | "
 		    "motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki] | "
-		    "motor velocity mpr bandwidth <hz>");
+		    "motor velocity mpr bandwidth <hz> | "
+		    "motor velocity mpr preset <safe|medium|fast>");
 	return -EINVAL;
 }
 
@@ -1314,6 +1440,10 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 		shell_print(sh, "Velocity DOB:");
 		shell_print(sh, "  Enabled:     %s",
 			    g_motor_params->velocity_dob_cfg.enabled ? "YES" : "NO");
+		const char *ready_reason = NULL;
+		bool ready = motor_velocity_dob_ready(g_motor_params, &ready_reason);
+		shell_print(sh, "  Ready:       %s (%s)",
+			    ready ? "YES" : "NO", ready_reason);
 		shell_print(sh, "  Gain:        %.6f Nm/(rad/s)",
 			    (double)g_motor_params->velocity_dob_cfg.observer_gain_nm_per_rad_s);
 		shell_print(sh, "  Torque limit %.6f Nm",
@@ -1352,7 +1482,7 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 			return ret;
 		}
 
-		ret = motor_api_set_param("velocity_dob_enable", 1.0f);
+		ret = motor_api_set_param("velocity_dob_enable", 0.0f);
 		if (ret != 0) {
 			shell_error(sh, "Failed to set velocity_dob_enable (err %d)", ret);
 			return ret;
@@ -1376,7 +1506,7 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Velocity DOB %s defaults applied: enable=1 gain=%.6f Nm/(rad/s), torque_limit=%.6f Nm, iq_ff_limit=%.6f A (Kt=%.6f Nm/A)",
+			    "Velocity DOB %s defaults staged: enable=0 gain=%.6f Nm/(rad/s), torque_limit=%.6f Nm, iq_ff_limit=%.6f A (Kt=%.6f Nm/A). Run 'motor velocity dob enable 1' after velocity control is stable.",
 			    (profile == MOTOR_GAINS_PROFILE_SAFE) ? "safe" : "nominal",
 			    (double)gain, (double)torque_limit, (double)iq_ff_limit, (double)kt);
 		return 0;
@@ -1394,11 +1524,23 @@ static int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **ar
 			shell_error(sh, "enable value must be 0 or 1");
 			return -EINVAL;
 		}
+		if (enabled) {
+			const char *ready_reason = NULL;
+			if (!motor_velocity_dob_ready(g_motor_params, &ready_reason)) {
+				shell_error(sh, "Velocity DOB not ready: %s", ready_reason);
+				return -EACCES;
+			}
+		}
 		int ret = motor_api_set_param("velocity_dob_enable", enabled ? 1.0f : 0.0f);
 		if (ret != 0) {
 			shell_error(sh, "Failed to update velocity_dob_enable (err %d)", ret);
 			return ret;
 		}
+		motor_dob_reset(&g_motor_params->velocity_dob_state,
+				g_motor_params->live.velocity_rad_s);
+		g_motor_params->live.velocity_dob_iq_ff_a = 0.0f;
+		g_motor_params->live.velocity_dob_disturbance_nm = 0.0f;
+		g_motor_params->live.velocity_dob_residual_rad_s = 0.0f;
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh, "Velocity DOB %s", enabled ? "enabled" : "disabled");
 		return 0;
@@ -1961,6 +2103,19 @@ static int cmd_motor_outer_status(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->position_mpr_cfg.q_velocity_ff,
 		    (double)g_motor_params->position_mpr_cfg.r_delta_velocity,
 		    g_motor_params->position_mpr_cfg.horizon);
+	const char *dob_reason = NULL;
+	bool dob_ready = motor_velocity_dob_ready(g_motor_params, &dob_reason);
+	shell_print(sh, "  DOB:          %s ready=%s (%s) ff=%.6f A dist=%.6f Nm",
+		    g_motor_params->velocity_dob_cfg.enabled ? "ENABLED" : "DISABLED",
+		    dob_ready ? "YES" : "NO",
+		    dob_reason,
+		    (double)g_motor_params->live.velocity_dob_iq_ff_a,
+		    (double)g_motor_params->live.velocity_dob_disturbance_nm);
+	shell_print(sh, "  Detent FF:    %s gain=%.3f limit=%.6f A live=%.6f A",
+		    g_motor_params->detent_map_cfg.enabled ? "ENABLED" : "DISABLED",
+		    (double)g_motor_params->detent_map_cfg.gain,
+		    (double)g_motor_params->detent_map_cfg.iq_ff_limit_a,
+		    (double)g_motor_params->live.detent_iq_ff_a);
 	return 0;
 }
 
@@ -2268,7 +2423,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_velocity,
 		      "Velocity PI: status | set <kp> <ki> <iq_limit> | defaults <safe|nominal> | bandwidth <hz> [zeta]",
 		      cmd_motor_velocity_pi, 2, 3),
 	SHELL_CMD_ARG(mpr, NULL,
-		      "Velocity MPR: status | set <q> <r> <horizon> <max_delta_iq> [dist_ki] | bandwidth <hz>",
+		      "Velocity MPR: status | set <q> <r> <horizon> <max_delta_iq> [dist_ki] | bandwidth <hz> | preset <safe|medium|fast>",
 		      cmd_motor_velocity_mpr, 2, 5),
 	SHELL_CMD_ARG(dob, NULL,
 		      "Velocity disturbance observer: status | defaults <safe|nominal> | enable <0|1> | gain <nm_per_rad_s> | torque_limit <nm> | iq_limit <a>",
@@ -2511,6 +2666,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
 	SHELL_CMD_ARG(apply, NULL,
 		      "Apply staged detent table [enable] [gain] [limit_a]",
 		      cmd_motor_commission_detent_apply, 1, 3),
+	SHELL_CMD_ARG(validate, NULL,
+		      "Compare low-speed velocity ripple with detent off/on <mech_hz> <duration_ms>",
+		      cmd_motor_commission_detent_validate, 3, 0),
+	SHELL_CMD_ARG(dump, NULL,
+		      "Dump staged detent bins [start_bin] [count]",
+		      cmd_motor_commission_detent_dump, 1, 2),
 	SHELL_CMD(clear, NULL, "Clear staged and runtime detent feedforward table",
 		  cmd_motor_commission_detent_clear),
 	SHELL_SUBCMD_SET_END
@@ -2534,8 +2695,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_validate,
 	SHELL_CMD_ARG(current, NULL, "Smoke-test current_encoder torque response [iq_a] [hold_ms]",
 		      cmd_motor_commission_validate_current, 1, 2),
-	SHELL_CMD_ARG(velocity, NULL, "Smoke-test velocity_encoder PI response [max_hz] [hold_ms]",
-		      cmd_motor_commission_validate_velocity, 1, 2),
+	SHELL_CMD_ARG(velocity, NULL,
+		      "Smoke-test velocity_encoder response [max_hz] [hold_ms] [active]",
+		      cmd_motor_commission_validate_velocity, 1, 3),
 	SHELL_CMD_ARG(position, NULL, "Smoke-test position_encoder profiled move [delta_deg] [hold_ms]",
 		      cmd_motor_commission_validate_position, 1, 2),
 	SHELL_SUBCMD_SET_END

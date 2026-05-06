@@ -624,13 +624,34 @@ static inline void motor_control_step_detent_capture(
 
 	float32_t omega = feedback_ref->velocity_filtered_rad_s;
 	if ((feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_VALID) == 0U ||
+	    (feedback_ref->quality_flags & MOTOR_FEEDBACK_QUALITY_FRESH) == 0U ||
 	    feedback_ref->error ||
-	    fabsf(omega) < 0.1f ||
 	    !isfinite(feedback_ref->position_rad) ||
+	    !isfinite(omega) ||
 	    !isfinite(feedback_ref->acceleration_rad_s2) ||
 	    !isfinite(current_ref->iq_ref_a) ||
 	    !isfinite(cap->kt_nm_per_a) ||
 	    cap->kt_nm_per_a <= 0.0f) {
+		cap->rejected_quality++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (fabsf(omega) < 0.1f ||
+	    (cap->target_speed_rad_s != 0.0f &&
+	     fabsf(omega - cap->target_speed_rad_s) > cap->velocity_band_rad_s)) {
+		cap->rejected_velocity++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (cap->accel_limit_rad_s2 > 0.0f &&
+	    fabsf(feedback_ref->acceleration_rad_s2) > cap->accel_limit_rad_s2) {
+		cap->rejected_accel++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (cap->iq_saturation_limit_a > 0.0f &&
+	    fabsf(current_ref->iq_ref_a) > cap->iq_saturation_limit_a) {
+		cap->rejected_saturation++;
 		cap->rejected_samples++;
 		return;
 	}
@@ -652,6 +673,17 @@ static inline void motor_control_step_detent_capture(
 		cap->sum_iq_a[bin] += residual_iq_a;
 		cap->bin_counts[bin]++;
 		cap->sample_count++;
+	}
+	if (omega >= 0.0f) {
+		if (cap->bin_counts_forward[bin] != UINT16_MAX) {
+			cap->sum_iq_forward_a[bin] += residual_iq_a;
+			cap->bin_counts_forward[bin]++;
+			cap->accepted_forward++;
+		}
+	} else if (cap->bin_counts_reverse[bin] != UINT16_MAX) {
+		cap->sum_iq_reverse_a[bin] += residual_iq_a;
+		cap->bin_counts_reverse[bin]++;
+		cap->accepted_reverse++;
 	}
 }
 
