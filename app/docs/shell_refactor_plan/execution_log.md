@@ -33,3 +33,21 @@ Notes:
 - Added private shared helper header `app/src/shell_state_common.h` for shell-only formatting/parsing helpers used by multiple domains.
 - Removed `shell_commands_state.c` from the build and left it as a tombstone documenting the split.
 - Validation: MT6835 west build passed using `west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"`.
+
+## SH030 - Encoder command nesting cleanup
+
+- Added nested encoder command groups:
+  - `motor encoder acquisition status|reset|recover|inject`
+  - `motor encoder control status|direction|trim`
+  - `motor encoder reg read|write`
+- Kept existing flat aliases during this refactor:
+  - `motor encoder acquisition`
+  - `motor encoder acquisition_reset`
+  - `motor encoder recover`
+  - `motor encoder acquisition_inject`
+  - `motor encoder control_status`
+  - `motor encoder direction`
+  - `motor encoder trim`
+  - `motor encoder reg_read`
+  - `motor encoder reg_write`
+- Validation: MT6835 west build passed using `west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"`.

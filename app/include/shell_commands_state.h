@@ -35,17 +35,28 @@ int cmd_motor_safety_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_gate_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_gate_reset(const struct shell *sh, size_t argc, char **argv);
 
-/* Info and encoder diagnostics commands */
+/* Info diagnostics commands */
 int cmd_motor_info_config(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_info_live(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv);
+
+/* Encoder diagnostics commands */
+int cmd_motor_encoder_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_alarm(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_fast(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_reg_read(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_reg_write(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_acquisition_inject(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_encoder_recover(const struct shell *sh, size_t argc, char **argv);
+
+/* Encoder protocol commands */
 int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_spi4_8_volatile(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_spi4_16_volatile(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_detect(const struct shell *sh, size_t argc, char **argv);
@@ -54,12 +65,8 @@ int cmd_motor_encoder_protocol_driver_spi4_16(const struct shell *sh, size_t arg
 int cmd_motor_encoder_protocol_spi_mode(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_raw_position(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_acquisition(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_acquisition_reset(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_acquisition_inject(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_recover(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_direction(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_trim(const struct shell *sh, size_t argc, char **argv);
+
+/* Encoder capture commands */
 int cmd_motor_encoder_capture_start(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_stop(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_status(const struct shell *sh, size_t argc, char **argv);
@@ -67,13 +74,16 @@ int cmd_motor_encoder_capture_summary(const struct shell *sh, size_t argc, char 
 int cmd_motor_encoder_capture_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_compare(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_capture_clear(const struct shell *sh, size_t argc, char **argv);
+
+/* Encoder trace commands */
 int cmd_motor_encoder_trace_start(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_stop(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_summary(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_encoder_trace_clear(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_encoder_control_status(const struct shell *sh, size_t argc, char **argv);
+
+/* Fault snapshot commands */
 int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_fault_snapshot_clear(const struct shell *sh, size_t argc, char **argv);

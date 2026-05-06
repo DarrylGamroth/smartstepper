@@ -294,23 +294,56 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_protocol,
 	SHELL_SUBCMD_SET_END
 );
 
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_acquisition,
+	SHELL_CMD(status, NULL, "Show encoder acquisition status/counters",
+		  cmd_motor_encoder_acquisition),
+	SHELL_CMD(reset, NULL, "Reset encoder acquisition counters",
+		  cmd_motor_encoder_acquisition_reset),
+	SHELL_CMD(recover, NULL, "Abort/reset encoder acquisition fault state",
+		  cmd_motor_encoder_recover),
+	SHELL_CMD_ARG(inject, NULL, "Fault inject mode [none|status|frame]",
+		      cmd_motor_encoder_acquisition_inject, 1, 1),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_control,
+	SHELL_CMD(status, NULL, "Show encoder-control readiness gate",
+		  cmd_motor_encoder_control_status),
+	SHELL_CMD_ARG(direction, NULL, "Get/set encoder direction sign [<1|-1>]",
+		      cmd_motor_encoder_direction, 1, 1),
+	SHELL_CMD_ARG(trim, NULL, "Get/set electrical commutation trim [<-180..180> deg]",
+		      cmd_motor_encoder_trim, 1, 1),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder_reg,
+	SHELL_CMD_ARG(read, NULL, "Read AEAT-9955 register <addr>",
+		      cmd_motor_encoder_reg_read, 2, 0),
+	SHELL_CMD_ARG(write, NULL, "Write AEAT-9955 register <addr> <value>",
+		      cmd_motor_encoder_reg_write, 3, 0),
+	SHELL_SUBCMD_SET_END
+);
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_encoder,
 	SHELL_CMD(status, NULL, "Show concise encoder control status", cmd_motor_encoder_status),
 	SHELL_CMD(alarm, NULL, "Read AEAT-9955 alarm byte (MHI/MLO)", cmd_motor_encoder_alarm),
 	SHELL_CMD(fast, NULL, "Show fast encoder_rt driver status/counters",
 		  cmd_motor_encoder_fast),
+	SHELL_CMD(reg, &sub_motor_encoder_reg, "Encoder register access", NULL),
 	SHELL_CMD_ARG(reg_read, NULL, "Read AEAT-9955 register <addr>",
 		      cmd_motor_encoder_reg_read, 2, 0),
 	SHELL_CMD_ARG(reg_write, NULL, "Write AEAT-9955 register <addr> <value>",
 		      cmd_motor_encoder_reg_write, 3, 0),
 	SHELL_CMD(protocol, &sub_motor_encoder_protocol, "AEAT-9955 protocol control", NULL),
+	SHELL_CMD(control, &sub_motor_encoder_control, "Encoder control configuration/readiness",
+		  NULL),
 	SHELL_CMD_ARG(direction, NULL, "Get/set encoder direction sign [<1|-1>]",
 		      cmd_motor_encoder_direction, 1, 1),
 	SHELL_CMD_ARG(trim, NULL, "Get/set electrical commutation trim [<-180..180> deg]",
 		      cmd_motor_encoder_trim, 1, 1),
 	SHELL_CMD(capture, &sub_motor_encoder_capture, "Encoder sample capture buffer", NULL),
 	SHELL_CMD(trace, &sub_motor_encoder_trace, "Raw encoder telemetry trace buffer", NULL),
-	SHELL_CMD(acquisition, NULL, "Show encoder acquisition status/counters",
+	SHELL_CMD(acquisition, &sub_motor_encoder_acquisition, "Encoder acquisition diagnostics",
 		  cmd_motor_encoder_acquisition),
 	SHELL_CMD(acquisition_reset, NULL, "Reset encoder acquisition counters",
 		  cmd_motor_encoder_acquisition_reset),
