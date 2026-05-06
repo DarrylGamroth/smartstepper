@@ -14,6 +14,8 @@
 #include "motor_states.h"
 #include "motor/runtime/control_policy.h"
 
+struct motor_parameters;
+
 enum motor_mode_reset_policy {
 	MOTOR_MODE_RESET_NONE = 0,
 	MOTOR_MODE_RESET_DIRECT_CURRENT,
@@ -38,5 +40,11 @@ const struct motor_operating_mode_descriptor *
 motor_operating_mode_descriptor_get(enum motor_state state);
 
 atomic_val_t motor_operating_mode_feature_mask(enum motor_state state);
+
+void motor_operating_mode_apply_entry_policy(struct motor_parameters *params,
+					     enum motor_state state);
+
+void motor_operating_mode_apply_exit_policy(struct motor_parameters *params,
+					    enum motor_state state);
 
 #endif /* MOTOR_OPERATING_MODE_H_ */

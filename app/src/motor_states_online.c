@@ -16,16 +16,13 @@
 #include "motor_states_online.h"
 #include "motor_control_api.h"
 #include "config.h"
-#include "motor/filters/pi.h"
-#include "motor/motion/traj.h"
 #include "motor/motion/angle_gen.h"
-#include "motor/observers/angle_observer.h"
 #include "motor/math/angle_wrap.h"
-#include "motor/control/dob.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
 #include "motor_encoder_control.h"
+#include "motor_operating_mode.h"
 #include "motor_state_transition.h"
 
 LOG_MODULE_DECLARE(motor_states, CONFIG_APP_LOG_LEVEL);
@@ -280,28 +277,11 @@ void motor_state_online_current_encoder_entry(void *obj)
 	LOG_INF("Entering ONLINE_CURRENT_ENCODER substate (direct Id/Iq control)");
 
 	/* Encoder-based control: add encoder read; ONLINE provides the baseline. */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_enable_isr_feature_flags(params,
+				       motor_operating_mode_feature_mask(
+					       MOTOR_STATE_ONLINE_CURRENT_ENCODER));
 	motor_online_reset_feedback_quality(params);
-	/* Start direct Id/Iq control from a neutral command for bumpless handover. */
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
-	pi_set_ui(&params->pi_Id, 0.0f);
-	pi_set_ui(&params->pi_Iq, 0.0f);
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	params->velocity_loop_phase = 0U;
-	params->position_loop_phase = 0U;
-	params->live.velocity_target_rad_s = 0.0f;
-	params->live.velocity_ref_rad_s = 0.0f;
-	motor_mpr_velocity_reset(&params->velocity_mpr_state,
-				 params->live.velocity_rad_s,
-				 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state,
-			params->live.velocity_rad_s);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_entry_policy(params, MOTOR_STATE_ONLINE_CURRENT_ENCODER);
 }
 
 void motor_state_online_current_encoder_exit(void *obj)
@@ -311,7 +291,10 @@ void motor_state_online_current_encoder_exit(void *obj)
 	LOG_INF("Exiting ONLINE_CURRENT_ENCODER substate");
 
 	/* Clear this substate's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
+	motor_operating_mode_apply_exit_policy(params, MOTOR_STATE_ONLINE_CURRENT_ENCODER);
+	motor_disable_isr_feature_flags(params,
+					motor_operating_mode_feature_mask(
+						MOTOR_STATE_ONLINE_CURRENT_ENCODER));
 }
 
 enum smf_state_result motor_state_online_current_encoder_run(void *obj)
@@ -335,8 +318,9 @@ void motor_state_online_velocity_generated_entry(void *obj)
 	/* Generated-angle velocity control uses angle generator and velocity trajectory.
 	 * ONLINE provides the baseline.
 	 */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_enable_isr_feature_flags(params,
+				       motor_operating_mode_feature_mask(
+					       MOTOR_STATE_ONLINE_VELOCITY_GENERATED));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ));
 
 	/* Initialize angle generator for open-loop mode */
@@ -345,22 +329,8 @@ void motor_state_online_velocity_generated_entry(void *obj)
 	/* Preserve commutation frame across mode transitions. */
 	angle_gen_set_angle(&params->angle_gen, mech_angle_rad);
 
-	/* Initialize velocity trajectory */
-	motor_velocity_plan_init(&params->traj_velocity,
-				 params->profile_max_velocity_rad_s,
-				 params->profile_max_accel_rad_s2,
-				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
-				 0.0f);
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	params->velocity_loop_phase = 0U;
-	params->position_loop_phase = 0U;
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_entry_policy(params,
+						MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
 
 	LOG_INF("Generated-angle velocity mode initialized: max=%.1f Hz, accel=%.1f Hz/s",
 		(double)(params->profile_max_velocity_rad_s / (2.0f * PI_F32)),
@@ -382,15 +352,13 @@ void motor_state_online_velocity_generated_exit(void *obj)
 
 	LOG_INF("Exiting ONLINE_VELOCITY_GENERATED substate");
 
-	/* Reset angle generator and trajectory */
-	angle_gen_set_velocity(&params->angle_gen, 0.0f);
-	angle_gen_set_angle(&params->angle_gen, 0.0f);
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, 0.0f);
+	motor_operating_mode_apply_exit_policy(params,
+					       MOTOR_STATE_ONLINE_VELOCITY_GENERATED);
 
 	/* Clear this substate's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_disable_isr_feature_flags(params,
+					motor_operating_mode_feature_mask(
+						MOTOR_STATE_ONLINE_VELOCITY_GENERATED));
 }
 
 /* Substate: ONLINE_POSITION_GENERATED - generated-angle position/profile control */
@@ -404,26 +372,17 @@ void motor_state_online_position_generated_entry(void *obj)
 	/* Generated-angle position/profile control drives mechanical position directly.
 	 * Encoder reads remain disabled; capture telemetry can still request samples.
 	 */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+	motor_enable_isr_feature_flags(params,
+				       motor_operating_mode_feature_mask(
+					       MOTOR_STATE_ONLINE_POSITION_GENERATED));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
 						      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
 
 	angle_gen_init(&params->angle_gen, 1.0f / CONTROL_LOOP_FREQUENCY_HZ);
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	angle_gen_set_angle(&params->angle_gen, mech_angle_rad);
-	motion_profile_quintic_cancel(&params->position_profile, mech_angle_rad);
-	params->position_target_rad = wrap_rad_2pi(mech_angle_rad);
-
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	params->velocity_loop_phase = 0U;
-	params->position_loop_phase = 0U;
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_entry_policy(params,
+						MOTOR_STATE_ONLINE_POSITION_GENERATED);
 
 	LOG_INF("Generated-angle position/profile mode initialized at %.2f deg",
 		(double)(mech_angle_rad * 180.0f / PI_F32));
@@ -437,64 +396,33 @@ enum smf_state_result motor_state_online_position_generated_run(void *obj)
 void motor_state_online_position_generated_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t hold_rad = angle_gen_get_angle(&params->angle_gen);
-
 	LOG_INF("Exiting ONLINE_POSITION_GENERATED substate");
 
-	angle_gen_set_velocity(&params->angle_gen, 0.0f);
-	motion_profile_quintic_cancel(&params->position_profile, hold_rad);
-	params->live.velocity_target_rad_s = 0.0f;
-	params->live.velocity_ref_rad_s = 0.0f;
-	params->profile_seq.running = false;
-	params->profile_seq.tick_counter = 0U;
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_exit_policy(params,
+					       MOTOR_STATE_ONLINE_POSITION_GENERATED);
 
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN));
+	motor_disable_isr_feature_flags(params,
+					motor_operating_mode_feature_mask(
+						MOTOR_STATE_ONLINE_POSITION_GENERATED));
 }
 
 /* Substate: ONLINE_VELOCITY_ENCODER - encoder-feedback velocity control */
 void motor_state_online_velocity_encoder_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
 
 	LOG_INF("Entering ONLINE_VELOCITY_ENCODER substate");
 
 	/* Encoder-feedback velocity uses measured speed and acceleration-limited velocity profile. */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_enable_isr_feature_flags(params,
+				       motor_operating_mode_feature_mask(
+					       MOTOR_STATE_ONLINE_VELOCITY_ENCODER));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 						      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 	motor_online_reset_feedback_quality(params);
 
-	motor_velocity_plan_init(&params->traj_velocity,
-				 params->profile_max_velocity_rad_s,
-				 params->profile_max_accel_rad_s2,
-				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
-				 0.0f);
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, 0.0f);
-	params->live.velocity_target_rad_s = 0.0f;
-	params->live.velocity_ref_rad_s = 0.0f;
-	params->live.Id_ref_A = params->Id_setpoint_A;
-	params->live.Iq_ref_A = 0.0f;
-	params->velocity_cl_i_term_A = 0.0f;
-	params->velocity_loop_phase = 0U;
-	params->position_loop_phase = 0U;
-	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, speed_mech_rad_s);
-	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_entry_policy(params,
+						MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
 }
 
 enum smf_state_result motor_state_online_velocity_encoder_run(void *obj)
@@ -510,8 +438,11 @@ void motor_state_online_velocity_encoder_exit(void *obj)
 	LOG_INF("Exiting ONLINE_VELOCITY_ENCODER substate");
 
 	/* Clear this substate's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_operating_mode_apply_exit_policy(params,
+					       MOTOR_STATE_ONLINE_VELOCITY_ENCODER);
+	motor_disable_isr_feature_flags(params,
+					motor_operating_mode_feature_mask(
+						MOTOR_STATE_ONLINE_VELOCITY_ENCODER));
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 }
 
@@ -519,42 +450,18 @@ void motor_state_online_velocity_encoder_exit(void *obj)
 void motor_state_online_position_encoder_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	float32_t speed_mech_rad_s = params->live.velocity_rad_s;
-	float32_t position_mech_rad = params->live.position_rad;
 
 	LOG_INF("Entering ONLINE_POSITION_ENCODER substate");
 
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-						     BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_enable_isr_feature_flags(params,
+				       motor_operating_mode_feature_mask(
+					       MOTOR_STATE_ONLINE_POSITION_ENCODER));
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
 						      BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 	motor_online_reset_feedback_quality(params);
 
-	/* Use current angle as initial target for bumpless mode entry. */
-	params->position_target_rad = position_mech_rad;
-	motion_profile_quintic_cancel(&params->position_profile, position_mech_rad);
-
-	motor_velocity_plan_init(&params->traj_velocity,
-				 params->profile_max_velocity_rad_s,
-				 params->profile_max_accel_rad_s2,
-				 1.0f / CONTROL_LOOP_FREQUENCY_HZ,
-				 speed_mech_rad_s);
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	params->live.velocity_target_rad_s = 0.0f;
-	params->live.velocity_ref_rad_s = speed_mech_rad_s;
-	params->live.Id_ref_A = params->Id_setpoint_A;
-	params->live.Iq_ref_A = 0.0f;
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	params->velocity_loop_phase = 0U;
-	params->position_loop_phase = 0U;
-	filter_so_prime(&params->filter_velocity_notch, speed_mech_rad_s);
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, speed_mech_rad_s, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state, speed_mech_rad_s);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_entry_policy(params,
+						MOTOR_STATE_ONLINE_POSITION_ENCODER);
 }
 
 enum smf_state_result motor_state_online_position_encoder_run(void *obj)
@@ -568,24 +475,11 @@ void motor_state_online_position_encoder_exit(void *obj)
 
 	LOG_INF("Exiting ONLINE_POSITION_ENCODER substate");
 
-	traj_set_target_value(&params->traj_velocity, 0.0f);
-	traj_set_int_value(&params->traj_velocity, 0.0f);
-	params->live.velocity_target_rad_s = 0.0f;
-	motion_profile_quintic_cancel(&params->position_profile,
-				      params->live.position_rad);
-	params->live.velocity_ref_rad_s = 0.0f;
-	params->profile_seq.running = false;
-	params->profile_seq.tick_counter = 0U;
-	params->velocity_cl_i_term_A = 0.0f;
-	params->position_cl_i_term_rad_s = 0.0f;
-	motor_mpr_velocity_reset(&params->velocity_mpr_state, 0.0f, 0.0f);
-	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
-	motor_dob_reset(&params->velocity_dob_state, 0.0f);
-	params->live.velocity_dob_iq_ff_a = 0.0f;
-	params->live.velocity_dob_disturbance_nm = 0.0f;
-	params->live.velocity_dob_residual_rad_s = 0.0f;
+	motor_operating_mode_apply_exit_policy(params,
+					       MOTOR_STATE_ONLINE_POSITION_ENCODER);
 
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ENCODER_READ) |
-					      BIT(MOTOR_FEATURE_VELOCITY_TRAJ));
+	motor_disable_isr_feature_flags(params,
+					motor_operating_mode_feature_mask(
+						MOTOR_STATE_ONLINE_POSITION_ENCODER));
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_USE_COMMANDED_CURRENTS));
 }
