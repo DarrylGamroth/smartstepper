@@ -51,3 +51,11 @@ Notes:
   - `motor encoder reg_read`
   - `motor encoder reg_write`
 - Validation: MT6835 west build passed using `west build -p auto -b smartstepper_v2/stm32h743xx /workspace/chopper/app -d /workspace/build/chopper/smartstepper_v2 -S serial-shell -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"`.
+
+## SH040 - Validation and final report
+
+- Created `app/docs/shell_refactor_plan/final_validation_report.md`.
+- Validation results:
+  - `./tests/run_unit_tests.sh`: PASS, 31/31 configurations and 274/274 test cases.
+  - `python3 -m unittest scripts/hil/test_hil_telnet_parser.py`: PASS, 15 tests.
+  - MT6835 west build: PASS.
