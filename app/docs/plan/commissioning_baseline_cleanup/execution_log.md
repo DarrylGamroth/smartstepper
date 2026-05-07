@@ -30,3 +30,12 @@ Plan status:
 Validation evidence:
 
 - Plan-only change; no build required.
+
+## 2026-05-07 - T007 Settings Persistence Implementation
+
+- Implemented typed motor Settings keys under `motor/` using the Zephyr Settings/ZMS backend.
+- Added guarded shell commands: `motor settings status`, `preview`, `save`, `load`, `clear`, and `autoload status`.
+- Changed persistence direction from a packed blob to individual typed keys plus metadata (`schema_version`, `generation`, `valid_groups`).
+- ADC current offsets are intentionally not persisted; they remain boot-calibrated runtime values.
+- Autoload remains disabled; load is explicit and refused while armed, online, or calibrating.
+- Validation evidence: firmware build passed with `west build --build-dir /workspace/build/chopper/smartstepper_v2`; focused persistence unit suite passed with `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit`.

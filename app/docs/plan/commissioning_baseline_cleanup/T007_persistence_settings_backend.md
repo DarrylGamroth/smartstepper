@@ -3,8 +3,7 @@
 ## Decision
 
 Use Zephyr Settings as the first persistence API, backed by **ZMS** on an
-internal-MCU-flash storage partition where practical. Store packed, versioned,
-CRC-protected records rather than many independent float keys.
+internal-MCU-flash storage partition where practical. Store individual typed Settings keys under the `motor/` namespace with group metadata. Do not store one opaque blob for this phase.
 
 NVS is an acceptable fallback only if ZMS is unavailable on the target. Direct
 NVMEM/EEPROM cell access is deferred until there is a concrete use case. It may
@@ -22,15 +21,14 @@ filesystem failures and should not depend on external-flash initialization.
 - Settings gives standard key/value load/save and shell/debug integration.
 - ZMS is the preferred modern Zephyr settings backend for this project.
 - NVS is a fallback backend only.
-- A packed record preserves schema, version, generation, validity flags, and CRC
-  semantics.
+- Individual typed keys make Settings shell inspection useful while group metadata preserves schema, generation, and apply semantics.
 - Direct NVMEM cells are better for fixed manufacturing data or compact custom
   two-slot records, but they are not as convenient as a settings API for staged
   commissioned values.
 
 ## Work
 
-- Define settings subtree, e.g. `motor/commission/v1`.
+- Define typed settings namespaces under `motor/meta`, `motor/encoder`, `motor/model`, `motor/controllers`, and `motor/detent`.
 - Add build configuration for:
   - `CONFIG_SETTINGS=y`
   - `CONFIG_ZMS=y`
@@ -41,19 +39,18 @@ filesystem failures and should not depend on external-flash initialization.
   partition plan before final sizing. The current `smartstepper_v2` flash
   partition map is provisional and under-allocates the STM32H743 internal flash;
   fix that layout before finalizing the settings partition.
-- Store a packed `motor_persistent_config_v1` record using existing
-  `persistent_config.h` schema.
+- Store individual typed keys under `motor/encoder`, `motor/model`, `motor/controllers`, and `motor/detent`, plus `motor/meta/schema_version`, `motor/meta/generation`, and `motor/meta/valid_groups`.
+- Do not persist ADC current offsets; run the quick offset calibration every boot.
 - Add shell commands:
   - `motor settings status`
   - `motor settings preview`
-  - `motor settings save [baseline|model|controllers|all]`
-  - `motor settings load [baseline|model|controllers|all]`
-  - `motor settings clear`
+  - `motor settings save [baseline|encoder|model|controllers|detent|all]`
+  - `motor settings load [baseline|encoder|model|controllers|detent|all]`
+  - `motor settings clear [baseline|encoder|model|controllers|detent|all]`
   - `motor settings autoload status`
 - Keep autoload disabled in this plan.
 - Refuse save/load while armed or online unless command is read-only preview.
-- On load, validate magic/schema/size/CRC/flags and print all values before
-  apply.
+- On load, validate schema/group presence/value ranges and print all values before apply.
 - Apply only explicitly selected groups and reset affected fast-loop state.
 - Enable `CONFIG_SETTINGS_SHELL` only as a debug/bring-up aid if useful. The
   generic `settings` shell can list/read/write/delete raw keys, but it must not
@@ -65,16 +62,16 @@ filesystem failures and should not depend on external-flash initialization.
 
 - No automatic boot apply until HIL reset/reboot gates pass.
 - Never persist advisory/invalid mechanical ID or unvalidated advanced features.
-- Do not persist detent table in V1; store only metadata/table CRC if needed.
+- Do not persist detent table in V1; store only metadata/table CRC.
 - Must work safely when settings are absent or corrupted: fall back to DT.
 
 ## Validation
 
-- Unit tests for record pack/unpack/CRC/version rejection.
+- Unit tests for persistence schema helpers remain in place; app-level Settings path is validated by firmware build and HIL shell flow.
 - Native settings backend smoke test if practical.
 - HIL manual flow:
   1. baseline commission,
-  2. save baseline,
+  2. save baseline (encoder mapping only; current offsets remain volatile),
   3. reset target,
   4. preview saved values,
   5. explicitly load baseline,

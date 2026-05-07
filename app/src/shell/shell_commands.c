@@ -557,6 +557,23 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor settings autoload subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_settings_autoload,
+	SHELL_CMD(status, NULL, "Show settings autoload status", cmd_motor_settings_autoload_status),
+	SHELL_SUBCMD_SET_END
+);
+
+/* motor settings subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_settings,
+	SHELL_CMD(status, NULL, "Show persisted motor settings status", cmd_motor_settings_status),
+	SHELL_CMD(preview, NULL, "Preview persisted motor settings", cmd_motor_settings_preview),
+	SHELL_CMD(save, NULL, "Save settings [baseline|encoder|model|controllers|detent|all]", cmd_motor_settings_save),
+	SHELL_CMD(load, NULL, "Load settings [baseline|encoder|model|controllers|detent|all]", cmd_motor_settings_load),
+	SHELL_CMD(clear, NULL, "Clear settings [baseline|encoder|model|controllers|detent|all]", cmd_motor_settings_clear),
+	SHELL_CMD(autoload, &sub_motor_settings_autoload, "Settings autoload controls", NULL),
+	SHELL_SUBCMD_SET_END
+);
+
 /* Top-level motor command */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(params, &sub_motor_params, "Parameter access", NULL),
@@ -568,6 +585,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 	SHELL_CMD(gate, &sub_motor_gate, "Gate-driver diagnostics/recovery", NULL),
 	SHELL_CMD(fault, &sub_motor_fault, "Fault diagnostics", NULL),
 	SHELL_CMD(info, &sub_motor_info, "Motor information", NULL),
+	SHELL_CMD(settings, &sub_motor_settings, "Persistent motor settings", NULL),
 #ifdef CONFIG_RLS_PARAMETER_ESTIMATION
 	SHELL_CMD(rls, &sub_motor_rls, "RLS parameter estimation", NULL),
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */

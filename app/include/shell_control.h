@@ -43,4 +43,11 @@ int cmd_motor_rls_temp(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_rls_gating(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_rls_reset(const struct shell *sh, size_t argc, char **argv);
 
+int cmd_motor_settings_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_preview(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_save(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_load(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_clear(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_autoload_status(const struct shell *sh, size_t argc, char **argv);
+
 #endif /* SHELL_CONTROL_H_ */
