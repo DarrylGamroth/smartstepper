@@ -568,4 +568,56 @@ ZTEST(motor_mpr, test_position_bandwidth_config_rejects_invalid_inputs)
 	zassert_equal(motor_mpr_position_config_from_bandwidth(&input, &cfg, NULL), -EINVAL, NULL);
 }
 
+ZTEST(motor_mpr, test_velocity_step_uses_reference_direction_for_coulomb_from_rest)
+{
+	struct motor_mpr_velocity_config cfg = {
+		.dt_s = 0.001f,
+		.horizon = 8U,
+		.q_speed = 0.05f,
+		.r_delta_iq = 20.0f,
+		.iq_limit_a = 0.5f,
+		.max_delta_iq_a = 0.5f,
+		.disturbance_ki_nm_per_rad_s = 0.0f,
+	};
+	struct motor_mpr_velocity_model model_no_friction = {
+		.inertia_kgm2 = 1.0e-4f,
+		.viscous_friction_nm_per_rad_s = 1.0e-3f,
+		.coulomb_friction_nm = 0.0f,
+		.torque_constant_nm_per_a = 0.34f,
+	};
+	struct motor_mpr_velocity_model model_with_friction = model_no_friction;
+	model_with_friction.coulomb_friction_nm = 0.03f;
+	struct motor_mpr_velocity_state state_no_friction = {0};
+	struct motor_mpr_velocity_state state_with_friction = {0};
+	float32_t iq_no_friction = 0.0f;
+	float32_t iq_with_friction = 0.0f;
+
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model_no_friction,
+					   &state_no_friction, 0.0f, 0.0f),
+		   NULL);
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model_with_friction,
+					   &state_with_friction, 0.0f, 0.0f),
+		   NULL);
+
+	zassert_ok(motor_mpr_velocity_step_fast(&cfg, &model_no_friction,
+						&state_no_friction,
+						0.0f, 2.0f, &iq_no_friction),
+		   NULL);
+	zassert_ok(motor_mpr_velocity_step_fast(&cfg, &model_with_friction,
+						&state_with_friction,
+						0.0f, 2.0f, &iq_with_friction),
+		   NULL);
+
+	zassert_true(iq_with_friction > iq_no_friction,
+		     "positive reference from rest should command extra current for Coulomb friction");
+
+	motor_mpr_velocity_reset(&state_with_friction, 0.0f, 0.0f);
+	zassert_ok(motor_mpr_velocity_step_fast(&cfg, &model_with_friction,
+						&state_with_friction,
+						0.0f, -2.0f, &iq_with_friction),
+		   NULL);
+	zassert_true(iq_with_friction < 0.0f,
+		     "negative reference from rest should command negative current");
+}
+
 ZTEST_SUITE(motor_mpr, NULL, NULL, NULL, NULL, NULL);

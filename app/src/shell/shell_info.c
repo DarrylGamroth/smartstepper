@@ -38,6 +38,23 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Rs:             %.6f Ohm", (double)g_motor_params->Rs_measured_ohm);
 	shell_print(sh, "  L:              %.9f H", (double)g_motor_params->Ls_measured_H);
 	shell_print(sh, "  R/L:            %.3f rad/s", (double)g_motor_params->R_over_L_measured);
+	shell_print(sh, "  psi_f active:   %.8f Wb", (double)g_motor_params->flux_linkage_wb_active);
+	shell_print(sh, "  Kt active:      %.8f Nm/A",
+		    (double)motor_torque_gain_resolve_active(g_motor_params));
+	shell_print(sh, "  J active:       %.8f kgm2", (double)g_motor_params->inertia_kgm2_active);
+	shell_print(sh, "  B active:       %.8f Nm/(rad/s)",
+		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active);
+	struct motor_voltage_speed_limit_result voltage_limit = {0};
+	if (motor_shell_voltage_speed_limit(g_motor_params,
+					    g_motor_params->velocity_cl_iq_limit_A,
+					    &voltage_limit) == 0 && voltage_limit.valid) {
+		shell_print(sh, "  Speed limit:    %.2f Hz command, %.2f Hz voltage model",
+			    (double)motor_shell_velocity_command_limit_hz(g_motor_params),
+			    (double)voltage_limit.max_mech_hz);
+		shell_print(sh, "  Voltage limit:  %.2f V usable, BEMF %.2f V at limit",
+			    (double)voltage_limit.voltage_limit_v,
+			    (double)voltage_limit.bemf_at_limit_v);
+	}
 	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
 	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);
 	shell_print(sh, "  Commissioned:   %s", g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
@@ -183,5 +200,4 @@ int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
 	
 	return 0;
 }
-
 

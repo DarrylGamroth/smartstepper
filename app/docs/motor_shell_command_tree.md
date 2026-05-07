@@ -37,7 +37,7 @@ motor velocity status
 motor velocity pi status
 motor velocity pi set <kp> <ki> <iq_limit>
 motor velocity pi defaults <safe|nominal>
-motor velocity pi bandwidth <hz> [zeta]
+motor velocity pi bandwidth <hz> [zeta] [iq_limit]
 
 motor velocity mpr status
 motor velocity mpr set <q_speed> <r_delta_iq> <horizon> <max_delta_iq> [disturbance_ki]
@@ -112,3 +112,30 @@ motor state clear_error
 `motor state clear_error` is only the state-machine clear request. Hardware
 recovery operations are separate so gate-driver nSLEEP pulses and encoder
 acquisition resets are visible and deterministic.
+
+## Commissioning
+
+Commissioning commands stage measurements first. `apply` commands explicitly
+promote valid staged results into active runtime parameters; no commissioning
+command persists values yet.
+
+```text
+motor commission boot <current_a> <mech_hz> <cycles>
+motor commission run <slow|confirm> [apply]
+motor commission status
+motor commission apply
+
+motor commission electrical plan
+motor commission electrical measure rs [current_a] [samples] [settle_ms]
+motor commission electrical measure inductance [pulse_v] [samples] [pulse_ms]
+motor commission electrical sweep [samples]
+motor commission electrical run [rs_current_a] [l_pulse_v] [samples]
+motor commission electrical status
+motor commission electrical apply
+motor commission electrical validate [current_a] [hold_ms] [max_error_a]
+motor commission electrical clear
+```
+
+`motor commission electrical` is the production-oriented electrical ID path. It
+is intentionally separate from the older Rs/R-over-L bootstrap estimator so both
+paths can be compared before replacing the fallback.

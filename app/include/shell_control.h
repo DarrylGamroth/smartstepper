@@ -15,6 +15,7 @@ int cmd_motor_params_list(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_id(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_iq(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_current_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_gain_get(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_gain_set(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_current_gain_bandwidth(const struct shell *sh, size_t argc, char **argv);

@@ -2,6 +2,25 @@
 
 /* Domain implementation split from shell_commands_state.c. */
 
+#if MOTOR_ENCODER_IS_AEAT9955_FAST
+static int motor_encoder_protocol_parse_u8_arg(const char *arg, uint8_t *value)
+{
+	if (arg == NULL || value == NULL) {
+		return -EINVAL;
+	}
+
+	errno = 0;
+	char *endp = NULL;
+	unsigned long parsed = strtoul(arg, &endp, 0);
+	if (endp == arg || *endp != '\0' || errno == ERANGE || parsed > UINT8_MAX) {
+		return -EINVAL;
+	}
+
+	*value = (uint8_t)parsed;
+	return 0;
+}
+#endif
+
 /* motor encoder protocol status */
 int cmd_motor_encoder_protocol_status(const struct shell *sh, size_t argc, char **argv)
 {
@@ -312,7 +331,7 @@ int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char
 	}
 
 	uint8_t reg = 0U;
-	if (motor_encoder_parse_u8_arg(argv[1], &reg) != 0) {
+	if (motor_encoder_protocol_parse_u8_arg(argv[1], &reg) != 0) {
 		shell_error(sh, "addr must be an 8-bit register address");
 		return -EINVAL;
 	}
@@ -342,5 +361,4 @@ int cmd_motor_encoder_protocol_raw_reg(const struct shell *sh, size_t argc, char
 	return 0;
 #endif
 }
-
 

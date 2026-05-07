@@ -7,6 +7,7 @@
 #include "motor_control_api.h"
 #include "motor_states.h"
 #include "config.h"
+#include "motor_current_slew.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
@@ -687,11 +688,11 @@ void motor_api_apply_param_update(struct motor_parameters *params)
 	/* Direct write to setpoint fields based on param_id */
 	switch (params->event.param_update.param_id) {
 	case PARAM_ID_ID_SETPOINT_A:
-		params->Id_setpoint_A = value;
+		motor_current_slew_params_set_target(params, value, params->Iq_setpoint_A);
 		LOG_DBG("Updated Id_setpoint_A = %.3f A", (double)value);
 		break;
 	case PARAM_ID_IQ_SETPOINT_A:
-		params->Iq_setpoint_A = value;
+		motor_current_slew_params_set_target(params, params->Id_setpoint_A, value);
 		LOG_DBG("Updated Iq_setpoint_A = %.3f A", (double)value);
 		break;
 	case PARAM_ID_VELOCITY_KP_A_PER_RAD_S:

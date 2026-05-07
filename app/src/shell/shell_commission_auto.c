@@ -15,6 +15,7 @@
 #include "shell_commission_internal.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor_control_api.h"
+#include "motor_current_slew.h"
 #include "motor_torque.h"
 #include "shell_parse.h"
 #include "motor/math/math_constants.h"
@@ -405,8 +406,7 @@ static int motor_commission_auto_run_mech(const struct shell *sh,
 	}
 
 stop_current:
-	g_motor_params->Id_setpoint_A = 0.0f;
-	g_motor_params->Iq_setpoint_A = 0.0f;
+	motor_current_slew_params_zero(g_motor_params);
 	motor_commission_set_velocity_target_hz(0.0f);
 	if (ret != 0) {
 		return ret;
@@ -640,6 +640,11 @@ int cmd_motor_commission_auto_status(const struct shell *sh, size_t argc, char *
 		    (double)ctx->auto_tune_staged.velocity_dob_observer_gain_nm_per_rad_s,
 		    (double)ctx->auto_tune_staged.velocity_dob_torque_limit_nm,
 		    (double)ctx->auto_tune_staged.velocity_dob_iq_ff_limit_a);
+	shell_print(sh, "  Model source:  flux=%s mech=%s",
+		    g_motor_params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
+			    "MEASURED" : "FALLBACK",
+		    g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
+			    "MEASURED" : "FALLBACK");
 	motor_commission_print_tune_reject_flags(sh, ctx->auto_tune_staged.reject_flags);
 	return 0;
 }
@@ -979,8 +984,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 
 	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
 	if (ret != 0) {
-		g_motor_params->Id_setpoint_A = 0.0f;
-		g_motor_params->Iq_setpoint_A = 0.0f;
+		motor_current_slew_params_zero(g_motor_params);
 		if (g_motor_params->commission.active) {
 			struct motor_commission_runtime_ctx commission_ctx;
 			motor_commission_ctx_from_global(&commission_ctx);
@@ -1022,23 +1026,23 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 				motor_commission_print_mech_fit_summary(
 					sh, "    Fit",
 					&g_motor_params->commission.results);
-				shell_print(sh,
-					    "    Capture: accepted=%u rejected=%u stored=%u/%u rejects(mode=%u disarmed=%u encoder=%u fault=%u sat=%u invalid=%u)",
-					    g_motor_params->commission.accepted_samples,
-					    g_motor_params->commission.rejected_samples,
-					    g_motor_params->commission.sample_count,
-					    MOTOR_COMMISSION_MAX_SAMPLES,
-					    g_motor_params->commission.reject_mode_mismatch,
-					    g_motor_params->commission.reject_disarmed,
-					    g_motor_params->commission.reject_encoder,
-					    g_motor_params->commission.reject_fault,
-					    g_motor_params->commission.reject_saturation,
-					    g_motor_params->commission.reject_data_invalid);
+					shell_print(sh,
+						    "    Capture: accepted=%u rejected=%u stored=%u/%u rejects(mode=%u disarmed=%u encoder=%u fault=%u sat=%u invalid=%u track=%u)",
+						    g_motor_params->commission.accepted_samples,
+						    g_motor_params->commission.rejected_samples,
+						    g_motor_params->commission.sample_count,
+						    MOTOR_COMMISSION_MAX_SAMPLES,
+						    g_motor_params->commission.reject_mode_mismatch,
+						    g_motor_params->commission.reject_disarmed,
+						    g_motor_params->commission.reject_encoder,
+						    g_motor_params->commission.reject_fault,
+						    g_motor_params->commission.reject_saturation,
+						    g_motor_params->commission.reject_data_invalid,
+						    g_motor_params->commission.reject_velocity_tracking);
 				continue;
 			}
 
-			g_motor_params->Id_setpoint_A = 0.0f;
-			g_motor_params->Iq_setpoint_A = 0.0f;
+			motor_current_slew_params_zero(g_motor_params);
 			if (g_motor_params->commission.active) {
 				struct motor_commission_runtime_ctx commission_ctx;
 				motor_commission_ctx_from_global(&commission_ctx);

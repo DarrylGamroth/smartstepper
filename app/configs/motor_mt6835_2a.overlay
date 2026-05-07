@@ -22,6 +22,7 @@
 		pwm-frequency-hz = <20000>;
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
+		current-command-ramp-ms = <100>;
 		offset-pole-hz = <300>;
 		/* MT6835 positive direction convention is inverted from controller positive motion. */
 		encoder-direction-sign = <(-1)>;
@@ -36,8 +37,20 @@
 		rs-est-current-ma = <300>;
 		rs-est-rampup-ms = <1000>;
 		rs-est-duration-ms = <1000>;
+		commission-electrical-rs-current-ma = <300>;
+		commission-electrical-current-limit-ma = <300>;
+		commission-electrical-samples = <128>;
+		commission-electrical-settle-ms = <1000>;
+		commission-electrical-current-ramp-ms = <1000>;
+		commission-electrical-l-pulse-mv = <500>;
+		commission-electrical-l-pulse-ms = <5>;
+		commission-electrical-demod-pulse-mv = <500>;
+		commission-electrical-demod-pulse-ms = <2>;
+		commission-electrical-demod-half-cycles = <40>;
+		commission-electrical-max-pulse-mv = <500>;
 		rls-excitation-current-ma = <100>;
-		velocity-max-hz = <30>;
+		/* This 50 pole-pair motor is voltage-speed limited on a ~24 V bus. */
+		velocity-max-hz = <5>;
 		velocity-max-accel-hz-per-s = <20>;
 		velocity-initial-hz = <0>;
 		commission-standard-min-auto-iq-ma = <250>;
@@ -79,7 +92,7 @@
 		pole-pairs = <50>;
 		/* Boot/fallback only; commissioning estimates runtime inertia. */
 		inertia-mgcm2 = <57000>;
-		max-speed-hz = <13>;
+		max-speed-hz = <5>;
 	};
 
 	fault_detection: fault_detection {

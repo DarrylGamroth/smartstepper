@@ -10,6 +10,7 @@
 #include <zephyr/sys/util.h>
 
 #include "config.h"
+#include "motor_current_slew.h"
 #include "motor/filters/pi.h"
 #include "motor/filters/filter_so.h"
 #include "motor/motion/angle_gen.h"
@@ -125,8 +126,7 @@ void motor_operating_mode_apply_entry_policy(struct motor_parameters *params,
 
 	switch (desc->entry_reset) {
 	case MOTOR_MODE_RESET_DIRECT_CURRENT:
-		params->Id_setpoint_A = 0.0f;
-		params->Iq_setpoint_A = 0.0f;
+		motor_current_slew_params_zero(params);
 		pi_set_ui(&params->pi_Id, 0.0f);
 		pi_set_ui(&params->pi_Iq, 0.0f);
 		params->live.velocity_target_rad_s = 0.0f;

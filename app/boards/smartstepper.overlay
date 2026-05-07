@@ -13,6 +13,7 @@
 		pwm-frequency-hz = <20000>;
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
+		current-command-ramp-ms = <100>;
 		offset-pole-hz = <300>;
 		align-current-ma = <67>;
 		align-duration-ms = <100>;

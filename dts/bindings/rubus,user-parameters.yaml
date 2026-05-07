@@ -26,6 +26,14 @@ properties:
     required: true
     description: Current controller bandwidth in Hz
 
+  current-command-ramp-ms:
+    type: int
+    default: 100
+    description: >
+      Default Id/Iq command slew time in milliseconds. Runtime online current
+      references ramp from zero to max-current over this interval unless a
+      calibration state programs a more specific trajectory rate.
+
   offset-pole-hz:
     type: int
     required: true
@@ -219,6 +227,122 @@ properties:
       Default Iq used by `motor commission validate current` when no current is
       specified. This is a per-motor smoke-test value and should exceed static
       friction/detent torque without approaching the motor current limit.
+
+  commission-electrical-rs-current-ma:
+    type: int
+    description: >
+      Default current for production bidirectional resistance identification in
+      milliamps. If omitted, firmware falls back to rs-est-current-ma.
+
+  commission-electrical-current-limit-ma:
+    type: int
+    description: >
+      Maximum current accepted by production electrical identification shell
+      commands in milliamps. If omitted, firmware falls back to
+      commission-electrical-rs-current-ma, then rs-est-current-ma.
+
+  commission-electrical-samples:
+    type: int
+    default: 128
+    description: Default accepted sample count for each production electrical ID axis.
+
+  commission-electrical-min-samples:
+    type: int
+    default: 8
+    description: Minimum accepted sample count for production electrical ID commands.
+
+  commission-electrical-max-samples:
+    type: int
+    default: 512
+    description: Maximum accepted sample count for production electrical ID commands.
+
+  commission-electrical-settle-ms:
+    type: int
+    description: >
+      Default settling time before production Rs capture in milliseconds. If
+      omitted, firmware falls back to rs-est-duration-ms.
+
+  commission-electrical-current-ramp-ms:
+    type: int
+    description: >
+      Current ramp time used by production electrical ID in milliseconds. If
+      omitted, firmware falls back to rs-est-rampup-ms.
+
+  commission-electrical-l-pulse-mv:
+    type: int
+    default: 250
+    description: Default direct-voltage pulse amplitude for integral inductance ID.
+
+  commission-electrical-l-pulse-ms:
+    type: int
+    default: 5
+    description: Default direct-voltage pulse width for integral inductance ID.
+
+  commission-electrical-demod-pulse-mv:
+    type: int
+    description: >
+      Default direct-voltage pulse amplitude for VESC-style inverse-L demod ID.
+      If omitted, firmware falls back to commission-electrical-l-pulse-mv.
+
+  commission-electrical-demod-pulse-ms:
+    type: int
+    default: 2
+    description: >
+      Default direct-voltage pulse width for VESC-style inverse-L demod ID.
+      For a 20 kHz PWM loop, 2 ms is a practical shell-command approximation
+      of VESC's faster PWM-rate HFI demod cadence.
+
+  commission-electrical-demod-half-cycles:
+    type: int
+    default: 40
+    description: >
+      Default VESC-style inverse-L demod half-period in control-loop cycles.
+      At 20 kHz, 40 cycles gives a 250 Hz positive/negative excitation cycle.
+
+  commission-electrical-min-pulse-mv:
+    type: int
+    default: 20
+    description: Minimum allowed direct-voltage pulse amplitude in millivolts.
+
+  commission-electrical-max-pulse-mv:
+    type: int
+    default: 500
+    description: Maximum allowed direct-voltage pulse amplitude in millivolts.
+
+  commission-electrical-min-pulse-ms:
+    type: int
+    default: 1
+    description: Minimum allowed direct-voltage pulse width in milliseconds.
+
+  commission-electrical-sweep-max-spread-mpu:
+    type: int
+    default: 350
+    description: Maximum qualified inductance sweep spread in milli-per-unit.
+
+  commission-electrical-sweep-min-qualified-mv:
+    type: int
+    default: 200
+    description: Minimum voltage pulse considered high-SNR for inductance sweep qualification.
+
+  commission-electrical-demod-scale-mpu:
+    type: int
+    default: 900
+    description: Scale factor applied to demodulated inductance in milli-per-unit.
+
+  commission-electrical-demod-max-spread-mpu:
+    type: int
+    default: 200
+    description: Maximum inverse-L demod spread ratio in milli-per-unit.
+
+  commission-electrical-validate-ms:
+    type: int
+    default: 300
+    description: Default hold time for electrical current-loop validation.
+
+  commission-electrical-validate-error-ua:
+    type: int
+    default: 10000
+    description: Default accepted average current-loop validation error in microamps.
 
   commission-auto-post-wait-ms:
     type: int

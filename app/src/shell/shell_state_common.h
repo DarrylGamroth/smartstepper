@@ -18,6 +18,7 @@
 #include "shell_commands_state.h"
 #include "shell_commands_motion.h"
 #include "motor_control_api.h"
+#include "motor_current_slew.h"
 #include "motor_states.h"
 #include "motor_state_utils.h"
 #include "motor/runtime/keepalive_policy.h"
@@ -29,6 +30,8 @@
 #include "config.h"
 #include "motor/math/angle_wrap.h"
 #include "shell_parse.h"
+#include "shell_motor_limits.h"
+#include "motor_encoder_fault_reason.h"
 
 static inline const char *motor_shell_feedback_trust_name(uint8_t trust_state)
 {
@@ -476,8 +479,7 @@ static inline void motor_zero_control_targets(struct motor_parameters *params)
 		return;
 	}
 
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
+	motor_current_slew_params_zero(params);
 	params->live.velocity_target_rad_s = 0.0f;
 	params->live.velocity_ref_rad_s = 0.0f;
 	traj_set_target_value(&params->traj_velocity, 0.0f);
@@ -563,6 +565,7 @@ static inline void motor_fault_snapshot_reset(struct motor_parameters *params, b
 	params->fault_snapshot.latched = 0U;
 	params->fault_snapshot.latch_loop = 0U;
 	params->fault_snapshot.latch_error_code = ERROR_NONE;
+	params->fault_snapshot.latch_encoder_fault_reason = MOTOR_ENCODER_FAULT_REASON_NONE;
 	if (clear_samples) {
 		memset(params->fault_snapshot.samples, 0, sizeof(params->fault_snapshot.samples));
 	}

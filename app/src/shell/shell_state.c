@@ -150,6 +150,12 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "Motor Status:");
 	shell_print(sh, "  State: %s (%d)", state_str, state);
 	shell_print(sh, "  Error: %s (%d)", error_str, error);
+	if (error == ERROR_ENCODER_FAULT) {
+		shell_print(sh, "  Enc reason: %s (%u)",
+			    motor_encoder_fault_reason_to_string(
+				    g_motor_params->fault_snapshot.latch_encoder_fault_reason),
+			    g_motor_params->fault_snapshot.latch_encoder_fault_reason);
+	}
 	shell_print(sh, "  Armed: %s", motor_control_is_armed(g_motor_params) ? "YES" : "NO");
 	shell_print(sh, "  Command timeout: %u ms", g_motor_params->command_timeout_ms);
 	shell_print(sh, "  Command age: %u ms", age_ms);
@@ -395,5 +401,4 @@ int cmd_motor_state_mode_position_encoder(const struct shell *sh, size_t argc, c
 	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION_ENCODER,
 					 "position_encoder");
 }
-
 

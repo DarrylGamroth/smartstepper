@@ -55,6 +55,15 @@ bool motor_control_kernel_feedback_sane(const struct motor_control_policy *polic
 		return false;
 	}
 
+	if (policy->current_source == MOTOR_CURRENT_SOURCE_COMMANDED &&
+	    policy->motion_source == MOTOR_MOTION_SOURCE_HOLD) {
+		float32_t direct_current_limit_rad_s =
+			fmaxf(profile_max_velocity_rad_s * 10.0f, 50.0f * 2.0f * PI_F32);
+
+		return fabsf(feedback_ref->velocity_filtered_rad_s) <=
+		       direct_current_limit_rad_s;
+	}
+
 	float32_t max_expected_rad_s =
 		fmaxf(profile_max_velocity_rad_s * 1.10f, 2.0f * PI_F32);
 

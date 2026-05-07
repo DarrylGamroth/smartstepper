@@ -11,9 +11,12 @@
 #include "motor/control/current_loop.h"
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/pwm_synthesis.h"
+#include "motor/control/speed_limit.h"
 #include "motor/control/transforms.h"
 #include "motor/protection/interlocks.h"
 #include "motor/runtime/command_arbitration.h"
+#include "motor/runtime/control_kernel.h"
+#include "motor/observers/feedback_quality.h"
 
 ZTEST(control_ref_path, test_arbitration_passthrough_when_commanded_currents_disabled)
 {
@@ -271,6 +274,76 @@ ZTEST(control_ref_path, test_pwm_synthesis_braking_clamps_to_unit_interval)
 	zassert_true(out.da_hb2_pu >= 0.0f && out.da_hb2_pu <= 1.0f, NULL);
 	zassert_true(out.db_hb1_pu >= 0.0f && out.db_hb1_pu <= 1.0f, NULL);
 	zassert_true(out.db_hb2_pu >= 0.0f && out.db_hb2_pu <= 1.0f, NULL);
+}
+
+ZTEST(control_ref_path, test_voltage_speed_limit_uses_flux_and_pole_pairs)
+{
+	const struct motor_voltage_speed_limit_input in = {
+		.vbus_v = 23.3f,
+		.max_modulation_index = 0.95f,
+		.resistance_ohm = 2.26f,
+		.inductance_h = 0.002756f,
+		.flux_linkage_wb = 0.004418f,
+		.current_limit_a = 0.225f,
+		.pole_pairs = 50U,
+		.safety_factor = 0.75f,
+	};
+	struct motor_voltage_speed_limit_result out = {0};
+
+	zassert_ok(motor_voltage_speed_limit_compute(&in, &out), NULL);
+	zassert_true(out.valid, NULL);
+	zassert_true(out.max_mech_hz > 10.0f, "limit=%f", (double)out.max_mech_hz);
+	zassert_true(out.max_mech_hz < 13.0f, "limit=%f", (double)out.max_mech_hz);
+	zassert_within(out.voltage_limit_v, 16.60125f, 0.001f, NULL);
+}
+
+ZTEST(control_ref_path, test_voltage_speed_limit_decreases_with_lower_bus)
+{
+	struct motor_voltage_speed_limit_input in = {
+		.vbus_v = 24.0f,
+		.max_modulation_index = 0.95f,
+		.resistance_ohm = 2.26f,
+		.inductance_h = 0.002756f,
+		.flux_linkage_wb = 0.004418f,
+		.current_limit_a = 0.225f,
+		.pole_pairs = 50U,
+		.safety_factor = 0.75f,
+	};
+	struct motor_voltage_speed_limit_result high = {0};
+	struct motor_voltage_speed_limit_result low = {0};
+
+	zassert_ok(motor_voltage_speed_limit_compute(&in, &high), NULL);
+	in.vbus_v = 12.0f;
+	zassert_ok(motor_voltage_speed_limit_compute(&in, &low), NULL);
+	zassert_true(low.max_mech_hz < high.max_mech_hz, NULL);
+}
+
+ZTEST(control_ref_path, test_feedback_sanity_allows_direct_current_motion_above_profile_limit)
+{
+	struct motor_control_policy policy = {
+		.motion_source = MOTOR_MOTION_SOURCE_HOLD,
+		.feedback_source = MOTOR_FEEDBACK_ENCODER,
+		.angle_source = MOTOR_ANGLE_SOURCE_ENCODER,
+		.current_source = MOTOR_CURRENT_SOURCE_COMMANDED,
+		.encoder_required_for_control = true,
+	};
+	struct motor_feedback_ref feedback = {
+		.source = MOTOR_FEEDBACK_ENCODER,
+		.input_source = MOTOR_ANGLE_INPUT_SRC_ENCODER,
+		.velocity_filtered_rad_s = 20.0f * 2.0f * PI_F32,
+		.quality_flags = MOTOR_FEEDBACK_QUALITY_VALID | MOTOR_FEEDBACK_QUALITY_FRESH,
+		.error = false,
+	};
+
+	zassert_true(motor_control_kernel_feedback_sane(&policy, &feedback,
+						       5.0f * 2.0f * PI_F32),
+		     NULL);
+
+	policy.motion_source = MOTOR_MOTION_SOURCE_VELOCITY_TRAJ;
+	policy.current_source = MOTOR_CURRENT_SOURCE_VELOCITY_LOOP;
+	zassert_false(motor_control_kernel_feedback_sane(&policy, &feedback,
+							5.0f * 2.0f * PI_F32),
+		      NULL);
 }
 
 ZTEST_SUITE(control_ref_path, NULL, NULL, NULL, NULL, NULL);

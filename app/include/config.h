@@ -16,6 +16,7 @@
 #include "motor/observers/angle_observer.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/estimation/rs_online.h"
+#include "motor/estimation/electrical_id.h"
 #include "motor/motion/traj.h"
 #include "motor/motion/motion_profile.h"
 #include "motor/runtime/commission_runtime.h"
@@ -76,6 +77,46 @@ struct motor_detent_capture_ctx {
 	uint16_t bin_counts_reverse[MOTOR_DETENT_MAP_BINS];
 };
 
+#define MOTOR_ELECTRICAL_ID_CAPTURE_NONE 0U
+#define MOTOR_ELECTRICAL_ID_CAPTURE_RS 1U
+#define MOTOR_ELECTRICAL_ID_CAPTURE_LD 2U
+#define MOTOR_ELECTRICAL_ID_CAPTURE_LQ 3U
+#define MOTOR_ELECTRICAL_ID_CAPTURE_VALIDATE_ID 4U
+
+struct motor_electrical_id_capture_ctx {
+	bool active;
+	bool done;
+	bool valid;
+	uint8_t mode;
+	uint32_t target_samples;
+	uint32_t sample_count;
+	uint32_t rejected_samples;
+	uint32_t update_count;
+	bool prev_valid;
+	bool direct_voltage_enabled;
+	float32_t prev_current_a;
+	float32_t rs_ohm;
+	float32_t vd_cmd_v;
+	float32_t vq_cmd_v;
+	float32_t voltage_limit_v;
+	bool l_segment_active;
+	bool l_segment_latch_pending;
+	float32_t l_segment_start_current_a;
+	float32_t l_segment_last_current_a;
+	float32_t l_segment_flux_vs;
+	uint32_t l_segment_samples;
+	uint32_t l_rejected_segments;
+	float32_t validation_target_a;
+	float32_t validation_sum_abs_error_a;
+	float32_t validation_max_abs_error_a;
+	struct motor_electrical_id_rs_config rs_cfg;
+	struct motor_electrical_id_rs_accum rs_accum;
+	struct motor_electrical_id_rs_result rs_result;
+	struct motor_electrical_id_l_config l_cfg;
+	struct motor_electrical_id_l_accum l_accum;
+	struct motor_electrical_id_l_result l_result;
+};
+
 #define PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL 0U
 #define PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL 1U
 
@@ -88,6 +129,13 @@ struct motor_detent_capture_ctx {
 
 #define MOTOR_OUTER_LOOP_MODE_PI 0U
 #define MOTOR_OUTER_LOOP_MODE_MPR 1U
+
+#ifndef MOTOR_MODEL_SOURCE_FALLBACK
+#define MOTOR_MODEL_SOURCE_FALLBACK 0U
+#endif
+#ifndef MOTOR_MODEL_SOURCE_MEASURED
+#define MOTOR_MODEL_SOURCE_MEASURED 1U
+#endif
 
 struct motor_encoder_capture_sample {
 	uint32_t control_loop_count;
@@ -137,6 +185,7 @@ struct motor_encoder_raw_trace_sample {
 
 struct motor_fault_snapshot_sample {
 	uint32_t control_loop_count;
+	uint8_t encoder_fault_reason;
 	float32_t encoder_angle_deg;
 	float32_t observer_input_rad;
 	float32_t elec_angle_rad;
@@ -246,6 +295,7 @@ struct motor_fault_snapshot_ctx {
 	uint32_t overrun_count;
 	uint32_t latch_loop;
 	uint32_t latch_error_code;
+	uint8_t latch_encoder_fault_reason;
 	uint8_t latched;
 	struct motor_fault_snapshot_sample samples[MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES];
 };
@@ -408,6 +458,7 @@ struct motor_parameters {
 	int8_t encoder_direction_sign; /* Mechanical encoder direction mapping (+1/-1) */
 	struct rs_online_estimator rs_est;
 	struct traj_f32 traj_Id;
+	struct traj_f32 traj_Iq;
 	struct traj_f32 traj_velocity;  /* Velocity trajectory for open-loop mode */
 	struct motion_profile_quintic position_profile; /* Optional quintic position profile */
 	float32_t position_target_rad;  /* Position target for closed-loop position mode */
@@ -445,6 +496,7 @@ struct motor_parameters {
 	struct motor_detent_map_state detent_map_state; /* Detent map runtime */
 	float32_t detent_map_iq_table_a[MOTOR_DETENT_MAP_BINS]; /* One mechanical revolution */
 	struct motor_detent_capture_ctx detent_capture; /* ISR-rate commissioning accumulator */
+	struct motor_electrical_id_capture_ctx electrical_id_capture; /* ISR-rate electrical ID */
 
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
@@ -455,6 +507,8 @@ struct motor_parameters {
 	float32_t inertia_kgm2_active;                /* Active inertia estimate */
 	float32_t viscous_friction_nm_per_rad_s_active; /* Active viscous friction */
 	float32_t coulomb_friction_nm_active;         /* Active Coulomb friction */
+	uint8_t flux_model_source;                    /* MOTOR_MODEL_SOURCE_* for psi_f/Kt */
+	uint8_t mech_model_source;                    /* MOTOR_MODEL_SOURCE_* for J/B/Tc */
 
 	/* R/L estimation accumulators and angle generator */
 	float32_t roverl_accumulator_Vd_Id;
@@ -512,6 +566,9 @@ struct motor_parameters {
 #define CONTROL_LOOP_FREQUENCY_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, control_loop_frequency_hz))
 #define CURRENT_LOOP_BANDWIDTH_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, current_loop_bandwidth_hz))
 #define CURRENT_LOOP_BANDWIDTH_RPS (2.0f * PI_F32 * (float32_t)DT_PROP(USER_PARAMS_NODE, current_loop_bandwidth_hz))
+#define CURRENT_COMMAND_RAMP_MS DT_PROP_OR(USER_PARAMS_NODE, current_command_ramp_ms, 100)
+#define CURRENT_COMMAND_RAMP_S ((float32_t)CURRENT_COMMAND_RAMP_MS / 1000.0f)
+BUILD_ASSERT(CURRENT_COMMAND_RAMP_MS > 0, "current-command-ramp-ms must be positive");
 #define OFFSET_POLE_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, offset_pole_hz))
 #define ALIGN_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, align_current_ma) / 1000.0f)
 #define ALIGN_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, align_duration_ms) / 1000.0f)
@@ -534,6 +591,80 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 #define RS_EST_RAMPUP_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms) / 1000.0f)
 #define RS_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms) / 1000.0f)
 #define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
+#define COMMISSION_ELECTRICAL_RS_CURRENT_A \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
+			       DT_PROP(USER_PARAMS_NODE, rs_est_current_ma)) / 1000.0f)
+#define COMMISSION_ELECTRICAL_CURRENT_LIMIT_A \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma, \
+			       DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
+					  DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) / 1000.0f)
+#define COMMISSION_ELECTRICAL_SAMPLES \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_samples)
+#define COMMISSION_ELECTRICAL_MIN_SAMPLES \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_min_samples)
+#define COMMISSION_ELECTRICAL_MAX_SAMPLES \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_max_samples)
+#define COMMISSION_ELECTRICAL_SETTLE_MS \
+	DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_settle_ms, \
+		   DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms))
+#define COMMISSION_ELECTRICAL_CURRENT_RAMP_MS \
+	DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_ramp_ms, \
+		   DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms))
+#define COMMISSION_ELECTRICAL_L_PULSE_V \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_mv) / 1000.0f)
+#define COMMISSION_ELECTRICAL_L_PULSE_MS \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_ms)
+#define COMMISSION_ELECTRICAL_DEMOD_PULSE_V \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_demod_pulse_mv, \
+			       DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_mv)) / 1000.0f)
+#define COMMISSION_ELECTRICAL_DEMOD_PULSE_MS \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_pulse_ms)
+#define COMMISSION_ELECTRICAL_DEMOD_HALF_CYCLES \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_half_cycles)
+#define COMMISSION_ELECTRICAL_MIN_PULSE_V \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_mv) / 1000.0f)
+#define COMMISSION_ELECTRICAL_MAX_PULSE_V \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_max_pulse_mv) / 1000.0f)
+#define COMMISSION_ELECTRICAL_MIN_PULSE_MS \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_ms)
+#define COMMISSION_ELECTRICAL_SWEEP_MAX_SPREAD_RATIO \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_sweep_max_spread_mpu) / 1000.0f)
+#define COMMISSION_ELECTRICAL_SWEEP_MIN_QUALIFIED_V \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_sweep_min_qualified_mv) / 1000.0f)
+#define COMMISSION_ELECTRICAL_DEMOD_SCALE_FACTOR \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_scale_mpu) / 1000.0f)
+#define COMMISSION_ELECTRICAL_DEMOD_MAX_SPREAD_RATIO \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_max_spread_mpu) / 1000.0f)
+#define COMMISSION_ELECTRICAL_VALIDATE_MS \
+	DT_PROP(USER_PARAMS_NODE, commission_electrical_validate_ms)
+#define COMMISSION_ELECTRICAL_VALIDATE_ERROR_A \
+	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_validate_error_ua) / 1000000.0f)
+BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
+			DT_PROP(USER_PARAMS_NODE, rs_est_current_ma)) > 0,
+	     "commission-electrical-rs-current-ma must be positive");
+BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma,
+			DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
+				   DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) > 0,
+	     "commission-electrical-current-limit-ma must be positive");
+BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma,
+			DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
+				   DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) <=
+		     DT_PROP(DT_PATH(motor_parameters), max_current_ma),
+	     "commission-electrical-current-limit-ma must be <= motor max-current-ma");
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_samples) >=
+		     DT_PROP(USER_PARAMS_NODE, commission_electrical_min_samples),
+	     "commission-electrical-samples must be >= commission-electrical-min-samples");
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_max_samples) >=
+		     DT_PROP(USER_PARAMS_NODE, commission_electrical_samples),
+	     "commission-electrical-max-samples must be >= commission-electrical-samples");
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_mv) > 0 &&
+		     DT_PROP(USER_PARAMS_NODE, commission_electrical_max_pulse_mv) >=
+		     DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_mv),
+	     "commission-electrical pulse voltage limits are invalid");
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_pulse_ms) > 0,
+	     "commission-electrical-demod-pulse-ms must be positive");
+BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_half_cycles) > 0,
+	     "commission-electrical-demod-half-cycles must be positive");
 
 /* RLS and Thermal parameters - all values from devicetree (motor/system specific) */
 #define RLS_DECIMATION DT_PROP(USER_PARAMS_NODE, rls_decimation)

@@ -35,6 +35,7 @@ struct motor_control_pwm_output {
 
 struct motor_control_fault_snapshot {
 	bool valid;
+	uint8_t encoder_fault_reason;
 	float32_t encoder_angle_deg;
 	float32_t observer_input_rad;
 	float32_t elec_angle_rad;
@@ -58,6 +59,7 @@ struct motor_control_fault_snapshot {
 struct motor_control_step_report {
 	bool error_pending;
 	uint32_t error_code;
+	uint8_t encoder_fault_reason;
 	bool encoder_capture_valid;
 	bool encoder_raw_trace_valid;
 	struct motor_control_encoder_sample encoder_sample;

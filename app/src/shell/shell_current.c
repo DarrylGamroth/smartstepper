@@ -1,4 +1,5 @@
 #include "shell_control_common.h"
+#include "motor_current_slew.h"
 
 /* Domain implementation split from shell_control.c. */
 
@@ -101,6 +102,46 @@ int cmd_motor_current_dq(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "Failed to set DQ currents");
 		return -EIO;
 	}
+}
+
+/* motor current status */
+int cmd_motor_current_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	const float32_t delta_a =
+		motor_current_slew_delta_a_per_tick(MOTOR_MAX_CURRENT_A,
+						    CURRENT_COMMAND_RAMP_S,
+						    CONTROL_LOOP_FREQUENCY_HZ);
+
+	shell_print(sh, "Current Status:");
+	shell_print(sh, "  Command ramp:      %u ms",
+		    CURRENT_COMMAND_RAMP_MS);
+	shell_print(sh, "  Full-scale delta:  %.6f A/tick",
+		    (double)delta_a);
+	shell_print(sh, "  Id target/ref/meas: %.4f / %.4f / %.4f A",
+		    (double)g_motor_params->Id_setpoint_A,
+		    (double)g_motor_params->live.Id_ref_A,
+		    (double)g_motor_params->live.Id_A);
+	shell_print(sh, "  Iq target/ref/meas: %.4f / %.4f / %.4f A",
+		    (double)g_motor_params->Iq_setpoint_A,
+		    (double)g_motor_params->live.Iq_ref_A,
+		    (double)g_motor_params->live.Iq_A);
+	shell_print(sh, "  Id traj target/int/delta: %.4f / %.4f / %.6f A",
+		    (double)traj_get_target_value(&g_motor_params->traj_Id),
+		    (double)traj_get_int_value(&g_motor_params->traj_Id),
+		    (double)traj_get_max_delta(&g_motor_params->traj_Id));
+	shell_print(sh, "  Iq traj target/int/delta: %.4f / %.4f / %.6f A",
+		    (double)traj_get_target_value(&g_motor_params->traj_Iq),
+		    (double)traj_get_int_value(&g_motor_params->traj_Iq),
+		    (double)traj_get_max_delta(&g_motor_params->traj_Iq));
+	return 0;
 }
 
 /* motor current gain get <id|iq> */
@@ -245,4 +286,3 @@ int cmd_motor_current_gain_bandwidth(const struct shell *sh, size_t argc, char *
 }
 
 /* motor velocity target <hz> */
-

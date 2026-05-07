@@ -72,6 +72,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_current,
 	SHELL_CMD(id, NULL, "Set Id current (A)", cmd_motor_current_id),
 	SHELL_CMD(iq, NULL, "Set Iq current (A)", cmd_motor_current_iq),
 	SHELL_CMD(dq, NULL, "Set Id and Iq currents", cmd_motor_current_dq),
+	SHELL_CMD(status, NULL, "Show current command and slew status", cmd_motor_current_status),
 	SHELL_CMD(gain, &sub_motor_current_gain, "Current-loop PI gain tuning", NULL),
 	SHELL_SUBCMD_SET_END
 );
@@ -452,6 +453,52 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission electrical subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_electrical_measure,
+	SHELL_CMD_ARG(rs, NULL,
+		      "Stage production Rs measurement [current_a] [samples] [settle_ms]",
+		      cmd_motor_commission_electrical_measure_rs, 1, 3),
+	SHELL_CMD_ARG(inductance, NULL,
+		      "Stage production L measurement [pulse_v] [samples] [pulse_ms]",
+		      cmd_motor_commission_electrical_measure_inductance, 1, 3),
+	SHELL_CMD_ARG(demod, NULL,
+		      "Stage cycle-counted demodulated L measurement [pulse_v] [samples] [half_cycles]",
+		      cmd_motor_commission_electrical_measure_demod, 1, 3),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_electrical,
+	SHELL_CMD(plan, NULL, "Show production electrical-ID workflow and limits",
+		  cmd_motor_commission_electrical_plan),
+	SHELL_CMD(measure, &sub_motor_commission_electrical_measure,
+		  "Run one production electrical-ID measurement stage", NULL),
+	SHELL_CMD_ARG(run, NULL,
+		      "Run production electrical-ID sequence [rs_current_a] [l_pulse_v] [samples]",
+		      cmd_motor_commission_electrical_run, 1, 3),
+	SHELL_CMD_ARG(sweep, NULL,
+		      "Sweep D-axis inductance pulses and stage stable scalar L [samples]",
+		      cmd_motor_commission_electrical_sweep, 1, 1),
+	SHELL_CMD_ARG(demod_sweep, NULL,
+		      "Sweep D-axis demod frequencies and stage best scalar L [pulse_v] [samples]",
+		      cmd_motor_commission_electrical_demod_sweep, 1, 2),
+	SHELL_CMD_ARG(saliency_sweep, NULL,
+		      "Measure diagnostic vector saliency [pulse_v] [vectors] [pairs] [revs] [half_cycles] [settle_ticks]",
+		      cmd_motor_commission_electrical_saliency_sweep, 1, 6),
+	SHELL_CMD(saliency_apply, NULL,
+		  "Explicitly stage the last valid diagnostic saliency Ld/Lq",
+		  cmd_motor_commission_electrical_saliency_apply),
+	SHELL_CMD(status, NULL, "Show staged production electrical-ID result",
+		  cmd_motor_commission_electrical_status),
+	SHELL_CMD(apply, NULL, "Apply valid staged production electrical-ID result",
+		  cmd_motor_commission_electrical_apply),
+	SHELL_CMD_ARG(validate, NULL,
+		      "Validate active current-loop step [current_a] [hold_ms] [max_error_a]",
+		      cmd_motor_commission_electrical_validate, 1, 3),
+	SHELL_CMD(clear, NULL, "Clear staged production electrical-ID result",
+		  cmd_motor_commission_electrical_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission auto subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 	SHELL_CMD_ARG(run, NULL, "Plan or run identify+tune workflow [slow|confirm] [apply]",
@@ -468,8 +515,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_auto,
 
 /* motor commission validate subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_validate,
-	SHELL_CMD_ARG(current, NULL, "Smoke-test current_encoder torque response [iq_a] [hold_ms]",
-		      cmd_motor_commission_validate_current, 1, 2),
+	SHELL_CMD_ARG(current, NULL,
+		      "Bounded current_encoder smoke test [iq_a] [hold_ms] [ramp_ms] [stop_deg]",
+		      cmd_motor_commission_validate_current, 1, 4),
 	SHELL_CMD_ARG(velocity, NULL,
 		      "Smoke-test velocity_encoder response [max_hz] [hold_ms] [active]",
 		      cmd_motor_commission_validate_velocity, 1, 3),
@@ -494,6 +542,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
 	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Encoder commutation mapping", NULL),
 	SHELL_CMD(detent, &sub_motor_commission_detent, "Detent feedforward commissioning", NULL),
+	SHELL_CMD(electrical, &sub_motor_commission_electrical,
+		  "Production electrical identification", NULL),
 	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),
 	SHELL_CMD(validate, &sub_motor_commission_validate, "Encoder-mode smoke validation", NULL),
 	SHELL_SUBCMD_SET_END

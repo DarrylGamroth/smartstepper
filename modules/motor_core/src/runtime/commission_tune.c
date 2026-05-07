@@ -21,6 +21,9 @@
 #define MOTOR_COMMISSION_TUNE_MPR_R_MAX 100.0f
 #define MOTOR_COMMISSION_TUNE_MPR_DI_MIN_A 0.0005f
 #define MOTOR_COMMISSION_TUNE_MPR_DI_MAX_A 0.0020f
+#define MOTOR_COMMISSION_TUNE_LOW_SPEED_GAIN_HZ 0.50f
+#define MOTOR_COMMISSION_TUNE_LOW_SPEED_KP_CURRENT_FRACTION 1.0f
+#define MOTOR_COMMISSION_TUNE_VELOCITY_KI_TO_KP_MAX 2.0f
 
 static bool tune_is_finite_positive(float32_t value)
 {
@@ -179,8 +182,18 @@ int motor_commission_tune_compute(const struct motor_commission_fit_summary *fit
 				    cfg->max_current_a);
 	float32_t velocity_bw_hz = cfg->velocity_bw_hz;
 	float32_t velocity_omega = 2.0f * PI_F32 * velocity_bw_hz;
-	float32_t velocity_kp = ((2.0f * cfg->velocity_zeta * velocity_omega * inertia) - viscous) / kt;
-	float32_t velocity_ki = (velocity_omega * velocity_omega * inertia) / kt;
+	float32_t velocity_kp_model =
+		((2.0f * cfg->velocity_zeta * velocity_omega * inertia) - viscous) / kt;
+	float32_t low_speed_gain_rad_s =
+		2.0f * PI_F32 * MOTOR_COMMISSION_TUNE_LOW_SPEED_GAIN_HZ;
+	float32_t velocity_kp_authority =
+		(MOTOR_COMMISSION_TUNE_LOW_SPEED_KP_CURRENT_FRACTION * iq_limit) /
+		low_speed_gain_rad_s;
+	float32_t velocity_kp = fmaxf(velocity_kp_model, velocity_kp_authority);
+	float32_t velocity_ki_model = (velocity_omega * velocity_omega * inertia) / kt;
+	float32_t velocity_ki =
+		fminf(velocity_ki_model,
+		      MOTOR_COMMISSION_TUNE_VELOCITY_KI_TO_KP_MAX * velocity_kp);
 
 	float32_t position_ratio = clampf(cfg->position_bw_ratio,
 					  MOTOR_COMMISSION_TUNE_POSITION_BW_RATIO_MIN,

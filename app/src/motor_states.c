@@ -25,6 +25,7 @@
 #include "motor_control_api.h"
 #include "motor_hardware.h"
 #include "config.h"
+#include "motor_current_slew.h"
 #include "motor/filters/pi.h"
 #include "motor/filters/filter_fo.h"
 #include "motor/motion/traj.h"
@@ -33,6 +34,7 @@
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/motion_planner.h"
 #include "motor_state_utils.h"
+#include "motor_encoder_fault_reason.h"
 #include "motor_states_calibration.h"
 #include "motor_states_online.h"
 #include "motor/runtime/commission_runtime.h"
@@ -204,10 +206,7 @@ static void motor_reset_gate_driver_faults_before_enable(struct motor_parameters
 
 static inline void motor_reset_control_runtime(struct motor_parameters *params)
 {
-	params->Id_setpoint_A = 0.0f;
-	params->Iq_setpoint_A = 0.0f;
-	params->live.Id_ref_A = 0.0f;
-	params->live.Iq_ref_A = 0.0f;
+	motor_current_slew_params_force_zero(params);
 	params->live.velocity_target_rad_s = 0.0f;
 	params->live.velocity_ref_rad_s = 0.0f;
 	params->velocity_loop_phase = 0U;
@@ -216,8 +215,6 @@ static inline void motor_reset_control_runtime(struct motor_parameters *params)
 	params->position_cl_i_term_rad_s = 0.0f;
 	motor_velocity_regulator_reset(&params->velocity_reg_state, 0.0f);
 	motor_position_regulator_reset(&params->position_reg_state, 0.0f);
-	traj_set_target_value(&params->traj_Id, 0.0f);
-	traj_set_int_value(&params->traj_Id, 0.0f);
 	traj_set_target_value(&params->traj_velocity, 0.0f);
 	traj_set_int_value(&params->traj_velocity, 0.0f);
 	pi_set_ui(&params->pi_Id, 0.0f);
@@ -584,10 +581,13 @@ static void motor_state_ctrl_init_entry(void *obj)
 			    MOTOR_POLE_PAIRS,
 			    ENCODER_SAMPLE_DELAY_SAMPLES);
 
-	/* Initialize Id trajectory generator for smooth current ramping */
-	traj_init(&params->traj_Id);
-	traj_set_min_value(&params->traj_Id, -MOTOR_MAX_CURRENT_A);
-	traj_set_max_value(&params->traj_Id, MOTOR_MAX_CURRENT_A);
+	/* Initialize Id/Iq trajectory generators for smooth current reference ramping. */
+	struct motor_current_slew_pair current_slew = motor_current_slew_from_params(params);
+	float32_t current_delta_a =
+		motor_current_slew_delta_a_per_tick(MOTOR_MAX_CURRENT_A,
+						    CURRENT_COMMAND_RAMP_S,
+						    CONTROL_LOOP_FREQUENCY_HZ);
+	motor_current_slew_pair_init(&current_slew, MOTOR_MAX_CURRENT_A, current_delta_a);
 
 	/* Initialize velocity/position scaffold defaults */
 	params->position_target_rad = 0.0f;
@@ -643,10 +643,12 @@ static void motor_state_ctrl_init_entry(void *obj)
 	motor_mpr_position_reset(&params->position_mpr_state, 0.0f);
 	params->observer_alignment_offset_rad = 0.0f;
 	params->observer_elec_trim_rad = 0.0f;
-	params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
-	params->torque_gain_nm_per_a_active =
-		motor_torque_gain_from_flux(params->flux_linkage_wb_active);
-	params->velocity_dob_cfg.enabled = VELOCITY_DOB_DEFAULT_ENABLED;
+		params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
+		params->torque_gain_nm_per_a_active =
+			motor_torque_gain_from_flux(params->flux_linkage_wb_active);
+		params->flux_model_source = MOTOR_MODEL_SOURCE_FALLBACK;
+		params->mech_model_source = MOTOR_MODEL_SOURCE_FALLBACK;
+		params->velocity_dob_cfg.enabled = VELOCITY_DOB_DEFAULT_ENABLED;
 	params->velocity_dob_cfg.dt_s = velocity_loop_dt_s;
 	params->velocity_dob_cfg.observer_gain_nm_per_rad_s = 0.02f;
 	params->velocity_dob_cfg.iq_ff_limit_a = params->velocity_cl_iq_limit_A;
@@ -697,6 +699,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->fault_snapshot.overrun_count = 0U;
 	params->fault_snapshot.latch_loop = 0U;
 	params->fault_snapshot.latch_error_code = ERROR_NONE;
+	params->fault_snapshot.latch_encoder_fault_reason = MOTOR_ENCODER_FAULT_REASON_NONE;
 	params->fault_snapshot.latched = 0U;
 	params->recovery_status = (struct motor_recovery_status){
 		.last_error_code = ERROR_NONE,

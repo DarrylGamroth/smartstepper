@@ -160,12 +160,11 @@ ZTEST(motor_rl_ident, test_rs_est_plan_configures_traj_and_filters)
 	zassert_within(filter_fo_get_b0(&ifilt), b0_expected, 1e-8f, NULL);
 }
 
-ZTEST(motor_rl_ident, test_rs_est_step_filter_accumulates_only_at_target)
+ZTEST(motor_rl_ident, test_rs_est_accumulates_only_after_current_slew_reaches_target)
 {
 	struct traj_f32 traj = {0};
 	struct filter_fo_f32 vf = {0};
 	struct filter_fo_f32 ifilt = {0};
-	float32_t id_ref = 0.0f;
 
 	/* Direct-pass one-pole configuration for simple assertions. */
 	filter_fo_init(&vf);
@@ -182,8 +181,9 @@ ZTEST(motor_rl_ident, test_rs_est_step_filter_accumulates_only_at_target)
 	traj_set_max_value(&traj, 1.0f);
 	traj_set_target_value(&traj, 0.1f);
 	traj_set_max_delta(&traj, 0.01f); /* Not yet at target after one step */
-	motor_rs_est_step_filter(&traj, &vf, &ifilt, 2.0f, 0.5f, &id_ref);
-	zassert_true(id_ref > 0.0f && id_ref < 0.1f, NULL);
+	traj_run(&traj);
+	zassert_true(traj_get_int_value(&traj) > 0.0f &&
+		     traj_get_int_value(&traj) < 0.1f, NULL);
 	zassert_within(filter_fo_get_y1(&vf), 0.0f, 1e-7f, NULL);
 	zassert_within(filter_fo_get_y1(&ifilt), 0.0f, 1e-7f, NULL);
 
@@ -192,8 +192,11 @@ ZTEST(motor_rl_ident, test_rs_est_step_filter_accumulates_only_at_target)
 	traj_set_max_value(&traj, 1.0f);
 	traj_set_target_value(&traj, 0.1f);
 	traj_set_max_delta(&traj, 0.1f); /* Reaches target in one step */
-	motor_rs_est_step_filter(&traj, &vf, &ifilt, 2.0f, 0.5f, &id_ref);
-	zassert_within(id_ref, 0.1f, 1e-7f, NULL);
+	traj_run(&traj);
+	if (traj_is_at_target(&traj)) {
+		motor_rs_est_accumulate(&vf, &ifilt, 2.0f, 0.5f);
+	}
+	zassert_within(traj_get_int_value(&traj), 0.1f, 1e-7f, NULL);
 	zassert_within(filter_fo_get_y1(&vf), 2.0f, 1e-6f, NULL);
 	zassert_within(filter_fo_get_y1(&ifilt), 0.5f, 1e-6f, NULL);
 }

@@ -29,9 +29,11 @@ add_library(motor_core_motion STATIC
 motor_core_configure_target(motor_core_motion)
 
 add_library(motor_core_estimation STATIC
+	estimation/electrical_id.c
 	estimation/rls_motor_est.c
 	estimation/rls_runtime.c
 	estimation/rs_online.c
+	estimation/saliency_id.c
 	estimation/thermal_model.c
 	math/prbs.c
 )

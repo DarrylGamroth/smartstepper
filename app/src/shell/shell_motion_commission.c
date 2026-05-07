@@ -16,6 +16,7 @@
 #include "shell_commands_state.h"
 #include "motor/runtime/commission_runtime.h"
 #include "motor_control_api.h"
+#include "motor_current_slew.h"
 #include "motor_states.h"
 #include "shell_parse.h"
 #include "config.h"
@@ -303,7 +304,8 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		    confirm_profile ? "confirm" : "slow",
 		    apply_on_success ? ", apply" : "");
 	shell_print(sh, "[0/4] Reset to safe idle and clear stale commissioning data");
-	int ret = motor_commission_request_idle_disarmed();
+	int ret = motor_commission_prepare_idle_zero_current(
+		MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
 	if (ret != 0) {
 		shell_error(sh, "Failed to enter IDLE before commissioning (err %d)", ret);
 		motor_commission_standard_cleanup(saved_timeout_ms);
@@ -342,7 +344,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->Ls_measured_H,
 		    (double)g_motor_params->R_over_L_measured);
 
-	shell_print(sh, "[2/4] Encoder commutation mapping and current smoke test");
+	shell_print(sh, "[2/4] Encoder commutation mapping");
 	char *boot_argv[] = { "boot" };
 	ret = cmd_motor_commission_boot(sh, ARRAY_SIZE(boot_argv), boot_argv);
 	if (ret != 0) {
@@ -411,8 +413,7 @@ void motor_commission_motion_stop_current(void)
 
 	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
 	(void)motor_api_set_param("Iq_setpoint_A", 0.0f);
-	g_motor_params->Id_setpoint_A = 0.0f;
-	g_motor_params->Iq_setpoint_A = 0.0f;
+	motor_current_slew_params_zero(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 }
 
@@ -436,15 +437,70 @@ int motor_commission_request_idle_disarmed(void)
 					      MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
 }
 
+int motor_commission_prepare_idle_zero_current(uint32_t settle_ms)
+{
+	if (g_motor_params == NULL) {
+		return -ENODEV;
+	}
+
+	motor_commission_motion_stop_current();
+	motor_commission_set_velocity_target_hz(0.0f);
+	atomic_set(&g_motor_params->control_armed, 0);
+	motor_current_slew_params_force_zero(g_motor_params);
+	motor_command_feed_watchdog(g_motor_params);
+
+	int ret = motor_api_request_idle();
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = motor_commission_wait_for_mode(MOTOR_STATE_IDLE,
+					     MOTOR_COMMISSION_MOTION_MODE_TIMEOUT_MS);
+	if (ret != 0) {
+		return ret;
+	}
+
+	motor_current_slew_params_force_zero(g_motor_params);
+	motor_commission_set_velocity_target_hz(0.0f);
+	motor_command_feed_watchdog(g_motor_params);
+
+	if (settle_ms > 0U) {
+		ret = motor_commission_wait_ms_or_fault(settle_ms);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 int motor_commission_motion_measure_current(
 	float32_t signed_iq_a,
 	uint32_t hold_ms,
 	float32_t min_motion_rad,
 	struct motor_commission_motion_measurement *out)
 {
+	return motor_commission_motion_measure_current_bounded(
+		signed_iq_a, hold_ms, CURRENT_COMMAND_RAMP_MS, min_motion_rad,
+		0.0f, 0.0f, out);
+}
+
+int motor_commission_motion_measure_current_bounded(
+	float32_t signed_iq_a,
+	uint32_t hold_ms,
+	uint32_t ramp_ms,
+	float32_t min_motion_rad,
+	float32_t stop_motion_rad,
+	float32_t max_velocity_rad_s,
+	struct motor_commission_motion_measurement *out)
+{
 	if (g_motor_params == NULL || out == NULL ||
 	    !isfinite(signed_iq_a) || !isfinite(min_motion_rad) ||
-	    hold_ms < MOTOR_COMMISSION_MOTION_SAMPLE_MS) {
+	    !isfinite(stop_motion_rad) || !isfinite(max_velocity_rad_s) ||
+	    hold_ms < MOTOR_COMMISSION_MOTION_SAMPLE_MS ||
+	    ramp_ms < MOTOR_COMMISSION_MOTION_SAMPLE_MS ||
+	    min_motion_rad < 0.0f || stop_motion_rad < 0.0f ||
+	    max_velocity_rad_s < 0.0f) {
 		return -EINVAL;
 	}
 
@@ -454,13 +510,15 @@ int motor_commission_motion_measure_current(
 
 	(void)motor_api_set_param("Id_setpoint_A", 0.0f);
 	(void)motor_api_set_param("Iq_setpoint_A", signed_iq_a);
-	g_motor_params->Id_setpoint_A = 0.0f;
-	g_motor_params->Iq_setpoint_A = signed_iq_a;
+	motor_current_slew_params_set_target_ramp(g_motor_params, 0.0f, signed_iq_a,
+						  (float32_t)ramp_ms / 1000.0f);
 	motor_command_feed_watchdog(g_motor_params);
 
 	bool have_prev = false;
+	bool have_first = false;
 	float32_t prev_angle_rad = 0.0f;
 	uint32_t last_trace_loop = g_motor_params->rt_fast.control_loop_count;
+	uint32_t prev_loop = last_trace_loop;
 	uint32_t start_ms = k_uptime_get_32();
 
 	while ((k_uptime_get_32() - start_ms) < hold_ms) {
@@ -486,7 +544,11 @@ int motor_commission_motion_measure_current(
 		out->sample_count++;
 		if (!have_prev) {
 			prev_angle_rad = raw_trace.control_angle_rad;
+			prev_loop = raw_trace.control_loop_count;
+			out->start_angle_rad = raw_trace.control_angle_rad;
+			out->end_angle_rad = raw_trace.control_angle_rad;
 			have_prev = true;
+			have_first = true;
 			continue;
 		}
 
@@ -495,12 +557,33 @@ int motor_commission_motion_measure_current(
 			out->error_count++;
 			continue;
 		}
+		uint32_t loop_delta = raw_trace.control_loop_count - prev_loop;
+		if (loop_delta > 0U) {
+			float32_t dt_s = (float32_t)loop_delta / CONTROL_LOOP_FREQUENCY_HZ;
+			float32_t velocity_rad_s = delta_rad / dt_s;
+			float32_t abs_velocity_rad_s = fabsf(velocity_rad_s);
+
+			out->max_abs_velocity_rad_s =
+				fmaxf(out->max_abs_velocity_rad_s, abs_velocity_rad_s);
+			if (max_velocity_rad_s > 0.0f &&
+			    abs_velocity_rad_s > max_velocity_rad_s) {
+				out->stopped_on_velocity = true;
+				break;
+			}
+		}
 		out->net_motion_rad += delta_rad;
 		out->abs_motion_rad += fabsf(delta_rad);
 		prev_angle_rad = raw_trace.control_angle_rad;
+		prev_loop = raw_trace.control_loop_count;
+		out->end_angle_rad = raw_trace.control_angle_rad;
+		if (stop_motion_rad > 0.0f && out->abs_motion_rad >= stop_motion_rad) {
+			out->stopped_on_motion = true;
+			break;
+		}
 	}
 
 	out->valid = out->sample_count >= MOTOR_COMMISSION_MOTION_MIN_SAMPLES &&
+		     have_first &&
 		     out->error_count <= MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES &&
 		     fabsf(out->net_motion_rad) >= min_motion_rad &&
 		     out->abs_motion_rad >= min_motion_rad;
@@ -692,9 +775,10 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 	shell_print(sh, "  Samples:        accepted=%u rejected=%u stored=%u/%u",
 		    ctx->accepted_samples, ctx->rejected_samples, ctx->sample_count,
 		    MOTOR_COMMISSION_MAX_SAMPLES);
-	shell_print(sh, "  Reject reasons: mode=%u disarmed=%u encoder=%u fault=%u sat=%u invalid=%u",
+	shell_print(sh, "  Reject reasons: mode=%u disarmed=%u encoder=%u fault=%u sat=%u invalid=%u track=%u",
 		    ctx->reject_mode_mismatch, ctx->reject_disarmed, ctx->reject_encoder,
-		    ctx->reject_fault, ctx->reject_saturation, ctx->reject_data_invalid);
+		    ctx->reject_fault, ctx->reject_saturation, ctx->reject_data_invalid,
+		    ctx->reject_velocity_tracking);
 	shell_print(sh, "  Decimation:     %u", ctx->sample_decimation);
 	shell_print(sh, "  Last abort:     %s", ctx->last_abort_reason);
 	shell_print(sh, "  Motion thresh:  valid=%s pos=%.3f A neg=%.3f A rec=%.3f A",
@@ -804,6 +888,11 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)g_motor_params->inertia_kgm2_active,
 		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active,
 		    (double)g_motor_params->coulomb_friction_nm_active);
+	shell_print(sh, "  Model source:   flux=%s mech=%s",
+		    g_motor_params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
+			    "MEASURED" : "FALLBACK",
+		    g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
+			    "MEASURED" : "FALLBACK");
 
 	return 0;
 }

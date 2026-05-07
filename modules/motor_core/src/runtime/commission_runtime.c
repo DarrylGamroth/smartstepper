@@ -33,6 +33,9 @@
 #define MOTOR_COMMISSION_MAPPING_POLE_REL_ERR_MAX 0.15f
 #define MOTOR_COMMISSION_DEFAULT_SAMPLE_RATE_HZ 80U
 #define MOTOR_COMMISSION_CAPTURE_TARGET_MAX_SAMPLES 480U
+#define MOTOR_COMMISSION_TRACKING_MIN_TARGET_RAD_S (2.0f * PI_F32 * 0.05f)
+#define MOTOR_COMMISSION_TRACKING_ABS_TOL_RAD_S (2.0f * PI_F32 * 0.05f)
+#define MOTOR_COMMISSION_TRACKING_REL_TOL 0.75f
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
@@ -76,6 +79,37 @@ static inline bool motor_commission_obs_matches_expected(
 	default:
 		return false;
 	}
+}
+
+static bool motor_commission_obs_velocity_tracking_ok(
+	const struct motor_commission_ctx *commission,
+	const struct motor_commission_observation *obs)
+{
+	if (commission == NULL || obs == NULL) {
+		return false;
+	}
+	if (commission->mode != MOTOR_COMMISSION_MODE_FLUX &&
+	    commission->mode != MOTOR_COMMISSION_MODE_MECH) {
+		return true;
+	}
+	if (commission->expected_mode != MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED) {
+		return true;
+	}
+	if (!isfinite(obs->velocity_ref_rad_s) ||
+	    !isfinite(obs->mech_speed_rad_s)) {
+		return false;
+	}
+
+	float32_t target_abs = fabsf(obs->velocity_ref_rad_s);
+	if (target_abs < MOTOR_COMMISSION_TRACKING_MIN_TARGET_RAD_S) {
+		return true;
+	}
+
+	float32_t err = fabsf(obs->mech_speed_rad_s - obs->velocity_ref_rad_s);
+	float32_t limit = fmaxf(MOTOR_COMMISSION_TRACKING_ABS_TOL_RAD_S,
+				MOTOR_COMMISSION_TRACKING_REL_TOL * target_abs);
+
+	return err <= limit;
 }
 
 const char *motor_commission_mode_to_string(uint8_t mode)
@@ -122,6 +156,7 @@ static void motor_commission_reset_capture_state(struct motor_commission_ctx *ct
 	ctx->reject_fault = 0U;
 	ctx->reject_saturation = 0U;
 	ctx->reject_data_invalid = 0U;
+	ctx->reject_velocity_tracking = 0U;
 	ctx->sample_decimation_counter = 0U;
 	ctx->prev_valid = false;
 	ctx->prev_loop_count = 0U;
@@ -755,12 +790,18 @@ int motor_commission_apply_results(struct motor_commission_runtime_ctx *ctx)
 		if (isfinite(derived_kt) && derived_kt > MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
 			*ctx->torque_gain_nm_per_a_active = derived_kt;
 		}
+		if (ctx->flux_model_source != NULL) {
+			*ctx->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
+		}
 	}
 	if (results->mech_valid) {
 		*ctx->inertia_kgm2_active = results->inertia_kgm2;
 		*ctx->viscous_friction_nm_per_rad_s_active =
 			results->viscous_friction_nm_per_rad_s;
 		*ctx->coulomb_friction_nm_active = results->coulomb_friction_nm;
+		if (ctx->mech_model_source != NULL) {
+			*ctx->mech_model_source = MOTOR_MODEL_SOURCE_MEASURED;
+		}
 	}
 
 	if (!isfinite(*ctx->torque_gain_nm_per_a_active) ||
@@ -932,6 +973,11 @@ void motor_commission_update(struct motor_commission_runtime_ctx *ctx,
 	if (obs->saturation) {
 		commission->rejected_samples++;
 		commission->reject_saturation++;
+		return;
+	}
+	if (!motor_commission_obs_velocity_tracking_ok(commission, obs)) {
+		commission->rejected_samples++;
+		commission->reject_velocity_tracking++;
 		return;
 	}
 	if (commission->sample_count >= MOTOR_COMMISSION_MAX_SAMPLES) {

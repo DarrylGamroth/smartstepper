@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_electrical_id.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - estimation
+      - electrical_id
+    harness: ztest
+    integration_platforms:
+      - native_sim

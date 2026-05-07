@@ -27,18 +27,26 @@
 #define MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES 4U
 #define MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_IQ_A COMMISSION_VALIDATE_CURRENT_DEFAULT_IQ_A
 #define MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_IQ_A 0.150f
-#define MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_HOLD_MS 160U
+#define MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_HOLD_MS 1500U
+#define MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_RAMP_MS 1000U
+#define MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_STOP_DEG 5.0f
+#define MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_SPEED_HZ 8.0f
 #define MOTOR_COMMISSION_VALIDATE_POSITION_DEFAULT_DELTA_DEG 5.0f
 #define MOTOR_COMMISSION_VALIDATE_POSITION_DEFAULT_HOLD_MS 2000U
 #define MOTOR_COMMISSION_VALIDATE_POSITION_MIN_DURATION_S 0.20f
 
 struct motor_commission_motion_measurement {
 	float32_t iq_a;
+	float32_t start_angle_rad;
+	float32_t end_angle_rad;
 	float32_t net_motion_rad;
 	float32_t abs_motion_rad;
 	uint16_t sample_count;
 	uint16_t warning_count;
 	uint16_t error_count;
+	float32_t max_abs_velocity_rad_s;
+	bool stopped_on_motion;
+	bool stopped_on_velocity;
 	bool valid;
 };
 
@@ -64,12 +72,21 @@ int motor_commission_run_motion_threshold(const struct shell *sh,
 					  float32_t min_motion_rad);
 void motor_commission_set_velocity_target_hz(float32_t target_hz);
 void motor_commission_motion_stop_current(void);
+int motor_commission_prepare_idle_zero_current(uint32_t settle_ms);
 int motor_commission_request_idle_disarmed(void);
 void motor_commission_encoder_clear_result(void);
 int motor_commission_motion_measure_current(float32_t signed_iq_a,
 					    uint32_t hold_ms,
 					    float32_t min_motion_rad,
 					    struct motor_commission_motion_measurement *out);
+int motor_commission_motion_measure_current_bounded(
+	float32_t signed_iq_a,
+	uint32_t hold_ms,
+	uint32_t ramp_ms,
+	float32_t min_motion_rad,
+	float32_t stop_motion_rad,
+	float32_t max_velocity_rad_s,
+	struct motor_commission_motion_measurement *out);
 void motor_commission_print_velocity_validation_sample(const struct shell *sh,
 					       float32_t target_hz);
 void motor_commission_encoder_trace_force_on_decimated(

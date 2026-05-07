@@ -17,6 +17,7 @@ import socket
 import sys
 import time
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -35,12 +36,21 @@ class ShellCommand:
     command: str
     timeout_s: float = 3.0
     settle_s: float = 0.05
+    note: str | None = None
+    require_success: bool = False
 
 
 @dataclass(frozen=True)
 class ShellResult:
     command: str
     response: str
+
+
+class ScenarioAbort(RuntimeError):
+    def __init__(self, command: str, reason: str):
+        super().__init__(f"{command}: {reason}")
+        self.command = command
+        self.reason = reason
 
 
 @dataclass
@@ -184,6 +194,8 @@ class TelnetShell:
         pending = self.drain_pending(quiet_s=0.08, timeout_s=0.5)
         if pending.strip():
             self._print_and_log("\n### ASYNC\n" + pending)
+        if cmd.note:
+            self._print_and_log(f"\n### NOTE: {cmd.note}\n")
         header = f"\n### CMD: {cmd.command}\n"
         self._print_and_log(header)
         self._write_raw((cmd.command + "\r\n").encode("utf-8"))
@@ -252,6 +264,12 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand(
             f"motor commission boot {args.boot_current:.3f} {args.boot_hz:.3f} {args.cycles:.3f}",
             timeout_s=duration_s,
+            note=(
+                f"Boot commissioning: offset calibration has no rotation; encoder mapping "
+                f"then rotates {args.cycles:.2f} rev at {args.boot_hz:.3f} Hz; "
+                "+Iq validation should move briefly."
+            ),
+            require_success=True,
         ),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor encoder acquisition"),
@@ -300,6 +318,11 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
             f"motor commission encoder robust {args.boot_current:.3f} "
             f"{args.boot_hz:.3f} {args.cycles:.3f}{suffix}",
             timeout_s=duration_s,
+            note=(
+                f"Encoder mapping: generated-angle Id sweep at {args.boot_hz:.3f} Hz; "
+                "slow visible rotation is expected."
+            ),
+            require_success=True,
         ),
         ShellCommand("motor commission encoder status", timeout_s=3.0),
         ShellCommand("motor commission encoder apply", timeout_s=3.0),
@@ -310,14 +333,22 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
 
 
 def _optional_velocity_pi_commands(args: argparse.Namespace) -> list[ShellCommand]:
-    if args.velocity_pi_kp is None and args.velocity_pi_ki is None:
-        return []
-    if args.velocity_pi_kp is None or args.velocity_pi_ki is None:
-        raise ValueError("--velocity-pi-kp and --velocity-pi-ki must be supplied together")
+    if args.velocity_pi_kp is not None or args.velocity_pi_ki is not None:
+        if args.velocity_pi_kp is None or args.velocity_pi_ki is None:
+            raise ValueError("--velocity-pi-kp and --velocity-pi-ki must be supplied together")
+        return [
+            ShellCommand(
+                f"motor velocity pi set {args.velocity_pi_kp:.6f} "
+                f"{args.velocity_pi_ki:.6f} {args.velocity_pi_iq_limit:.6f}",
+                timeout_s=2.0,
+            ),
+            ShellCommand("motor velocity pi status", timeout_s=2.0),
+        ]
+
     return [
         ShellCommand(
-            f"motor velocity pi set {args.velocity_pi_kp:.6f} "
-            f"{args.velocity_pi_ki:.6f} {args.velocity_pi_iq_limit:.6f}",
+            f"motor velocity pi bandwidth {args.velocity_pi_bandwidth_hz:.3f} "
+            f"{args.velocity_pi_zeta:.3f} {args.velocity_pi_iq_limit:.3f}",
             timeout_s=2.0,
         ),
         ShellCommand("motor velocity pi status", timeout_s=2.0),
@@ -421,6 +452,143 @@ def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellComm
     ]
 
 
+def _velocity_sweep_targets(args: argparse.Namespace) -> list[float]:
+    if args.velocity_sweep_target_hz:
+        return [float(target) for target in args.velocity_sweep_target_hz]
+
+    magnitudes = (0.1, 0.3, 0.5, 1.0, 5.0)
+    targets: list[float] = []
+    for magnitude in magnitudes:
+        targets.extend((magnitude, -magnitude))
+    return targets
+
+
+def _velocity_sweep_hold_s(args: argparse.Namespace, target_hz: float) -> float:
+    min_hold_s = float(args.velocity_sweep_min_hold_ms) / 1000.0
+    if abs(target_hz) <= 1.0e-6:
+        return min_hold_s
+    rotation_hold_s = float(args.velocity_sweep_rotations) / abs(target_hz)
+    return max(min_hold_s, rotation_hold_s)
+
+
+def _velocity_sweep_trace_decimation(hold_s: float) -> int:
+    # Size the 512-sample trace window to cover the full measurement interval.
+    decimation = int(ceil(max(hold_s, 0.001) * 20000.0 / 512.0))
+    return max(1, min(decimation, 65535))
+
+
+def _velocity_sweep_regulator_setup(args: argparse.Namespace,
+                                    regulator: str) -> list[ShellCommand]:
+    if regulator == "pi":
+        return [
+            ShellCommand("motor outer mode pi", timeout_s=2.0),
+            ShellCommand(
+                f"motor velocity pi bandwidth {args.velocity_pi_bandwidth_hz:.3f} "
+                f"{args.velocity_pi_zeta:.3f} {args.velocity_sweep_iq_limit:.3f}",
+                timeout_s=2.0,
+            ),
+            ShellCommand("motor velocity pi status", timeout_s=2.0),
+        ]
+
+    return [
+        ShellCommand(
+            f"motor velocity pi bandwidth {args.velocity_pi_bandwidth_hz:.3f} "
+            f"{args.velocity_pi_zeta:.3f} {args.velocity_sweep_iq_limit:.3f}",
+            timeout_s=2.0,
+        ),
+        ShellCommand(f"motor velocity mpr bandwidth {args.mpr_bandwidth_hz:.3f}",
+                     timeout_s=2.0),
+        ShellCommand("motor outer mode mpr", timeout_s=2.0),
+        ShellCommand("motor velocity mpr status", timeout_s=2.0),
+    ]
+
+
+def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
+    targets = _velocity_sweep_targets(args)
+    commission_timeout_s = args.standard_commission_timeout_s
+    if args.velocity_sweep_commission == "boot":
+        commission_duration_s = max(
+            10.0,
+            (float(args.cycles) / max(float(args.boot_hz), 0.001)) + 12.0,
+        )
+        commission_commands = [
+            ShellCommand(
+                f"motor commission boot {args.boot_current:.3f} "
+                f"{args.boot_hz:.3f} {args.cycles:.3f}",
+                timeout_s=commission_duration_s,
+                note=(
+                    f"Boot commissioning before sweep: offset calibration has no rotation; "
+                    f"mapping rotates {args.cycles:.2f} rev at {args.boot_hz:.3f} Hz."
+                ),
+                require_success=True,
+            ),
+        ]
+    elif args.velocity_sweep_commission == "standard":
+        commission_commands = [
+            ShellCommand(f"motor commission run {args.commission_profile} apply",
+                         timeout_s=commission_timeout_s,
+                         note=(
+                             "Standard commissioning: R/L excitation does not rotate; "
+                             "encoder mapping is a slow generated sweep; mechanical ID "
+                             "moves forward/reverse."
+                         ),
+                         require_success=True),
+            # The standard workflow can reject auto-tune repeatability while still
+            # leaving valid flux/mechanical estimates staged. Apply those active
+            # model values explicitly before deriving PI/MPR bandwidth settings.
+            ShellCommand("motor commission apply", timeout_s=3.0),
+            ShellCommand("motor commission status", timeout_s=3.0),
+            ShellCommand("motor info measured", timeout_s=3.0),
+        ]
+    else:
+        commission_commands = []
+
+    commands = [
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 0"),
+        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        *commission_commands,
+        ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
+        ShellCommand("motor commission detent clear", timeout_s=2.0),
+        *_velocity_sweep_regulator_setup(args, args.velocity_sweep_regulator),
+        ShellCommand("motor state mode velocity_encoder", timeout_s=2.0),
+        ShellCommand("motor state online", timeout_s=4.0),
+        ShellCommand("motor arm", timeout_s=2.0),
+        ShellCommand("motor encoder control_status", timeout_s=3.0),
+    ]
+
+    for target_hz in targets:
+        hold_s = _velocity_sweep_hold_s(args, target_hz)
+        settle_s = float(args.velocity_sweep_settle_ms) / 1000.0
+        decimation = _velocity_sweep_trace_decimation(hold_s)
+        commands.extend([
+            ShellCommand(f"motor velocity target {target_hz:.3f}",
+                         timeout_s=2.0, settle_s=settle_s),
+            ShellCommand("motor encoder trace clear", timeout_s=2.0),
+            ShellCommand(f"motor encoder trace start {decimation}", timeout_s=2.0),
+            ShellCommand("kernel uptime", timeout_s=2.0, settle_s=hold_s),
+            ShellCommand("motor encoder trace stop", timeout_s=2.0),
+            ShellCommand("motor velocity status", timeout_s=2.0),
+            ShellCommand("motor encoder trace summary", timeout_s=3.0),
+            ShellCommand("motor velocity target 0", timeout_s=2.0,
+                         settle_s=float(args.velocity_sweep_stop_ms) / 1000.0),
+        ])
+
+    commands.extend([
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor state status", timeout_s=3.0),
+    ])
+    return commands
+
+
 def _feature_velocity_validate_commands(args: argparse.Namespace,
                                         label: str,
                                         outer_mode: str,
@@ -478,7 +646,13 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
         ShellCommand(f"motor commission run {args.commission_profile} apply",
-                     timeout_s=args.standard_commission_timeout_s),
+                     timeout_s=args.standard_commission_timeout_s,
+                     note=(
+                         "Standard commissioning: R/L excitation does not rotate; "
+                         "encoder mapping is a slow generated sweep; mechanical ID "
+                         "moves forward/reverse."
+                     ),
+                     require_success=True),
         ShellCommand("motor commission status", timeout_s=3.0),
         ShellCommand("motor encoder control_status", timeout_s=3.0),
         ShellCommand("motor encoder acquisition", timeout_s=3.0),
@@ -527,7 +701,15 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
 
 
 def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
-    return [ShellCommand(cmd, timeout_s=args.command_timeout) for cmd in args.command]
+    commands: list[ShellCommand] = []
+    for cmd in args.command:
+        timeout_s = args.command_timeout
+        if cmd.strip().startswith("motor commission boot"):
+            timeout_s = max(timeout_s, args.boot_commission_timeout_s)
+        elif cmd.strip().startswith("motor commission run"):
+            timeout_s = max(timeout_s, args.standard_commission_timeout_s)
+        commands.append(ShellCommand(cmd, timeout_s=timeout_s))
+    return commands
 
 
 def scenario_recovery_status(args: argparse.Namespace) -> list[ShellCommand]:
@@ -540,6 +722,44 @@ def scenario_recovery_status(args: argparse.Namespace) -> list[ShellCommand]:
     ]
 
 
+def scenario_production_electrical_id(args: argparse.Namespace) -> list[ShellCommand]:
+    return [
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor current id 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 0"),
+        ShellCommand("motor commission electrical clear", timeout_s=2.0),
+        ShellCommand("motor commission electrical plan", timeout_s=2.0),
+        ShellCommand(
+            f"motor commission electrical run {args.electrical_id_current:.3f} "
+            f"{args.electrical_id_pulse:.3f} {args.electrical_id_samples}",
+            timeout_s=max(20.0, args.electrical_id_samples * 0.08 + 8.0),
+            note=(
+                "Production electrical ID: bipolar Rs current injection and direct-voltage "
+                "Ld/Lq pulses; no sustained rotation is expected."
+            ),
+            require_success=True,
+        ),
+        ShellCommand("motor commission electrical status", timeout_s=3.0),
+        ShellCommand("motor commission electrical apply", timeout_s=3.0, require_success=True),
+        ShellCommand(
+            f"motor commission electrical validate {args.electrical_id_current:.3f} "
+            f"{args.electrical_id_validate_ms} {args.electrical_id_max_error:.3f}",
+            timeout_s=max(8.0, args.electrical_id_validate_ms / 1000.0 + 4.0),
+            require_success=True,
+        ),
+        ShellCommand("motor current gain get id", timeout_s=2.0),
+        ShellCommand("motor current gain get iq", timeout_s=2.0),
+        ShellCommand("motor info measured", timeout_s=3.0),
+        ShellCommand("motor state status", timeout_s=3.0),
+        ShellCommand("motor safety timeout 1000"),
+    ]
+
+
 SCENARIOS = {
     "status": (scenario_status, False),
     "boot-commission": (scenario_boot_commission, True),
@@ -549,7 +769,9 @@ SCENARIOS = {
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
     "mpr-dob-detent": (scenario_mpr_dob_detent, True),
     "position-validate": (scenario_position_validate, True),
+    "production-electrical-id": (scenario_production_electrical_id, True),
     "recovery-status": (scenario_recovery_status, False),
+    "velocity-sweep": (scenario_velocity_sweep, True),
     "velocity-validate": (scenario_velocity_validate, True),
     "custom": (scenario_custom, False),
 }
@@ -557,6 +779,67 @@ SCENARIOS = {
 
 def _combined_text(results: Sequence[ShellResult]) -> str:
     return "\n".join(result.response for result in results)
+
+
+def _command_success_failure_reason(cmd: ShellCommand, response: str) -> str | None:
+    if not cmd.require_success:
+        return None
+
+    lower = response.lower()
+    command = cmd.command
+    if command.startswith("motor commission boot"):
+        if "boot commissioning complete" in lower:
+            return None
+        return "boot commissioning did not complete"
+
+    if command.startswith("motor commission run"):
+        if ("standard commissioning workflow complete" in lower or
+            "auto commission complete" in lower or
+            "auto commission complete and applied" in lower):
+            return None
+        return "standard commissioning did not complete"
+
+    if command.startswith("motor commission encoder robust"):
+        if "encoder mapping result: valid=yes" in lower:
+            return None
+        return "encoder mapping did not produce a valid result"
+
+    if command.startswith("motor commission encoder apply"):
+        if "encoder mapping applied:" in lower:
+            return None
+        return "encoder mapping was not applied"
+
+    if command.startswith("motor commission validate"):
+        if "complete" in lower:
+            return None
+        return "commissioning validation did not complete"
+
+    if command.startswith("motor commission electrical run"):
+        if "production inductance staged" in lower:
+            return None
+        return "production electrical ID did not stage inductance"
+
+    if command.startswith("motor commission electrical apply"):
+        if "production electrical id applied" in lower:
+            return None
+        return "production electrical ID was not applied"
+
+    if command.startswith("motor commission electrical validate"):
+        if "validation: pass" in lower:
+            return None
+        return "production electrical current-step validation failed"
+
+    failure_patterns = (
+        " failed",
+        "failed ",
+        "fault",
+        "error state",
+        "entering error",
+        "cannot arm",
+    )
+    if any(pattern in lower for pattern in failure_patterns):
+        return "command response contains failure/fault text"
+    return None
 
 
 def _last_response(results: Sequence[ShellResult], command_prefix: str) -> str:
@@ -578,6 +861,17 @@ def _info(checks: list[VerdictCheck], name: str, detail: str,
 
 def _parse_motor_error(response: str) -> tuple[str, int] | None:
     match = re.search(r"^\s*Error:\s+([A-Z0-9_]+)\s+\(([-0-9]+)\)", response, re.MULTILINE)
+    if match is None:
+        return None
+    return match.group(1), int(match.group(2))
+
+
+def _parse_encoder_fault_reason(response: str) -> tuple[str, int] | None:
+    match = re.search(
+        r"^\s*Enc reason:\s+([a-zA-Z0-9_]+)\s+\(([-0-9]+)\)",
+        response,
+        re.MULTILINE,
+    )
     if match is None:
         return None
     return match.group(1), int(match.group(2))
@@ -689,6 +983,25 @@ def _parse_velocity_samples(response: str) -> list[dict[str, float | int]]:
     return samples
 
 
+def _parse_velocity_status(response: str) -> dict[str, float | str] | None:
+    target = re.search(r"^\s*Target:\s+([-+0-9.]+)\s+Hz", response, re.MULTILINE)
+    ref = re.search(r"^\s*Ref:\s+([-+0-9.]+)\s+Hz", response, re.MULTILINE)
+    measured = re.search(r"^\s*Measured:\s+([-+0-9.]+)\s+Hz", response, re.MULTILINE)
+    error = re.search(r"^\s*Error:\s+([-+0-9.]+)\s+Hz", response, re.MULTILINE)
+    iq_limit = re.search(r"^\s*Iq limit:\s+([-+0-9.]+)\s+A", response, re.MULTILINE)
+    outer = re.search(r"^\s*Outer loop:\s+([A-Z]+)", response, re.MULTILINE)
+    if target is None or ref is None or measured is None or error is None:
+        return None
+    return {
+        "target_hz": float(target.group(1)),
+        "ref_hz": float(ref.group(1)),
+        "measured_hz": float(measured.group(1)),
+        "error_hz": float(error.group(1)),
+        "iq_limit_a": float(iq_limit.group(1)) if iq_limit is not None else 0.0,
+        "outer_loop": outer.group(1) if outer is not None else "",
+    }
+
+
 def _parse_open_loop_trace_summary(response: str) -> dict[str, float | int] | None:
     stored = re.search(r"Stored:\s+(\d+)\s*/\s*(\d+)", response)
     raw_delta = re.search(r"Raw delta:\s+([-+0-9]+)\s+mdeg,\s+avg\s+([-+0-9]+)\s+mHz",
@@ -717,6 +1030,92 @@ def _parse_open_loop_trace_summary(response: str) -> dict[str, float | int] | No
         "io": int(counts.group(6)),
         "delta_drops": int(drops.group(1)) if drops is not None else 0,
     }
+
+
+def _parse_target_command(command: str) -> float | None:
+    match = re.match(r"motor velocity target\s+([-+0-9.]+)$", command)
+    if match is None:
+        return None
+    return float(match.group(1))
+
+
+def _collect_velocity_sweep_samples(
+    results: Sequence[ShellResult],
+) -> list[dict[str, float | int | str | bool]]:
+    samples: list[dict[str, float | int | str | bool]] = []
+    active_target: float | None = None
+    active_status: dict[str, float | str] | None = None
+
+    for result in results:
+        target = _parse_target_command(result.command)
+        if target is not None:
+            active_target = target if abs(target) > 1.0e-6 else None
+            active_status = None
+            continue
+
+        if active_target is None:
+            continue
+
+        if result.command == "motor velocity status":
+            active_status = _parse_velocity_status(result.response)
+            continue
+
+        if result.command == "motor encoder trace summary":
+            trace = _parse_open_loop_trace_summary(result.response)
+            if trace is None:
+                samples.append({
+                    "target_hz": active_target,
+                    "parsed": False,
+                })
+                active_target = None
+                active_status = None
+                continue
+
+            avg_hz = float(trace["ctrl_avg_mhz"]) / 1000.0
+            status_measured_hz = (
+                float(active_status["measured_hz"])
+                if active_status is not None and "measured_hz" in active_status
+                else avg_hz
+            )
+            samples.append({
+                "target_hz": active_target,
+                "avg_hz": avg_hz,
+                "status_measured_hz": status_measured_hz,
+                "status_ref_hz": (
+                    float(active_status["ref_hz"])
+                    if active_status is not None and "ref_hz" in active_status
+                    else 0.0
+                ),
+                "status_error_hz": (
+                    float(active_status["error_hz"])
+                    if active_status is not None and "error_hz" in active_status
+                    else active_target - avg_hz
+                ),
+                "outer_loop": (
+                    str(active_status["outer_loop"])
+                    if active_status is not None and "outer_loop" in active_status
+                    else ""
+                ),
+                "iq_limit_a": (
+                    float(active_status["iq_limit_a"])
+                    if active_status is not None and "iq_limit_a" in active_status
+                    else 0.0
+                ),
+                "ctrl_delta_mdeg": int(trace["ctrl_delta_mdeg"]),
+                "raw_delta_mdeg": int(trace["raw_delta_mdeg"]),
+                "stored": int(trace["stored"]),
+                "clean": int(trace["clean"]),
+                "fresh": int(trace["fresh"]),
+                "warn": int(trace["warn"]),
+                "err": int(trace["err"]),
+                "io": int(trace["io"]),
+                "delta_drops": int(trace["delta_drops"]),
+                "parsed": True,
+            })
+            active_target = None
+            active_status = None
+
+    return samples
 
 
 def _evaluate_current_validation(args: argparse.Namespace, checks: list[VerdictCheck],
@@ -901,6 +1300,104 @@ def _evaluate_all_velocity_validations(args: argparse.Namespace, checks: list[Ve
         })
 
 
+def _evaluate_velocity_sweep(args: argparse.Namespace, checks: list[VerdictCheck],
+                             results: Sequence[ShellResult]) -> None:
+    samples = _collect_velocity_sweep_samples(results)
+    expected_targets = _velocity_sweep_targets(args)
+    if len(samples) != len(expected_targets):
+        checks.append(VerdictCheck(
+            "velocity_sweep_sample_count",
+            "FAIL",
+            f"Parsed {len(samples)} sweep samples, expected {len(expected_targets)}",
+            {"parsed": len(samples), "expected": len(expected_targets)},
+        ))
+        return
+
+    failed = 0
+    max_abs_err = 0.0
+    max_warn = 0
+    max_err = 0
+    max_io = 0
+    worst_target = 0.0
+    min_motion_ratio = 999.0
+    required_motion_mdeg = int(
+        round(max(float(args.velocity_sweep_rotations), 0.0) * 360000.0 *
+              float(args.velocity_sweep_min_motion_fraction))
+    )
+
+    for idx, sample in enumerate(samples):
+        target_hz = float(sample.get("target_hz", 0.0))
+        if not bool(sample.get("parsed", False)):
+            failed += 1
+            checks.append(VerdictCheck(
+                f"velocity_sweep_{idx}",
+                "FAIL",
+                "Sweep trace summary not parsed",
+                {"target_hz": target_hz},
+            ))
+            continue
+
+        avg_hz = float(sample["avg_hz"])
+        abs_err = abs(target_hz - avg_hz)
+        err_limit = max(
+            float(args.velocity_sweep_max_error_hz),
+            abs(target_hz) * float(args.velocity_sweep_max_error_ratio),
+        )
+        clean = (
+            int(sample["warn"]) <= args.max_sample_warnings and
+            int(sample["err"]) <= args.max_sample_errors and
+            int(sample["io"]) <= args.max_transport_errors and
+            int(sample["delta_drops"]) == 0
+        )
+        sign_ok = target_hz * avg_hz > 0.0
+        motion_mdeg = abs(int(sample["ctrl_delta_mdeg"]))
+        motion_ok = motion_mdeg >= required_motion_mdeg
+        ok = abs_err <= err_limit and sign_ok and motion_ok and clean
+
+        if not ok:
+            failed += 1
+        if abs_err > max_abs_err:
+            max_abs_err = abs_err
+            worst_target = target_hz
+        max_warn = max(max_warn, int(sample["warn"]))
+        max_err = max(max_err, int(sample["err"]))
+        max_io = max(max_io, int(sample["io"]))
+        if required_motion_mdeg > 0:
+            min_motion_ratio = min(min_motion_ratio, motion_mdeg / required_motion_mdeg)
+
+        _check(checks, f"velocity_sweep_{idx}", ok,
+               "Sweep point tracked within threshold" if ok
+               else "Sweep point failed tracking, direction, motion, or trace quality",
+               {
+                   "target_hz": target_hz,
+                   "avg_hz": avg_hz,
+                   "abs_err_hz": abs_err,
+                   "err_limit_hz": err_limit,
+                   "status_measured_hz": float(sample["status_measured_hz"]),
+                   "status_ref_hz": float(sample["status_ref_hz"]),
+                   "ctrl_delta_mdeg": motion_mdeg,
+                   "required_motion_mdeg": required_motion_mdeg,
+                   "warn": int(sample["warn"]),
+                   "err": int(sample["err"]),
+                   "io": int(sample["io"]),
+                   "delta_drops": int(sample["delta_drops"]),
+               })
+
+    _check(checks, "velocity_sweep", failed == 0,
+           "All exact velocity sweep points passed" if failed == 0
+           else "One or more exact velocity sweep points failed",
+           {
+               "samples": len(samples),
+               "failed": failed,
+               "max_abs_err_hz": max_abs_err,
+               "worst_target_hz": worst_target,
+               "max_warn": max_warn,
+               "max_err": max_err,
+               "max_io": max_io,
+               "min_motion_ratio": min_motion_ratio if min_motion_ratio != 999.0 else 0.0,
+           })
+
+
 def _evaluate_position_validation(checks: list[VerdictCheck],
                                   results: Sequence[ShellResult]) -> None:
     position_response = _last_response(results, "motor commission validate position")
@@ -979,6 +1476,7 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
 
     state_response = _last_response(results, "motor state status")
     motor_error = _parse_motor_error(state_response)
+    state_encoder_fault_reason = _parse_encoder_fault_reason(state_response)
     if motor_error is None:
         checks.append(VerdictCheck("motor_error_none", "INCONCLUSIVE",
                                    "No motor state status error field parsed"))
@@ -1030,6 +1528,17 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                })
 
     fault_response = _last_response(results, "motor fault snapshot status")
+    fault_encoder_fault_reason = _parse_encoder_fault_reason(fault_response)
+    encoder_fault_reason = fault_encoder_fault_reason or state_encoder_fault_reason
+    if encoder_fault_reason is not None:
+        reason_name, reason_code = encoder_fault_reason
+        _info(checks, "encoder_fault_reason",
+              f"Encoder fault reason is {reason_name} ({reason_code})",
+              {"reason": reason_name, "code": reason_code})
+    elif motor_error is not None and motor_error[0] == "ENCODER_FAULT":
+        _check(checks, "encoder_fault_reason", False,
+               "Motor is in ENCODER_FAULT but no encoder fault reason was parsed")
+
     if fault_response:
         latched = _parse_latch_field(fault_response, "Latched")
         if latched is None:
@@ -1123,6 +1632,25 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         _evaluate_detent_capture(checks, results)
         _evaluate_all_velocity_validations(args, checks, results)
 
+    if args.scenario == "velocity-sweep":
+        if args.velocity_sweep_commission == "standard":
+            complete = "Standard commissioning workflow complete" in text
+            applied = "Commissioning results applied to active runtime parameters" in text
+            _check(checks, "standard_commission_complete_or_estimates_applied",
+                   complete or applied,
+                   "Standard commissioning completed or valid estimates were applied"
+                   if complete or applied
+                   else "No standard commissioning completion/apply evidence found")
+            _check(checks, "commission_estimates_applied", applied,
+                   "Commissioning estimates applied to active model" if applied
+                   else "Commissioning estimates were not applied to active model")
+        elif args.velocity_sweep_commission == "boot":
+            complete = "Boot commissioning complete" in text
+            _check(checks, "boot_commission_complete", complete,
+                   "Boot commissioning completed" if complete
+                   else "Boot commissioning completion text not found")
+        _evaluate_velocity_sweep(args, checks, results)
+
     if args.scenario in ("current-validate", "encoder-validate"):
         _evaluate_current_validation(args, checks, results)
 
@@ -1205,17 +1733,46 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--velocity-hold-ms", type=int, default=1000)
     parser.add_argument("--mpr-bandwidth-hz", type=float, default=1.0,
                         help="Velocity MPR bandwidth used by mpr-dob-detent feature combos.")
+    parser.add_argument("--velocity-pi-bandwidth-hz", type=float, default=10.0,
+                        help="Model-based velocity PI bandwidth for velocity-sweep.")
+    parser.add_argument("--velocity-pi-zeta", type=float, default=1.0,
+                        help="Damping ratio for model-based velocity PI tuning.")
+    parser.add_argument("--velocity-sweep-regulator", choices=("pi", "mpr"), default="pi",
+                        help="Outer regulator under test for velocity-sweep.")
+    parser.add_argument("--velocity-sweep-commission",
+                        choices=("standard", "boot", "none"), default="standard",
+                        help="Commissioning sequence to run before velocity-sweep.")
+    parser.add_argument("--velocity-sweep-target-hz", type=float, action="append",
+                        help="Exact velocity target for velocity-sweep. Can be repeated.")
+    parser.add_argument("--velocity-sweep-rotations", type=float, default=1.0,
+                        help="Minimum mechanical rotations measured at each nonzero target.")
+    parser.add_argument("--velocity-sweep-min-hold-ms", type=int, default=1000,
+                        help="Minimum trace hold time per sweep target.")
+    parser.add_argument("--velocity-sweep-settle-ms", type=int, default=500,
+                        help="Settling time after target command and before trace capture.")
+    parser.add_argument("--velocity-sweep-stop-ms", type=int, default=500,
+                        help="Settling time after commanding zero between sweep points.")
+    parser.add_argument("--velocity-sweep-iq-limit", type=float, default=0.225,
+                        help="Velocity controller Iq authority used by PI and MPR sweeps.")
+    parser.add_argument("--velocity-sweep-max-error-hz", type=float, default=0.05,
+                        help="Absolute velocity error limit for exact sweep points.")
+    parser.add_argument("--velocity-sweep-max-error-ratio", type=float, default=0.15,
+                        help="Relative velocity error limit for exact sweep points.")
+    parser.add_argument("--velocity-sweep-min-motion-fraction", type=float, default=0.80,
+                        help="Required fraction of requested full-rotation trace motion.")
     parser.add_argument("--velocity-pi-kp", type=float,
                         help="Optional velocity PI Kp to set before velocity validation.")
     parser.add_argument("--velocity-pi-ki", type=float,
                         help="Optional velocity PI Ki to set before velocity validation.")
     parser.add_argument("--velocity-pi-iq-limit", type=float, default=0.12,
-                        help="Iq limit used with --velocity-pi-kp/--velocity-pi-ki.")
+                        help="Iq limit used with velocity PI set/bandwidth validation.")
     parser.add_argument("--include-position", action="store_true")
     parser.add_argument("--position-delta-deg", type=float, default=5.0)
     parser.add_argument("--position-hold-ms", type=int, default=2000)
     parser.add_argument("--standard-commission-timeout-s", type=float, default=120.0,
                         help="Timeout for 'motor commission run <profile> apply'.")
+    parser.add_argument("--boot-commission-timeout-s", type=float, default=30.0,
+                        help="Timeout for a custom 'motor commission boot ...' command.")
     parser.add_argument("--commission-profile", choices=("slow", "confirm"), default="confirm",
                         help="Auto-commissioning motion profile used by mpr-dob-detent.")
     parser.add_argument("--detent-hz", type=float, default=0.10,
@@ -1230,6 +1787,16 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Mechanical Hz for detent off/on validation.")
     parser.add_argument("--detent-validate-ms", type=int, default=3000,
                         help="Duration per detent validation pass.")
+    parser.add_argument("--electrical-id-current", type=float, default=0.05,
+                        help="D-axis current for production electrical Rs measurement.")
+    parser.add_argument("--electrical-id-pulse", type=float, default=0.25,
+                        help="Small direct D/Q voltage pulse for production electrical Ld/Lq measurement.")
+    parser.add_argument("--electrical-id-samples", type=int, default=64,
+                        help="Sample/repeat count for production electrical ID.")
+    parser.add_argument("--electrical-id-validate-ms", type=int, default=300,
+                        help="Hold time for production electrical current-step validation.")
+    parser.add_argument("--electrical-id-max-error", type=float, default=0.01,
+                        help="Average current error limit for production electrical validation.")
     parser.add_argument(
         "--feature-combo",
         action="append",
@@ -1297,6 +1864,16 @@ def main(argv: Sequence[str]) -> int:
             for cmd in commands:
                 response = shell.run(cmd)
                 results.append(ShellResult(cmd.command, response))
+                failure_reason = _command_success_failure_reason(cmd, response)
+                if failure_reason is not None:
+                    raise ScenarioAbort(cmd.command, failure_reason)
+        except ScenarioAbort as exc:
+            exit_code = 1
+            print(f"Aborting scenario after required command failed: {exc}", file=sys.stderr)
+            results.append(ShellResult(
+                "hil abort",
+                f"HIL scenario aborted after '{exc.command}': {exc.reason}\n",
+            ))
         except KeyboardInterrupt:
             exit_code = 130
             print("Interrupted; sending stop commands", file=sys.stderr)

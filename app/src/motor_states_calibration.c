@@ -114,6 +114,41 @@ motor_commissioning_identification_complete(struct motor_parameters *params)
 
 typedef int (*motor_calibration_finalize_fn_t)(struct motor_parameters *params);
 
+static int motor_calibration_apply_current_pi_from_rl(struct motor_parameters *params)
+{
+	if (params == NULL ||
+	    !isfinite(params->Rs_measured_ohm) ||
+	    !isfinite(params->Ls_measured_H) ||
+	    params->Rs_measured_ohm <= 0.0f ||
+	    params->Ls_measured_H <= 0.0f) {
+		return -ERANGE;
+	}
+
+	float32_t r_over_l = params->Rs_measured_ohm / params->Ls_measured_H;
+	if (!isfinite(params->R_over_L_measured) ||
+	    params->R_over_L_measured <= 0.0f) {
+		params->R_over_L_measured = r_over_l;
+	}
+
+	float32_t kp = params->Ls_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
+	float32_t ki = params->R_over_L_measured / CONTROL_LOOP_FREQUENCY_HZ;
+	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
+		return -ERANGE;
+	}
+
+	pi_set_gains(&params->pi_Id, kp, ki);
+	pi_set_gains(&params->pi_Iq, kp, ki);
+	pi_set_ui(&params->pi_Id, 0.0f);
+	pi_set_ui(&params->pi_Iq, 0.0f);
+
+	LOG_INF("Current PI updated from electrical ID: Kp=%.6f Ki=%.6f (Rs=%.4f Ω L=%.6f H R/L=%.1f)",
+		(double)kp, (double)ki,
+		(double)params->Rs_measured_ohm,
+		(double)params->Ls_measured_H,
+		(double)params->R_over_L_measured);
+	return 0;
+}
+
 static inline enum smf_state_result
 motor_calibration_timeout_finalize_or_fault(struct motor_parameters *params,
 					    enum motor_state next_state,
@@ -411,7 +446,7 @@ static int motor_calibration_finalize_rs(struct motor_parameters *params)
 
 	params->Rs_measured_ohm = result.rs_ohm;
 	params->R_over_L_measured = result.r_over_l;
-	return 0;
+	return motor_calibration_apply_current_pi_from_rl(params);
 }
 
 enum smf_state_result motor_state_rs_est_run(void *obj)
@@ -451,7 +486,7 @@ static const struct motor_calibration_window_policy align_sample_window_policy =
 
 /* ALIGN current reference contract:
  * - state thread only programs traj_Id target/rate
- * - ISR control loop consumes traj_Id to produce Id_ref_A in ALIGN states
+ * - ADC ISR owns traj_Id advancement and publishes the ramped Id_ref_A
  * - no direct Id_ref_A step changes from state handlers
  */
 static inline bool motor_align_plan_injection_or_fault(struct motor_parameters *params,

@@ -232,6 +232,10 @@ int motor_mpr_velocity_step_fast(const struct motor_mpr_velocity_config *cfg,
 		sign_speed = motor_mpr_sign_with_deadband(state->omega_model_rad_s,
 							   MOTOR_MPR_FRICTION_DEADBAND_RAD_S);
 	}
+	if (sign_speed == 0.0f) {
+		sign_speed = motor_mpr_sign_with_deadband(omega_ref_rad_s,
+							   MOTOR_MPR_FRICTION_DEADBAND_RAD_S);
+	}
 	float32_t tau_coulomb_nm = model->coulomb_friction_nm * sign_speed;
 	float32_t d_term = b_d * (state->disturbance_nm - tau_coulomb_nm);
 

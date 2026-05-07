@@ -693,3 +693,110 @@ Next action:
 - Make the commissioned/model-derived velocity tuning produce a practical hybrid-stepper PI baseline instead of the too-low `~0.04 A` authority.
 - Preserve the empirical PI baseline (`Kp=0.08`, `Ki=0.16`, `Iq limit=0.25 A`) as the comparison target.
 - Retune MPR bandwidth mapping against this PI baseline before enabling DOB.
+
+### 2026-05-06 PI/MPR Tuning Cleanup Pass
+
+Implemented control-tuning fixes before continuing DOB/detent enablement:
+
+- Commissioned/model-derived velocity PI now includes a low-speed current-authority floor. For the MT6835-like measured model (`psi_f ~= 0.00455 Wb`, `Kt ~= 0.341 Nm/A`, `J ~= 1e-4 kgm2`) and `Iq limit=0.25 A`, the derived PI is intentionally near the empirical baseline:
+  - `Kp ~= 0.0796 A/(rad/s)`
+  - `Ki ~= 0.159 A/rad`
+- `motor velocity pi bandwidth <hz> [zeta] [iq_limit]` now uses the requested `iq_limit` when computing the low-speed authority floor, instead of the previously active Iq limit.
+- Velocity MPR now uses the requested velocity direction to choose Coulomb friction sign when starting from rest and measured/model speed are inside the deadband. This avoids under-commanding the first move away from zero speed.
+- `velocity-validate` HIL now actually applies the advertised bandwidth PI command by default. Explicit `--velocity-pi-kp/--velocity-pi-ki` still overrides bandwidth tuning.
+
+Validation:
+
+```text
+python3 -m py_compile scripts/hil/hil_telnet.py
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+Result: PASS, 24/24 tests.
+
+./tests/run_unit_tests.sh wonderful_goldberg \
+  -s chopper.motor_commission_tune.unit \
+  -s chopper.motor_mpr.unit \
+  -s chopper.control_ref_path.unit
+Result: PASS, 3/3 suites, 40/40 test cases.
+
+west build for smartstepper_v2 + motor_mt6835_2a.overlay
+Result: PASS.
+```
+
+Live HIL notes:
+
+- Firmware flashed successfully.
+- `status` check after flash passed with `Vbus=23.6 V`, no controller fault, and zero encoder acquisition errors.
+- One boot commissioning pass completed successfully with `dir=-1`, `corr=-0.9335`, `off_mech=0.991 deg`, `warn=0`, `err=0`.
+- A later boot commissioning pass failed before velocity PI/MPR testing because the generated sweep did not complete a full mechanical revolution:
+  - first attempt: `motion=128.847 deg`, `corr=-0.2848`, encoder errors all zero,
+  - retry: `motion=1.950 deg`, `corr=-0.0045`, encoder errors all zero.
+- A generated-mode isolation run showed the controller could enter `ONLINE_VELOCITY_GENERATED`, command `Id=0.150 A`, advance the generated reference at `0.100 Hz`, and maintain clean encoder transport. This suggests the immediate blocker is repeatable generated-sweep torque/current authority or mechanical slip during mapping, not encoder SPI transport or MPR/DOB code.
+
+Current gating decision:
+
+- Do not run DOB or detent feedforward validation until boot encoder mapping is repeatable.
+- Next live work should increase/parameterize boot mapping current or use a slower/stiffer mapping trajectory, then rerun PI velocity validation with:
+
+```bash
+python3 -u scripts/hil/hil_telnet.py velocity-validate \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --boot-current 0.20 \
+  --boot-hz 0.05 \
+  --cycles 1 \
+  --velocity-hz 0.5 \
+  --velocity-hold-ms 2000 \
+  --velocity-pi-bandwidth-hz 10 \
+  --velocity-pi-zeta 1.0 \
+  --velocity-pi-iq-limit 0.25
+```
+
+If boot mapping becomes repeatable, continue with MPR bandwidth sweep before enabling DOB or detent.
+
+### 2026-05-06 Boot Mapping Repeatability Fix
+
+Follow-up to the failed generated-sweep mapping run:
+
+- Hypothesis: the mapping failure was not insufficient current. It was caused by starting trace/sampling and generated velocity immediately after commanding Id, before the rotor had settled onto the generated D-axis field. On a repeat run, the generated/trajectory state could start from a different phase, making the first part of the sweep slip or barely move.
+- Fix: encoder mapping now performs an explicit pre-sweep hold:
+  1. enter `velocity_generated`,
+  2. force velocity target to zero,
+  3. command mapping Id current,
+  4. wait `500 ms`,
+  5. reset the trace loop marker,
+  6. command the generated sweep and begin sampling.
+- The mapping current remains `0.150 A` for the MT6835 test, which is 10% of the configured `1.5 A` maximum. No increase above 10% was required.
+
+Validation:
+
+```text
+python3 -m py_compile scripts/hil/hil_telnet.py
+python3 -m unittest scripts/hil/test_hil_telnet_parser.py
+Result: PASS, 24/24 tests.
+
+west build for smartstepper_v2 + motor_mt6835_2a.overlay
+Result: PASS.
+
+HIL: two back-to-back boot mapping runs at Id=0.150 A, 0.100 Hz, 1 rev
+Result: PASS.
+```
+
+Back-to-back HIL results:
+
+```text
+Run 1:
+  valid=YES dir=-1 corr=-0.9353 off_mech=1.004 deg
+  motion=361.671 deg samples=500 rejected=0 warn=0 err=0
+
+Run 2:
+  valid=YES dir=-1 corr=-0.9202 off_mech=0.971 deg
+  motion=361.418 deg samples=500 rejected=0 warn=0 err=0
+
+Final state:
+  IDLE, Error=NONE, encoder acquisition errors all zero.
+```
+
+Conclusion:
+
+- The generated sweep did not rotate a full revolution because the command began measuring before the rotor/current had settled. It was a sequencing/state-preconditioning issue, not evidence that mapping needs more than 10% current.
+- Next validation can return to PI velocity bandwidth testing with normal `--boot-current 0.15`.

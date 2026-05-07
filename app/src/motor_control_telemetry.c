@@ -176,6 +176,7 @@ void motor_control_telemetry_store_fault_snapshot(
 	struct motor_fault_snapshot_sample *sample = &params->fault_snapshot.samples[idx];
 
 	sample->control_loop_count = params->rt_fast.control_loop_count;
+	sample->encoder_fault_reason = snapshot->encoder_fault_reason;
 	sample->encoder_angle_deg = snapshot->encoder_angle_deg;
 	sample->observer_input_rad = snapshot->observer_input_rad;
 	sample->elec_angle_rad = snapshot->elec_angle_rad;

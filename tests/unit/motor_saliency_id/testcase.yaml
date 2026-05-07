@@ -1,0 +1,11 @@
+tests:
+  chopper.motor_saliency_id.unit:
+    tags:
+      - chopper
+      - motor
+      - unit
+      - estimation
+      - saliency_id
+    harness: ztest
+    integration_platforms:
+      - native_sim

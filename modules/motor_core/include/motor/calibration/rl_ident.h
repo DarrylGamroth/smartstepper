@@ -144,27 +144,6 @@ void motor_rs_est_accumulate(struct filter_fo_f32 *filter_v,
 			     float32_t vd_v,
 			     float32_t id_a);
 
-static inline void motor_rs_est_step_filter(struct traj_f32 *traj,
-					    struct filter_fo_f32 *filter_v,
-					    struct filter_fo_f32 *filter_i,
-					    float32_t vd_v,
-					    float32_t id_meas_a,
-					    float32_t *id_ref_a_out)
-{
-	if (traj == NULL) {
-		return;
-	}
-
-	traj_run(traj);
-	if (id_ref_a_out != NULL) {
-		*id_ref_a_out = traj_get_int_value(traj);
-	}
-
-	if (filter_v != NULL && filter_i != NULL && traj_is_at_target(traj)) {
-		motor_rs_est_accumulate(filter_v, filter_i, vd_v, id_meas_a);
-	}
-}
-
 int motor_rs_est_finalize_from_scalars(float32_t v_est_v,
 				       float32_t i_est_a,
 				       float32_t inductance_h,

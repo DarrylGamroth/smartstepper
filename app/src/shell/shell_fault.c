@@ -80,6 +80,12 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 		shell_print(sh, "  Fault:      %s (%u)",
 			    motor_error_to_string((int)g_motor_params->fault_snapshot.latch_error_code),
 			    g_motor_params->fault_snapshot.latch_error_code);
+		if (g_motor_params->fault_snapshot.latch_error_code == ERROR_ENCODER_FAULT) {
+			shell_print(sh, "  Enc reason: %s (%u)",
+				    motor_encoder_fault_reason_to_string(
+					    g_motor_params->fault_snapshot.latch_encoder_fault_reason),
+				    g_motor_params->fault_snapshot.latch_encoder_fault_reason);
+		}
 		shell_print(sh, "  Fault loop: %u", g_motor_params->fault_snapshot.latch_loop);
 	}
 	shell_print(sh, "  Stored:     %u / %u",
@@ -94,8 +100,9 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 		const struct motor_fault_snapshot_sample *newest =
 			&g_motor_params->fault_snapshot.samples[newest_idx];
 		shell_print(sh,
-			    "  Latest:     loop=%u src=%s enc=%.3fdeg iq_ref=%.3fA iq=%.3fA ia=%.3fA ib=%.3fA fresh=%u warn=%u err=%u status=0x%02X",
+			    "  Latest:     loop=%u reason=%s src=%s enc=%.3fdeg iq_ref=%.3fA iq=%.3fA ia=%.3fA ib=%.3fA fresh=%u warn=%u err=%u status=0x%02X",
 			    newest->control_loop_count,
+			    motor_encoder_fault_reason_to_string(newest->encoder_fault_reason),
 			    motor_encoder_input_source_to_string(newest->input_source),
 			    (double)newest->encoder_angle_deg,
 			    (double)newest->Iq_ref_A,
@@ -150,15 +157,16 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 	}
 
 	shell_print(sh,
-		    "idx loop src fresh warn err status pqual enc_deg obs_in elec obs_we id_ref iq_ref id iq ia ib vd vq");
+		    "idx loop reason src fresh warn err status pqual enc_deg obs_in elec obs_we id_ref iq_ref id iq ia ib vd vq");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 		const struct motor_fault_snapshot_sample *sample =
 			&g_motor_params->fault_snapshot.samples[idx];
 		shell_print(sh,
-			    "%u %u %s %u %u %u 0x%02X 0x%02X %.3f %.6f %.6f %.6f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
+			    "%u %u %s %s %u %u %u 0x%02X 0x%02X %.3f %.6f %.6f %.6f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
 			    i,
 			    sample->control_loop_count,
+			    motor_encoder_fault_reason_to_string(sample->encoder_fault_reason),
 			    motor_encoder_input_source_to_string(sample->input_source),
 			    sample->sample_fresh,
 			    sample->sample_warning,
@@ -198,4 +206,3 @@ int cmd_motor_fault_snapshot_clear(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "Fault snapshot cleared");
 	return 0;
 }
-

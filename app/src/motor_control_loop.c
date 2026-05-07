@@ -44,6 +44,8 @@
 #include "motor/control/dq_decoupling.h"
 #include "motor/control/pwm_synthesis.h"
 #include "motor/control/transforms.h"
+#include "motor_encoder_fault_reason.h"
+#include "motor_current_slew.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -107,6 +109,89 @@ static inline bool motor_calibration_owns_angle_generator(uint32_t mode_flags)
 	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
 	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	       motor_is_align_active_state(mode_flags);
+}
+
+static inline bool motor_current_slew_calibration_target_active(uint32_t mode_flags)
+{
+	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
+	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
+	       motor_is_align_active_state(mode_flags);
+}
+
+static inline float32_t motor_current_ref_default_delta_a(void)
+{
+	return fmaxf(MOTOR_MAX_CURRENT_A /
+		     (CURRENT_COMMAND_RAMP_S * CONTROL_LOOP_FREQUENCY_HZ),
+		     1.0e-6f);
+}
+
+static inline void motor_current_slew_set_online_targets(struct motor_parameters *params,
+							const struct motor_current_ref *current_ref)
+{
+	const float32_t current_ref_delta_a = motor_current_ref_default_delta_a();
+
+	struct motor_current_slew_pair slew = motor_current_slew_from_params(params);
+
+	motor_current_slew_set_delta(&slew, current_ref_delta_a);
+	motor_current_slew_set_target(&slew, current_ref->id_ref_a, current_ref->iq_ref_a);
+}
+
+static inline void motor_current_slew_set_calibration_targets(struct motor_parameters *params)
+{
+	struct motor_current_slew_pair slew = motor_current_slew_from_params(params);
+
+	traj_set_max_delta(slew.iq, motor_current_ref_default_delta_a());
+	traj_set_target_value(slew.iq, 0.0f);
+}
+
+static inline void motor_control_current_slew_run(struct motor_parameters *params,
+						  struct motor_current_ref *current_ref)
+{
+	struct motor_current_slew_pair slew = motor_current_slew_from_params(params);
+
+	motor_current_slew_run(&slew, &current_ref->id_ref_a, &current_ref->iq_ref_a);
+}
+
+static inline void motor_current_slew_accumulate_calibration(
+	struct motor_parameters *params,
+	uint32_t mode_flags,
+	const struct motor_control_measurements *meas)
+{
+	if (meas == NULL || !traj_is_at_target(&params->traj_Id)) {
+		return;
+	}
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) &&
+	    traj_is_at_target(&params->traj_Id)) {
+		motor_roverl_accumulate_scalars(&params->roverl_accumulator_Vd_Id,
+						&params->roverl_accumulator_Vq_Id,
+						&params->roverl_accumulator_Id2,
+						params->Vd_V, params->Vq_V, meas->id_a);
+	}
+
+	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST)) {
+		motor_rs_est_accumulate(&params->filter_rs_est_V,
+					&params->filter_rs_est_I,
+					params->Vd_V, meas->id_a);
+	}
+}
+
+static inline void motor_control_step_current_slew_stage(struct motor_parameters *params,
+							 uint32_t mode_flags,
+							 bool use_commanded_currents,
+							 const struct motor_control_measurements *meas,
+							 struct motor_current_ref *current_ref)
+{
+	if (params == NULL || current_ref == NULL) {
+		return;
+	}
+
+	if (motor_current_slew_calibration_target_active(mode_flags)) {
+		motor_current_slew_set_calibration_targets(params);
+	} else if (!use_commanded_currents) {
+		motor_current_slew_set_online_targets(params, current_ref);
+	}
+	motor_control_current_slew_run(params, current_ref);
+	motor_current_slew_accumulate_calibration(params, mode_flags, meas);
 }
 
 static inline bool motor_vbus_fault_required(uint32_t mode_flags)
@@ -203,6 +288,7 @@ static inline void motor_fault_snapshot_prepare(struct motor_control_step_report
 	}
 
 	report->fault_snapshot.valid = true;
+	report->fault_snapshot.encoder_fault_reason = report->encoder_fault_reason;
 	report->fault_snapshot.encoder_angle_deg = encoder_angle_deg;
 	report->fault_snapshot.observer_input_rad = observer_input_rad;
 	report->fault_snapshot.elec_angle_rad = elec_angle_rad;
@@ -223,8 +309,10 @@ static inline void motor_fault_snapshot_prepare(struct motor_control_step_report
 	report->fault_snapshot.position_quality_flags = position_quality_flags;
 }
 
-static inline void motor_step_report_post_error(struct motor_control_step_report *report,
-						uint32_t error_code)
+static inline void motor_step_report_post_error_with_encoder_reason(
+	struct motor_control_step_report *report,
+	uint32_t error_code,
+	uint8_t encoder_fault_reason)
 {
 	if (report == NULL || report->error_pending) {
 		return;
@@ -232,6 +320,50 @@ static inline void motor_step_report_post_error(struct motor_control_step_report
 
 	report->error_pending = true;
 	report->error_code = error_code;
+	report->encoder_fault_reason = encoder_fault_reason;
+	report->fault_snapshot.encoder_fault_reason = encoder_fault_reason;
+}
+
+static inline void motor_step_report_post_error(struct motor_control_step_report *report,
+						uint32_t error_code)
+{
+	motor_step_report_post_error_with_encoder_reason(
+		report, error_code, MOTOR_ENCODER_FAULT_REASON_NONE);
+}
+
+static inline uint8_t motor_encoder_fault_reason_for_invalid_feedback(
+	const struct motor_feedback_ref *feedback_ref,
+	uint16_t stale_count,
+	uint32_t stale_limit)
+{
+	if (feedback_ref == NULL || feedback_ref->source == MOTOR_FEEDBACK_NONE) {
+		return MOTOR_ENCODER_FAULT_REASON_NO_FEEDBACK;
+	}
+	if (feedback_ref->error) {
+		return MOTOR_ENCODER_FAULT_REASON_FRAME_OR_IO_ERROR;
+	}
+	if (feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_PROPAGATED &&
+	    stale_count > stale_limit) {
+		return MOTOR_ENCODER_FAULT_REASON_STALE;
+	}
+	if (!motor_feedback_quality_is_usable(feedback_ref->quality_flags)) {
+		return MOTOR_ENCODER_FAULT_REASON_QUALITY;
+	}
+	if (feedback_ref->input_source == MOTOR_ANGLE_INPUT_SRC_PROPAGATED) {
+		return MOTOR_ENCODER_FAULT_REASON_PROPAGATED;
+	}
+
+	return MOTOR_ENCODER_FAULT_REASON_FEEDBACK_INVALID;
+}
+
+static inline uint8_t motor_encoder_fault_reason_for_insane_feedback(
+	const struct motor_feedback_ref *feedback_ref)
+{
+	if (feedback_ref == NULL || !isfinite(feedback_ref->velocity_filtered_rad_s)) {
+		return MOTOR_ENCODER_FAULT_REASON_VELOCITY_NAN;
+	}
+
+	return MOTOR_ENCODER_FAULT_REASON_VELOCITY_SPIKE;
 }
 
 static inline void motor_runtime_fast_sync(struct motor_parameters *params,
@@ -519,6 +651,7 @@ static inline void motor_control_step_prepare_commission_obs(
 	obs->fault_active = false;
 	obs->saturation = false;
 	obs->data_valid = false;
+	obs->velocity_ref_rad_s = 0.0f;
 }
 
 static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor_parameters *params,
@@ -913,29 +1046,17 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	uint32_t mode_flags = ctx->mode_flags;
 
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS)) {
-		traj_run(&params->traj_Id);
-		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
-
-		if (traj_is_at_target(&params->traj_Id)) {
-			motor_roverl_accumulate_scalars(&params->roverl_accumulator_Vd_Id,
-							&params->roverl_accumulator_Vq_Id,
-							&params->roverl_accumulator_Id2,
-							params->Vd_V, params->Vq_V, meas->id_a);
-		}
 	}
 
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST)) {
-		motor_rs_est_step_filter(&params->traj_Id,
-					 &params->filter_rs_est_V,
-					 &params->filter_rs_est_I,
-					 params->Vd_V, meas->id_a, &current_ref->id_ref_a);
+		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
 	}
 
 	if (motor_is_align_active_state(mode_flags)) {
-		traj_run(&params->traj_Id);
-		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
 	}
 
@@ -1018,6 +1139,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	current_ref->iq_ref_a = ctx->ref_policy_outputs.iq_ref_a;
 
 	if (ctx->ref_policy_outputs.disarmed_interlock_active) {
+		motor_current_slew_params_force_zero(params);
 		traj_set_target_value(&params->traj_velocity, 0.0f);
 		traj_set_int_value(&params->traj_velocity, 0.0f);
 		angle_gen_set_velocity(&params->angle_gen, 0.0f);
@@ -1043,9 +1165,13 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 							       rls_runtime);
 
 	if (motor_is_align_active_state(mode_flags)) {
-		current_ref->id_ref_a = traj_get_int_value(&params->traj_Id);
+		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
 	}
+
+	motor_control_step_current_slew_stage(params, mode_flags,
+					      ctx->feature_use_commanded_currents,
+					      meas, current_ref);
 
 	if (ctx->policy.generated_angle_mode == MOTOR_GENERATED_ANGLE_VELOCITY_DRIVEN) {
 		angle_gen_run(&params->angle_gen);
@@ -1207,6 +1333,89 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	return false;
 }
 
+static inline bool motor_control_step_electrical_id_voltage_active(
+	const struct motor_electrical_id_capture_ctx *cap)
+{
+	return cap != NULL && cap->active && cap->direct_voltage_enabled &&
+	       (cap->mode == MOTOR_ELECTRICAL_ID_CAPTURE_LD ||
+		cap->mode == MOTOR_ELECTRICAL_ID_CAPTURE_LQ);
+}
+
+static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_electrical_id_voltage_stage(
+	struct motor_parameters *params,
+	const struct motor_rt_control_ctx *ctx,
+	const struct motor_control_measurements *meas,
+	const struct motor_feedback_ref *feedback_ref,
+	struct motor_angle_ref *angle_ref,
+	struct motor_commutation_ref *commutation_ref,
+	struct motor_control_pwm_output *pwm_out)
+{
+	struct motor_electrical_id_capture_ctx *cap = &params->electrical_id_capture;
+
+	angle_ref->electrical_angle_rad = feedback_ref->electrical_angle_rad;
+	angle_ref->predicted_electrical_angle_rad =
+		feedback_ref->predicted_electrical_angle_rad;
+	angle_ref->electrical_speed_rad_s = feedback_ref->electrical_speed_rad_s;
+	angle_ref->source = ctx->policy.angle_source;
+
+	float32_t max_voltage_magnitude_v = params->max_modulation_index * meas->vbus_v;
+	if (max_voltage_magnitude_v <= 0.0f || cap->voltage_limit_v <= 0.0f) {
+		return true;
+	}
+
+	float32_t voltage_limit_v = fminf(cap->voltage_limit_v, max_voltage_magnitude_v);
+	commutation_ref->vd_v = clampf(cap->vd_cmd_v, -voltage_limit_v, voltage_limit_v);
+	commutation_ref->vq_v = clampf(cap->vq_cmd_v, -voltage_limit_v, voltage_limit_v);
+
+	if (motor_transforms_inv_park(commutation_ref->vd_v,
+				      commutation_ref->vq_v,
+				      angle_ref->predicted_electrical_angle_rad,
+				      &commutation_ref->va_v,
+				      &commutation_ref->vb_v) != 0) {
+		return true;
+	}
+
+	float32_t ua_pu;
+	float32_t ub_pu;
+	float32_t da_pu;
+	float32_t db_pu;
+	if (motor_pwm_synthesis_step_fast_values(commutation_ref->va_v,
+						 commutation_ref->vb_v,
+						 meas->vbus_v,
+						 ctx->feature_braking,
+						 0.0f,
+						 0.0f,
+						 VBUS_REGEN_LIMIT_V,
+						 VBUS_VOLTAGE_MARGIN_INV,
+						 &ua_pu,
+						 &ub_pu,
+						 &da_pu,
+						 &db_pu,
+						 &commutation_ref->da_hb1_pu,
+						 &commutation_ref->da_hb2_pu,
+						 &commutation_ref->db_hb1_pu,
+						 &commutation_ref->db_hb2_pu) != 0) {
+		return true;
+	}
+	ARG_UNUSED(ua_pu);
+	ARG_UNUSED(ub_pu);
+	ARG_UNUSED(da_pu);
+	ARG_UNUSED(db_pu);
+
+	commutation_ref->max_voltage_magnitude_v = max_voltage_magnitude_v;
+	commutation_ref->voltage_saturated =
+		(fabsf(commutation_ref->vd_v) >= voltage_limit_v) ||
+		(fabsf(commutation_ref->vq_v) >= voltage_limit_v);
+
+	pwm_out->da_hb1_pu = commutation_ref->da_hb1_pu;
+	pwm_out->da_hb2_pu = commutation_ref->da_hb2_pu;
+	pwm_out->db_hb1_pu = commutation_ref->db_hb1_pu;
+	pwm_out->db_hb2_pu = commutation_ref->db_hb2_pu;
+	pwm_out->update_pwm = true;
+
+	return false;
+}
+
 static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_actuator_stage(
 	struct motor_parameters *params,
 	const struct motor_rt_control_ctx *ctx,
@@ -1221,6 +1430,12 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_actuator_stage(
 {
 	if (actuator_ref == NULL || !actuator_ref->enabled) {
 		return false;
+	}
+
+	if (motor_control_step_electrical_id_voltage_active(&params->electrical_id_capture)) {
+		return motor_control_step_electrical_id_voltage_stage(params, ctx, meas,
+								     feedback_ref, angle_ref,
+								     commutation_ref, pwm_out);
 	}
 
 	switch (actuator_ref->kind) {
@@ -1286,7 +1501,94 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	commission_obs->vq_v = commutation_ref->vq_v;
 	commission_obs->mech_speed_rad_s = params->live.velocity_rad_s;
 	commission_obs->elec_speed_rad_s = angle_ref->electrical_speed_rad_s;
+	commission_obs->velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;
 	commission_obs->saturation = commutation_ref->voltage_saturated;
+}
+
+static inline void motor_control_step_electrical_id_capture(
+	struct motor_parameters *params,
+	const struct motor_current_ref *current_ref,
+	const struct motor_commutation_ref *commutation_ref)
+{
+	struct motor_electrical_id_capture_ctx *cap = &params->electrical_id_capture;
+
+	if (!cap->active || cap->done || cap->target_samples == 0U) {
+		return;
+	}
+
+	cap->update_count++;
+	int ret = 0;
+	switch (cap->mode) {
+	case MOTOR_ELECTRICAL_ID_CAPTURE_RS:
+		ret = motor_electrical_id_rs_add(&cap->rs_accum, &cap->rs_cfg,
+						 commutation_ref->vd_v,
+						 current_ref->id_meas_a);
+		break;
+	case MOTOR_ELECTRICAL_ID_CAPTURE_LD:
+	case MOTOR_ELECTRICAL_ID_CAPTURE_LQ: {
+		bool q_axis = cap->mode == MOTOR_ELECTRICAL_ID_CAPTURE_LQ;
+		float32_t current = q_axis ? current_ref->iq_meas_a : current_ref->id_meas_a;
+		float32_t voltage = q_axis ? commutation_ref->vq_v : commutation_ref->vd_v;
+
+		if (cap->direct_voltage_enabled) {
+			if (cap->l_segment_active) {
+				if (cap->l_segment_latch_pending) {
+					cap->l_segment_start_current_a = current;
+					cap->l_segment_last_current_a = current;
+					cap->l_segment_flux_vs = 0.0f;
+					cap->l_segment_samples = 0U;
+					cap->l_segment_latch_pending = false;
+				} else {
+					float32_t v_eff = voltage - (cap->rs_ohm * current);
+
+					cap->l_segment_flux_vs += v_eff *
+								  cap->l_cfg.dt_s;
+					cap->l_segment_last_current_a = current;
+					cap->l_segment_samples++;
+				}
+			}
+			return;
+		}
+
+		if (!cap->prev_valid) {
+			cap->prev_current_a = current;
+			cap->prev_valid = true;
+			return;
+		}
+		ret = motor_electrical_id_l_add(&cap->l_accum, &cap->l_cfg,
+						voltage, current,
+						cap->prev_current_a,
+						cap->rs_ohm);
+		cap->prev_current_a = current;
+		break;
+	}
+	case MOTOR_ELECTRICAL_ID_CAPTURE_VALIDATE_ID: {
+		float32_t err = fabsf(cap->validation_target_a - current_ref->id_meas_a);
+		cap->validation_sum_abs_error_a += err;
+		cap->validation_max_abs_error_a = fmaxf(cap->validation_max_abs_error_a, err);
+		ret = 0;
+		break;
+	}
+	default:
+		cap->active = false;
+		cap->done = true;
+		cap->valid = false;
+		return;
+	}
+
+	if (ret == 0) {
+		cap->sample_count++;
+	} else if (ret > 0) {
+		cap->rejected_samples++;
+	} else {
+		cap->rejected_samples++;
+	}
+
+	if (cap->sample_count >= cap->target_samples) {
+		cap->active = false;
+		cap->done = true;
+		cap->valid = true;
+	}
 }
 
 void motor_control_loop_step(struct motor_parameters *params,
@@ -1340,7 +1642,8 @@ void motor_control_loop_step(struct motor_parameters *params,
 						      generated_angle_active, commission_obs,
 						      enc_stage);
 	if (enc_ret == -EIO) {
-		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
+		motor_step_report_post_error_with_encoder_reason(
+			report, ERROR_ENCODER_FAULT, MOTOR_ENCODER_FAULT_REASON_READ_EIO);
 		goto isr_done;
 	}
 	motor_control_step_prepare_encoder_reports(params, encoder_sample, enc_stage, report);
@@ -1349,12 +1652,18 @@ void motor_control_loop_step(struct motor_parameters *params,
 	if (!motor_control_kernel_feedback_valid(&ctx->policy, feedback_ref,
 						 params->live.position_stale_count,
 						 ENCODER_FAULT_THRESHOLD)) {
-		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
+		motor_step_report_post_error_with_encoder_reason(
+			report, ERROR_ENCODER_FAULT,
+			motor_encoder_fault_reason_for_invalid_feedback(
+				feedback_ref, params->live.position_stale_count,
+				ENCODER_FAULT_THRESHOLD));
 		goto isr_done;
 	}
 	if (!motor_control_kernel_feedback_sane(&ctx->policy, feedback_ref,
 						params->profile_max_velocity_rad_s)) {
-		motor_step_report_post_error(report, ERROR_ENCODER_FAULT);
+		motor_step_report_post_error_with_encoder_reason(
+			report, ERROR_ENCODER_FAULT,
+			motor_encoder_fault_reason_for_insane_feedback(feedback_ref));
 		goto isr_done;
 	}
 
@@ -1403,6 +1712,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_control_step_publish_stage(params, meas, motion_ref, feedback_ref, angle_ref,
 					 current_ref, commutation_ref, rls_runtime, commission_obs);
+	motor_control_step_electrical_id_capture(params, current_ref, commutation_ref);
 
 isr_done:
 	motor_control_step_finalize(params, mode_flags, control_armed, commission_obs);

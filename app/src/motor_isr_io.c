@@ -57,6 +57,8 @@ static void motor_adc_publish_step_report(struct motor_parameters *params,
 	if (report->error_pending) {
 		params->fault_snapshot.latched = 1U;
 		params->fault_snapshot.latch_error_code = report->error_code;
+		params->fault_snapshot.latch_encoder_fault_reason =
+			report->encoder_fault_reason;
 		params->fault_snapshot.latch_loop = params->rt_fast.control_loop_count;
 		struct motor_event evt = {
 			.type = MOTOR_EVENT_ERROR,

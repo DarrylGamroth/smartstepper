@@ -27,6 +27,7 @@
 #include "motor/motion/motion_planner.h"
 #include "motor/runtime/commission_tune.h"
 #include "shell_parse.h"
+#include "shell_motor_limits.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
@@ -46,6 +47,9 @@ enum motor_gains_profile {
 #define VELOCITY_DEFAULT_GAIN_SPEED_HZ 0.50f
 #define VELOCITY_MODEL_SAFE_BW_HZ 0.25f
 #define VELOCITY_MODEL_NOMINAL_BW_HZ 0.50f
+#define VELOCITY_MODEL_LOW_SPEED_GAIN_HZ 0.50f
+#define VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION 1.0f
+#define VELOCITY_MODEL_KI_TO_KP_MAX 2.0f
 #define POSITION_MODEL_SAFE_BW_RATIO 0.10f
 #define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
 #define POSITION_TARGET_MIN_DURATION_S 0.20f
@@ -80,6 +84,13 @@ static inline bool motor_velocity_dob_ready(const struct motor_parameters *param
 	if (params->detent_map_cfg.enabled) {
 		if (reason != NULL) {
 			*reason = "detent feedforward enabled";
+		}
+		return false;
+	}
+	if (params->flux_model_source != MOTOR_MODEL_SOURCE_MEASURED ||
+	    params->mech_model_source != MOTOR_MODEL_SOURCE_MEASURED) {
+		if (reason != NULL) {
+			*reason = "model source is not measured";
 		}
 		return false;
 	}
@@ -208,8 +219,13 @@ static inline int motor_compute_model_outer_gains(const struct motor_parameters 
 	float omega = 2.0f * PI_F32 * velocity_bw_hz;
 	float kp_num = (2.0f * zeta * omega * j) - b;
 	float kp_floor = (0.25f * omega * j) / kt;
-	float kp = fmaxf(kp_num / kt, kp_floor);
-	float ki = (omega * omega * j) / kt;
+	float low_speed_gain_rad_s = 2.0f * PI_F32 * VELOCITY_MODEL_LOW_SPEED_GAIN_HZ;
+	float kp_authority =
+		(VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION * iq_limit) /
+		low_speed_gain_rad_s;
+	float kp = fmaxf(fmaxf(kp_num / kt, kp_floor), kp_authority);
+	float ki_model = (omega * omega * j) / kt;
+	float ki = fminf(ki_model, VELOCITY_MODEL_KI_TO_KP_MAX * kp);
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
 		return -ERANGE;
 	}
@@ -304,6 +320,7 @@ static inline int motor_compute_velocity_dob_defaults(const struct motor_paramet
 
 static inline int motor_compute_velocity_bandwidth_gains(const struct motor_parameters *params,
 						  float bw_hz, float zeta,
+						  float iq_limit,
 						  float *kp_out, float *ki_out,
 						  float *kt_out)
 {
@@ -329,8 +346,16 @@ static inline int motor_compute_velocity_bandwidth_gains(const struct motor_para
 
 	float kp_num = (2.0f * zeta * omega * j) - b;
 	float kp_floor = (0.25f * omega * j) / kt;
-	float kp = fmaxf(kp_num / kt, kp_floor);
-	float ki = (omega * omega * j) / kt;
+	if (!isfinite(iq_limit) || iq_limit <= 0.0f) {
+		return -ERANGE;
+	}
+	float low_speed_gain_rad_s = 2.0f * PI_F32 * VELOCITY_MODEL_LOW_SPEED_GAIN_HZ;
+	float kp_authority =
+		(VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION * iq_limit) /
+		low_speed_gain_rad_s;
+	float kp = fmaxf(fmaxf(kp_num / kt, kp_floor), kp_authority);
+	float ki_model = (omega * omega * j) / kt;
+	float ki = fminf(ki_model, VELOCITY_MODEL_KI_TO_KP_MAX * kp);
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
 		return -ERANGE;
 	}

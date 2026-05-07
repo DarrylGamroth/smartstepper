@@ -24,6 +24,7 @@
 		pwm-frequency-hz = <20000>;
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
+		current-command-ramp-ms = <100>;
 		offset-pole-hz = <300>;
 		/*
 		 * AEAT-9955 positive direction is clockwise looking from the back
@@ -48,6 +49,17 @@
 		rs-est-current-ma = <100>;
 		rs-est-rampup-ms = <1000>;
 		rs-est-duration-ms = <1000>;
+		commission-electrical-rs-current-ma = <100>;
+		commission-electrical-current-limit-ma = <100>;
+		commission-electrical-samples = <128>;
+		commission-electrical-settle-ms = <1000>;
+		commission-electrical-current-ramp-ms = <1000>;
+		commission-electrical-l-pulse-mv = <450>;
+		commission-electrical-l-pulse-ms = <5>;
+		commission-electrical-demod-pulse-mv = <450>;
+		commission-electrical-demod-pulse-ms = <2>;
+		commission-electrical-demod-half-cycles = <40>;
+		commission-electrical-max-pulse-mv = <500>;
 		rls-excitation-current-ma = <100>;
 		velocity-max-hz = <50>;
 		velocity-max-accel-hz-per-s = <10>;

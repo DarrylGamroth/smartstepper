@@ -35,10 +35,17 @@ int cmd_motor_velocity_target(const struct shell *sh, size_t argc, char **argv)
 	/* Convert Hz to mechanical rad/s for trajectory */
 	float target_rad_s = target_hz * 2.0f * PI_F32;
 
-	/* Respect currently configured profile velocity limits. */
+	/* Respect profile and measured voltage-speed limits. */
+	float32_t speed_limit_hz = motor_shell_velocity_command_limit_hz(g_motor_params);
+	float32_t speed_limit_rad_s = speed_limit_hz * 2.0f * PI_F32;
 	float32_t target_clamped = clampf(target_rad_s,
-					  -g_motor_params->profile_max_velocity_rad_s,
-					  g_motor_params->profile_max_velocity_rad_s);
+					  -speed_limit_rad_s,
+					  speed_limit_rad_s);
+	if (fabsf(target_clamped - target_rad_s) > 1.0e-6f) {
+		shell_warn(sh,
+			   "Velocity target limited to %.2f Hz by profile/voltage-speed limit",
+			   (double)(target_clamped / (2.0f * PI_F32)));
+	}
 	float32_t prev_target = g_motor_params->live.velocity_target_rad_s;
 	bool sign_change =
 		(prev_target > 1e-6f && target_clamped < -1e-6f) ||
@@ -214,6 +221,17 @@ int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->detent_map_cfg.iq_ff_limit_a,
 		    (double)g_motor_params->live.detent_iq_ff_a);
 	shell_print(sh, "  Iq limit:   %.3f A", (double)g_motor_params->velocity_cl_iq_limit_A);
+	struct motor_voltage_speed_limit_result voltage_limit = {0};
+	if (motor_shell_voltage_speed_limit(g_motor_params,
+					    g_motor_params->velocity_cl_iq_limit_A,
+					    &voltage_limit) == 0 && voltage_limit.valid) {
+		float command_limit_hz = motor_shell_velocity_command_limit_hz(g_motor_params);
+		shell_print(sh, "  Speed limit: %.2f Hz cmd, %.2f Hz voltage (Vlim=%.2f V, bemf=%.2f V)",
+			    (double)command_limit_hz,
+			    (double)voltage_limit.max_mech_hz,
+			    (double)voltage_limit.voltage_limit_v,
+			    (double)voltage_limit.bemf_at_limit_v);
+	}
 
 	return 0;
 }
@@ -221,7 +239,7 @@ int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char **argv)
 /* motor velocity pi status
  * motor velocity pi set <kp_a_per_rad_s> <ki_a_per_rad> <iq_limit_a>
  * motor velocity pi defaults <safe|nominal>
- * motor velocity pi bandwidth <hz> [zeta]
+ * motor velocity pi bandwidth <hz> [zeta] [iq_limit_a]
  */
 int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 {
@@ -229,7 +247,7 @@ int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "Usage: motor velocity pi status | "
 			    "motor velocity pi set <kp> <ki> <iq_limit> | "
 			    "motor velocity pi defaults <safe|nominal> | "
-			    "motor velocity pi bandwidth <hz> [zeta]");
+			    "motor velocity pi bandwidth <hz> [zeta] [iq_limit]");
 		return -EINVAL;
 	}
 
@@ -336,16 +354,18 @@ int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	if (strcmp(argv[1], "bandwidth") == 0) {
-		if (argc != 3 && argc != 4) {
-			shell_error(sh, "Usage: motor velocity pi bandwidth <hz> [zeta]");
+		if (argc < 3 || argc > 5) {
+			shell_error(sh, "Usage: motor velocity pi bandwidth <hz> [zeta] [iq_limit]");
 			return -EINVAL;
 		}
 
 		float bw_hz = 0.0f;
 		float zeta = OUTER_LOOP_ZETA_DEFAULT;
+		float iq_limit = g_motor_params->velocity_cl_iq_limit_A;
 		if (!shell_parse_finite_float(argv[2], &bw_hz) ||
-		    (argc == 4 && !shell_parse_finite_float(argv[3], &zeta))) {
-			shell_error(sh, "Bandwidth/zeta must be finite numbers");
+		    (argc >= 4 && !shell_parse_finite_float(argv[3], &zeta)) ||
+		    (argc == 5 && !shell_parse_finite_float(argv[4], &iq_limit))) {
+			shell_error(sh, "Bandwidth/zeta/iq_limit must be finite numbers");
 			return -EINVAL;
 		}
 		if (bw_hz <= 0.0f || bw_hz > (CONTROL_LOOP_FREQUENCY_HZ * 0.25f)) {
@@ -353,12 +373,17 @@ int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 				    (double)(CONTROL_LOOP_FREQUENCY_HZ * 0.25f));
 			return -EINVAL;
 		}
+		if (iq_limit <= 0.0f || iq_limit > MOTOR_MAX_CURRENT_A) {
+			shell_error(sh, "Iq limit must be in (0, %.3f] A",
+				    (double)MOTOR_MAX_CURRENT_A);
+			return -EINVAL;
+		}
 
 		float kp = 0.0f;
 		float ki = 0.0f;
 		float kt = 0.0f;
 		int ret = motor_compute_velocity_bandwidth_gains(g_motor_params, bw_hz, zeta,
-								 &kp, &ki, &kt);
+								 iq_limit, &kp, &ki, &kt);
 		if (ret != 0) {
 			if (ret == -ERANGE) {
 				shell_error(sh,
@@ -370,7 +395,7 @@ int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 			return ret;
 		}
 
-		ret = motor_apply_velocity_gains(kp, ki, g_motor_params->velocity_cl_iq_limit_A);
+		ret = motor_apply_velocity_gains(kp, ki, iq_limit);
 		if (ret != 0) {
 			shell_error(sh, "Failed to apply velocity PI bandwidth settings (err %d)", ret);
 			return ret;
@@ -378,15 +403,16 @@ int cmd_motor_velocity_pi(const struct shell *sh, size_t argc, char **argv)
 
 		motor_command_feed_watchdog(g_motor_params);
 		shell_print(sh,
-			    "Velocity bandwidth tuned: bw=%.2f Hz zeta=%.2f -> Kp=%.5f A/(rad/s), Ki=%.5f A/rad (Kt=%.6f Nm/A)",
-			    (double)bw_hz, (double)zeta, (double)kp, (double)ki, (double)kt);
+			    "Velocity bandwidth tuned: bw=%.2f Hz zeta=%.2f iq_limit=%.3f A -> Kp=%.5f A/(rad/s), Ki=%.5f A/rad (Kt=%.6f Nm/A)",
+			    (double)bw_hz, (double)zeta, (double)iq_limit,
+			    (double)kp, (double)ki, (double)kt);
 		return 0;
 	}
 
 	shell_error(sh, "Usage: motor velocity pi status | "
 		    "motor velocity pi set <kp> <ki> <iq_limit> | "
 		    "motor velocity pi defaults <safe|nominal> | "
-		    "motor velocity pi bandwidth <hz> [zeta]");
+		    "motor velocity pi bandwidth <hz> [zeta] [iq_limit]");
 	return -EINVAL;
 }
 
@@ -737,4 +763,3 @@ int cmd_motor_velocity_dob(const struct shell *sh, size_t argc, char **argv)
 }
 
 /* motor position target <deg> */
-

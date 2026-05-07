@@ -135,4 +135,41 @@ ZTEST(motor_commission_tune, test_accepts_and_produces_positive_gains)
 	zassert_true(out.velocity_dob_torque_limit_nm > 0.0f, NULL);
 }
 
+ZTEST(motor_commission_tune, test_mt6835_like_model_uses_low_speed_authority_floor)
+{
+	struct motor_commission_tune_config cfg;
+	struct motor_commission_fit_summary fit = {
+		.psi_f_valid = true,
+		.psi_f_wb = 0.00455f,
+		.psi_f_r2 = 0.92f,
+		.psi_f_residual_rms_v = 0.3f,
+		.psi_f_sample_count = 180U,
+		.mech_valid = true,
+		.inertia_kgm2 = 1.0e-4f,
+		.viscous_friction_nm_per_rad_s = 2.7e-3f,
+		.mech_r2 = 0.70f,
+		.mech_residual_rms_nm = 0.06f,
+		.mech_sample_count = 220U,
+	};
+	struct motor_commission_tune_output out = {0};
+
+	zassert_ok(motor_commission_tune_config_default(&cfg,
+							50.0f,
+							0.00005f,
+							1.5f,
+							2.0f * 3.14159265f * 5.0f,
+							2.0f * 3.14159265f * 20.0f),
+		   NULL);
+	cfg.iq_limit_a = 0.25f;
+
+	zassert_ok(motor_commission_tune_compute(&fit, &cfg, &out), NULL);
+	zassert_true(out.accepted, NULL);
+	zassert_within(out.kt_nm_per_a, 0.34125f, 1.0e-5f, NULL);
+	zassert_within(out.velocity_kp_a_per_rad_s, 0.07958f, 1.0e-4f,
+		       "Kp should provide roughly full Iq authority at 0.5 Hz");
+	zassert_within(out.velocity_ki_a_per_rad,
+		       2.0f * out.velocity_kp_a_per_rad_s, 1.0e-5f,
+		       "Ki should be capped relative to Kp for low-speed hybrid stepper startup");
+}
+
 ZTEST_SUITE(motor_commission_tune, NULL, NULL, NULL, NULL, NULL);

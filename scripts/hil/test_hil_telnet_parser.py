@@ -190,6 +190,58 @@ Encoder Control Readiness:
 
         self.assertEqual(report.verdict, "PASS")
 
+    def test_velocity_validate_commands_apply_bandwidth_pi_by_default(self) -> None:
+        args = hil_telnet.parse_args([
+            "velocity-validate",
+            "--no-log",
+            "--velocity-pi-bandwidth-hz",
+            "10",
+            "--velocity-pi-zeta",
+            "1.0",
+            "--velocity-pi-iq-limit",
+            "0.25",
+        ])
+
+        commands = [command.command for command in hil_telnet.scenario_velocity_validate_commands(args)]
+
+        self.assertIn("motor velocity pi bandwidth 10.000 1.000 0.250", commands)
+        self.assertIn("motor velocity pi status", commands)
+
+    def test_velocity_validate_commands_allow_explicit_pi_override(self) -> None:
+        args = hil_telnet.parse_args([
+            "velocity-validate",
+            "--no-log",
+            "--velocity-pi-kp",
+            "0.08",
+            "--velocity-pi-ki",
+            "0.16",
+            "--velocity-pi-iq-limit",
+            "0.25",
+        ])
+
+        commands = [command.command for command in hil_telnet.scenario_velocity_validate_commands(args)]
+
+        self.assertIn("motor velocity pi set 0.080000 0.160000 0.250000", commands)
+        self.assertFalse(any(command.startswith("motor velocity pi bandwidth")
+                             for command in commands))
+
+    def test_custom_commission_commands_get_long_timeouts(self) -> None:
+        args = hil_telnet.parse_args([
+            "custom",
+            "--no-log",
+            "--command",
+            "motor commission boot",
+            "--command",
+            "motor state status",
+            "--command-timeout",
+            "3",
+        ])
+
+        commands = hil_telnet.scenario_custom(args)
+
+        self.assertGreaterEqual(commands[0].timeout_s, args.boot_commission_timeout_s)
+        self.assertEqual(commands[1].timeout_s, 3.0)
+
     def test_encoder_validate_fails_wrong_velocity_sign(self) -> None:
         results = [
             hil_telnet.ShellResult(
@@ -575,6 +627,268 @@ Encoder Control Readiness:
 
         self.assertEqual(report.verdict, "PASS")
         self.assertFalse(any(check.name == "current_validation" for check in report.checks))
+
+    def test_velocity_sweep_passes_with_full_rotation_trace(self) -> None:
+        args = hil_telnet.parse_args([
+            "velocity-sweep",
+            "--no-log",
+            "--velocity-sweep-commission",
+            "none",
+            "--velocity-sweep-target-hz",
+            "0.5",
+            "--velocity-sweep-target-hz",
+            "-0.5",
+        ])
+        results = [
+            hil_telnet.ShellResult(
+                "motor velocity target 0.500",
+                "Velocity target set to 0.50 Hz\n",
+            ),
+            hil_telnet.ShellResult("motor velocity status", """
+Velocity Controller Status:
+  Target:     0.50 Hz
+  Ref:        0.50 Hz
+  Measured:   0.49 Hz
+  Error:      0.01 Hz
+  Outer loop: PI
+  Iq limit:   0.225 A
+"""),
+            hil_telnet.ShellResult("motor encoder trace summary", """
+Encoder raw trace summary:
+  Stored:       512 / 512
+  Decimation:   80
+  Overrun:      0
+  Raw delta:    360000 mdeg, avg 500 mHz
+  Ctrl delta:   360000 mdeg, avg 500 mHz
+  Counts:       clean=512 fresh=512 ctrl_en=512 warn=0 err=0 io=0
+  Delta drops:  0
+"""),
+            hil_telnet.ShellResult(
+                "motor velocity target -0.500",
+                "Velocity target set to -0.50 Hz\n",
+            ),
+            hil_telnet.ShellResult("motor velocity status", """
+Velocity Controller Status:
+  Target:     -0.50 Hz
+  Ref:        -0.50 Hz
+  Measured:   -0.48 Hz
+  Error:      -0.02 Hz
+  Outer loop: PI
+  Iq limit:   0.225 A
+"""),
+            hil_telnet.ShellResult("motor encoder trace summary", """
+Encoder raw trace summary:
+  Stored:       512 / 512
+  Decimation:   80
+  Overrun:      0
+  Raw delta:    -355000 mdeg, avg -493 mHz
+  Ctrl delta:   -355000 mdeg, avg -493 mHz
+  Counts:       clean=512 fresh=512 ctrl_en=512 warn=0 err=0 io=0
+  Delta drops:  0
+"""),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(args, results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+        sweep = next(check for check in report.checks if check.name == "velocity_sweep")
+        self.assertEqual(sweep.values["samples"], 2)
+
+    def test_velocity_sweep_fails_wrong_direction(self) -> None:
+        args = hil_telnet.parse_args([
+            "velocity-sweep",
+            "--no-log",
+            "--velocity-sweep-commission",
+            "none",
+            "--velocity-sweep-target-hz",
+            "0.5",
+        ])
+        results = [
+            hil_telnet.ShellResult("motor velocity target 0.500", ""),
+            hil_telnet.ShellResult("motor velocity status", """
+Velocity Controller Status:
+  Target:     0.50 Hz
+  Ref:        0.50 Hz
+  Measured:   -0.50 Hz
+  Error:      1.00 Hz
+  Outer loop: PI
+  Iq limit:   0.225 A
+"""),
+            hil_telnet.ShellResult("motor encoder trace summary", """
+Encoder raw trace summary:
+  Stored:       512 / 512
+  Raw delta:    -360000 mdeg, avg -500 mHz
+  Ctrl delta:   -360000 mdeg, avg -500 mHz
+  Counts:       clean=512 fresh=512 ctrl_en=512 warn=0 err=0 io=0
+  Delta drops:  0
+"""),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  Error: NONE (0)\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(args, results, None)
+
+        self.assertEqual(report.verdict, "FAIL")
+        point = next(check for check in report.checks if check.name == "velocity_sweep_0")
+        self.assertEqual(point.status, "FAIL")
+
+    def test_required_boot_commission_rejects_failed_response(self) -> None:
+        cmd = hil_telnet.ShellCommand(
+            "motor commission boot 0.150 0.100 1.000",
+            require_success=True,
+        )
+
+        reason = hil_telnet._command_success_failure_reason(
+            cmd,
+            "Encoder boot commissioning failed (err -14)\n",
+        )
+
+        self.assertIsNotNone(reason)
+
+    def test_required_boot_commission_accepts_completion_response(self) -> None:
+        cmd = hil_telnet.ShellCommand(
+            "motor commission boot 0.150 0.100 1.000",
+            require_success=True,
+        )
+
+        reason = hil_telnet._command_success_failure_reason(
+            cmd,
+            "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+        )
+
+        self.assertIsNone(reason)
+
+    def test_parse_encoder_fault_reason(self) -> None:
+        reason = hil_telnet._parse_encoder_fault_reason(
+            "Fault snapshot:\n"
+            "  Fault:      ENCODER_FAULT (3)\n"
+            "  Enc reason: stale (4)\n"
+        )
+
+        self.assertEqual(reason, ("stale", 4))
+
+    def test_status_reports_encoder_fault_reason(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n"
+                "  State: ERROR (17)\n"
+                "  Error: ENCODER_FAULT (3)\n"
+                "  Enc reason: stale (4)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor fault snapshot status",
+                "Fault snapshot:\n"
+                "  Latched:    YES\n"
+                "  Fault:      ENCODER_FAULT (3)\n"
+                "  Enc reason: stale (4)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n"
+                "  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("status"), results, None)
+
+        reason = next(check for check in report.checks
+                      if check.name == "encoder_fault_reason")
+        self.assertEqual(reason.status, "INFO")
+        self.assertEqual(reason.values["reason"], "stale")
+        self.assertEqual(reason.values["code"], 4)
+
+    def test_encoder_fault_without_reason_fails(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n"
+                "  State: ERROR (17)\n"
+                "  Error: ENCODER_FAULT (3)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor fault snapshot status",
+                "Fault snapshot:\n"
+                "  Latched:    YES\n"
+                "  Fault:      ENCODER_FAULT (3)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition",
+                "Encoder acquisition:\n"
+                "  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("status"), results, None)
+
+        reason = next(check for check in report.checks
+                      if check.name == "encoder_fault_reason")
+        self.assertEqual(reason.status, "FAIL")
+
+    def test_production_electrical_id_commands_run_and_apply(self) -> None:
+        args = hil_telnet.parse_args([
+            "production-electrical-id",
+            "--no-log",
+            "--yes-live-motion",
+            "--electrical-id-current",
+            "0.04",
+            "--electrical-id-pulse",
+            "0.02",
+            "--electrical-id-samples",
+            "16",
+        ])
+
+        commands = [command.command for command in hil_telnet.scenario_production_electrical_id(args)]
+
+        self.assertIn("motor commission electrical plan", commands)
+        self.assertIn("motor commission electrical run 0.040 0.020 16", commands)
+        self.assertIn("motor commission electrical apply", commands)
+        self.assertIn("motor commission electrical validate 0.040 300 0.010", commands)
+
+    def test_production_electrical_id_required_response_checks(self) -> None:
+        run_cmd = hil_telnet.ShellCommand(
+            "motor commission electrical run 0.040 0.020 16",
+            require_success=True,
+        )
+        apply_cmd = hil_telnet.ShellCommand(
+            "motor commission electrical apply",
+            require_success=True,
+        )
+        validate_cmd = hil_telnet.ShellCommand(
+            "motor commission electrical validate 0.040 300 0.010",
+            require_success=True,
+        )
+
+        self.assertIsNone(hil_telnet._command_success_failure_reason(
+            run_cmd,
+            "Production inductance staged: Ld=0.003 H Lq=0.003 H\n",
+        ))
+        self.assertIsNone(hil_telnet._command_success_failure_reason(
+            apply_cmd,
+            "Production electrical ID applied: Rs=2.2 Ld=0.003 Lq=0.003\n",
+        ))
+        self.assertIsNotNone(hil_telnet._command_success_failure_reason(
+            run_cmd,
+            "Production Rs measurement rejected (err -34)\n",
+        ))
+        self.assertIsNone(hil_telnet._command_success_failure_reason(
+            validate_cmd,
+            "Production electrical current-step validation: PASS target=0.0400 A\n",
+        ))
 
 
 if __name__ == "__main__":

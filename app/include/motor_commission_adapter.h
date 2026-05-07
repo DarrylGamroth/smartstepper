@@ -32,6 +32,8 @@ static inline void motor_commission_runtime_ctx_init(struct motor_commission_run
 		.viscous_friction_nm_per_rad_s_active =
 			&params->viscous_friction_nm_per_rad_s_active,
 		.coulomb_friction_nm_active = &params->coulomb_friction_nm_active,
+		.flux_model_source = &params->flux_model_source,
+		.mech_model_source = &params->mech_model_source,
 		.velocity_cl_kp_a_per_rad_s = &params->velocity_cl_kp_A_per_rad_s,
 		.velocity_cl_ki_a_per_rad = &params->velocity_cl_ki_A_per_rad,
 		.velocity_cl_iq_limit_a = &params->velocity_cl_iq_limit_A,

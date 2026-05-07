@@ -18,6 +18,13 @@
 
 #define MOTOR_COMMISSION_MAX_SAMPLES 512U
 
+#ifndef MOTOR_MODEL_SOURCE_FALLBACK
+#define MOTOR_MODEL_SOURCE_FALLBACK 0U
+#endif
+#ifndef MOTOR_MODEL_SOURCE_MEASURED
+#define MOTOR_MODEL_SOURCE_MEASURED 1U
+#endif
+
 enum motor_commission_mode {
 	MOTOR_COMMISSION_MODE_NONE = 0,
 	MOTOR_COMMISSION_MODE_FLUX = 1,
@@ -142,6 +149,7 @@ struct motor_commission_observation {
 	bool fault_active;
 	bool saturation;
 	bool data_valid;
+	float32_t velocity_ref_rad_s;
 	float32_t vbus_v;
 	float32_t id_a;
 	float32_t iq_a;
@@ -170,6 +178,7 @@ struct motor_commission_ctx {
 	uint32_t reject_fault;
 	uint32_t reject_saturation;
 	uint32_t reject_data_invalid;
+	uint32_t reject_velocity_tracking;
 
 	bool prev_valid;
 	uint32_t prev_loop_count;
@@ -210,6 +219,8 @@ struct motor_commission_runtime_ctx {
 	float32_t *inertia_kgm2_active;
 	float32_t *viscous_friction_nm_per_rad_s_active;
 	float32_t *coulomb_friction_nm_active;
+	uint8_t *flux_model_source;
+	uint8_t *mech_model_source;
 	float32_t *velocity_cl_kp_a_per_rad_s;
 	float32_t *velocity_cl_ki_a_per_rad;
 	float32_t *velocity_cl_iq_limit_a;

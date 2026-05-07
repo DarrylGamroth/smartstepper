@@ -9,6 +9,7 @@ target_include_directories(app PRIVATE
 target_sources(app PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/command_arbitration.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/protection/interlocks.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/runtime/control_kernel.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/control/current_loop.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/control/dq_decoupling.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/motor_core/src/control/pwm_synthesis.c

@@ -22,6 +22,7 @@
 #include "motor/motion/motion_planner.h"
 #include "motor/motion/motion_profile.h"
 #include "motor/motion/traj.h"
+#include "motor_torque.h"
 
 static const float32_t motor_commission_validate_step_scale[] = {
 	0.2f, 0.6f, 1.0f, -0.2f, -0.6f, -1.0f, 0.0f,
@@ -89,13 +90,59 @@ static int motor_commission_enter_mode_armed(const struct shell *sh,
 	return cmd_motor_arm(sh, 0, NULL);
 }
 
+static bool motor_commission_current_model_cap(float32_t ramp_s,
+					       float32_t max_velocity_rad_s,
+					       float32_t *iq_cap_out)
+{
+	if (g_motor_params == NULL || iq_cap_out == NULL) {
+		return false;
+	}
+
+	const struct motor_commission_results *res = &g_motor_params->commission.results;
+	bool have_model = (res->mech_valid &&
+			   res->mech_confidence >= COMMISSION_AUTO_MECH_MIN_CONFIDENCE &&
+			   res->psi_f_valid) ||
+			  (g_motor_params->commission.auto_tune_applied &&
+			   g_motor_params->commission.auto_tune_staged.accepted);
+	if (!have_model) {
+		return false;
+	}
+
+	float32_t j = g_motor_params->inertia_kgm2_active;
+	float32_t b = g_motor_params->viscous_friction_nm_per_rad_s_active;
+	float32_t tc = g_motor_params->coulomb_friction_nm_active;
+	float32_t kt = motor_torque_gain_resolve_active(g_motor_params);
+	if (!isfinite(j) || j <= 0.0f || !isfinite(b) || b < 0.0f ||
+	    !isfinite(tc) || tc < 0.0f || !isfinite(kt) || kt <= 0.0f ||
+	    !isfinite(ramp_s) || ramp_s <= 0.0f ||
+	    !isfinite(max_velocity_rad_s) || max_velocity_rad_s <= 0.0f) {
+		return false;
+	}
+
+	float32_t alpha_limit_rad_s2 = max_velocity_rad_s / ramp_s;
+	float32_t torque_nm = (j * alpha_limit_rad_s2) +
+			      (b * max_velocity_rad_s) +
+			      tc +
+			      fmaxf(0.25f * tc, 1.0e-4f);
+	float32_t iq_cap = torque_nm / kt;
+	if (!isfinite(iq_cap) || iq_cap < 0.01f) {
+		return false;
+	}
+
+	*iq_cap_out = iq_cap;
+	return true;
+}
+
 int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, char **argv)
 {
 	float32_t iq_a = MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_IQ_A;
 	uint32_t hold_ms = MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_HOLD_MS;
+	uint32_t ramp_ms = MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_RAMP_MS;
+	float32_t stop_motion_deg = MOTOR_COMMISSION_VALIDATE_CURRENT_DEFAULT_STOP_DEG;
 
-	if (argc > 3) {
-		shell_error(sh, "Usage: motor commission validate current [iq_a] [hold_ms]");
+	if (argc > 5) {
+		shell_error(sh,
+			    "Usage: motor commission validate current [iq_a] [hold_ms] [ramp_ms] [stop_deg]");
 		return -EINVAL;
 	}
 	if (argc >= 2 && !shell_parse_finite_float(argv[1], &iq_a)) {
@@ -106,9 +153,30 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 		shell_error(sh, "hold_ms must be an integer");
 		return -EINVAL;
 	}
+	if (argc >= 4 && !shell_parse_u32(argv[3], &ramp_ms)) {
+		shell_error(sh, "ramp_ms must be an integer");
+		return -EINVAL;
+	}
+	if (argc >= 5 && !shell_parse_finite_float(argv[4], &stop_motion_deg)) {
+		shell_error(sh, "stop_deg must be finite");
+		return -EINVAL;
+	}
 	iq_a = clampf(fabsf(iq_a), 0.01f, MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_IQ_A);
 	hold_ms = CLAMP(hold_ms, MOTOR_COMMISSION_MOTION_SAMPLE_MS,
 			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
+	ramp_ms = CLAMP(ramp_ms, MOTOR_COMMISSION_MOTION_SAMPLE_MS,
+			MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HOLD_MS);
+	stop_motion_deg = clampf(fabsf(stop_motion_deg), 0.1f, 45.0f);
+	float32_t max_velocity_rad_s =
+		MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_SPEED_HZ * 2.0f * PI_F32;
+	float32_t model_iq_cap = 0.0f;
+	bool model_cap_valid =
+		motor_commission_current_model_cap((float32_t)ramp_ms / 1000.0f,
+						   max_velocity_rad_s,
+						   &model_iq_cap);
+	if (model_cap_valid) {
+		iq_a = fminf(iq_a, fminf(model_iq_cap, MOTOR_MAX_CURRENT_A));
+	}
 
 	shell_print(sh,
 		    "Validate current_encoder: requires 'motor commission boot'; does not tune gains.");
@@ -127,27 +195,60 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	motor_commission_encoder_trace_force_on_decimated(&trace_guard, 4U);
 	struct motor_commission_motion_measurement pos = {0};
 	struct motor_commission_motion_measurement neg = {0};
-	ret = motor_commission_motion_measure_current(iq_a, hold_ms, 0.0f, &pos);
+	float32_t stop_motion_rad = stop_motion_deg * (PI_F32 / 180.0f);
+	float32_t min_motion_rad = 0.5f * (PI_F32 / 180.0f);
+	ret = motor_commission_motion_measure_current_bounded(iq_a, hold_ms, ramp_ms,
+							     min_motion_rad,
+							     stop_motion_rad,
+							     max_velocity_rad_s,
+							     &pos);
 	motor_commission_motion_stop_current();
 	k_msleep(MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
 	if (ret == 0) {
-		ret = motor_commission_motion_measure_current(-iq_a, hold_ms, 0.0f, &neg);
+		ret = motor_commission_motion_measure_current_bounded(-iq_a, hold_ms, ramp_ms,
+								     min_motion_rad,
+								     stop_motion_rad,
+								     max_velocity_rad_s,
+								     &neg);
 	}
 	motor_commission_motion_stop_current();
 	motor_commission_encoder_trace_restore(&trace_guard);
 	int idle_ret = motor_commission_request_idle_disarmed();
 
 	shell_print(sh,
-		    "Current encoder validation: Iq=+/-%.3f A hold=%u ms outer=PI DOB=off detent=off",
-		    (double)iq_a, hold_ms);
-	shell_print(sh, "  +Iq: net=%.3f deg abs=%.3f deg samples=%u warn=%u err=%u",
+		    "Current encoder validation: Iq=+/-%.3f A hold=%u ms ramp=%u ms stop=%.2f deg speed_limit=%.2f Hz",
+		    (double)iq_a, hold_ms, ramp_ms, (double)stop_motion_deg,
+		    (double)MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_SPEED_HZ);
+	shell_print(sh, "  Current cap: %s limit=%.3f A",
+		    model_cap_valid ? "model" : "configured",
+		    (double)(model_cap_valid ? model_iq_cap :
+					      MOTOR_COMMISSION_VALIDATE_CURRENT_MAX_IQ_A));
+	shell_print(sh,
+		    "  +Iq: net=%.3f deg abs=%.3f deg max_vel=%.2f Hz samples=%u warn=%u err=%u stop(motion=%s velocity=%s)",
 		    (double)(pos.net_motion_rad * 180.0f / PI_F32),
 		    (double)(pos.abs_motion_rad * 180.0f / PI_F32),
-		    pos.sample_count, pos.warning_count, pos.error_count);
-	shell_print(sh, "  -Iq: net=%.3f deg abs=%.3f deg samples=%u warn=%u err=%u",
+		    (double)(pos.max_abs_velocity_rad_s / (2.0f * PI_F32)),
+		    pos.sample_count, pos.warning_count, pos.error_count,
+		    pos.stopped_on_motion ? "YES" : "NO",
+		    pos.stopped_on_velocity ? "YES" : "NO");
+	if (pos.sample_count > 0U) {
+		shell_print(sh, "       angle %.3f -> %.3f deg",
+			    (double)(pos.start_angle_rad * 180.0f / PI_F32),
+			    (double)(pos.end_angle_rad * 180.0f / PI_F32));
+	}
+	shell_print(sh,
+		    "  -Iq: net=%.3f deg abs=%.3f deg max_vel=%.2f Hz samples=%u warn=%u err=%u stop(motion=%s velocity=%s)",
 		    (double)(neg.net_motion_rad * 180.0f / PI_F32),
 		    (double)(neg.abs_motion_rad * 180.0f / PI_F32),
-		    neg.sample_count, neg.warning_count, neg.error_count);
+		    (double)(neg.max_abs_velocity_rad_s / (2.0f * PI_F32)),
+		    neg.sample_count, neg.warning_count, neg.error_count,
+		    neg.stopped_on_motion ? "YES" : "NO",
+		    neg.stopped_on_velocity ? "YES" : "NO");
+	if (neg.sample_count > 0U) {
+		shell_print(sh, "       angle %.3f -> %.3f deg",
+			    (double)(neg.start_angle_rad * 180.0f / PI_F32),
+			    (double)(neg.end_angle_rad * 180.0f / PI_F32));
+	}
 	if (ret != 0) {
 		shell_error(sh, "Current encoder validation stopped by fault/error (err %d)", ret);
 		return ret;
@@ -163,6 +264,14 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	    neg.error_count > MOTOR_COMMISSION_ENCODER_MAX_ERROR_SAMPLES) {
 		shell_error(sh, "Current encoder validation had insufficient clean samples");
 		return -ENODATA;
+	}
+	if (pos.stopped_on_velocity || neg.stopped_on_velocity) {
+		shell_error(sh, "Current encoder validation exceeded velocity limit");
+		return -ERANGE;
+	}
+	if (pos.net_motion_rad <= 0.0f || neg.net_motion_rad >= 0.0f) {
+		shell_error(sh, "Current encoder validation direction check failed");
+		return -ERANGE;
 	}
 
 	shell_print(sh, "Current encoder validation complete");
