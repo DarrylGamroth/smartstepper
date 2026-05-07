@@ -220,6 +220,15 @@ properties:
       conservative runtime velocity limits from starving the identification
       stage.
 
+  commission-auto-velocity-bandwidth-mhz:
+    type: int
+    default: 20000
+    description: >
+      Temporary velocity PI bandwidth in milli-hertz used only during
+      one-command commissioning flux/mechanical captures. This should be high
+      enough that velocity commands track without large acceleration phase lag,
+      but still below the point where the motor chatters or saturates.
+
   commission-validate-current-default-iq-ma:
     type: int
     default: 80

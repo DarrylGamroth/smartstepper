@@ -17,6 +17,7 @@
 #include "motor_control_api.h"
 #include "motor_current_slew.h"
 #include "motor_torque.h"
+#include "shell_control_common.h"
 #include "shell_parse.h"
 #include "motor/math/math_constants.h"
 
@@ -31,6 +32,14 @@ static const float32_t motor_commission_mech_step_pattern[] = {
 
 static const float32_t motor_commission_validate_step_scale[] = {
 	0.2f, 0.6f, 1.0f, -0.2f, -0.6f, -1.0f, 0.0f,
+};
+
+struct motor_commission_velocity_gain_restore {
+	float32_t kp_a_per_rad_s;
+	float32_t ki_a_per_rad;
+	float32_t iq_limit_a;
+	float32_t i_term_a;
+	bool valid;
 };
 
 
@@ -55,6 +64,87 @@ static const char *motor_commission_mech_reject_to_string(uint8_t reason)
 	default:
 		return "unknown";
 	}
+}
+
+static void motor_commission_velocity_gains_save(
+	struct motor_commission_velocity_gain_restore *restore)
+{
+	if (restore == NULL || g_motor_params == NULL) {
+		return;
+	}
+
+	*restore = (struct motor_commission_velocity_gain_restore){
+		.kp_a_per_rad_s = g_motor_params->velocity_cl_kp_A_per_rad_s,
+		.ki_a_per_rad = g_motor_params->velocity_cl_ki_A_per_rad,
+		.iq_limit_a = g_motor_params->velocity_cl_iq_limit_A,
+		.i_term_a = g_motor_params->velocity_cl_i_term_A,
+		.valid = true,
+	};
+}
+
+static void motor_commission_velocity_gains_restore(
+	const struct motor_commission_velocity_gain_restore *restore)
+{
+	if (restore == NULL || !restore->valid || g_motor_params == NULL) {
+		return;
+	}
+
+	(void)motor_apply_velocity_gains(restore->kp_a_per_rad_s,
+					 restore->ki_a_per_rad,
+					 restore->iq_limit_a);
+	g_motor_params->velocity_cl_i_term_A = restore->i_term_a;
+}
+
+static int motor_commission_stage_velocity_capture_gains(
+	const struct shell *sh,
+	float32_t iq_limit_a,
+	struct motor_commission_velocity_gain_restore *restore)
+{
+	if (g_motor_params == NULL || restore == NULL) {
+		return -ENODEV;
+	}
+
+	motor_commission_velocity_gains_save(restore);
+
+	float32_t kp = 0.0f;
+	float32_t ki = 0.0f;
+	float32_t kt = 0.0f;
+	float32_t iq_limit = clampf(iq_limit_a, 0.04f, MOTOR_MAX_CURRENT_A);
+	bool measured_mech_model =
+		g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED &&
+		isfinite(g_motor_params->inertia_kgm2_active) &&
+		g_motor_params->inertia_kgm2_active > 0.0f;
+	int ret = measured_mech_model ?
+			  motor_compute_velocity_bandwidth_gains(g_motor_params,
+								 COMMISSION_AUTO_VELOCITY_BANDWIDTH_HZ,
+								 0.8f,
+								 iq_limit,
+								 &kp,
+								 &ki,
+								 &kt) :
+			  -ENOENT;
+	const char *source = "model";
+	if (ret != 0) {
+		float32_t gain_speed_rad_s = 2.0f * PI_F32 * VELOCITY_DEFAULT_GAIN_SPEED_HZ;
+		kp = 0.75f * iq_limit / gain_speed_rad_s;
+		ki = 2.0f * kp;
+		source = "authority";
+	}
+
+	ret = motor_apply_velocity_gains(kp, ki, iq_limit);
+	if (ret != 0) {
+		motor_commission_velocity_gains_restore(restore);
+		return ret;
+	}
+
+	shell_print(sh,
+		    "  Commission velocity PI: bw=%.2f Hz source=%s Kp=%.5f Ki=%.5f iq=%.3f A",
+		    (double)COMMISSION_AUTO_VELOCITY_BANDWIDTH_HZ,
+		    source,
+		    (double)kp,
+		    (double)ki,
+		    (double)iq_limit);
+	return 0;
 }
 
 static const char *motor_commission_tune_error_to_string(int err)
@@ -897,6 +987,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	struct motor_commission_flux_config flux_cfg = {0};
 	struct motor_commission_mech_config mech_cfg = {0};
 	struct motor_commission_tune_config tune_cfg = {0};
+	struct motor_commission_velocity_gain_restore velocity_restore = {0};
 	float32_t iq_limit_default = planned_iq_limit_a;
 	float32_t threshold_start_a = clampf(0.10f * MOTOR_MAX_CURRENT_A,
 					     0.02f,
@@ -933,6 +1024,15 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	flux_cfg.settle_ms = slow_profile ? 500U : 400U;
 	flux_cfg.sample_ms = slow_profile ? 500U : 400U;
 	flux_cfg.iq_limit_a = iq_limit_default;
+
+	ret = motor_commission_stage_velocity_capture_gains(sh,
+							    flux_cfg.iq_limit_a,
+							    &velocity_restore);
+	if (ret != 0) {
+		g_motor_params->commission.auto_tune_last_error = ret;
+		shell_error(sh, "Failed to stage commissioning velocity PI gains (err %d)", ret);
+		return ret;
+	}
 
 	float32_t mech_speed_upper_hz = planned_mech_upper_hz;
 	mech_cfg.base_speed_hz = planned_mech_base_hz;
@@ -985,6 +1085,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
 	if (ret != 0) {
 		motor_current_slew_params_zero(g_motor_params);
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		if (g_motor_params->commission.active) {
 			struct motor_commission_runtime_ctx commission_ctx;
 			motor_commission_ctx_from_global(&commission_ctx);
@@ -1043,6 +1144,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 			}
 
 			motor_current_slew_params_zero(g_motor_params);
+			motor_commission_velocity_gains_restore(&velocity_restore);
 			if (g_motor_params->commission.active) {
 				struct motor_commission_runtime_ctx commission_ctx;
 				motor_commission_ctx_from_global(&commission_ctx);
@@ -1067,6 +1169,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 
 	if (mech_agg.count < COMMISSION_AUTO_MECH_RUNS) {
 		g_motor_params->commission.auto_tune_last_error = -ERANGE;
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		shell_error(sh, "Auto commission only accepted %u/%u mechanical runs",
 			    mech_agg.count,
 			    COMMISSION_AUTO_MECH_RUNS);
@@ -1077,6 +1180,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 						       &g_motor_params->commission.results);
 	if (ret != 0 || !g_motor_params->commission.results.mech_valid) {
 		g_motor_params->commission.auto_tune_last_error = (ret != 0) ? ret : -ERANGE;
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		shell_error(sh, "Auto commission failed to aggregate mechanical runs (err %d)",
 			    g_motor_params->commission.auto_tune_last_error);
 		return g_motor_params->commission.auto_tune_last_error;
@@ -1087,6 +1191,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	if (ret != 0) {
 		g_motor_params->commission.results = aggregate_results;
 		g_motor_params->commission.auto_tune_last_error = ret;
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		shell_error(sh, "Auto commission failed during mechanical validation (err %d)",
 			    ret);
 		return ret;
@@ -1128,6 +1233,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	g_motor_params->commission.results = aggregate_results;
 	if (!g_motor_params->commission.results.mech_validation_pass) {
 		g_motor_params->commission.auto_tune_last_error = (ret != 0) ? ret : -ERANGE;
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		shell_error(sh,
 			    "Auto commission mechanical validation failed (err %d rms=%.6f Nm limit=%.6f Nm conf=%.2f min_conf=%.2f sign=%d N=%u)",
 			    g_motor_params->commission.auto_tune_last_error,
@@ -1179,6 +1285,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 
 	ret = motor_commission_stage_auto_tune(&commission_ctx, &tune_cfg);
 	if (ret != 0) {
+		motor_commission_velocity_gains_restore(&velocity_restore);
 		shell_error(sh, "Auto tune staging failed (err %d: %s)", ret,
 			    motor_commission_tune_error_to_string(ret));
 		motor_commission_print_tune_reject_flags(
@@ -1200,6 +1307,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	if (apply_on_success) {
 		ret = motor_commission_apply_staged_auto_tune(&commission_ctx);
 		if (ret != 0) {
+			motor_commission_velocity_gains_restore(&velocity_restore);
 			shell_error(sh, "Auto commission completed but apply failed (err %d)", ret);
 			return ret;
 		}

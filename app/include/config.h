@@ -755,6 +755,8 @@ BUILD_ASSERT(VBUS_MAX_V > VBUS_REGEN_LIMIT_V,
 #define ENCODER_DIRECTION_SIGN ((ENCODER_DIRECTION_SIGN_RAW == 1) ? 1 : -1)
 #define COMMISSION_STANDARD_MIN_AUTO_IQ_A \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_standard_min_auto_iq_ma, 250) / 1000.0f)
+#define COMMISSION_AUTO_VELOCITY_BANDWIDTH_HZ \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_velocity_bandwidth_mhz, 20000) / 1000.0f)
 #define COMMISSION_VALIDATE_CURRENT_DEFAULT_IQ_A \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_validate_current_default_iq_ma, 80) / 1000.0f)
 #define COMMISSION_AUTO_POST_WAIT_MS \
@@ -795,6 +797,8 @@ BUILD_ASSERT(VBUS_MAX_V > VBUS_REGEN_LIMIT_V,
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_slow_mech_dither_mhz, 150) / 1000.0f)
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_standard_min_auto_iq_ma, 250) > 0,
 	     "commission-standard-min-auto-iq-ma must be positive");
+BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_auto_velocity_bandwidth_mhz, 20000) > 0,
+	     "commission-auto-velocity-bandwidth-mhz must be positive");
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_validate_current_default_iq_ma, 80) > 0,
 	     "commission-validate-current-default-iq-ma must be positive");
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_validate_current_default_iq_ma, 80) <=

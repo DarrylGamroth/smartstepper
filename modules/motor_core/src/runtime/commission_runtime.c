@@ -37,6 +37,29 @@
 #define MOTOR_COMMISSION_TRACKING_ABS_TOL_RAD_S (2.0f * PI_F32 * 0.05f)
 #define MOTOR_COMMISSION_TRACKING_REL_TOL 0.75f
 
+static inline uint8_t motor_commission_mech_reject_rank(uint8_t reason)
+{
+	switch (reason) {
+	case MOTOR_COMMISSION_MECH_REJECT_NONE:
+		return 0U;
+	case MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE:
+		/*
+		 * A negative viscous term often appears when acceleration/current
+		 * phase is noisy but the inertia sign is still useful. Prefer it
+		 * over invalid inertia and clamp B to zero after selection.
+		 */
+		return 1U;
+	case MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID:
+		return 2U;
+	case MOTOR_COMMISSION_MECH_REJECT_SAMPLES:
+	case MOTOR_COMMISSION_MECH_REJECT_SOLVER:
+	case MOTOR_COMMISSION_MECH_REJECT_FINALIZE:
+	case MOTOR_COMMISSION_MECH_REJECT_KT_INVALID:
+	default:
+		return 3U;
+	}
+}
+
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
 	/* Keep default auto-commission windows (~5-6 s) within capture capacity. */
@@ -425,10 +448,11 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			reject_reason = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
 		}
 
+		uint8_t reject_rank = motor_commission_mech_reject_rank(reject_reason);
+		uint8_t best_rank = motor_commission_mech_reject_rank(best_reject_reason);
 		if (!have_best ||
-		    (reject_reason == MOTOR_COMMISSION_MECH_REJECT_NONE &&
-		     best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) ||
-		    (reject_reason == best_reject_reason &&
+		    reject_rank < best_rank ||
+		    (reject_rank == best_rank &&
 		     estimate.residual_rms_nm < best_estimate.residual_rms_nm)) {
 			best_estimate = estimate;
 			best_finalize_error = 0;
@@ -461,6 +485,14 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_FINALIZE;
 		}
 		return;
+	}
+
+	if (best_reject_reason == MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE &&
+	    best_estimate.valid &&
+	    isfinite(best_estimate.inertia_kgm2) &&
+	    best_estimate.inertia_kgm2 > 0.0f) {
+		best_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+		best_estimate.viscous_friction_nm_per_rad_s = 0.0f;
 	}
 
 	if (best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) {
