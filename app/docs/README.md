@@ -6,6 +6,10 @@ as the source of truth and treat `archive/` as background evidence only.
 
 ## Current Entry Points
 
+- `control_commissioning_inventory_2026-05-07.md`
+  - Current inventory of known-good, advisory, experimental, and duplicated
+    commissioning/control paths. Use this before adding more tuning or
+    identification features.
 - `commissioning_workflow_refactor_plan.md`
   - Current MT6835 commissioning workflow and latest standard commissioning
     evidence.
@@ -21,6 +25,16 @@ as the source of truth and treat `archive/` as background evidence only.
   - Current staged plan to replace the coupled 4-parameter mechanical fit with
     separate friction, inertia, detent, confidence-gating, and HIL workflow
     phases.
+- `plan/commissioning_baseline_cleanup/README.md`
+  - Current plan package to narrow baseline commissioning, remove duplicated
+    legacy paths, clean devicetree/runtime configuration boundaries, and add
+    guarded persistence.
+- `plan/field_update_bootloader/README.md`
+  - Plan package for MCUboot, Ethernet field updates, image
+    confirmation/rollback, and storage partition coordination.
+- `field_update_user_guide.md`
+  - Operator workflow for sysbuild, signed MCUboot images, J-Link development
+    flashing, MCUmgr UDP upload, image confirmation, and rollback behavior.
 - `settings_persistence_plan.md`
   - Persistence readiness policy. Persistence remains opt-in/future until
     repeatable HIL gates prove behavior.

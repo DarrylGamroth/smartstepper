@@ -76,6 +76,86 @@ podman exec wonderful_goldberg bash -lc '\
     -DEXTRA_CONF_FILE="debug.conf;logging.conf"'
 ```
 
+Sysbuild + MCUboot build (MT6835 profile):
+
+```bash
+podman exec wonderful_goldberg bash -lc '\
+  cd /workspace && \
+  west build --sysbuild -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2_mcuboot \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"'
+```
+
+Sysbuild + MCUboot build (AEAT-9955 profile):
+
+```bash
+podman exec wonderful_goldberg bash -lc '\
+  cd /workspace && \
+  west build --sysbuild -p always \
+    -b smartstepper_v2/stm32h743xx \
+    /workspace/chopper/app \
+    -d /workspace/build/chopper/smartstepper_v2_mcuboot_aeat \
+    -S serial-shell -S serial-console -- \
+    -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay"'
+```
+
+What sysbuild means here:
+
+- `west build --sysbuild` is Zephyr's multi-image build flow.
+- It configures and builds a standalone MCUboot image plus the application image
+  in one build directory.
+- MCUboot is not linked into the app. It is a separate bootloader image that
+  runs first after reset, validates the signed app, then jumps to it.
+- The application is built MCUboot-aware: linked for slot0 and signed for
+  MCUboot validation.
+- Current outputs:
+  - bootloader: `/workspace/build/chopper/smartstepper_v2_mcuboot/mcuboot/zephyr/zephyr.bin`
+  - signed app: `/workspace/build/chopper/smartstepper_v2_mcuboot/app/zephyr/zephyr.signed.bin`
+  - signed app hex: `/workspace/build/chopper/smartstepper_v2_mcuboot/app/zephyr/zephyr.signed.hex`
+- Use normal app-only builds for fast motor/control development.
+- Use sysbuild for bootloader, partition, signing, rollback, settings-retention,
+  and field-update validation.
+
+MCUboot notes:
+
+- The smartstepper_v2 base DTS allocates internal flash as 128 KiB MCUboot,
+  896 KiB slot0, 896 KiB slot1, and 128 KiB `settings_storage`.
+- The sysbuild requires the `zcbor` Zephyr module for MCUmgr/CBOR support.
+  Checksum-verified MCUmgr image upload also requires Zephyr's
+  `tf-psa-crypto` module through `CONFIG_IMG_ENABLE_IMAGE_CHECK=y`. Both are
+  included in `west.yml`; if a workspace is missing either module, run
+  `west update`.
+  If the container global Git config rewrites HTTPS GitHub URLs to SSH and
+  breaks unauthenticated fetches, run the update with `GIT_CONFIG_GLOBAL=/dev/null`.
+- Development sysbuild currently uses Zephyr/MCUboot's default ECDSA-P256 key.
+  Replace this with a production key before field deployment.
+- Development flashing still uses the J-Link runner.
+- To flash the bootloader-managed image during development, flash the sysbuild
+  directory:
+
+```bash
+podman exec wonderful_goldberg bash -lc '\
+  west flash -d /workspace/build/chopper/smartstepper_v2_mcuboot \
+    --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+```
+
+- Field updates use MCUboot + MCUmgr SMP over UDP/IPv4 Ethernet on port `1337`.
+  The normal update payload is `app/zephyr/zephyr.signed.bin`.
+- The firmware enables Zephyr's built-in `mcuboot` shell command through
+  `CONFIG_MCUBOOT_SHELL`; there is no project-specific `motor update` command.
+- The firmware enables MCUmgr SMP over UDP/IPv4 on port `1337` for Ethernet
+  field updates. Use the host-installed `mcumgrctl` tool
+  (`/home/dgamroth/.cargo/bin/mcumgrctl`) rather than looking for `mcumgr` in
+  the container.
+- Field-update operator documentation lives in
+  `app/docs/field_update_user_guide.md`.
+- HIL field-update verification was completed on 2026-05-07 against the MT6835
+  target at `10.0.0.44`: MCUmgr upload/test/reset/confirm over UDP worked and
+  the confirmed test image stayed active after a second reset.
+
 Pristine reconfigure is only needed if CMake cache/config state is stale:
 
 ```bash
@@ -110,6 +190,15 @@ Avoid broad plans that combine algorithm design, runtime refactor, shell naming,
 commissioning, persistence, and HIL validation at the same time. If a request
 spans multiple concepts, create a program index and split the work into narrow
 execution plans.
+
+## Git Workflow
+
+- Commit changes as work progresses so each functional step has a rollback
+  point.
+- Commit before starting a new major plan/task and again after validation passes.
+- Keep commit messages specific to the completed task or evidence produced.
+- Do not let large refactors, HIL experiments, and documentation updates pile up
+  uncommitted unless explicitly asked to pause before committing.
 
 Each plan should use this structure:
 

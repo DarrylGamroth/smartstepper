@@ -389,8 +389,16 @@ int motor_api_request_calibrate(void)
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_CALIBRATE_REQUEST,
 	};
-	
-	int ret = motor_api_post_event_back(&evt);
+
+	if (g_motor_params != NULL) {
+		g_motor_params->calibration.complete = false;
+		g_motor_params->calibration.commissioning_complete = false;
+	}
+
+	/* Calibration establishes current offsets and must not sit behind stale
+	 * shell-requested mode events during commissioning workflows.
+	 */
+	int ret = motor_api_post_event_front(&evt);
 	if (ret != 0) {
 		LOG_ERR("Failed to post calibrate request: queue full");
 		return ret;

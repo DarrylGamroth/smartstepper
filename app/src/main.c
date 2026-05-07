@@ -11,6 +11,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/smf.h>
+#include <zephyr/settings/settings.h>
 
 #include "motor_states.h"
 #include "motor_isr.h"
@@ -18,11 +19,22 @@
 #include "motor_control_api.h"
 #include "config.h"
 #include "shell_commands.h"
+#include "app_update.h"
 
 LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 int main(void)
 {
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		int rc = settings_load();
+
+		if (rc != 0) {
+			LOG_WRN("Settings load failed: %d", rc);
+		}
+	}
+
+	app_update_init();
+
 	/* Get motor parameters pointer from state machine */
 	struct motor_parameters *params = motor_sm_get_params();
 

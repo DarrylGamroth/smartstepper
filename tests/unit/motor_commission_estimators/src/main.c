@@ -538,8 +538,45 @@ ZTEST(motor_commission_estimators, test_friction_plateau_identifies_model)
 	zassert_true(result.valid, NULL);
 	zassert_within(result.viscous_friction_nm_per_rad_s, b_true, 1.0e-5f, NULL);
 	zassert_within(result.coulomb_friction_nm, tc_true, 1.0e-5f, NULL);
+	zassert_within(result.signed_coulomb_friction_nm, tc_true, 1.0e-5f, NULL);
 	zassert_within(result.offset_friction_nm, t0_true, 1.0e-5f, NULL);
 	zassert_true(result.residual_rms_nm < 1.0e-5f, NULL);
+}
+
+ZTEST(motor_commission_estimators, test_friction_plateau_preserves_signed_coulomb)
+{
+	const struct motor_mech_friction_id_config cfg = {
+		.kt_nm_per_a = 0.32f,
+		.sign_deadband_rad_s = 0.5f,
+		.max_abs_accel_rad_s2 = 0.2f,
+		.min_samples = 16U,
+		.min_samples_per_direction = 4U,
+		.min_r2 = 0.95f,
+		.require_nonnegative_viscous = true,
+		.require_nonnegative_coulomb = true,
+	};
+	const float32_t tc_signed = -0.018f;
+	struct motor_mech_friction_id_state state = {0};
+	struct motor_mech_friction_id_result result = {0};
+
+	motor_mech_friction_id_init(&state, &cfg);
+	for (uint32_t i = 0U; i < 64U; i++) {
+		float32_t speed = 2.0f + 0.1f * (float32_t)(i % 16U);
+		if ((i & 1U) != 0U) {
+			speed = -speed;
+		}
+		const float32_t sign = (speed > 0.0f) ? 1.0f : -1.0f;
+		const float32_t torque = 0.001f * speed + tc_signed * sign;
+
+		zassert_true(motor_mech_friction_id_accumulate(&state, speed, 0.0f,
+							       torque / cfg.kt_nm_per_a,
+							       0.0f), NULL);
+	}
+
+	zassert_ok(motor_mech_friction_id_finalize(&state, &result), NULL);
+	zassert_true(result.valid, NULL);
+	zassert_within(result.coulomb_friction_nm, fabsf(tc_signed), 1.0e-5f, NULL);
+	zassert_within(result.signed_coulomb_friction_nm, tc_signed, 1.0e-5f, NULL);
 }
 
 ZTEST(motor_commission_estimators, test_friction_plateau_rejects_negative_viscous)
@@ -574,6 +611,44 @@ ZTEST(motor_commission_estimators, test_friction_plateau_rejects_negative_viscou
 	zassert_ok(motor_mech_friction_id_finalize(&state, &result), NULL);
 	zassert_false(result.valid, NULL);
 	zassert_true(result.viscous_friction_nm_per_rad_s < 0.0f, NULL);
+}
+
+ZTEST(motor_commission_estimators, test_friction_plateau_zero_viscous_fallback)
+{
+	const struct motor_mech_friction_id_config cfg = {
+		.kt_nm_per_a = 0.32f,
+		.sign_deadband_rad_s = 0.5f,
+		.max_abs_accel_rad_s2 = 0.2f,
+		.min_samples = 16U,
+		.min_samples_per_direction = 4U,
+		.min_r2 = 0.0f,
+		.require_nonnegative_viscous = true,
+		.require_nonnegative_coulomb = true,
+	};
+	struct motor_mech_friction_id_state state = {0};
+	struct motor_mech_friction_id_result unconstrained = {0};
+	struct motor_mech_friction_id_result zero_b = {0};
+
+	motor_mech_friction_id_init(&state, &cfg);
+	for (uint32_t i = 0U; i < 64U; i++) {
+		float32_t speed = 2.0f + 0.1f * (float32_t)(i % 16U);
+		if ((i & 1U) != 0U) {
+			speed = -speed;
+		}
+		const float32_t sign = (speed > 0.0f) ? 1.0f : -1.0f;
+		const float32_t torque = -0.002f * speed + 0.02f * sign;
+
+		zassert_true(motor_mech_friction_id_accumulate(&state, speed, 0.0f,
+							       torque / cfg.kt_nm_per_a,
+							       0.0f), NULL);
+	}
+
+	zassert_ok(motor_mech_friction_id_finalize(&state, &unconstrained), NULL);
+	zassert_false(unconstrained.valid, NULL);
+	zassert_ok(motor_mech_friction_id_finalize_zero_viscous(&state, &zero_b), NULL);
+	zassert_true(zero_b.valid, NULL);
+	zassert_within(zero_b.viscous_friction_nm_per_rad_s, 0.0f, 1.0e-9f, NULL);
+	zassert_true(zero_b.coulomb_friction_nm >= 0.0f, NULL);
 }
 
 ZTEST(motor_commission_estimators, test_friction_plateau_requires_directional_coverage)
@@ -647,6 +722,53 @@ ZTEST(motor_commission_estimators, test_inertia_transient_identifies_model)
 	zassert_true(result.valid, NULL);
 	zassert_within(result.inertia_kgm2, j_true, 1.0e-8f, NULL);
 	zassert_true(result.residual_rms_nm < 1.0e-5f, NULL);
+}
+
+ZTEST(motor_commission_estimators, test_inertia_transient_allows_signed_coulomb_subtraction)
+{
+	const struct motor_mech_inertia_id_config cfg = {
+		.kt_nm_per_a = 0.32f,
+		.sign_deadband_rad_s = 0.5f,
+		.min_abs_accel_rad_s2 = 1.0f,
+		.viscous_friction_nm_per_rad_s = 0.001f,
+		.coulomb_friction_nm = -0.015f,
+		.offset_friction_nm = 0.0005f,
+		.fallback_inertia_kgm2 = 5.7e-6f,
+		.min_plausibility_ratio = 0.1f,
+		.max_plausibility_ratio = 10.0f,
+		.min_samples = 16U,
+		.min_samples_per_accel_direction = 4U,
+		.max_residual_rms_nm = 0.01f,
+		.require_plausible = true,
+	};
+	const float32_t j_true = 7.0e-6f;
+	struct motor_mech_inertia_id_state state = {0};
+	struct motor_mech_inertia_id_result result = {0};
+
+	motor_mech_inertia_id_init(&state, &cfg);
+	for (uint32_t i = 0U; i < 80U; i++) {
+		float32_t speed = 2.0f + 0.05f * (float32_t)(i % 20U);
+		if ((i & 2U) != 0U) {
+			speed = -speed;
+		}
+		float32_t accel = 18.0f + (float32_t)(i % 7U);
+		if ((i & 1U) != 0U) {
+			accel = -accel;
+		}
+		const float32_t sign = (speed > 0.0f) ? 1.0f : -1.0f;
+		const float32_t torque = j_true * accel +
+					 cfg.viscous_friction_nm_per_rad_s * speed +
+					 cfg.coulomb_friction_nm * sign +
+					 cfg.offset_friction_nm;
+
+		zassert_true(motor_mech_inertia_id_accumulate(&state, speed, accel,
+							      torque / cfg.kt_nm_per_a,
+							      0.0f), NULL);
+	}
+
+	zassert_ok(motor_mech_inertia_id_finalize(&state, &result), NULL);
+	zassert_true(result.valid, NULL);
+	zassert_within(result.inertia_kgm2, j_true, 1.0e-8f, NULL);
 }
 
 ZTEST(motor_commission_estimators, test_inertia_transient_rejects_low_accel)

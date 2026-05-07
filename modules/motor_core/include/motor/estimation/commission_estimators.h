@@ -124,6 +124,7 @@ struct motor_mech_friction_id_state {
 struct motor_mech_friction_id_result {
 	float32_t viscous_friction_nm_per_rad_s;
 	float32_t coulomb_friction_nm;
+	float32_t signed_coulomb_friction_nm;
 	float32_t offset_friction_nm;
 	float32_t residual_rms_nm;
 	float32_t r2;
@@ -144,6 +145,9 @@ bool motor_mech_friction_id_accumulate(struct motor_mech_friction_id_state *stat
 				       float32_t detent_torque_nm);
 int motor_mech_friction_id_finalize(const struct motor_mech_friction_id_state *state,
 				    struct motor_mech_friction_id_result *result);
+int motor_mech_friction_id_finalize_zero_viscous(
+	const struct motor_mech_friction_id_state *state,
+	struct motor_mech_friction_id_result *result);
 
 struct motor_mech_inertia_id_config {
 	float32_t kt_nm_per_a;

@@ -42,9 +42,9 @@
 #define MOTOR_COMMISSION_MECH_ACCEL_HALF_WINDOW 2U
 #define MOTOR_COMMISSION_MECH_MIN_CONFIDENCE 0.50f
 #define MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN 0.10f
-#define MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX 10.0f
+#define MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX 25.0f
 #define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN 0.25f
-#define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX 4.0f
+#define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX 10.0f
 #define MOTOR_COMMISSION_MECH_MAX_RESIDUAL_NM 0.20f
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
@@ -756,6 +756,7 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	float32_t best_confidence = -1.0f;
 	uint8_t best_reject = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
 	bool best_detent_corrected = false;
+	bool have_valid_candidate = false;
 
 	for (uint32_t sign_idx = 0U; sign_idx < ARRAY_SIZE(signs); sign_idx++) {
 		const int8_t fit_sign = signs[sign_idx];
@@ -791,8 +792,20 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 		}
 
 		int ret = motor_mech_friction_id_finalize(&friction_state, &friction);
+		if (ret == 0 && !friction.valid &&
+		    friction.viscous_friction_nm_per_rad_s < 0.0f) {
+			struct motor_mech_friction_id_result zero_b = {0};
+			int zero_ret =
+				motor_mech_friction_id_finalize_zero_viscous(&friction_state,
+									     &zero_b);
+			if (zero_ret == 0 && zero_b.valid) {
+				friction = zero_b;
+			}
+		}
 		if (ret < 0 || !friction.valid) {
-			best_reject = MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID;
+			if (!have_valid_candidate) {
+				best_reject = MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID;
+			}
 			continue;
 		}
 
@@ -802,7 +815,7 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			.min_abs_accel_rad_s2 = MOTOR_COMMISSION_MECH_INERTIA_MIN_ACCEL_RAD_S2,
 			.viscous_friction_nm_per_rad_s =
 				friction.viscous_friction_nm_per_rad_s,
-			.coulomb_friction_nm = friction.coulomb_friction_nm,
+			.coulomb_friction_nm = friction.signed_coulomb_friction_nm,
 			.offset_friction_nm = friction.offset_friction_nm,
 			.fallback_inertia_kgm2 = *ctx->inertia_kgm2_active,
 			.min_plausibility_ratio = MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN,
@@ -810,7 +823,7 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			.min_samples = 16U,
 			.min_samples_per_accel_direction = 4U,
 			.max_residual_rms_nm = MOTOR_COMMISSION_MECH_MAX_RESIDUAL_NM,
-			.require_plausible = true,
+			.require_plausible = false,
 		};
 		struct motor_mech_inertia_id_state inertia_state;
 		struct motor_mech_inertia_id_result inertia;
@@ -834,7 +847,14 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 
 		ret = motor_mech_inertia_id_finalize(&inertia_state, &inertia);
 		if (ret < 0 || !inertia.valid) {
-			best_reject = MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID;
+			if (!have_valid_candidate &&
+			    inertia.sample_count >= best_inertia.sample_count) {
+				best_friction = friction;
+				best_inertia = inertia;
+				best_sign = fit_sign;
+				best_detent_corrected = detent_corrected;
+				best_reject = MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID;
+			}
 			continue;
 		}
 
@@ -853,10 +873,25 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			best_sign = fit_sign;
 			best_detent_corrected = detent_corrected;
 			best_reject = MOTOR_COMMISSION_MECH_REJECT_NONE;
+			have_valid_candidate = true;
 		}
 	}
 
-	if (best_reject != MOTOR_COMMISSION_MECH_REJECT_NONE || best_confidence < 0.0f) {
+	if (!have_valid_candidate || best_reject != MOTOR_COMMISSION_MECH_REJECT_NONE ||
+	    best_confidence < 0.0f) {
+		res->mech_fit_torque_sign = best_sign;
+		res->inertia_kgm2 = best_inertia.inertia_kgm2;
+		res->viscous_friction_nm_per_rad_s = best_friction.viscous_friction_nm_per_rad_s;
+		res->coulomb_friction_nm = best_friction.coulomb_friction_nm;
+		res->offset_friction_nm = best_friction.offset_friction_nm;
+		res->mech_friction_residual_rms_nm = best_friction.residual_rms_nm;
+		res->mech_inertia_residual_rms_nm = best_inertia.residual_rms_nm;
+		res->mech_inertia_plausibility_ratio = best_inertia.plausibility_ratio;
+		res->mech_friction_sample_count = best_friction.sample_count;
+		res->mech_inertia_sample_count = best_inertia.sample_count;
+		res->mech_friction_valid = best_friction.valid;
+		res->mech_inertia_valid = best_inertia.valid;
+		res->mech_detent_corrected = best_detent_corrected;
 		res->mech_reject_reason = best_reject;
 		return;
 	}

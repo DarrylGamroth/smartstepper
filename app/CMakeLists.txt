@@ -14,6 +14,7 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../modules/motor_core
 
 target_sources(app PRIVATE 
 	src/main.c
+	src/app_update.c
 	src/config.c
 	src/shell/shell_commands.c
 	src/shell/shell_params.c

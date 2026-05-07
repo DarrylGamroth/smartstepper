@@ -139,3 +139,27 @@ config MOTOR_ISR_SANITY_CHECKS
 	  after the signal chain and configuration are validated.
 
 endmenu
+
+menu "Field Update"
+
+config APP_UPDATE_AUTO_CONFIRM_AFTER_BOOT
+	bool "Automatically confirm MCUboot test image after boot delay"
+	depends on BOOTLOADER_MCUBOOT
+	default n
+	help
+	  If enabled, the application confirms a pending MCUboot test image after
+	  APP_UPDATE_AUTO_CONFIRM_DELAY_MS. Leave this disabled for bring-up and
+	  validation so an unconfirmed field-update image rolls back unless an
+	  operator explicitly runs `mcuboot confirm`.
+
+config APP_UPDATE_AUTO_CONFIRM_DELAY_MS
+	int "Delay before automatically confirming a test image"
+	depends on APP_UPDATE_AUTO_CONFIRM_AFTER_BOOT
+	default 30000
+	range 1000 600000
+	help
+	  Delay after app init before writing image_ok in the MCUboot trailer.
+	  This gives basic init, networking, and motor safety checks time to fail
+	  before the image is made permanent.
+
+endmenu

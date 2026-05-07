@@ -33,3 +33,5 @@ manifest:
           - mcumgr
           - picolibc
           - segger
+          - tf-psa-crypto
+          - zcbor

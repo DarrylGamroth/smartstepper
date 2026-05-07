@@ -10,7 +10,14 @@
 /build*
 /twister-out*
 
+# private signing/material generated outside source control
+/keys/
+/secure-keys/
+
 __pycache__/
 
 # docs
 /doc/_build*
+
+# HIL/runtime logs are local validation artifacts
+/hil_logs/

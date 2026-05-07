@@ -17,16 +17,18 @@ settings backend is enabled until encoder-control HIL stability is acceptable.
 
 ## Storage Backend Direction
 
-Preferred backend is Zephyr Settings over an NVMEM/EEPROM-backed storage area,
-but the schema is independent of the backend. The first backend should use the
-existing board EEPROM only after the application has explicit operator commands
-for save/load/clear and HIL validation gates.
+Preferred backend is Zephyr Settings over a ZMS-backed storage partition. The
+schema is independent of the backend, but ZMS is the preferred first backend for
+commissioned runtime values. NVS is fallback only if ZMS is unavailable. Direct
+NVMEM/EEPROM cell access remains a later option for fixed manufacturing data or
+a compact custom two-slot record.
 
 Expected backend options:
 
-- Zephyr Settings with NVS/NVMEM backend if the board EEPROM path is stable.
-- Direct NVMEM cell/partition access for a compact binary record if Settings
-  overhead is too high.
+- Zephyr Settings with the ZMS backend on a dedicated storage partition.
+- Zephyr Settings with NVS only as a fallback if ZMS is unavailable.
+- Direct NVMEM cell/partition access for a compact binary record only if
+  Settings overhead is too high or fixed manufacturing cells are required.
 - Two-slot record layout for rollback-safe writes if bypassing Settings.
 
 ## Schema

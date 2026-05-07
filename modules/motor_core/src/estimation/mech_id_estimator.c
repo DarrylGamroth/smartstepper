@@ -318,22 +318,90 @@ int motor_mech_friction_id_finalize(const struct motor_mech_friction_id_state *s
 	const float32_t r2 = (sst > MOTOR_MECH_ID_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
 
 	result->viscous_friction_nm_per_rad_s = theta[0];
-	result->coulomb_friction_nm = theta[1];
+	result->coulomb_friction_nm = fabsf(theta[1]);
+	result->signed_coulomb_friction_nm = theta[1];
 	result->offset_friction_nm = theta[2];
 	result->residual_rms_nm = residual_rms_nm;
 	result->r2 = r2;
+	const float32_t coulomb_mag = fabsf(theta[1]);
 	result->valid = isfinite(theta[0]) &&
 			isfinite(theta[1]) &&
 			isfinite(theta[2]) &&
 			isfinite(residual_rms_nm) &&
 			isfinite(r2) &&
 			(!state->cfg.require_nonnegative_viscous || theta[0] >= 0.0f) &&
-			(!state->cfg.require_nonnegative_coulomb || theta[1] >= 0.0f) &&
+			(!state->cfg.require_nonnegative_coulomb || coulomb_mag >= 0.0f) &&
 			r2 >= state->cfg.min_r2;
 
-	if (result->valid && result->coulomb_friction_nm < 0.0f) {
-		result->coulomb_friction_nm = -result->coulomb_friction_nm;
+	return 0;
+}
+
+int motor_mech_friction_id_finalize_zero_viscous(
+	const struct motor_mech_friction_id_state *state,
+	struct motor_mech_friction_id_result *result)
+{
+	if (state == NULL || result == NULL) {
+		return -EINVAL;
 	}
+	if (!state->config_valid) {
+		return -EINVAL;
+	}
+
+	memset(result, 0, sizeof(*result));
+	result->sample_count = (uint16_t)MIN(state->sample_count, UINT16_MAX);
+	result->positive_count = (uint16_t)MIN(state->positive_count, UINT16_MAX);
+	result->negative_count = (uint16_t)MIN(state->negative_count, UINT16_MAX);
+	result->rejected_count = (uint16_t)MIN(state->rejected_count, UINT16_MAX);
+
+	if (state->sample_count < state->cfg.min_samples ||
+	    state->positive_count < state->cfg.min_samples_per_direction ||
+	    state->negative_count < state->cfg.min_samples_per_direction) {
+		return -ENODATA;
+	}
+
+	const float32_t a00 = state->A[1][1];
+	const float32_t a01 = state->A[1][2];
+	const float32_t a11 = state->A[2][2];
+	const float32_t b0 = state->b[1];
+	const float32_t b1 = state->b[2];
+	const float32_t det = a00 * a11 - a01 * a01;
+	if (fabsf(det) < MOTOR_MECH_ID_PIVOT_EPS) {
+		return -ERANGE;
+	}
+
+	const float32_t inv_det = 1.0f / det;
+	const float32_t tc = (b0 * a11 - b1 * a01) * inv_det;
+	const float32_t t0 = (a00 * b1 - a01 * b0) * inv_det;
+
+	const float32_t n = (float32_t)state->sample_count;
+	const float32_t theta_dot_b = tc * state->b[1] + t0 * state->b[2];
+	float32_t sse = state->sum_z2 - theta_dot_b;
+	if (sse < 0.0f) {
+		sse = 0.0f;
+	}
+	const float32_t mean_z = state->sum_z / n;
+	float32_t sst = state->sum_z2 - n * mean_z * mean_z;
+	if (sst < 0.0f) {
+		sst = 0.0f;
+	}
+
+	const float32_t residual_dof = (state->sample_count > 2U) ? (n - 2.0f) : n;
+	const float32_t residual_rms_nm = sqrtf(sse / residual_dof);
+	const float32_t r2 = (sst > MOTOR_MECH_ID_VAR_EPS) ? (1.0f - sse / sst) : 0.0f;
+
+	result->viscous_friction_nm_per_rad_s = 0.0f;
+	result->coulomb_friction_nm = fabsf(tc);
+	result->signed_coulomb_friction_nm = tc;
+	result->offset_friction_nm = t0;
+	result->residual_rms_nm = residual_rms_nm;
+	result->r2 = r2;
+	const float32_t coulomb_mag = fabsf(tc);
+	result->valid = isfinite(tc) &&
+			isfinite(t0) &&
+			isfinite(residual_rms_nm) &&
+			isfinite(r2) &&
+			(!state->cfg.require_nonnegative_coulomb || coulomb_mag >= 0.0f) &&
+			r2 >= state->cfg.min_r2;
 
 	return 0;
 }
@@ -349,7 +417,7 @@ int motor_mech_inertia_id_validate_config(const struct motor_mech_inertia_id_con
 	    !motor_mech_id_is_finite_nonnegative(cfg->sign_deadband_rad_s) ||
 	    !motor_mech_id_is_finite_nonnegative(cfg->min_abs_accel_rad_s2) ||
 	    !motor_mech_id_is_finite_nonnegative(cfg->viscous_friction_nm_per_rad_s) ||
-	    !motor_mech_id_is_finite_nonnegative(cfg->coulomb_friction_nm) ||
+	    !isfinite(cfg->coulomb_friction_nm) ||
 	    !isfinite(cfg->offset_friction_nm) ||
 	    !motor_mech_id_is_finite_nonnegative(cfg->fallback_inertia_kgm2) ||
 	    !isfinite(cfg->min_plausibility_ratio) ||

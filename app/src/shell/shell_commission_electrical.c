@@ -126,41 +126,67 @@ static int parse_optional_u32(char **argv, size_t argc, size_t idx,
 	return 0;
 }
 
-static int electrical_id_enter_generated_current_mode(const struct shell *sh)
+static int electrical_id_ensure_current_offsets(const struct shell *sh, bool force)
 {
+	int ret;
+
+	if (!force && g_motor_params->calibration.complete) {
+		return 0;
+	}
+
+	shell_print(sh, "Current offset calibration %s before production electrical ID.",
+		    force ? "forced" : "required");
+	ret = motor_api_request_calibrate();
+	if (ret != 0) {
+		shell_error(sh, "Failed to request current offset calibration (err %d)", ret);
+		return ret;
+	}
+
+	int64_t deadline = k_uptime_get() + 8000;
+	bool saw_calibration_start = false;
+	while (k_uptime_get() < deadline) {
+		int state = motor_api_get_state();
+		if (state == MOTOR_STATE_ERROR) {
+			shell_error(sh, "Current offset calibration entered ERROR state");
+			return -EIO;
+		}
+		if (g_motor_params->calibration.running || state != MOTOR_STATE_IDLE) {
+			saw_calibration_start = true;
+		}
+		if (saw_calibration_start &&
+		    !g_motor_params->calibration.running &&
+		    g_motor_params->calibration.complete &&
+		    state != MOTOR_STATE_OFFSET_MEAS &&
+		    state != MOTOR_STATE_CALIBRATION) {
+			shell_print(sh, "Current offsets ready: Ia=%.4f Ib=%.4f",
+				    (double)g_motor_params->Ia_offset,
+				    (double)g_motor_params->Ib_offset);
+			return 0;
+		}
+		motor_command_feed_watchdog(g_motor_params);
+		k_msleep(10);
+	}
+
+	shell_error(sh, "Current offset calibration timed out");
+	return -ETIMEDOUT;
+}
+
+static int electrical_id_enter_generated_current_mode(const struct shell *sh,
+						      bool force_current_offsets)
+{
+	bool ran_current_offsets;
 	int ret = motor_commission_prepare_idle_zero_current(COMMISSION_ELECTRICAL_SETTLE_MS);
 	if (ret != 0) {
 		shell_error(sh, "Failed to prepare idle zero-current state (err %d)", ret);
 		return ret;
 	}
 
-	if (!g_motor_params->calibration.complete) {
-		shell_print(sh, "Current offset calibration required before production electrical ID.");
-		ret = motor_api_request_calibrate();
-		if (ret != 0) {
-			shell_error(sh, "Failed to request current offset calibration (err %d)", ret);
-			return ret;
-		}
-		int64_t deadline = k_uptime_get() + 5000;
-		while (k_uptime_get() < deadline) {
-			int state = motor_api_get_state();
-			if (state == MOTOR_STATE_ERROR) {
-				shell_error(sh, "Current offset calibration entered ERROR state");
-				return -EIO;
-			}
-			if (g_motor_params->calibration.complete && state == MOTOR_STATE_IDLE) {
-				shell_print(sh, "Current offsets ready: Ia=%.4f Ib=%.4f",
-					    (double)g_motor_params->Ia_offset,
-					    (double)g_motor_params->Ib_offset);
-				break;
-			}
-			motor_command_feed_watchdog(g_motor_params);
-			k_msleep(10);
-		}
-		if (!g_motor_params->calibration.complete) {
-			shell_error(sh, "Current offset calibration timed out");
-			return -ETIMEDOUT;
-		}
+	ran_current_offsets = force_current_offsets || !g_motor_params->calibration.complete;
+	ret = electrical_id_ensure_current_offsets(sh, force_current_offsets);
+	if (ret != 0) {
+		return ret;
+	}
+	if (ran_current_offsets) {
 		ret = motor_commission_prepare_idle_zero_current(COMMISSION_ELECTRICAL_SETTLE_MS);
 		if (ret != 0) {
 			shell_error(sh, "Failed to re-enter idle after current offsets (err %d)", ret);
@@ -1035,7 +1061,7 @@ int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t ar
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh);
+	ret = electrical_id_enter_generated_current_mode(sh, true);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1087,7 +1113,7 @@ int cmd_motor_commission_electrical_measure_inductance(const struct shell *sh, s
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh);
+	ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1162,7 +1188,7 @@ int cmd_motor_commission_electrical_measure_demod(const struct shell *sh, size_t
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh);
+	ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1305,7 +1331,7 @@ int cmd_motor_commission_electrical_demod_sweep(const struct shell *sh, size_t a
 	staged.inductance_demod = false;
 	staged.inductance_saliency = false;
 
-	ret = electrical_id_enter_generated_current_mode(sh);
+	ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1436,7 +1462,7 @@ int cmd_motor_commission_electrical_saliency_sweep(const struct shell *sh, size_
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh);
+	ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1571,7 +1597,7 @@ int cmd_motor_commission_electrical_sweep(const struct shell *sh, size_t argc, c
 	float32_t qualified_min_v = fmaxf(COMMISSION_ELECTRICAL_SWEEP_MIN_QUALIFIED_V,
 					  pulse_limit_v * 0.55f);
 
-	int ret = electrical_id_enter_generated_current_mode(sh);
+	int ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1888,7 +1914,7 @@ int cmd_motor_commission_electrical_validate(const struct shell *sh, size_t argc
 		return -EINVAL;
 	}
 
-	int ret = electrical_id_enter_generated_current_mode(sh);
+	int ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
