@@ -12,5 +12,6 @@
 #include <zephyr/dsp/utils.h>
 
 bool motor_math_solve_linear_4x4(float32_t A[4][4], float32_t b[4], float32_t x[4]);
+bool motor_math_solve_linear_3x3(float32_t A[3][3], float32_t b[3], float32_t x[3]);
 
 #endif /* MATRIX_SOLVE_H_ */

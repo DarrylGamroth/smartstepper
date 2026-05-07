@@ -9,6 +9,7 @@
 #include <zephyr/ztest.h>
 
 #include "motor/estimation/commission_estimators.h"
+#include "motor/math/matrix_solve.h"
 
 static float32_t flux_model_vq(const struct motor_flux_id_config *cfg,
 			       float32_t elec_speed_rad_s,
@@ -482,6 +483,22 @@ ZTEST(motor_commission_estimators, test_mech_finalize_flags_low_r2)
 	zassert_ok(motor_mech_id_finalize(&state, &result), NULL);
 	zassert_true(result.r2 < cfg.min_r2, NULL);
 	zassert_false(result.valid, NULL);
+}
+
+ZTEST(motor_commission_estimators, test_matrix_solve_3x3)
+{
+	float32_t A[3][3] = {
+		{4.0f, 1.0f, 2.0f},
+		{1.0f, 3.0f, 0.5f},
+		{2.0f, 0.5f, 5.0f},
+	};
+	float32_t b[3] = {12.0f, 8.5f, 18.0f};
+	float32_t x[3] = {0};
+
+	zassert_true(motor_math_solve_linear_3x3(A, b, x), NULL);
+	zassert_within(x[0], 1.0f, 1.0e-5f, NULL);
+	zassert_within(x[1], 2.0f, 1.0e-5f, NULL);
+	zassert_within(x[2], 3.0f, 1.0e-5f, NULL);
 }
 
 ZTEST_SUITE(motor_commission_estimators, NULL, NULL, NULL, NULL, NULL);

@@ -287,7 +287,7 @@ void config_print_parameters(void)
 	LOG_INF("  Encoder direction sign=%d", ENCODER_DIRECTION_SIGN);
 	LOG_INF("  Max current=%.1fA", (double)MOTOR_MAX_CURRENT_A);
 	LOG_INF("  Max speed=%.0fHz", (double)MOTOR_MAX_SPEED_HZ);
-	LOG_INF("  Inertia=%.3fkgcm²", (double)(MOTOR_INERTIA_KGM2 * 10000.0f));
+	LOG_INF("  Inertia=%.0f mg*cm^2", (double)(MOTOR_INERTIA_KGM2 * 10000000000.0f));
 	LOG_INF("Control Options:");
 	LOG_INF("  DQ Decoupling=%s", CURRENT_DECOUPLING_ENABLED ? "ON" : "OFF");
 	LOG_INF("  Velocity notch=%s%s",

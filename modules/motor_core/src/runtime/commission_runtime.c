@@ -12,6 +12,7 @@
 
 #include "motor/runtime/commission_runtime.h"
 #include "motor/math/math_constants.h"
+#include "motor/math/matrix_solve.h"
 #include "motor/estimation/commission_estimators.h"
 #include "motor/control/torque.h"
 
@@ -36,29 +37,6 @@
 #define MOTOR_COMMISSION_TRACKING_MIN_TARGET_RAD_S (2.0f * PI_F32 * 0.05f)
 #define MOTOR_COMMISSION_TRACKING_ABS_TOL_RAD_S (2.0f * PI_F32 * 0.05f)
 #define MOTOR_COMMISSION_TRACKING_REL_TOL 0.75f
-
-static inline uint8_t motor_commission_mech_reject_rank(uint8_t reason)
-{
-	switch (reason) {
-	case MOTOR_COMMISSION_MECH_REJECT_NONE:
-		return 0U;
-	case MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE:
-		/*
-		 * A negative viscous term often appears when acceleration/current
-		 * phase is noisy but the inertia sign is still useful. Prefer it
-		 * over invalid inertia and clamp B to zero after selection.
-		 */
-		return 1U;
-	case MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID:
-		return 2U;
-	case MOTOR_COMMISSION_MECH_REJECT_SAMPLES:
-	case MOTOR_COMMISSION_MECH_REJECT_SOLVER:
-	case MOTOR_COMMISSION_MECH_REJECT_FINALIZE:
-	case MOTOR_COMMISSION_MECH_REJECT_KT_INVALID:
-	default:
-		return 3U;
-	}
-}
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
@@ -354,6 +332,98 @@ static void motor_commission_validate_mapping_flux(struct motor_commission_runti
 	motor_commission_update_mapping_summary(ctx, res);
 }
 
+static int motor_commission_estimate_mech_zero_viscous(
+	const struct motor_commission_ctx *commission,
+	float32_t kt_nm_per_a,
+	struct motor_mech_id_result *estimate)
+{
+	if (commission == NULL || estimate == NULL ||
+	    !isfinite(kt_nm_per_a) ||
+	    fabsf(kt_nm_per_a) < MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		return -EINVAL;
+	}
+
+	float32_t A[3][3] = {0};
+	float32_t b[3] = {0};
+	float32_t theta[3] = {0};
+	float32_t sum_z = 0.0f;
+	float32_t sum_z2 = 0.0f;
+	uint32_t count = 0U;
+
+	memset(estimate, 0, sizeof(*estimate));
+
+	for (uint32_t i = 0U; i < commission->sample_count; i++) {
+		const struct motor_commission_sample *s = &commission->samples[i];
+		if (!isfinite(s->mech_speed_rad_s) ||
+		    !isfinite(s->mech_accel_rad_s2) ||
+		    !isfinite(s->iq_a) ||
+		    fabsf(s->mech_speed_rad_s) < MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S) {
+			continue;
+		}
+
+		const float32_t sign_term = (s->mech_speed_rad_s > 0.0f) ? 1.0f : -1.0f;
+		const float32_t phi[3] = {
+			s->mech_accel_rad_s2,
+			sign_term,
+			1.0f,
+		};
+		const float32_t z = kt_nm_per_a * s->iq_a;
+		if (!isfinite(z)) {
+			continue;
+		}
+
+		for (uint32_t r = 0U; r < 3U; r++) {
+			b[r] += phi[r] * z;
+			for (uint32_t c = 0U; c < 3U; c++) {
+				A[r][c] += phi[r] * phi[c];
+			}
+		}
+		sum_z += z;
+		sum_z2 += z * z;
+		count++;
+	}
+
+	estimate->sample_count = (uint16_t)MIN(count, UINT16_MAX);
+	if (count < MOTOR_COMMISSION_MIN_MECH_SAMPLES) {
+		return -ENODATA;
+	}
+	if (!motor_math_solve_linear_3x3(A, b, theta)) {
+		return -ERANGE;
+	}
+
+	const float32_t n = (float32_t)count;
+	const float32_t theta_dot_b = theta[0] * b[0] + theta[1] * b[1] + theta[2] * b[2];
+	float32_t sse = sum_z2 - theta_dot_b;
+	if (sse < 0.0f) {
+		sse = 0.0f;
+	}
+	const float32_t mean_z = sum_z / n;
+	float32_t sst = sum_z2 - n * mean_z * mean_z;
+	if (sst < 0.0f) {
+		sst = 0.0f;
+	}
+
+	const float32_t residual_dof = (count > 3U) ? (n - 3.0f) : n;
+	const float32_t residual_rms_nm = sqrtf(sse / residual_dof);
+	const float32_t r2 = (sst > 1.0e-8f) ? (1.0f - sse / sst) : 0.0f;
+
+	estimate->inertia_kgm2 = theta[0];
+	estimate->viscous_friction_nm_per_rad_s = 0.0f;
+	estimate->coulomb_friction_nm = fabsf(theta[1]);
+	estimate->offset_friction_nm = theta[2];
+	estimate->residual_rms_nm = residual_rms_nm;
+	estimate->r2 = r2;
+	estimate->valid = isfinite(theta[0]) &&
+			  isfinite(theta[1]) &&
+			  isfinite(theta[2]) &&
+			  isfinite(residual_rms_nm) &&
+			  isfinite(r2) &&
+			  theta[0] > 0.0f &&
+			  r2 >= 0.0f;
+
+	return 0;
+}
+
 static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *ctx)
 {
 	struct motor_commission_ctx *commission = ctx->commission;
@@ -448,11 +518,21 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			reject_reason = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
 		}
 
-		uint8_t reject_rank = motor_commission_mech_reject_rank(reject_reason);
-		uint8_t best_rank = motor_commission_mech_reject_rank(best_reject_reason);
+		if (reject_reason == MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE) {
+			struct motor_mech_id_result zero_b_estimate = {0};
+			ret = motor_commission_estimate_mech_zero_viscous(commission,
+									  cfg.kt_nm_per_a,
+									  &zero_b_estimate);
+			if (ret == 0 && zero_b_estimate.valid) {
+				estimate = zero_b_estimate;
+				reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+			}
+		}
+
 		if (!have_best ||
-		    reject_rank < best_rank ||
-		    (reject_rank == best_rank &&
+		    (reject_reason == MOTOR_COMMISSION_MECH_REJECT_NONE &&
+		     best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) ||
+		    (reject_reason == best_reject_reason &&
 		     estimate.residual_rms_nm < best_estimate.residual_rms_nm)) {
 			best_estimate = estimate;
 			best_finalize_error = 0;
@@ -469,12 +549,6 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	res->mech_finalize_error = best_finalize_error;
 	res->mech_fit_torque_sign = best_sign;
 	res->mech_sample_count = best_estimate.sample_count;
-	res->inertia_kgm2 = best_estimate.inertia_kgm2;
-	res->viscous_friction_nm_per_rad_s = best_estimate.viscous_friction_nm_per_rad_s;
-	res->coulomb_friction_nm = best_estimate.coulomb_friction_nm;
-	res->offset_friction_nm = best_estimate.offset_friction_nm;
-	res->mech_residual_rms_nm = best_estimate.residual_rms_nm;
-	res->mech_r2 = best_estimate.r2;
 
 	if (best_finalize_error < 0) {
 		if (best_finalize_error == -ENODATA) {
@@ -487,21 +561,25 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 		return;
 	}
 
-	if (best_reject_reason == MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE &&
-	    best_estimate.valid &&
-	    isfinite(best_estimate.inertia_kgm2) &&
-	    best_estimate.inertia_kgm2 > 0.0f) {
-		best_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
-		best_estimate.viscous_friction_nm_per_rad_s = 0.0f;
-	}
-
 	if (best_reject_reason != MOTOR_COMMISSION_MECH_REJECT_NONE) {
 		res->mech_reject_reason = best_reject_reason;
 		return;
 	}
 
+	if (best_estimate.viscous_friction_nm_per_rad_s <
+	    -MOTOR_COMMISSION_VISCOUS_NEG_TOL_NM_PER_RAD_S) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE;
+		return;
+	}
+
+	res->inertia_kgm2 = best_estimate.inertia_kgm2;
 	res->viscous_friction_nm_per_rad_s =
-		fmaxf(best_estimate.viscous_friction_nm_per_rad_s, 0.0f);
+		(best_estimate.viscous_friction_nm_per_rad_s > 0.0f) ?
+			best_estimate.viscous_friction_nm_per_rad_s : 0.0f;
+	res->coulomb_friction_nm = best_estimate.coulomb_friction_nm;
+	res->offset_friction_nm = best_estimate.offset_friction_nm;
+	res->mech_residual_rms_nm = best_estimate.residual_rms_nm;
+	res->mech_r2 = best_estimate.r2;
 	res->mech_valid = best_estimate.valid;
 }
 
