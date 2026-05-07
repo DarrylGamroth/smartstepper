@@ -20,7 +20,9 @@ python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-trace-open-loop --yes-live-motion
+python3 scripts/hil/hil_telnet.py velocity-sweep --yes-live-motion
 python3 scripts/hil/hil_telnet.py mpr-dob-detent --yes-live-motion
+python3 scripts/hil/hil_telnet.py custom --yes-live-motion --command 'motor state status'
 ```
 
 Useful options:
@@ -75,6 +77,28 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --velocity-hold-ms 1000
 ```
 
+Use the velocity sweep scenario for PI/MPR baseline tuning. It records an
+encoder trace for each target and evaluates direction, minimum motion, trace
+quality, and velocity error. With `--velocity-sweep-commission standard`, the
+script first runs production electrical ID so demodulated `Ld/Lq` are staged
+and then reapplied through standard commissioning. Use
+`--skip-production-electrical` only when reusing already-staged values in the
+same target session.
+
+```bash
+python3 scripts/hil/hil_telnet.py velocity-sweep \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --velocity-sweep-commission standard \
+  --velocity-sweep-regulator pi \
+  --velocity-sweep-target-hz 0.1 --velocity-sweep-target-hz -0.1 \
+  --velocity-sweep-target-hz 0.3 --velocity-sweep-target-hz -0.3 \
+  --velocity-sweep-target-hz 0.5 --velocity-sweep-target-hz -0.5 \
+  --velocity-sweep-target-hz 1.0 --velocity-sweep-target-hz -1.0 \
+  --velocity-sweep-target-hz 3.0 --velocity-sweep-target-hz -3.0 \
+  --velocity-sweep-target-hz 5.0 --velocity-sweep-target-hz -5.0
+```
+
 Run a shorter subset while tuning:
 
 ```bash
@@ -86,6 +110,9 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --feature-combo mpr_detent \
   --mpr-bandwidth-hz 1.0
 ```
+
+The `mpr-dob-detent` scenario also runs production electrical ID before
+standard commissioning unless `--skip-production-electrical` is supplied.
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file
 logging or `--log-dir <path>` to choose another location.
@@ -167,6 +194,9 @@ configurable with options such as `--max-crc-errors`,
 Safety behavior:
 
 - Live-motion scenarios refuse to run without `--yes-live-motion`.
+- `custom` is treated as live-motion because arbitrary command lists can
+  energize hardware. This also ensures the stop/status postlude runs, so encoder
+  acquisition counters are available to the final verdict.
 - The script sends best-effort stop commands at the end of live-motion scenarios:
   `motor velocity target 0`, `motor current iq 0`, `motor disarm`,
   `motor state idle`, and `motor safety timeout 1000`, followed by status

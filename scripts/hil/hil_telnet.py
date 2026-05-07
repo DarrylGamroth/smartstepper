@@ -242,7 +242,7 @@ def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor encoder status", timeout_s=5.0),
         ShellCommand("motor outer status", timeout_s=5.0),
         ShellCommand("motor encoder control_status", timeout_s=5.0),
-        ShellCommand("motor encoder acquisition", timeout_s=5.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=5.0),
         ShellCommand("motor fault recovery", timeout_s=5.0),
         ShellCommand("motor fault snapshot status", timeout_s=5.0),
         ShellCommand("motor info live", timeout_s=5.0),
@@ -260,7 +260,7 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
-        ShellCommand("motor encoder acquisition_reset"),
+        ShellCommand("motor encoder acquisition reset"),
         ShellCommand(
             f"motor commission boot {args.boot_current:.3f} {args.boot_hz:.3f} {args.cycles:.3f}",
             timeout_s=duration_s,
@@ -272,7 +272,7 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
             require_success=True,
         ),
         ShellCommand("motor encoder control_status"),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor state status"),
         ShellCommand("motor velocity target 0", timeout_s=1.5),
         ShellCommand("motor current iq 0", timeout_s=1.5),
@@ -280,7 +280,7 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 1000"),
         ShellCommand("motor encoder control_status"),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor state status"),
     ]
 
@@ -312,7 +312,7 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
-        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
         ShellCommand("motor arm", timeout_s=2.0),
         ShellCommand(
             f"motor commission encoder robust {args.boot_current:.3f} "
@@ -327,7 +327,7 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor commission encoder status", timeout_s=3.0),
         ShellCommand("motor commission encoder apply", timeout_s=3.0),
         ShellCommand("motor encoder control_status", timeout_s=3.0),
-        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=3.0),
         ShellCommand("motor state status", timeout_s=3.0),
     ]
 
@@ -364,7 +364,7 @@ def scenario_current_validate_commands(args: argparse.Namespace) -> list[ShellCo
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor state status"),
     ]
@@ -381,7 +381,7 @@ def scenario_velocity_validate_commands(args: argparse.Namespace) -> list[ShellC
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor state status"),
     ]
@@ -398,7 +398,7 @@ def scenario_position_validate_commands(args: argparse.Namespace) -> list[ShellC
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor state status"),
     ]
@@ -446,10 +446,45 @@ def scenario_encoder_trace_open_loop(args: argparse.Namespace) -> list[ShellComm
         ShellCommand("motor current iq 0"),
         ShellCommand("motor encoder trace summary"),
         ShellCommand(f"motor encoder trace dump {args.trace_dump}"),
-        ShellCommand("motor encoder acquisition"),
+        ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor disarm"),
         ShellCommand("motor state idle", timeout_s=2.0),
     ]
+
+
+def production_electrical_id_commands(args: argparse.Namespace,
+                                      *,
+                                      validate: bool) -> list[ShellCommand]:
+    commands = [
+        ShellCommand("motor commission electrical clear", timeout_s=2.0),
+        ShellCommand("motor commission electrical plan", timeout_s=2.0),
+        ShellCommand(
+            f"motor commission electrical run {args.electrical_id_current:.3f} "
+            f"{args.electrical_id_pulse:.3f} {args.electrical_id_samples}",
+            timeout_s=max(20.0, args.electrical_id_samples * 0.08 + 8.0),
+            note=(
+                "Production electrical ID: bipolar Rs current injection and direct-voltage "
+                "Ld/Lq pulses; no sustained rotation is expected."
+            ),
+            require_success=True,
+        ),
+        ShellCommand("motor commission electrical status", timeout_s=3.0),
+        ShellCommand("motor commission electrical apply", timeout_s=3.0,
+                     require_success=True),
+    ]
+    if validate:
+        commands.extend([
+            ShellCommand(
+                f"motor commission electrical validate {args.electrical_id_current:.3f} "
+                f"{args.electrical_id_validate_ms} {args.electrical_id_max_error:.3f}",
+                timeout_s=max(8.0, args.electrical_id_validate_ms / 1000.0 + 4.0),
+                require_success=True,
+            ),
+            ShellCommand("motor current gain get id", timeout_s=2.0),
+            ShellCommand("motor current gain get iq", timeout_s=2.0),
+        ])
+    commands.append(ShellCommand("motor info measured", timeout_s=3.0))
+    return commands
 
 
 def _velocity_sweep_targets(args: argparse.Namespace) -> list[float]:
@@ -524,7 +559,10 @@ def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
             ),
         ]
     elif args.velocity_sweep_commission == "standard":
-        commission_commands = [
+        commission_commands = []
+        if not args.skip_production_electrical:
+            commission_commands.extend(production_electrical_id_commands(args, validate=True))
+        commission_commands.extend([
             ShellCommand(f"motor commission run {args.commission_profile} apply",
                          timeout_s=commission_timeout_s,
                          note=(
@@ -539,7 +577,7 @@ def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
             ShellCommand("motor commission apply", timeout_s=3.0),
             ShellCommand("motor commission status", timeout_s=3.0),
             ShellCommand("motor info measured", timeout_s=3.0),
-        ]
+        ])
     else:
         commission_commands = []
 
@@ -551,7 +589,7 @@ def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
-        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
         *commission_commands,
         ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
         ShellCommand("motor commission detent clear", timeout_s=2.0),
@@ -583,7 +621,7 @@ def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=3.0),
         ShellCommand("motor state status", timeout_s=3.0),
     ])
     return commands
@@ -639,12 +677,15 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
     commands = [
         ShellCommand("motor state status"),
         ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
         ShellCommand("motor velocity target 0", timeout_s=1.5),
         ShellCommand("motor current iq 0", timeout_s=1.5),
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
-        ShellCommand("motor encoder acquisition_reset", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
+        *([] if args.skip_production_electrical
+          else production_electrical_id_commands(args, validate=True)),
         ShellCommand(f"motor commission run {args.commission_profile} apply",
                      timeout_s=args.standard_commission_timeout_s,
                      note=(
@@ -655,7 +696,7 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
                      require_success=True),
         ShellCommand("motor commission status", timeout_s=3.0),
         ShellCommand("motor encoder control_status", timeout_s=3.0),
-        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=3.0),
         ShellCommand("motor arm", timeout_s=2.0),
         ShellCommand("motor outer mode pi", timeout_s=2.0),
         ShellCommand("motor velocity dob enable 0", timeout_s=2.0),
@@ -694,7 +735,7 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor velocity mpr status", timeout_s=2.0),
         ShellCommand("motor velocity dob status", timeout_s=2.0),
         ShellCommand("motor outer status", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition", timeout_s=3.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=3.0),
         ShellCommand("motor state status", timeout_s=3.0),
     ])
     return commands
@@ -717,7 +758,7 @@ def scenario_recovery_status(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state recovery", timeout_s=5.0),
         ShellCommand("motor fault recovery", timeout_s=5.0),
         ShellCommand("motor gate status", timeout_s=5.0),
-        ShellCommand("motor encoder acquisition", timeout_s=5.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=5.0),
         ShellCommand("motor state status", timeout_s=5.0),
     ]
 
@@ -732,29 +773,7 @@ def scenario_production_electrical_id(args: argparse.Namespace) -> list[ShellCom
         ShellCommand("motor disarm", timeout_s=1.5),
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
-        ShellCommand("motor commission electrical clear", timeout_s=2.0),
-        ShellCommand("motor commission electrical plan", timeout_s=2.0),
-        ShellCommand(
-            f"motor commission electrical run {args.electrical_id_current:.3f} "
-            f"{args.electrical_id_pulse:.3f} {args.electrical_id_samples}",
-            timeout_s=max(20.0, args.electrical_id_samples * 0.08 + 8.0),
-            note=(
-                "Production electrical ID: bipolar Rs current injection and direct-voltage "
-                "Ld/Lq pulses; no sustained rotation is expected."
-            ),
-            require_success=True,
-        ),
-        ShellCommand("motor commission electrical status", timeout_s=3.0),
-        ShellCommand("motor commission electrical apply", timeout_s=3.0, require_success=True),
-        ShellCommand(
-            f"motor commission electrical validate {args.electrical_id_current:.3f} "
-            f"{args.electrical_id_validate_ms} {args.electrical_id_max_error:.3f}",
-            timeout_s=max(8.0, args.electrical_id_validate_ms / 1000.0 + 4.0),
-            require_success=True,
-        ),
-        ShellCommand("motor current gain get id", timeout_s=2.0),
-        ShellCommand("motor current gain get iq", timeout_s=2.0),
-        ShellCommand("motor info measured", timeout_s=3.0),
+        *production_electrical_id_commands(args, validate=True),
         ShellCommand("motor state status", timeout_s=3.0),
         ShellCommand("motor safety timeout 1000"),
     ]
@@ -773,7 +792,10 @@ SCENARIOS = {
     "recovery-status": (scenario_recovery_status, False),
     "velocity-sweep": (scenario_velocity_sweep, True),
     "velocity-validate": (scenario_velocity_validate, True),
-    "custom": (scenario_custom, False),
+    # A custom command list can include any live motor command. Treat it as a
+    # live scenario so the caller must opt in and the standard stop/status
+    # postlude always runs.
+    "custom": (scenario_custom, True),
 }
 
 
@@ -1685,7 +1707,7 @@ def stop_commands() -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 1000", timeout_s=1.5),
         ShellCommand("motor encoder control_status", timeout_s=2.0),
-        ShellCommand("motor encoder acquisition", timeout_s=2.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=2.0),
         ShellCommand("motor state status", timeout_s=2.0),
         ShellCommand("motor fault snapshot status", timeout_s=2.0),
     ]
@@ -1797,6 +1819,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Hold time for production electrical current-step validation.")
     parser.add_argument("--electrical-id-max-error", type=float, default=0.01,
                         help="Average current error limit for production electrical validation.")
+    parser.add_argument("--skip-production-electrical", action="store_true",
+                        help="Skip production Rs/Ld/Lq ID before standard control-tuning scenarios.")
     parser.add_argument(
         "--feature-combo",
         action="append",
