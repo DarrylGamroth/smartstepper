@@ -21,7 +21,7 @@ struct motor_parameters;
 	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL | \
 	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT)
 
-#define MOTOR_SETTINGS_SCHEMA_VERSION 1U
+#define MOTOR_SETTINGS_SCHEMA_VERSION 2U
 
 struct motor_settings_snapshot {
 	uint32_t schema_version;
@@ -43,25 +43,13 @@ struct motor_settings_snapshot {
 	float32_t model_viscous_friction_nm_per_rad_s;
 	float32_t model_coulomb_friction_nm;
 
-	float32_t ctrl_velocity_kp_a_per_rad_s;
-	float32_t ctrl_velocity_ki_a_per_rad;
+	uint8_t ctrl_outer_loop_mode;
+	float32_t ctrl_velocity_bandwidth_hz;
+	float32_t ctrl_position_bandwidth_hz;
+	float32_t ctrl_damping_ratio;
 	float32_t ctrl_velocity_iq_limit_a;
-	float32_t ctrl_position_kp_rad_s_per_rad;
-	float32_t ctrl_position_ki_rad_s2_per_rad;
-	float32_t ctrl_velocity_mpr_q_speed;
-	float32_t ctrl_velocity_mpr_r_delta_iq;
-	float32_t ctrl_velocity_mpr_max_delta_iq_a;
-	float32_t ctrl_velocity_mpr_disturbance_ki_nm_per_rad_s;
-	uint16_t ctrl_velocity_mpr_horizon;
-	float32_t ctrl_position_mpr_q_position;
-	float32_t ctrl_position_mpr_q_velocity_ff;
-	float32_t ctrl_position_mpr_r_delta_velocity;
-	float32_t ctrl_position_mpr_max_delta_velocity_rad_s;
-	uint16_t ctrl_position_mpr_horizon;
 	bool ctrl_velocity_dob_enabled;
-	float32_t ctrl_velocity_dob_observer_gain_nm_per_rad_s;
-	float32_t ctrl_velocity_dob_torque_limit_nm;
-	float32_t ctrl_velocity_dob_iq_ff_limit_a;
+	float32_t ctrl_velocity_dob_gain_scale;
 
 	bool detent_enabled;
 	uint16_t detent_bins;

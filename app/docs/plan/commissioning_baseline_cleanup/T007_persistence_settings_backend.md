@@ -40,6 +40,17 @@ filesystem failures and should not depend on external-flash initialization.
   partition map is provisional and under-allocates the STM32H743 internal flash;
   fix that layout before finalizing the settings partition.
 - Store individual typed keys under `motor/encoder`, `motor/model`, `motor/controllers`, and `motor/detent`, plus `motor/meta/schema_version`, `motor/meta/generation`, and `motor/meta/valid_groups`.
+- Store controller tuning intent, not raw generated coefficients:
+  - `motor/controllers/outer_loop_mode`
+  - `motor/controllers/velocity_bandwidth_hz`
+  - `motor/controllers/position_bandwidth_hz`
+  - `motor/controllers/damping_ratio`
+  - `motor/controllers/velocity_iq_limit_a`
+  - `motor/controllers/velocity_dob_enabled`
+  - `motor/controllers/velocity_dob_gain_scale`
+- Recompute velocity PI, position PI, velocity MPR, position MPR, and DOB
+  runtime coefficients on load from the stored tuning intent and active motor
+  model.
 - Do not persist ADC current offsets; run the quick offset calibration every boot.
 - Add shell commands:
   - `motor settings status`
@@ -51,7 +62,8 @@ filesystem failures and should not depend on external-flash initialization.
 - Keep autoload disabled in this plan.
 - Refuse save/load while armed or online unless command is read-only preview.
 - On load, validate schema/group presence/value ranges and print all values before apply.
-- Apply only explicitly selected groups and reset affected fast-loop state.
+- Apply only explicitly selected groups, recompute derived controller
+  coefficients, and reset affected fast-loop state.
 - Enable `CONFIG_SETTINGS_SHELL` only as a debug/bring-up aid if useful. The
   generic `settings` shell can list/read/write/delete raw keys, but it must not
   be treated as the product motor-parameter interface because it bypasses typed

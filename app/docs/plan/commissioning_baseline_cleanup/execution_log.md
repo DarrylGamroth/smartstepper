@@ -39,3 +39,11 @@ Validation evidence:
 - ADC current offsets are intentionally not persisted; they remain boot-calibrated runtime values.
 - Autoload remains disabled; load is explicit and refused while armed, online, or calibrating.
 - Validation evidence: firmware build passed with `west build --build-dir /workspace/build/chopper/smartstepper_v2`; focused persistence unit suite passed with `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit`.
+
+## 2026-05-07 - T007 Controller Settings Intent Schema
+
+- Replaced raw controller coefficient persistence with high-level controller intent.
+- Controller settings now persist outer-loop mode, velocity bandwidth, position bandwidth, damping ratio, velocity Iq limit, DOB enable, and DOB gain scale.
+- Velocity PI, position PI, velocity MPR, position MPR, and DOB coefficients are recomputed on load from the persisted intent and active motor model.
+- Bumped motor settings schema to version 2 to avoid applying old raw-controller records.
+- Validation evidence: firmware build passed with `west build --build-dir /workspace/build/chopper/smartstepper_v2`; focused persistence unit suite passed with `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit`.

@@ -120,30 +120,20 @@ static void print_snapshot(const struct shell *sh,
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_CONTROLLERS) != 0U) {
 		shell_print(sh, "  Controllers:");
-		shell_print(sh, "    velocity PI: kp=%.6f ki=%.6f iq_limit=%.6f A",
-			    (double)s->ctrl_velocity_kp_a_per_rad_s,
-			    (double)s->ctrl_velocity_ki_a_per_rad,
+		shell_print(sh, "    outer_loop:          %s",
+			    s->ctrl_outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR ? "MPR" : "PI");
+		shell_print(sh, "    velocity bandwidth:  %.6f Hz",
+			    (double)s->ctrl_velocity_bandwidth_hz);
+		shell_print(sh, "    position bandwidth:  %.6f Hz",
+			    (double)s->ctrl_position_bandwidth_hz);
+		shell_print(sh, "    damping ratio:       %.6f",
+			    (double)s->ctrl_damping_ratio);
+		shell_print(sh, "    velocity iq_limit:   %.6f A",
 			    (double)s->ctrl_velocity_iq_limit_a);
-		shell_print(sh, "    position PI: kp=%.6f ki=%.6f",
-			    (double)s->ctrl_position_kp_rad_s_per_rad,
-			    (double)s->ctrl_position_ki_rad_s2_per_rad);
-		shell_print(sh, "    velocity MPR: q=%.6f r=%.6f dIq=%.6f horizon=%u dist_ki=%.6f",
-			    (double)s->ctrl_velocity_mpr_q_speed,
-			    (double)s->ctrl_velocity_mpr_r_delta_iq,
-			    (double)s->ctrl_velocity_mpr_max_delta_iq_a,
-			    s->ctrl_velocity_mpr_horizon,
-			    (double)s->ctrl_velocity_mpr_disturbance_ki_nm_per_rad_s);
-		shell_print(sh, "    position MPR: q_pos=%.6f q_vel=%.6f r=%.6f dVel=%.6f horizon=%u",
-			    (double)s->ctrl_position_mpr_q_position,
-			    (double)s->ctrl_position_mpr_q_velocity_ff,
-			    (double)s->ctrl_position_mpr_r_delta_velocity,
-			    (double)s->ctrl_position_mpr_max_delta_velocity_rad_s,
-			    s->ctrl_position_mpr_horizon);
-		shell_print(sh, "    DOB: enabled=%s gain=%.6f torque_limit=%.6f iq_limit=%.6f",
+		shell_print(sh, "    DOB intent:          enabled=%s gain_scale=%.6f",
 			    s->ctrl_velocity_dob_enabled ? "yes" : "no",
-			    (double)s->ctrl_velocity_dob_observer_gain_nm_per_rad_s,
-			    (double)s->ctrl_velocity_dob_torque_limit_nm,
-			    (double)s->ctrl_velocity_dob_iq_ff_limit_a);
+			    (double)s->ctrl_velocity_dob_gain_scale);
+		shell_print(sh, "    Note: PI/MPR/DOB coefficients are recomputed from these values on load.");
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_DETENT) != 0U) {
 		shell_print(sh, "  Detent metadata:");

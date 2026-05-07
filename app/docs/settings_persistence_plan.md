@@ -66,26 +66,20 @@ motor/model/coulomb_friction_nm
 Controller group:
 
 ```text
-motor/controllers/velocity_kp_a_per_rad_s
-motor/controllers/velocity_ki_a_per_rad
+motor/controllers/outer_loop_mode
+motor/controllers/velocity_bandwidth_hz
+motor/controllers/position_bandwidth_hz
+motor/controllers/damping_ratio
 motor/controllers/velocity_iq_limit_a
-motor/controllers/position_kp_rad_s_per_rad
-motor/controllers/position_ki_rad_s2_per_rad
-motor/controllers/velocity_mpr_q_speed
-motor/controllers/velocity_mpr_r_delta_iq
-motor/controllers/velocity_mpr_max_delta_iq_a
-motor/controllers/velocity_mpr_disturbance_ki_nm_per_rad_s
-motor/controllers/velocity_mpr_horizon
-motor/controllers/position_mpr_q_position
-motor/controllers/position_mpr_q_velocity_ff
-motor/controllers/position_mpr_r_delta_velocity
-motor/controllers/position_mpr_max_delta_velocity_rad_s
-motor/controllers/position_mpr_horizon
 motor/controllers/velocity_dob_enabled
-motor/controllers/velocity_dob_observer_gain_nm_per_rad_s
-motor/controllers/velocity_dob_torque_limit_nm
-motor/controllers/velocity_dob_iq_ff_limit_a
+motor/controllers/velocity_dob_gain_scale
 ```
+
+The controller group stores tuning intent, not raw derived coefficients. On
+load the firmware recomputes velocity PI, position PI, velocity MPR, position
+MPR, and DOB limits from the stored bandwidth/current-limit settings and the
+active motor model. This avoids stale MPR/DOB values after model, decimation,
+sample-time, or current-limit changes.
 
 Detent metadata group:
 
@@ -134,8 +128,9 @@ Load validates selected values before applying. After apply:
 - encoder mapping reload updates the angle observer offset and resets feedback
   trust state,
 - model reload updates active Rs/Ld/Lq/flux/Kt/J/B/Tc and model source markers,
-- controller reload resets PI integrators, velocity/position regulator state,
-  MPR state, and DOB state,
+- controller reload recomputes PI/MPR/DOB coefficients from stored tuning
+  intent, then resets PI integrators, velocity/position regulator state, MPR
+  state, and DOB state,
 - detent metadata reload resets detent runtime state and only enables the map if
   its stored CRC matches the current volatile table.
 
