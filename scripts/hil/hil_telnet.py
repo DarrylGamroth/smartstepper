@@ -837,7 +837,8 @@ def _command_success_failure_reason(cmd: ShellCommand, response: str) -> str | N
         return "commissioning validation did not complete"
 
     if command.startswith("motor commission electrical run"):
-        if "production inductance staged" in lower:
+        if ("production inductance staged" in lower or
+            "demodulated inductance staged" in lower):
             return None
         return "production electrical ID did not stage inductance"
 
@@ -1809,11 +1810,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Mechanical Hz for detent off/on validation.")
     parser.add_argument("--detent-validate-ms", type=int, default=3000,
                         help="Duration per detent validation pass.")
-    parser.add_argument("--electrical-id-current", type=float, default=0.05,
+    parser.add_argument("--electrical-id-current", type=float, default=0.30,
                         help="D-axis current for production electrical Rs measurement.")
-    parser.add_argument("--electrical-id-pulse", type=float, default=0.25,
+    parser.add_argument("--electrical-id-pulse", type=float, default=0.50,
                         help="Small direct D/Q voltage pulse for production electrical Ld/Lq measurement.")
-    parser.add_argument("--electrical-id-samples", type=int, default=64,
+    parser.add_argument("--electrical-id-samples", type=int, default=128,
                         help="Sample/repeat count for production electrical ID.")
     parser.add_argument("--electrical-id-validate-ms", type=int, default=300,
                         help="Hold time for production electrical current-step validation.")

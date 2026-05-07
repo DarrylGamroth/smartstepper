@@ -84,6 +84,8 @@ script first runs production electrical ID so demodulated `Ld/Lq` are staged
 and then reapplied through standard commissioning. Use
 `--skip-production-electrical` only when reusing already-staged values in the
 same target session.
+The default production electrical ID settings are the currently validated
+MT6835 values: `0.300 A`, `0.500 V`, `128` samples.
 
 ```bash
 python3 scripts/hil/hil_telnet.py velocity-sweep \
