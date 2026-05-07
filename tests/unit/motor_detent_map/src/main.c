@@ -77,6 +77,24 @@ ZTEST(motor_detent_map, test_linear_interpolation)
 	zassert_within(iq, 0.40f, 1e-5f, NULL);
 }
 
+ZTEST(motor_detent_map, test_lookup_matches_step_without_state)
+{
+	clear_table();
+	table[1] = 0.20f;
+	table[2] = 0.60f;
+	struct motor_detent_map_config cfg = base_cfg();
+	struct motor_detent_map_state state;
+	float32_t iq_step = 0.0f;
+	float32_t iq_lookup = 0.0f;
+	float32_t angle = (1.5f / 8.0f) * 2.0f * PI_F32;
+
+	zassert_equal(motor_detent_map_init(&cfg, &state), 0, NULL);
+	zassert_equal(motor_detent_map_lookup(&cfg, angle, &iq_lookup), 0, NULL);
+	zassert_equal(motor_detent_map_step_fast(&cfg, &state, angle, &iq_step), 0, NULL);
+	zassert_within(iq_lookup, iq_step, 1e-6f, NULL);
+	zassert_within(iq_lookup, 0.40f, 1e-5f, NULL);
+}
+
 ZTEST(motor_detent_map, test_wraparound_interpolation)
 {
 	clear_table();

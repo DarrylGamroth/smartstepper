@@ -113,21 +113,17 @@ int motor_detent_map_learn_sample(const struct motor_detent_map_config *cfg,
 	return 0;
 }
 
-int motor_detent_map_step_fast(const struct motor_detent_map_config *cfg,
-			       struct motor_detent_map_state *state,
-			       float32_t mech_angle_rad,
-			       float32_t *iq_ff_a)
+int motor_detent_map_lookup(const struct motor_detent_map_config *cfg,
+			    float32_t mech_angle_rad,
+			    float32_t *iq_ff_a)
 {
 	if (!motor_detent_map_config_valid(cfg) ||
-	    state == NULL ||
 	    iq_ff_a == NULL ||
-	    !state->initialized ||
 	    !isfinite(mech_angle_rad)) {
 		return -EINVAL;
 	}
 
 	if (!cfg->enabled || cfg->iq_ff_limit_a == 0.0f || cfg->gain == 0.0f) {
-		state->last_iq_ff_a = 0.0f;
 		*iq_ff_a = 0.0f;
 		return 0;
 	}
@@ -151,6 +147,34 @@ int motor_detent_map_step_fast(const struct motor_detent_map_config *cfg,
 	} else if (out < -cfg->iq_ff_limit_a) {
 		out = -cfg->iq_ff_limit_a;
 	}
+
+	*iq_ff_a = out;
+	return 0;
+}
+
+int motor_detent_map_step_fast(const struct motor_detent_map_config *cfg,
+			       struct motor_detent_map_state *state,
+			       float32_t mech_angle_rad,
+			       float32_t *iq_ff_a)
+{
+	if (!motor_detent_map_config_valid(cfg) ||
+	    state == NULL ||
+	    iq_ff_a == NULL ||
+	    !state->initialized ||
+	    !isfinite(mech_angle_rad)) {
+		return -EINVAL;
+	}
+
+	float32_t out = 0.0f;
+	int ret = motor_detent_map_lookup(cfg, mech_angle_rad, &out);
+	if (ret != 0) {
+		return ret;
+	}
+	float32_t wrapped = wrap_rad_2pi(mech_angle_rad);
+	float32_t scaled = wrapped * ((float32_t)cfg->table_len / (2.0f * PI_F32));
+	int32_t base = (int32_t)floorf(scaled);
+	uint16_t idx0 = motor_detent_map_wrap_index(base + cfg->phase_advance_bins,
+						    cfg->table_len);
 
 	state->last_index = idx0;
 	state->last_iq_ff_a = out;

@@ -652,6 +652,7 @@ static inline void motor_control_step_prepare_commission_obs(
 	obs->saturation = false;
 	obs->data_valid = false;
 	obs->velocity_ref_rad_s = 0.0f;
+	obs->mech_position_rad = 0.0f;
 }
 
 static MOTOR_ISR_STAGE_NOINLINE int motor_control_step_read_encoder(struct motor_parameters *params,
@@ -1499,6 +1500,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	commission_obs->iq_a = current_ref->iq_meas_a;
 	commission_obs->vd_v = commutation_ref->vd_v;
 	commission_obs->vq_v = commutation_ref->vq_v;
+	commission_obs->mech_position_rad = params->live.position_rad;
 	commission_obs->mech_speed_rad_s = params->live.velocity_rad_s;
 	commission_obs->elec_speed_rad_s = angle_ref->electrical_speed_rad_s;
 	commission_obs->velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;

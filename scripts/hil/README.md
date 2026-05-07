@@ -20,6 +20,7 @@ python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py encoder-trace-open-loop --yes-live-motion
+python3 scripts/hil/hil_telnet.py mechanical-id-v2 --yes-live-motion
 python3 scripts/hil/hil_telnet.py velocity-sweep --yes-live-motion
 python3 scripts/hil/hil_telnet.py mpr-dob-detent --yes-live-motion
 python3 scripts/hil/hil_telnet.py custom --yes-live-motion --command 'motor state status'
@@ -58,6 +59,18 @@ and apply, without running current/velocity/position validation afterward:
 ```bash
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
   --boot-current 0.15 --boot-hz 0.10 --cycles 1 --bidirectional
+```
+
+Use the mechanical identification v2 scenario to run the staged
+friction/inertia workflow without applying the staged mechanical model. The
+verdict checks that windowed acceleration is present and that any accepted
+mechanical model passed the confidence gate:
+
+```bash
+python3 scripts/hil/hil_telnet.py mechanical-id-v2 \
+  --host 10.0.0.44 \
+  --yes-live-motion \
+  --mechanical-id-profile confirm
 ```
 
 Use the advanced motion scenario after basic encoder validation is passing. It

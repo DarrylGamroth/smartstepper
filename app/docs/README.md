@@ -17,6 +17,10 @@ as the source of truth and treat `archive/` as background evidence only.
     caveats.
 - `mpr_dob_detent_improvement_plan.md`
   - Current plan for detent feedforward, MPR, and DOB improvements.
+- `plan/mechanical_identification_v2/README.md`
+  - Current staged plan to replace the coupled 4-parameter mechanical fit with
+    separate friction, inertia, detent, confidence-gating, and HIL workflow
+    phases.
 - `settings_persistence_plan.md`
   - Persistence readiness policy. Persistence remains opt-in/future until
     repeatable HIL gates prove behavior.

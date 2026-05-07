@@ -14,6 +14,7 @@
 
 #include "motor/control/dob.h"
 #include "motor/control/mpr.h"
+#include "motor/compensation/detent_map.h"
 #include "motor/runtime/commission_tune.h"
 
 #define MOTOR_COMMISSION_MAX_SAMPLES 512U
@@ -62,9 +63,11 @@ struct motor_commission_mech_config {
 
 struct motor_commission_sample {
 	uint32_t loop_count;
+	float32_t mech_position_rad;
 	float32_t mech_speed_rad_s;
 	float32_t elec_speed_rad_s;
 	float32_t mech_accel_rad_s2;
+	float32_t mech_accel_window_rad_s2;
 	float32_t id_a;
 	float32_t iq_a;
 	float32_t did_dt_a_s;
@@ -96,11 +99,18 @@ struct motor_commission_results {
 	float32_t coulomb_friction_stddev_nm;
 	float32_t mech_validation_residual_rms_nm;
 	float32_t mech_confidence;
+	float32_t mech_friction_residual_rms_nm;
+	float32_t mech_inertia_residual_rms_nm;
+	float32_t mech_inertia_plausibility_ratio;
 	int32_t mech_finalize_error;
 	uint16_t mech_sample_count;
+	uint16_t mech_friction_sample_count;
+	uint16_t mech_inertia_sample_count;
+	uint16_t mech_accel_window_valid_count;
 	uint8_t mech_capture_count;
 	uint8_t mech_reject_reason;
 	int8_t mech_fit_torque_sign;
+	uint8_t mech_detent_correction_source;
 	float32_t mapping_direction_corr;
 	float32_t mapping_offset_ratio;
 	float32_t mapping_pole_pairs_est;
@@ -115,6 +125,10 @@ struct motor_commission_results {
 	bool iq_move_valid;
 	bool psi_f_valid;
 	bool mech_valid;
+	bool mech_v2_valid;
+	bool mech_friction_valid;
+	bool mech_inertia_valid;
+	bool mech_detent_corrected;
 	bool mech_validation_valid;
 	bool mech_validation_pass;
 	bool mapping_direction_valid;
@@ -135,6 +149,15 @@ enum motor_commission_mech_reject_reason {
 	MOTOR_COMMISSION_MECH_REJECT_FINALIZE = 4,
 	MOTOR_COMMISSION_MECH_REJECT_VISCOUS_NEGATIVE = 5,
 	MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID = 6,
+	MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID = 7,
+	MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID = 8,
+	MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE = 9,
+	MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE = 10,
+};
+
+enum motor_commission_detent_correction_source {
+	MOTOR_COMMISSION_DETENT_CORRECTION_NONE = 0,
+	MOTOR_COMMISSION_DETENT_CORRECTION_ACTIVE_MAP = 1,
 };
 
 struct motor_commission_observation {
@@ -155,6 +178,7 @@ struct motor_commission_observation {
 	float32_t iq_a;
 	float32_t vd_v;
 	float32_t vq_v;
+	float32_t mech_position_rad;
 	float32_t mech_speed_rad_s;
 	float32_t elec_speed_rad_s;
 };
@@ -241,6 +265,7 @@ struct motor_commission_runtime_ctx {
 	float32_t *live_velocity_dob_iq_ff_a;
 	float32_t *live_velocity_dob_disturbance_nm;
 	float32_t *live_velocity_dob_residual_rad_s;
+	const struct motor_detent_map_config *detent_map_cfg;
 };
 
 void motor_commission_init(struct motor_commission_runtime_ctx *ctx);

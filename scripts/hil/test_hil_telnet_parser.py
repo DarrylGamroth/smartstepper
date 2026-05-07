@@ -890,6 +890,62 @@ Encoder raw trace summary:
             "Production electrical current-step validation: PASS target=0.0400 A\n",
         ))
 
+    def test_mechanical_id_v2_passes_with_valid_confident_fit(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  State: IDLE (7)\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission status",
+                """
+Commission Status:
+  Estimates:      psi_f=VALID mech=VALID
+  Mech fit:       J=0.00000570 kgm2 B=0.00001000 Nm/(rad/s) Tc=0.02000000 Nm T0=0.00000000 Nm
+  Mech quality:   rms=0.001000 Nm R2=0.9000 N=128
+  Mech v2:        valid=YES friction=YES inertia=YES detent=none accelN=120
+  Mech v2 qual:   friction_rms=0.001000 Nm inertia_rms=0.001500 Nm J/fallback=1.000
+  Mech reject:    reason=none err=0 tq_sign=1
+  Mech repeat:    runs=3 conf=0.82 Jstd=0.00000010 Bstd=0.00000100 Tcstd=0.00100000
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition status",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("mechanical-id-v2"), results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+
+    def test_mechanical_id_v2_accepts_explicit_rejection(self) -> None:
+        results = [
+            hil_telnet.ShellResult(
+                "motor state status",
+                "Motor Status:\n  State: IDLE (7)\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission status",
+                """
+Commission Status:
+  Estimates:      psi_f=VALID mech=INVALID
+  Mech v2:        valid=NO friction=YES inertia=NO detent=none accelN=120
+  Mech v2 qual:   friction_rms=0.001000 Nm inertia_rms=0.100000 Nm J/fallback=20.000
+  Mech reject:    reason=implausible err=0 tq_sign=1
+  Mech repeat:    runs=1 conf=0.20 Jstd=0.00000000 Bstd=0.00000000 Tcstd=0.00000000
+""",
+            ),
+            hil_telnet.ShellResult(
+                "motor encoder acquisition status",
+                "Encoder acquisition:\n  Errors:   transport=0 frame=0 parity=0 crc=0 status=0 glitch=0\n",
+            ),
+        ]
+
+        report = hil_telnet.evaluate_results(_args("mechanical-id-v2"), results, None)
+
+        self.assertEqual(report.verdict, "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()

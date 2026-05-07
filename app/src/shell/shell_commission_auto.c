@@ -61,6 +61,14 @@ static const char *motor_commission_mech_reject_to_string(uint8_t reason)
 		return "viscous_negative";
 	case MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID:
 		return "fit_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID:
+		return "friction_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID:
+		return "inertia_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE:
+		return "implausible";
+	case MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE:
+		return "confidence";
 	default:
 		return "unknown";
 	}
@@ -231,6 +239,16 @@ static void motor_commission_print_mech_fit_summary(const struct shell *sh,
 		    (double)res->mech_r2,
 		    (double)res->mech_residual_rms_nm,
 		    res->mech_sample_count);
+	shell_print(sh,
+		    "%s v2=%s friction=%s inertia=%s conf=%.2f J/fallback=%.3f detent=%s accelN=%u",
+		    prefix,
+		    res->mech_v2_valid ? "YES" : "NO",
+		    res->mech_friction_valid ? "YES" : "NO",
+		    res->mech_inertia_valid ? "YES" : "NO",
+		    (double)res->mech_confidence,
+		    (double)res->mech_inertia_plausibility_ratio,
+		    res->mech_detent_corrected ? "active_map" : "none",
+		    res->mech_accel_window_valid_count);
 }
 static int motor_commission_wait_for_capture_stop(uint32_t timeout_ms)
 {
@@ -625,9 +643,17 @@ static int motor_commission_mech_aggregate_finalize(
 			  res->viscous_friction_nm_per_rad_s >= 0.0f &&
 			  isfinite(res->coulomb_friction_nm) &&
 			  res->coulomb_friction_nm >= 0.0f &&
-			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f;
+			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f &&
+			  isfinite(res->mech_confidence) &&
+			  res->mech_confidence >= COMMISSION_AUTO_MECH_MIN_CONFIDENCE;
+	res->mech_v2_valid = res->mech_valid;
+	res->mech_friction_valid = res->mech_valid;
+	res->mech_inertia_valid = res->mech_valid;
 	if (!res->mech_valid) {
-		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
+		res->mech_reject_reason =
+			(res->mech_confidence < COMMISSION_AUTO_MECH_MIN_CONFIDENCE) ?
+			MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE :
+			MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
 	}
 	return res->mech_valid ? 0 : -ERANGE;
 }

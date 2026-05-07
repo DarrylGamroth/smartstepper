@@ -54,6 +54,7 @@ static inline void motor_commission_runtime_ctx_init(struct motor_commission_run
 		.live_velocity_dob_iq_ff_a = &params->live.velocity_dob_iq_ff_a,
 		.live_velocity_dob_disturbance_nm = &params->live.velocity_dob_disturbance_nm,
 		.live_velocity_dob_residual_rad_s = &params->live.velocity_dob_residual_rad_s,
+		.detent_map_cfg = &params->detent_map_cfg,
 	};
 }
 

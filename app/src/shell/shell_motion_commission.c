@@ -93,6 +93,14 @@ static const char *motor_commission_mech_reject_to_string(uint8_t reason)
 		return "viscous_negative";
 	case MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID:
 		return "fit_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID:
+		return "friction_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID:
+		return "inertia_invalid";
+	case MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE:
+		return "implausible";
+	case MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE:
+		return "confidence";
 	default:
 		return "unknown";
 	}
@@ -825,6 +833,19 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)ctx->results.mech_residual_rms_nm,
 		    (double)ctx->results.mech_r2,
 		    ctx->results.mech_sample_count);
+	shell_print(sh, "  Mech v2:        valid=%s friction=%s inertia=%s detent=%s accelN=%u",
+		    ctx->results.mech_v2_valid ? "YES" : "NO",
+		    ctx->results.mech_friction_valid ? "YES" : "NO",
+		    ctx->results.mech_inertia_valid ? "YES" : "NO",
+		    ctx->results.mech_detent_corrected ? "active_map" : "none",
+		    ctx->results.mech_accel_window_valid_count);
+	shell_print(sh, "  Mech v2 qual:   friction_rms=%.6f Nm inertia_rms=%.6f Nm J/fallback=%.3f",
+		    (double)ctx->results.mech_friction_residual_rms_nm,
+		    (double)ctx->results.mech_inertia_residual_rms_nm,
+		    (double)ctx->results.mech_inertia_plausibility_ratio);
+	shell_print(sh, "  Mech v2 counts: frictionN=%u inertiaN=%u",
+		    ctx->results.mech_friction_sample_count,
+		    ctx->results.mech_inertia_sample_count);
 	shell_print(sh, "  Mech reject:    reason=%s err=%d tq_sign=%d",
 		    motor_commission_mech_reject_to_string(ctx->results.mech_reject_reason),
 		    (int)ctx->results.mech_finalize_error,

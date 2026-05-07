@@ -741,6 +741,38 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
     return commands
 
 
+def scenario_mechanical_id_v2(args: argparse.Namespace) -> list[ShellCommand]:
+    commands = [
+        ShellCommand("motor state status"),
+        ShellCommand("motor state clear_error", timeout_s=2.0),
+        ShellCommand("motor fault snapshot clear", timeout_s=2.0),
+        ShellCommand("motor velocity target 0", timeout_s=1.5),
+        ShellCommand("motor current iq 0", timeout_s=1.5),
+        ShellCommand("motor current id 0", timeout_s=1.5),
+        ShellCommand("motor disarm", timeout_s=1.5),
+        ShellCommand("motor state idle", timeout_s=2.0),
+        ShellCommand("motor safety timeout 0"),
+        ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
+        *([] if args.skip_production_electrical
+          else production_electrical_id_commands(args, validate=True)),
+        ShellCommand(
+            f"motor commission run {args.mechanical_id_profile}",
+            timeout_s=args.standard_commission_timeout_s,
+            note=(
+                "Mechanical ID v2: standard commissioning runs encoder mapping, "
+                "flux ID, staged friction plateau fit, transient inertia fit, "
+                "and confidence gating. Apply is intentionally not requested here."
+            ),
+            require_success=True,
+        ),
+        ShellCommand("motor commission status", timeout_s=5.0),
+        ShellCommand("motor encoder acquisition status", timeout_s=5.0),
+        ShellCommand("motor state status", timeout_s=5.0),
+        ShellCommand("motor safety timeout 1000"),
+    ]
+    return commands
+
+
 def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
     commands: list[ShellCommand] = []
     for cmd in args.command:
@@ -786,6 +818,7 @@ SCENARIOS = {
     "encoder-robust": (scenario_encoder_robust, True),
     "encoder-validate": (scenario_encoder_validate, True),
     "encoder-trace-open-loop": (scenario_encoder_trace_open_loop, True),
+    "mechanical-id-v2": (scenario_mechanical_id_v2, True),
     "mpr-dob-detent": (scenario_mpr_dob_detent, True),
     "position-validate": (scenario_position_validate, True),
     "production-electrical-id": (scenario_production_electrical_id, True),
@@ -915,11 +948,52 @@ def _parse_latch_field(response: str, label: str) -> bool | None:
 
 
 def _parse_field_value(response: str, label: str) -> str | None:
-    match = re.search(rf"^\s*{re.escape(label)}:\s+(.+?)\s*$", response, re.MULTILINE)
-    if match is None:
-        return None
-    return match.group(1).strip()
+	match = re.search(rf"^\s*{re.escape(label)}:\s+(.+?)\s*$", response, re.MULTILINE)
+	if match is None:
+		return None
+	return match.group(1).strip()
 
+
+def _parse_mechanical_v2_status(response: str) -> dict[str, float | int | str | bool] | None:
+    v2 = re.search(
+        r"Mech v2:\s+valid=(YES|NO)\s+friction=(YES|NO)\s+inertia=(YES|NO)\s+"
+        r"detent=([a-zA-Z0-9_]+)\s+accelN=(\d+)",
+        response,
+    )
+    qual = re.search(
+        r"Mech v2 qual:\s+friction_rms=([-+0-9.eE]+)\s+Nm\s+"
+        r"inertia_rms=([-+0-9.eE]+)\s+Nm\s+J/fallback=([-+0-9.eE]+)",
+        response,
+    )
+    repeat = re.search(
+        r"Mech repeat:\s+runs=(\d+)\s+conf=([-+0-9.eE]+)",
+        response,
+    )
+    reject = re.search(r"Mech reject:\s+reason=([a-zA-Z0-9_]+)", response)
+    if v2 is None:
+        return None
+
+    values: dict[str, float | int | str | bool] = {
+        "valid": v2.group(1) == "YES",
+        "friction_valid": v2.group(2) == "YES",
+        "inertia_valid": v2.group(3) == "YES",
+        "detent": v2.group(4),
+        "accel_count": int(v2.group(5)),
+    }
+    if qual is not None:
+        values.update({
+            "friction_rms_nm": float(qual.group(1)),
+            "inertia_rms_nm": float(qual.group(2)),
+            "j_fallback_ratio": float(qual.group(3)),
+        })
+    if repeat is not None:
+        values.update({
+            "runs": int(repeat.group(1)),
+            "confidence": float(repeat.group(2)),
+        })
+    if reject is not None:
+        values["reject_reason"] = reject.group(1)
+    return values
 
 def _parse_acquisition_errors(response: str) -> dict[str, int] | None:
     match = re.search(
@@ -1655,6 +1729,36 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         _evaluate_detent_capture(checks, results)
         _evaluate_all_velocity_validations(args, checks, results)
 
+    if args.scenario == "mechanical-id-v2":
+        status_response = _last_response(results, "motor commission status")
+        mech_v2 = _parse_mechanical_v2_status(status_response)
+        if mech_v2 is None:
+            checks.append(VerdictCheck("mechanical_v2_status", "INCONCLUSIVE",
+                                       "Mechanical v2 status fields were not parsed"))
+        else:
+            _check(checks, "mechanical_v2_has_accel",
+                   int(mech_v2.get("accel_count", 0)) > 0,
+                   "Windowed acceleration samples are present",
+                   mech_v2)
+            valid = bool(mech_v2.get("valid", False))
+            confidence = float(mech_v2.get("confidence", 0.0))
+            reject_reason = str(mech_v2.get("reject_reason", ""))
+            if valid:
+                _check(checks, "mechanical_v2_confidence_gate",
+                       confidence >= args.min_mech_confidence,
+                       "Accepted mechanical model meets confidence gate",
+                       mech_v2)
+                _check(checks, "mechanical_v2_subfits_valid",
+                       bool(mech_v2.get("friction_valid", False)) and
+                       bool(mech_v2.get("inertia_valid", False)),
+                       "Friction and inertia subfits are valid",
+                       mech_v2)
+            else:
+                _check(checks, "mechanical_v2_rejected_explicitly",
+                       reject_reason not in ("", "none"),
+                       f"Rejected mechanical model reports reason '{reject_reason}'",
+                       mech_v2)
+
     if args.scenario == "velocity-sweep":
         if args.velocity_sweep_commission == "standard":
             complete = "Standard commissioning workflow complete" in text
@@ -1798,6 +1902,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Timeout for a custom 'motor commission boot ...' command.")
     parser.add_argument("--commission-profile", choices=("slow", "confirm"), default="confirm",
                         help="Auto-commissioning motion profile used by mpr-dob-detent.")
+    parser.add_argument("--mechanical-id-profile", choices=("slow", "confirm"), default="confirm",
+                        help="Standard commissioning profile used by mechanical-id-v2.")
+    parser.add_argument("--min-mech-confidence", type=float, default=0.50,
+                        help="Minimum confidence accepted for a valid mechanical v2 model.")
     parser.add_argument("--detent-hz", type=float, default=0.10,
                         help="Mechanical Hz for detent map capture.")
     parser.add_argument("--detent-cycles", type=float, default=10.0,

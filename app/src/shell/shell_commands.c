@@ -404,6 +404,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_mech,
 	SHELL_CMD_ARG(run, NULL,
 		      "Run mechanical capture <base_hz> <dither_hz> <dither_period_ms> <duration_ms>",
 		      cmd_motor_commission_mech_run, 5, 0),
+	SHELL_CMD(status, NULL, "Show staged mechanical v2 fit and capture status",
+		  cmd_motor_commission_status),
+	SHELL_CMD(active, NULL, "Show active/staged mechanical model state",
+		  cmd_motor_commission_status),
+	SHELL_CMD(clear, NULL, "Clear staged mechanical capture data",
+		  cmd_motor_commission_clear),
+	SHELL_CMD(apply_staged, NULL, "Apply valid staged mechanical model",
+		  cmd_motor_commission_apply),
 	SHELL_SUBCMD_SET_END
 );
 

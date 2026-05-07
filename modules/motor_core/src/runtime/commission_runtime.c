@@ -37,6 +37,15 @@
 #define MOTOR_COMMISSION_TRACKING_MIN_TARGET_RAD_S (2.0f * PI_F32 * 0.05f)
 #define MOTOR_COMMISSION_TRACKING_ABS_TOL_RAD_S (2.0f * PI_F32 * 0.05f)
 #define MOTOR_COMMISSION_TRACKING_REL_TOL 0.75f
+#define MOTOR_COMMISSION_MECH_FRICTION_MAX_ACCEL_RAD_S2 (2.0f * PI_F32 * 1.0f)
+#define MOTOR_COMMISSION_MECH_INERTIA_MIN_ACCEL_RAD_S2 (2.0f * PI_F32 * 0.5f)
+#define MOTOR_COMMISSION_MECH_ACCEL_HALF_WINDOW 2U
+#define MOTOR_COMMISSION_MECH_MIN_CONFIDENCE 0.50f
+#define MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN 0.10f
+#define MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX 10.0f
+#define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN 0.25f
+#define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX 4.0f
+#define MOTOR_COMMISSION_MECH_MAX_RESIDUAL_NM 0.20f
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
@@ -424,7 +433,7 @@ static int motor_commission_estimate_mech_zero_viscous(
 	return 0;
 }
 
-static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *ctx)
+static void motor_commission_estimate_mech_legacy(struct motor_commission_runtime_ctx *ctx)
 {
 	struct motor_commission_ctx *commission = ctx->commission;
 	struct motor_commission_results *res = &commission->results;
@@ -583,6 +592,314 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 	res->mech_valid = best_estimate.valid;
 }
 
+static bool motor_commission_sample_window_accel(const struct motor_commission_ctx *commission,
+						 uint16_t index,
+						 float32_t control_loop_frequency_hz,
+						 float32_t *accel_rad_s2)
+{
+	if (commission == NULL || accel_rad_s2 == NULL) {
+		return false;
+	}
+
+	const uint16_t half_window = MOTOR_COMMISSION_MECH_ACCEL_HALF_WINDOW;
+	if (index < half_window ||
+	    (uint32_t)index + (uint32_t)half_window >= commission->sample_count ||
+	    !isfinite(control_loop_frequency_hz) ||
+	    control_loop_frequency_hz <= 0.0f) {
+		return false;
+	}
+
+	const uint16_t first = index - half_window;
+	const uint16_t last = index + half_window;
+	const uint32_t t0_count = commission->samples[index].loop_count;
+	const float32_t inv_fs = 1.0f / control_loop_frequency_hz;
+	float32_t sum_t = 0.0f;
+	float32_t sum_w = 0.0f;
+	float32_t sum_tt = 0.0f;
+	float32_t sum_tw = 0.0f;
+	uint16_t n = 0U;
+
+	for (uint16_t i = first; i <= last; i++) {
+		const struct motor_commission_sample *s = &commission->samples[i];
+		if (!isfinite(s->mech_speed_rad_s)) {
+			return false;
+		}
+		const int32_t dt_count = (int32_t)(s->loop_count - t0_count);
+		const float32_t t = (float32_t)dt_count * inv_fs;
+		sum_t += t;
+		sum_w += s->mech_speed_rad_s;
+		sum_tt += t * t;
+		sum_tw += t * s->mech_speed_rad_s;
+		n++;
+	}
+
+	const float32_t nf = (float32_t)n;
+	const float32_t denom = nf * sum_tt - sum_t * sum_t;
+	if (fabsf(denom) < 1.0e-8f) {
+		return false;
+	}
+
+	const float32_t slope = (nf * sum_tw - sum_t * sum_w) / denom;
+	if (!isfinite(slope)) {
+		return false;
+	}
+
+	*accel_rad_s2 = slope;
+	return true;
+}
+
+static uint16_t motor_commission_refresh_window_accel(struct motor_commission_runtime_ctx *ctx)
+{
+	struct motor_commission_ctx *commission = ctx->commission;
+	uint16_t valid_count = 0U;
+
+	for (uint16_t i = 0U; i < commission->sample_count; i++) {
+		float32_t accel = 0.0f;
+		if (motor_commission_sample_window_accel(commission, i,
+							 ctx->control_loop_frequency_hz,
+							 &accel)) {
+			commission->samples[i].mech_accel_window_rad_s2 = accel;
+			valid_count++;
+		} else {
+			commission->samples[i].mech_accel_window_rad_s2 = NAN;
+		}
+	}
+
+	return valid_count;
+}
+
+static float32_t motor_commission_sample_detent_torque_nm(
+	const struct motor_commission_runtime_ctx *ctx,
+	const struct motor_commission_sample *sample,
+	float32_t kt_nm_per_a,
+	bool *corrected)
+{
+	if (corrected != NULL) {
+		*corrected = false;
+	}
+	if (ctx == NULL || sample == NULL || ctx->detent_map_cfg == NULL ||
+	    !ctx->detent_map_cfg->enabled ||
+	    !isfinite(kt_nm_per_a) ||
+	    fabsf(kt_nm_per_a) < MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		return 0.0f;
+	}
+
+	float32_t iq_ff_a = 0.0f;
+	if (motor_detent_map_lookup(ctx->detent_map_cfg, sample->mech_position_rad, &iq_ff_a) != 0 ||
+	    !isfinite(iq_ff_a)) {
+		return 0.0f;
+	}
+
+	if (corrected != NULL) {
+		*corrected = true;
+	}
+	return kt_nm_per_a * iq_ff_a;
+}
+
+static float32_t motor_commission_resolve_torque_gain(const struct motor_commission_runtime_ctx *ctx)
+{
+	const struct motor_commission_results *res = &ctx->commission->results;
+	float32_t kt = motor_torque_gain_resolve(*ctx->torque_gain_nm_per_a_active,
+						 *ctx->flux_linkage_wb_active,
+						 ctx->default_flux_linkage_wb,
+						 ctx->pole_pairs);
+	if (res->psi_f_valid) {
+		float32_t derived_kt =
+			motor_torque_gain_from_flux_pole_pairs(res->psi_f_wb, ctx->pole_pairs);
+		if (isfinite(derived_kt) && derived_kt > 0.0f) {
+			kt = derived_kt;
+		}
+	}
+
+	return kt;
+}
+
+static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *ctx)
+{
+	struct motor_commission_ctx *commission = ctx->commission;
+	struct motor_commission_results *res = &commission->results;
+
+	/*
+	 * Keep the legacy coupled fit visible as a diagnostic seed, then
+	 * overwrite validity with the staged physically constrained result.
+	 */
+	motor_commission_estimate_mech_legacy(ctx);
+
+	const float32_t kt_base = motor_commission_resolve_torque_gain(ctx);
+	const int8_t preferred_sign =
+		(commission->expected_mode == MOTOR_COMMISSION_EXPECT_TORQUE &&
+		 res->iq_to_mech_sign < 0) ? -1 : 1;
+	const int8_t signs[2] = {preferred_sign, (int8_t)-preferred_sign};
+	const uint16_t accel_window_count = motor_commission_refresh_window_accel(ctx);
+
+	res->mech_valid = false;
+	res->mech_v2_valid = false;
+	res->mech_friction_valid = false;
+	res->mech_inertia_valid = false;
+	res->mech_detent_corrected = false;
+	res->mech_accel_window_valid_count = accel_window_count;
+	res->mech_friction_sample_count = 0U;
+	res->mech_inertia_sample_count = 0U;
+	res->mech_friction_residual_rms_nm = 0.0f;
+	res->mech_inertia_residual_rms_nm = 0.0f;
+	res->mech_inertia_plausibility_ratio = 0.0f;
+	res->mech_detent_correction_source = MOTOR_COMMISSION_DETENT_CORRECTION_NONE;
+
+	if (!isfinite(kt_base) || fabsf(kt_base) < MOTOR_COMMISSION_MIN_KT_NM_PER_A) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_KT_INVALID;
+		return;
+	}
+
+	struct motor_mech_friction_id_result best_friction = {0};
+	struct motor_mech_inertia_id_result best_inertia = {0};
+	int8_t best_sign = 0;
+	float32_t best_confidence = -1.0f;
+	uint8_t best_reject = MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
+	bool best_detent_corrected = false;
+
+	for (uint32_t sign_idx = 0U; sign_idx < ARRAY_SIZE(signs); sign_idx++) {
+		const int8_t fit_sign = signs[sign_idx];
+		const float32_t kt = kt_base * (float32_t)fit_sign;
+		const struct motor_mech_friction_id_config friction_cfg = {
+			.kt_nm_per_a = kt,
+			.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
+			.max_abs_accel_rad_s2 = MOTOR_COMMISSION_MECH_FRICTION_MAX_ACCEL_RAD_S2,
+			.min_samples = MOTOR_COMMISSION_MIN_MECH_SAMPLES,
+			.min_samples_per_direction = 8U,
+			.min_r2 = 0.0f,
+			.require_nonnegative_viscous = true,
+			.require_nonnegative_coulomb = true,
+		};
+		struct motor_mech_friction_id_state friction_state;
+		struct motor_mech_friction_id_result friction;
+		bool detent_corrected = false;
+
+		motor_mech_friction_id_init(&friction_state, &friction_cfg);
+		for (uint32_t i = 0U; i < commission->sample_count; i++) {
+			const struct motor_commission_sample *s = &commission->samples[i];
+			const float32_t accel = isfinite(s->mech_accel_window_rad_s2) ?
+				s->mech_accel_window_rad_s2 : s->mech_accel_rad_s2;
+			bool corrected = false;
+			float32_t detent_nm =
+				motor_commission_sample_detent_torque_nm(ctx, s, kt, &corrected);
+			detent_corrected = detent_corrected || corrected;
+			(void)motor_mech_friction_id_accumulate(&friction_state,
+								s->mech_speed_rad_s,
+								accel,
+								s->iq_a,
+								detent_nm);
+		}
+
+		int ret = motor_mech_friction_id_finalize(&friction_state, &friction);
+		if (ret < 0 || !friction.valid) {
+			best_reject = MOTOR_COMMISSION_MECH_REJECT_FRICTION_INVALID;
+			continue;
+		}
+
+		const struct motor_mech_inertia_id_config inertia_cfg = {
+			.kt_nm_per_a = kt,
+			.sign_deadband_rad_s = MOTOR_COMMISSION_SIGN_DEADBAND_RAD_S,
+			.min_abs_accel_rad_s2 = MOTOR_COMMISSION_MECH_INERTIA_MIN_ACCEL_RAD_S2,
+			.viscous_friction_nm_per_rad_s =
+				friction.viscous_friction_nm_per_rad_s,
+			.coulomb_friction_nm = friction.coulomb_friction_nm,
+			.offset_friction_nm = friction.offset_friction_nm,
+			.fallback_inertia_kgm2 = *ctx->inertia_kgm2_active,
+			.min_plausibility_ratio = MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN,
+			.max_plausibility_ratio = MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX,
+			.min_samples = 16U,
+			.min_samples_per_accel_direction = 4U,
+			.max_residual_rms_nm = MOTOR_COMMISSION_MECH_MAX_RESIDUAL_NM,
+			.require_plausible = true,
+		};
+		struct motor_mech_inertia_id_state inertia_state;
+		struct motor_mech_inertia_id_result inertia;
+
+		motor_mech_inertia_id_init(&inertia_state, &inertia_cfg);
+		for (uint32_t i = 0U; i < commission->sample_count; i++) {
+			const struct motor_commission_sample *s = &commission->samples[i];
+			if (!isfinite(s->mech_accel_window_rad_s2)) {
+				continue;
+			}
+			bool corrected = false;
+			float32_t detent_nm =
+				motor_commission_sample_detent_torque_nm(ctx, s, kt, &corrected);
+			detent_corrected = detent_corrected || corrected;
+			(void)motor_mech_inertia_id_accumulate(&inertia_state,
+							       s->mech_speed_rad_s,
+							       s->mech_accel_window_rad_s2,
+							       s->iq_a,
+							       detent_nm);
+		}
+
+		ret = motor_mech_inertia_id_finalize(&inertia_state, &inertia);
+		if (ret < 0 || !inertia.valid) {
+			best_reject = MOTOR_COMMISSION_MECH_REJECT_INERTIA_INVALID;
+			continue;
+		}
+
+		float32_t confidence = 0.5f * clampf(friction.r2, 0.0f, 1.0f) +
+				       0.5f * clampf(inertia.r2, 0.0f, 1.0f);
+		if (inertia.plausibility_ratio < MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN ||
+		    inertia.plausibility_ratio > MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX) {
+			confidence *= 0.75f;
+		}
+		confidence = clampf(confidence, 0.0f, 1.0f);
+
+		if (confidence > best_confidence) {
+			best_confidence = confidence;
+			best_friction = friction;
+			best_inertia = inertia;
+			best_sign = fit_sign;
+			best_detent_corrected = detent_corrected;
+			best_reject = MOTOR_COMMISSION_MECH_REJECT_NONE;
+		}
+	}
+
+	if (best_reject != MOTOR_COMMISSION_MECH_REJECT_NONE || best_confidence < 0.0f) {
+		res->mech_reject_reason = best_reject;
+		return;
+	}
+
+	res->mech_fit_torque_sign = best_sign;
+	res->inertia_kgm2 = best_inertia.inertia_kgm2;
+	res->viscous_friction_nm_per_rad_s = best_friction.viscous_friction_nm_per_rad_s;
+	res->coulomb_friction_nm = best_friction.coulomb_friction_nm;
+	res->offset_friction_nm = best_friction.offset_friction_nm;
+	res->mech_friction_residual_rms_nm = best_friction.residual_rms_nm;
+	res->mech_inertia_residual_rms_nm = best_inertia.residual_rms_nm;
+	res->mech_residual_rms_nm =
+		0.5f * (best_friction.residual_rms_nm + best_inertia.residual_rms_nm);
+	res->mech_r2 = 0.5f * (best_friction.r2 + best_inertia.r2);
+	res->mech_inertia_plausibility_ratio = best_inertia.plausibility_ratio;
+	res->mech_sample_count = (uint16_t)MIN(best_friction.sample_count +
+					       best_inertia.sample_count,
+					       UINT16_MAX);
+	res->mech_friction_sample_count = best_friction.sample_count;
+	res->mech_inertia_sample_count = best_inertia.sample_count;
+	res->mech_confidence = best_confidence;
+	res->mech_friction_valid = best_friction.valid;
+	res->mech_inertia_valid = best_inertia.valid;
+	res->mech_detent_corrected = best_detent_corrected;
+	res->mech_detent_correction_source = best_detent_corrected ?
+		MOTOR_COMMISSION_DETENT_CORRECTION_ACTIVE_MAP :
+		MOTOR_COMMISSION_DETENT_CORRECTION_NONE;
+	res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
+
+	if (best_inertia.plausibility_ratio < MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN ||
+	    best_inertia.plausibility_ratio > MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE;
+		return;
+	}
+	if (best_confidence < MOTOR_COMMISSION_MECH_MIN_CONFIDENCE) {
+		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE;
+		return;
+	}
+
+	res->mech_v2_valid = true;
+	res->mech_valid = true;
+}
+
 static void motor_commission_validate_mapping_mech(struct motor_commission_runtime_ctx *ctx)
 {
 	struct motor_commission_ctx *commission = ctx->commission;
@@ -693,11 +1010,19 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.coulomb_friction_stddev_nm = 0.0f;
 	commission->results.mech_validation_residual_rms_nm = 0.0f;
 	commission->results.mech_confidence = 0.0f;
+	commission->results.mech_friction_residual_rms_nm = 0.0f;
+	commission->results.mech_inertia_residual_rms_nm = 0.0f;
+	commission->results.mech_inertia_plausibility_ratio = 0.0f;
 	commission->results.mech_finalize_error = 0;
 	commission->results.mech_sample_count = 0U;
+	commission->results.mech_friction_sample_count = 0U;
+	commission->results.mech_inertia_sample_count = 0U;
+	commission->results.mech_accel_window_valid_count = 0U;
 	commission->results.mech_capture_count = 0U;
 	commission->results.mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
 	commission->results.mech_fit_torque_sign = 0;
+	commission->results.mech_detent_correction_source =
+		MOTOR_COMMISSION_DETENT_CORRECTION_NONE;
 	commission->results.mapping_direction_corr = 0.0f;
 	commission->results.mapping_offset_ratio = 0.0f;
 	commission->results.mapping_pole_pairs_est = 0.0f;
@@ -712,6 +1037,10 @@ void motor_commission_reset(struct motor_commission_runtime_ctx *ctx)
 	commission->results.iq_move_valid = false;
 	commission->results.psi_f_valid = false;
 	commission->results.mech_valid = false;
+	commission->results.mech_v2_valid = false;
+	commission->results.mech_friction_valid = false;
+	commission->results.mech_inertia_valid = false;
+	commission->results.mech_detent_corrected = false;
 	commission->results.mech_validation_valid = false;
 	commission->results.mech_validation_pass = false;
 	commission->results.mapping_direction_valid = false;
@@ -869,12 +1198,24 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	ctx->commission->results.coulomb_friction_stddev_nm = 0.0f;
 	ctx->commission->results.mech_validation_residual_rms_nm = 0.0f;
 	ctx->commission->results.mech_confidence = 0.0f;
+	ctx->commission->results.mech_friction_residual_rms_nm = 0.0f;
+	ctx->commission->results.mech_inertia_residual_rms_nm = 0.0f;
+	ctx->commission->results.mech_inertia_plausibility_ratio = 0.0f;
 	ctx->commission->results.mech_finalize_error = 0;
+	ctx->commission->results.mech_friction_sample_count = 0U;
+	ctx->commission->results.mech_inertia_sample_count = 0U;
+	ctx->commission->results.mech_accel_window_valid_count = 0U;
 	ctx->commission->results.mech_capture_count = 0U;
 	ctx->commission->results.mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
 	ctx->commission->results.mech_fit_torque_sign = 0;
+	ctx->commission->results.mech_detent_correction_source =
+		MOTOR_COMMISSION_DETENT_CORRECTION_NONE;
 	ctx->commission->results.mech_validation_valid = false;
 	ctx->commission->results.mech_validation_pass = false;
+	ctx->commission->results.mech_v2_valid = false;
+	ctx->commission->results.mech_friction_valid = false;
+	ctx->commission->results.mech_inertia_valid = false;
+	ctx->commission->results.mech_detent_corrected = false;
 	ctx->commission->results.mapping_direction_valid = false;
 	ctx->commission->results.mapping_direction_pass = false;
 	ctx->commission->results.mapping_direction_corr = 0.0f;
@@ -1120,9 +1461,11 @@ void motor_commission_update(struct motor_commission_runtime_ctx *ctx,
 	struct motor_commission_sample *sample =
 		&commission->samples[commission->sample_count++];
 	sample->loop_count = obs->control_loop_count;
+	sample->mech_position_rad = obs->mech_position_rad;
 	sample->mech_speed_rad_s = obs->mech_speed_rad_s;
 	sample->elec_speed_rad_s = obs->elec_speed_rad_s;
 	sample->mech_accel_rad_s2 = commission->domega_dt_filt_rad_s2;
+	sample->mech_accel_window_rad_s2 = commission->domega_dt_filt_rad_s2;
 	sample->id_a = obs->id_a;
 	sample->iq_a = obs->iq_a;
 	sample->did_dt_a_s = commission->did_dt_filt_a_s;

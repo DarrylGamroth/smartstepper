@@ -43,10 +43,13 @@ int motor_detent_map_learn_sample(const struct motor_detent_map_config *cfg,
 				  float32_t iq_sample_a,
 				  float32_t alpha);
 
+int motor_detent_map_lookup(const struct motor_detent_map_config *cfg,
+			    float32_t mech_angle_rad,
+			    float32_t *iq_ff_a);
+
 int motor_detent_map_step_fast(const struct motor_detent_map_config *cfg,
 			       struct motor_detent_map_state *state,
 			       float32_t mech_angle_rad,
 			       float32_t *iq_ff_a);
 
 #endif /* MOTOR_COMPENSATION_DETENT_MAP_H_ */
-
