@@ -36,7 +36,9 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 	
 	shell_print(sh, "Measured Parameters:");
 	shell_print(sh, "  Rs:             %.6f Ohm", (double)g_motor_params->Rs_measured_ohm);
-	shell_print(sh, "  L:              %.9f H", (double)g_motor_params->Ls_measured_H);
+	shell_print(sh, "  Lavg:           %.9f H", (double)g_motor_params->Ls_measured_H);
+	shell_print(sh, "  Ld:             %.9f H", (double)g_motor_params->Ld_measured_H);
+	shell_print(sh, "  Lq:             %.9f H", (double)g_motor_params->Lq_measured_H);
 	shell_print(sh, "  R/L:            %.3f rad/s", (double)g_motor_params->R_over_L_measured);
 	shell_print(sh, "  psi_f active:   %.8f Wb", (double)g_motor_params->flux_linkage_wb_active);
 	shell_print(sh, "  Kt active:      %.8f Nm/A",
@@ -200,4 +202,3 @@ int cmd_motor_info_stats(const struct shell *sh, size_t argc, char **argv)
 	
 	return 0;
 }
-

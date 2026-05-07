@@ -339,10 +339,27 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}
-	shell_print(sh, "  Rs=%.4f ohm L=%.6f H R/L=%.1f rad/s",
+	shell_print(sh, "  Rs=%.4f ohm Ld=%.6f H Lq=%.6f H Lavg=%.6f H R/L=%.1f rad/s",
 		    (double)g_motor_params->Rs_measured_ohm,
+		    (double)g_motor_params->Ld_measured_H,
+		    (double)g_motor_params->Lq_measured_H,
 		    (double)g_motor_params->Ls_measured_H,
 		    (double)g_motor_params->R_over_L_measured);
+	bool production_electrical_reapplied = false;
+
+	ret = motor_commission_electrical_reapply_if_staged(sh, &production_electrical_reapplied);
+	if (ret != 0) {
+		shell_error(sh, "Failed to reapply staged production electrical ID (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
+	}
+	if (production_electrical_reapplied) {
+		shell_print(sh,
+			    "  Reapplied production electrical ID for remaining commissioning: Ld=%.6f H Lq=%.6f H Lavg=%.6f H",
+			    (double)g_motor_params->Ld_measured_H,
+			    (double)g_motor_params->Lq_measured_H,
+			    (double)g_motor_params->Ls_measured_H);
+	}
 
 	shell_print(sh, "[2/4] Encoder commutation mapping");
 	char *boot_argv[] = { "boot" };

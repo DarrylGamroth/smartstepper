@@ -501,6 +501,8 @@ struct motor_parameters {
 	/* Measured parameters (from calibration) */
 	float32_t R_over_L_measured;
 	float32_t Ls_measured_H;
+	float32_t Ld_measured_H;
+	float32_t Lq_measured_H;
 	float32_t Rs_measured_ohm;
 	float32_t flux_linkage_wb_active;             /* Active psi_f used by FOC */
 	float32_t torque_gain_nm_per_a_active;        /* Active torque gain Kt for torque-domain models */

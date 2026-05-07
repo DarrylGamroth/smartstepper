@@ -711,6 +711,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->live.detent_iq_ff_a = 0.0f;
 	params->Rs_measured_ohm = MOTOR_RESISTANCE_OHM;
 	params->Ls_measured_H = MOTOR_INDUCTANCE_D_H;
+	params->Ld_measured_H = MOTOR_INDUCTANCE_D_H;
+	params->Lq_measured_H = MOTOR_INDUCTANCE_Q_H;
 	params->R_over_L_measured =
 		(params->Ls_measured_H > 0.0f) ? (params->Rs_measured_ohm / params->Ls_measured_H) : 0.0f;
 	params->inertia_kgm2_active = MOTOR_INERTIA_KGM2;
@@ -815,8 +817,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 		params->rls.stagger_offset &= (params->rls.decimation - 1u);
 	}
 	params->rls.excitation_current_a = RLS_EXCITATION_CURRENT_A;
-	params->rls.ld_est_h = params->Ls_measured_H;  /* Initial estimate from calibration */
-	params->rls.lq_est_h = RLS_INITIAL_LQ_H;
+	params->rls.ld_est_h = params->Ld_measured_H;
+	params->rls.lq_est_h = params->Lq_measured_H;
 	params->rls.id_prev_a = 0.0f;  /* Initialize previous RLS current for dI/dt */
 	params->rls.iq_prev_a = 0.0f;
 	params->rls.d_prev_cycle = 0u;
@@ -830,7 +832,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls.decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
-	                   params->Ls_measured_H,
+	                   params->Ld_measured_H,
 	                   RLS_INITIAL_COVARIANCE);
 
 	/* Initialize q-axis RLS estimator */
@@ -839,7 +841,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	                   CONTROL_LOOP_FREQUENCY_HZ / (float32_t)params->rls.decimation,
 	                   RLS_CONVERGENCE_THRESHOLD,
 	                   params->Rs_measured_ohm,
-	                   RLS_INITIAL_LQ_H,
+	                   params->Lq_measured_H,
 	                   RLS_INITIAL_COVARIANCE);
 
 	/* Initialize thermal model */

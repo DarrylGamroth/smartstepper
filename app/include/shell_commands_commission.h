@@ -6,6 +6,8 @@
 #ifndef SHELL_COMMANDS_COMMISSION_H_
 #define SHELL_COMMANDS_COMMISSION_H_
 
+#include <stdbool.h>
+
 #include <zephyr/shell/shell.h>
 
 int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv);
@@ -46,6 +48,7 @@ int cmd_motor_commission_electrical_status(const struct shell *sh, size_t argc, 
 int cmd_motor_commission_electrical_apply(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_validate(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_clear(const struct shell *sh, size_t argc, char **argv);
+int motor_commission_electrical_reapply_if_staged(const struct shell *sh, bool *applied);
 int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_auto_apply(const struct shell *sh, size_t argc, char **argv);

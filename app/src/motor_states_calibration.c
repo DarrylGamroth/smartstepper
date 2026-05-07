@@ -118,34 +118,45 @@ static int motor_calibration_apply_current_pi_from_rl(struct motor_parameters *p
 {
 	if (params == NULL ||
 	    !isfinite(params->Rs_measured_ohm) ||
-	    !isfinite(params->Ls_measured_H) ||
+	    !isfinite(params->Ld_measured_H) ||
+	    !isfinite(params->Lq_measured_H) ||
 	    params->Rs_measured_ohm <= 0.0f ||
-	    params->Ls_measured_H <= 0.0f) {
+	    params->Ld_measured_H <= 0.0f ||
+	    params->Lq_measured_H <= 0.0f) {
 		return -ERANGE;
 	}
 
+	params->Ls_measured_H = 0.5f * (params->Ld_measured_H + params->Lq_measured_H);
+	float32_t rd_over_ld = params->Rs_measured_ohm / params->Ld_measured_H;
+	float32_t rq_over_lq = params->Rs_measured_ohm / params->Lq_measured_H;
 	float32_t r_over_l = params->Rs_measured_ohm / params->Ls_measured_H;
 	if (!isfinite(params->R_over_L_measured) ||
 	    params->R_over_L_measured <= 0.0f) {
 		params->R_over_L_measured = r_over_l;
 	}
 
-	float32_t kp = params->Ls_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
-	float32_t ki = params->R_over_L_measured / CONTROL_LOOP_FREQUENCY_HZ;
-	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
+	float32_t kp_d = params->Ld_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
+	float32_t kp_q = params->Lq_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
+	float32_t ki_d = rd_over_ld / CONTROL_LOOP_FREQUENCY_HZ;
+	float32_t ki_q = rq_over_lq / CONTROL_LOOP_FREQUENCY_HZ;
+	if (!isfinite(kp_d) || !isfinite(kp_q) ||
+	    !isfinite(ki_d) || !isfinite(ki_q) ||
+	    kp_d <= 0.0f || kp_q <= 0.0f ||
+	    ki_d <= 0.0f || ki_q <= 0.0f) {
 		return -ERANGE;
 	}
 
-	pi_set_gains(&params->pi_Id, kp, ki);
-	pi_set_gains(&params->pi_Iq, kp, ki);
+	pi_set_gains(&params->pi_Id, kp_d, ki_d);
+	pi_set_gains(&params->pi_Iq, kp_q, ki_q);
 	pi_set_ui(&params->pi_Id, 0.0f);
 	pi_set_ui(&params->pi_Iq, 0.0f);
 
-	LOG_INF("Current PI updated from electrical ID: Kp=%.6f Ki=%.6f (Rs=%.4f Ω L=%.6f H R/L=%.1f)",
-		(double)kp, (double)ki,
+	LOG_INF("Current PI updated from electrical ID: Id(Kp=%.6f Ki=%.6f) Iq(Kp=%.6f Ki=%.6f) (Rs=%.4f Ω Ld=%.6f H Lq=%.6f H)",
+		(double)kp_d, (double)ki_d,
+		(double)kp_q, (double)ki_q,
 		(double)params->Rs_measured_ohm,
-		(double)params->Ls_measured_H,
-		(double)params->R_over_L_measured);
+		(double)params->Ld_measured_H,
+		(double)params->Lq_measured_H);
 	return 0;
 }
 
@@ -212,7 +223,9 @@ void motor_state_calibration_exit(void *obj)
 		LOG_INF("=== %s Complete ===",
 			commissioning ? "Commissioning" : "Calibration");
 		LOG_INF("  Rs:    %.4f Ω", (double)params->Rs_measured_ohm);
-		LOG_INF("  Ls:    %.6f H", (double)params->Ls_measured_H);
+		LOG_INF("  Lavg:  %.6f H", (double)params->Ls_measured_H);
+		LOG_INF("  Ld:    %.6f H", (double)params->Ld_measured_H);
+		LOG_INF("  Lq:    %.6f H", (double)params->Lq_measured_H);
 		LOG_INF("  R/L:   %.1f rad/s", (double)params->R_over_L_measured);
 		LOG_INF("  Encoder offset: %.3f deg",
 			(double)(params->observer_alignment_offset_rad * (180.0f / PI_F32)));
@@ -351,6 +364,8 @@ static int motor_calibration_finalize_roverl(struct motor_parameters *params)
 
 	params->Rs_measured_ohm = result.rs_ohm;
 	params->Ls_measured_H = result.ls_h;
+	params->Ld_measured_H = result.ls_h;
+	params->Lq_measured_H = result.ls_h;
 	params->R_over_L_measured = result.r_over_l;
 	return 0;
 }

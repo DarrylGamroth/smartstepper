@@ -625,8 +625,10 @@ static uint32_t electrical_id_default_saliency_settle_ticks(void)
 {
 	float32_t l_h = MOTOR_INDUCTANCE_D_H;
 
-	if (g_motor_params != NULL && g_motor_params->Ls_measured_H > 0.0f) {
-		l_h = fmaxf(l_h, g_motor_params->Ls_measured_H);
+	if (g_motor_params != NULL && g_motor_params->Ld_measured_H > 0.0f &&
+	    g_motor_params->Lq_measured_H > 0.0f) {
+		l_h = fmaxf(l_h, 0.5f * (g_motor_params->Ld_measured_H +
+					  g_motor_params->Lq_measured_H));
 	}
 	if (staged.ld_valid && staged.ld.inductance_h > 0.0f) {
 		l_h = fmaxf(l_h, staged.ld.inductance_h);
@@ -818,10 +820,10 @@ static void electrical_id_update_combined(void)
 
 static int electrical_id_stage_fallback_inductance(void)
 {
-	float32_t ld_h = (g_motor_params != NULL && g_motor_params->Ls_measured_H > 0.0f) ?
-		g_motor_params->Ls_measured_H : MOTOR_INDUCTANCE_D_H;
-	float32_t lq_h = (g_motor_params != NULL && g_motor_params->Ls_measured_H > 0.0f) ?
-		g_motor_params->Ls_measured_H : MOTOR_INDUCTANCE_Q_H;
+	float32_t ld_h = (g_motor_params != NULL && g_motor_params->Ld_measured_H > 0.0f) ?
+		g_motor_params->Ld_measured_H : MOTOR_INDUCTANCE_D_H;
+	float32_t lq_h = (g_motor_params != NULL && g_motor_params->Lq_measured_H > 0.0f) ?
+		g_motor_params->Lq_measured_H : MOTOR_INDUCTANCE_Q_H;
 
 	staged.ld = (struct motor_electrical_id_l_result){
 		.inductance_h = ld_h,
@@ -1714,13 +1716,13 @@ int cmd_motor_commission_electrical_run(const struct shell *sh, size_t argc, cha
 	snprintk(pulse_buf, sizeof(pulse_buf), "%.6f", (double)pulse_v);
 	l_args[1] = pulse_buf;
 	l_args[2] = sample_buf;
-	ret = cmd_motor_commission_electrical_measure_inductance(sh, 3, l_args);
+	ret = cmd_motor_commission_electrical_measure_demod(sh, 3, l_args);
 	if (ret == 0) {
 		return 0;
 	}
 
 	shell_warn(sh,
-		   "Production inductance pulse rejected (err %d); staging fallback L for PI recommendation",
+		   "Production demod inductance rejected (err %d); staging fallback L for PI recommendation",
 		   ret);
 	ret = electrical_id_stage_fallback_inductance();
 	if (ret != 0) {
@@ -1787,8 +1789,11 @@ int cmd_motor_commission_electrical_status(const struct shell *sh, size_t argc, 
 		    (double)staged.pi.kp_d, (double)staged.pi.ki_d,
 		    (double)staged.pi.kp_q, (double)staged.pi.ki_q);
 	if (g_motor_params != NULL) {
-		shell_print(sh, "  Active fallback/current: Rs=%.6f ohm Ls=%.9f H R/L=%.3f rad/s",
+		shell_print(sh,
+			    "  Active fallback/current: Rs=%.6f ohm Ld=%.9f H Lq=%.9f H Lavg=%.9f H R/L=%.3f rad/s",
 			    (double)g_motor_params->Rs_measured_ohm,
+			    (double)g_motor_params->Ld_measured_H,
+			    (double)g_motor_params->Lq_measured_H,
 			    (double)g_motor_params->Ls_measured_H,
 			    (double)g_motor_params->R_over_L_measured);
 		if (g_motor_params->R_over_L_measured > 0.0f && staged.rs_valid) {
@@ -1820,7 +1825,11 @@ int cmd_motor_commission_electrical_apply(const struct shell *sh, size_t argc, c
 
 	g_motor_params->Rs_measured_ohm = staged.result.rs_ohm;
 	g_motor_params->Ls_measured_H = staged.result.l_avg_h;
+	g_motor_params->Ld_measured_H = staged.result.ld_h;
+	g_motor_params->Lq_measured_H = staged.result.lq_h;
 	g_motor_params->R_over_L_measured = staged.result.rs_ohm / staged.result.l_avg_h;
+	g_motor_params->rls.ld_est_h = staged.result.ld_h;
+	g_motor_params->rls.lq_est_h = staged.result.lq_h;
 	pi_set_gains(&g_motor_params->pi_Id, staged.pi.kp_d, staged.pi.ki_d);
 	pi_set_gains(&g_motor_params->pi_Iq, staged.pi.kp_q, staged.pi.ki_q);
 	pi_set_ui(&g_motor_params->pi_Id, 0.0f);
@@ -1836,6 +1845,23 @@ int cmd_motor_commission_electrical_apply(const struct shell *sh, size_t argc, c
 		    (double)staged.pi.kp_d, (double)staged.pi.ki_d,
 		    (double)staged.pi.kp_q, (double)staged.pi.ki_q);
 	return 0;
+}
+
+int motor_commission_electrical_reapply_if_staged(const struct shell *sh, bool *applied)
+{
+	if (applied != NULL) {
+		*applied = false;
+	}
+	if (!staged.result_valid || !staged.pi_valid) {
+		return 0;
+	}
+
+	int ret = cmd_motor_commission_electrical_apply(sh, 0, NULL);
+
+	if (ret == 0 && applied != NULL) {
+		*applied = true;
+	}
+	return ret;
 }
 
 int cmd_motor_commission_electrical_validate(const struct shell *sh, size_t argc, char **argv)

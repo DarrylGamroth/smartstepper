@@ -37,7 +37,7 @@ static inline int motor_shell_voltage_speed_limit(
 		rs = MOTOR_RESISTANCE_OHM;
 	}
 
-	float ls = params->Ls_measured_H;
+	float ls = params->Lq_measured_H;
 	if (!isfinite(ls) || ls < 0.0f) {
 		ls = MOTOR_INDUCTANCE_Q_H;
 	}

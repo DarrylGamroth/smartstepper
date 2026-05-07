@@ -128,8 +128,12 @@ motor commission apply
 motor commission electrical plan
 motor commission electrical measure rs [current_a] [samples] [settle_ms]
 motor commission electrical measure inductance [pulse_v] [samples] [pulse_ms]
+motor commission electrical measure demod [pulse_v] [samples] [half_cycles]
 motor commission electrical sweep [samples]
-motor commission electrical run [rs_current_a] [l_pulse_v] [samples]
+motor commission electrical demod_sweep [pulse_v] [samples]
+motor commission electrical saliency_sweep [pulse_v] [vectors] [pairs] [revs] [half_cycles] [settle_ticks]
+motor commission electrical saliency_apply
+motor commission electrical run [rs_current_a] [demod_pulse_v] [samples]
 motor commission electrical status
 motor commission electrical apply
 motor commission electrical validate [current_a] [hold_ms] [max_error_a]

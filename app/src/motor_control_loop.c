@@ -1246,8 +1246,8 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_foc_stage(struct motor_p
 	if (motor_dq_decoupling_feedforward_step_fast_values(
 		    dq_decoupling_enabled,
 		    decoupling_speed_rad_s,
-		    params->rls.ld_est_h,
-		    params->rls.lq_est_h,
+		    params->Ld_measured_H,
+		    params->Lq_measured_H,
 		    params->flux_linkage_wb_active,
 		    current_ref->id_meas_a,
 		    current_ref->iq_meas_a,
