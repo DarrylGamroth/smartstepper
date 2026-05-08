@@ -1075,6 +1075,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	float32_t mech_speed_upper_hz = planned_mech_upper_hz;
 	mech_cfg.base_speed_hz = planned_mech_base_hz;
 	mech_cfg.dither_speed_hz = planned_mech_dither_hz;
+	mech_cfg.min_confidence = COMMISSION_AUTO_MECH_MIN_CONFIDENCE;
 
 	float32_t max_accel_hz_s =
 		fmaxf(g_motor_params->profile_max_accel_rad_s2 / (2.0f * PI_F32), 1.0f);

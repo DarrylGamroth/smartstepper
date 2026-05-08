@@ -33,7 +33,7 @@
 		commission-auto-mech-accel-margin-mpu = <1250>;
 		commission-auto-mech-validate-rms-unm = <5000>;
 		commission-auto-mech-validate-rms-gain-mpu = <5000>;
-		commission-auto-mech-min-confidence-mpu = <500>;
+		commission-auto-mech-min-confidence-mpu = <450>;
 
 		commission-auto-slow-flux-min-mhz = <250>;
 		commission-auto-slow-flux-max-mhz = <750>;

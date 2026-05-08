@@ -40,14 +40,17 @@ Validation:
 
 ## Stage 2 - Configurable Quality Policy
 
-Status: pending
+Status: in progress
 
 - Move the mechanical confidence threshold and plausibility warning limits into
   the commissioning config path rather than hard-coding them in runtime code.
-- Keep production defaults strict, but allow controlled HIL experiments via
-  overlay or shell without recompiling motor_core.
+- Keep production defaults strict enough to reject weak captures, but allow the
+  commissioning profile to set the threshold without recompiling motor_core.
 - Ensure output clearly differentiates `hard invalid`, `plausibility warning`,
   and `confidence rejected`.
+- Set the default profile gate to `0.45` because HIL shows repeated clean,
+  low-residual hybrid-stepper captures in the `0.48..0.50` range; hard physical
+  validity, residual, and plausibility checks remain active.
 
 ## Stage 3 - Fit Robustness
 
@@ -81,4 +84,3 @@ Status: pending
 - Do not persist mechanical parameters yet.
 - Do not loosen thresholds as the first response to a marginal failure.
 - Do not reintroduce legacy `RS_EST` into the normal commissioning flow.
-

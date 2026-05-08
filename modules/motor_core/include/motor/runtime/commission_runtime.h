@@ -57,6 +57,7 @@ struct motor_commission_flux_config {
 struct motor_commission_mech_config {
 	float32_t base_speed_hz;
 	float32_t dither_speed_hz;
+	float32_t min_confidence;
 	uint32_t dither_period_ms;
 	uint32_t duration_ms;
 };

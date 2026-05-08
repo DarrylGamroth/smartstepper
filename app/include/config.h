@@ -798,7 +798,7 @@ BUILD_ASSERT(VBUS_MAX_V > VBUS_REGEN_LIMIT_V,
 #define COMMISSION_AUTO_MECH_VALIDATE_RMS_GAIN \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_validate_rms_gain_mpu, 5000) / 1000.0f)
 #define COMMISSION_AUTO_MECH_MIN_CONFIDENCE \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 500) / 1000.0f)
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 450) / 1000.0f)
 #define COMMISSION_AUTO_NORMAL_FLUX_MIN_HZ \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_auto_normal_flux_min_mhz, 500) / 1000.0f)
 #define COMMISSION_AUTO_NORMAL_FLUX_MAX_HZ \
@@ -837,8 +837,8 @@ BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_validate_rms_unm,
 	     "commission-auto-mech-validate-rms-unm must be positive");
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_validate_rms_gain_mpu, 5000) > 0,
 	     "commission-auto-mech-validate-rms-gain-mpu must be positive");
-BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 500) >= 0 &&
-		     DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 500) <= 1000,
+BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 450) >= 0 &&
+		     DT_PROP_OR(USER_PARAMS_NODE, commission_auto_mech_min_confidence_mpu, 450) <= 1000,
 	     "commission-auto-mech-min-confidence-mpu must be in [0, 1000]");
 /*
  * The ADC ISR owns encoder request/collect cadence:

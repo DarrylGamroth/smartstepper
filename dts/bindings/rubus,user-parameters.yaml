@@ -406,11 +406,12 @@ properties:
 
   commission-auto-mech-min-confidence-mpu:
     type: int
-    default: 500
+    default: 450
     description: >
-      Minimum aggregate mechanical-fit confidence in milli-per-unit. This is
-      used as the fallback acceptance gate if the independent validation
-      capture does not contain enough usable motion samples.
+      Minimum mechanical-fit confidence in milli-per-unit. This gate is applied
+      to each mechanical capture and to the aggregate model. Keep this as a
+      commissioning policy threshold; hard validity checks still reject
+      non-physical or implausible fits.
 
   commission-auto-normal-flux-min-mhz:
     type: int

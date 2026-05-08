@@ -926,7 +926,12 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE;
 		return;
 	}
-	if (best_confidence < MOTOR_COMMISSION_MECH_MIN_CONFIDENCE) {
+	float32_t min_confidence = commission->mech_cfg.min_confidence;
+	if (!isfinite(min_confidence) || min_confidence <= 0.0f) {
+		min_confidence = MOTOR_COMMISSION_MECH_MIN_CONFIDENCE;
+	}
+	min_confidence = clampf(min_confidence, 0.0f, 1.0f);
+	if (best_confidence < min_confidence) {
 		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE;
 		return;
 	}
@@ -1211,6 +1216,10 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	    cfg->dither_speed_hz >= cfg->base_speed_hz) {
 		return -EINVAL;
 	}
+	if (isfinite(cfg->min_confidence) &&
+	    (cfg->min_confidence < 0.0f || cfg->min_confidence > 1.0f)) {
+		return -EINVAL;
+	}
 
 	int ret = motor_commission_start_common(ctx, MOTOR_COMMISSION_MODE_MECH,
 						MOTOR_COMMISSION_EXPECT_VELOCITY_CLOSED,
@@ -1220,6 +1229,11 @@ int motor_commission_start_mech(struct motor_commission_runtime_ctx *ctx,
 	}
 
 	ctx->commission->mech_cfg = *cfg;
+	if (!isfinite(ctx->commission->mech_cfg.min_confidence) ||
+	    ctx->commission->mech_cfg.min_confidence <= 0.0f) {
+		ctx->commission->mech_cfg.min_confidence =
+			MOTOR_COMMISSION_MECH_MIN_CONFIDENCE;
+	}
 	ctx->commission->results.mech_valid = false;
 	ctx->commission->results.mech_sample_count = 0U;
 	ctx->commission->results.inertia_kgm2 = 0.0f;
