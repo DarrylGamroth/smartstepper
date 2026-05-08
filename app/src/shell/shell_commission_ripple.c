@@ -489,6 +489,10 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 			    g_motor_params->calibration.encoder_mapping_complete ? 1U : 0U);
 		return -EACCES;
 	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' first");
+		return -EACCES;
+	}
 
 	float32_t velocity_hz;
 	uint32_t duration_ms;
@@ -615,12 +619,25 @@ restore_runtime:
 			g_motor_params->electrical_ripple_capture.sample_count;
 		ripple_result.rejected_samples =
 			g_motor_params->electrical_ripple_capture.rejected_samples;
+		ripple_result.rejected_quality =
+			g_motor_params->electrical_ripple_capture.rejected_quality;
+		ripple_result.rejected_velocity =
+			g_motor_params->electrical_ripple_capture.rejected_velocity;
+		ripple_result.rejected_accel =
+			g_motor_params->electrical_ripple_capture.rejected_accel;
+		ripple_result.rejected_saturation =
+			g_motor_params->electrical_ripple_capture.rejected_saturation;
 		shell_error(sh,
 			    "Electrical ripple capture failed (err %d): samples=%u rejected=%u bins=%u/%u raw=%u/%u conf=%.2f",
 			    ret, ripple_result.sample_count, ripple_result.rejected_samples,
 			    ripple_result.populated_bins, MOTOR_ELECTRICAL_RIPPLE_FF_BINS,
 			    ripple_result.raw_populated_bins, MOTOR_ELECTRICAL_RIPPLE_FF_BINS,
 			    (double)ripple_result.confidence);
+		shell_error(sh, "  rejects: quality=%u velocity=%u accel=%u saturation=%u",
+			    ripple_result.rejected_quality,
+			    ripple_result.rejected_velocity,
+			    ripple_result.rejected_accel,
+			    ripple_result.rejected_saturation);
 		return ret;
 	}
 
@@ -648,7 +665,7 @@ restore_runtime:
 		    (double)ripple_result.forward_reverse_rms_a,
 		    (double)ripple_result.max_adjacent_step_a);
 	shell_print(sh,
-		    "Run 'motor commission ripple validate <hz> <ms>' before applying; apply only if validation improves or matches baseline.");
+		    "Run 'motor commission ripple validate <velocity_hz> <duration_ms>' before applying; apply only if validation improves or matches baseline.");
 
 	return 0;
 }
@@ -691,6 +708,12 @@ int cmd_motor_commission_ripple_status(const struct shell *sh, size_t argc, char
 		    ripple_result.both_direction_bins,
 		    ripple_result.min_bin_count,
 		    ripple_result.max_bin_count);
+	shell_print(sh,
+		    "  rejects: quality=%u velocity=%u accel=%u saturation=%u",
+		    ripple_result.rejected_quality,
+		    ripple_result.rejected_velocity,
+		    ripple_result.rejected_accel,
+		    ripple_result.rejected_saturation);
 	shell_print(sh,
 		    "  iq_ff min=%.5f max=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
 		    (double)ripple_result.min_iq_ff_a,
@@ -839,6 +862,10 @@ int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, ch
 			    "Run boot/generated-sweep commissioning first: cal_complete=%u enc_mapped=%u",
 			    g_motor_params->calibration.complete ? 1U : 0U,
 			    g_motor_params->calibration.encoder_mapping_complete ? 1U : 0U);
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' first");
 		return -EACCES;
 	}
 
