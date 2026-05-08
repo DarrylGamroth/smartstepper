@@ -27,7 +27,7 @@
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS 2000U
 
 static const float32_t motor_commission_mech_step_pattern[] = {
-	-1.0f, 0.0f, 1.0f, -0.5f,
+	-1.0f, 1.0f, -0.5f, 0.5f, 0.0f, -1.0f,
 };
 
 static const float32_t motor_commission_validate_step_scale[] = {
@@ -225,6 +225,9 @@ static void motor_commission_print_mech_fit_summary(const struct shell *sh,
 						    const char *prefix,
 						    const struct motor_commission_results *res)
 {
+	float32_t confidence_margin =
+		res->mech_confidence - COMMISSION_AUTO_MECH_MIN_CONFIDENCE;
+
 	shell_print(sh,
 		    "%s valid=%s reason=%s err=%d tq_sign=%d J=%.8f B=%.8f Tc=%.8f T0=%.8f R2=%.4f rms=%.6f N=%u",
 		    prefix,
@@ -240,15 +243,24 @@ static void motor_commission_print_mech_fit_summary(const struct shell *sh,
 		    (double)res->mech_residual_rms_nm,
 		    res->mech_sample_count);
 	shell_print(sh,
-		    "%s v2=%s friction=%s inertia=%s conf=%.2f J/fallback=%.3f detent=%s accelN=%u",
+		    "%s v2=%s friction=%s inertia=%s conf=%.3f min=%.3f margin=%+.3f J/fallback=%.3f detent=%s accelN=%u",
 		    prefix,
 		    res->mech_v2_valid ? "YES" : "NO",
 		    res->mech_friction_valid ? "YES" : "NO",
 		    res->mech_inertia_valid ? "YES" : "NO",
 		    (double)res->mech_confidence,
+		    (double)COMMISSION_AUTO_MECH_MIN_CONFIDENCE,
+		    (double)confidence_margin,
 		    (double)res->mech_inertia_plausibility_ratio,
 		    res->mech_detent_corrected ? "active_map" : "none",
 		    res->mech_accel_window_valid_count);
+	shell_print(sh,
+		    "%s components: friction_rms=%.6f Nm friction_N=%u inertia_rms=%.6f Nm inertia_N=%u",
+		    prefix,
+		    (double)res->mech_friction_residual_rms_nm,
+		    res->mech_friction_sample_count,
+		    (double)res->mech_inertia_residual_rms_nm,
+		    res->mech_inertia_sample_count);
 }
 static int motor_commission_wait_for_capture_stop(uint32_t timeout_ms)
 {
@@ -1102,11 +1114,17 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)flux_cfg.min_speed_hz, (double)flux_cfg.max_speed_hz, flux_cfg.steps,
 		    flux_cfg.settle_ms, flux_cfg.sample_ms, (double)flux_cfg.iq_limit_a);
 	shell_print(sh,
-		    "  Mech cfg: base=%.3f Hz dither=%.3f Hz accel=%.3f Hz/s dither_period=%u ms duration=%u ms",
+		    "  Mech cfg: base=%.3f Hz dither=%.3f Hz accel=%.3f Hz/s dither_period=%u ms duration=%u ms pattern=%u cycles=%u runs=%u/%u min_conf=%.3f",
 		    (double)mech_cfg.base_speed_hz,
 		    (double)mech_cfg.dither_speed_hz,
 		    (double)max_accel_hz_s,
-		    mech_cfg.dither_period_ms, mech_cfg.duration_ms);
+		    mech_cfg.dither_period_ms,
+		    mech_cfg.duration_ms,
+		    (unsigned int)ARRAY_SIZE(motor_commission_mech_step_pattern),
+		    (unsigned int)COMMISSION_AUTO_MECH_CYCLES_PER_CAPTURE,
+		    (unsigned int)COMMISSION_AUTO_MECH_RUNS,
+		    (unsigned int)COMMISSION_AUTO_MECH_MAX_ATTEMPTS,
+		    (double)COMMISSION_AUTO_MECH_MIN_CONFIDENCE);
 
 	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
 	if (ret != 0) {
