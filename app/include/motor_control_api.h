@@ -101,9 +101,10 @@ int motor_api_request_calibrate(void);
 /**
  * @brief Request commissioning sequence (thread-safe)
  *
- * Posts commissioning request to state machine. Commissioning runs the
- * extended electrical identification flow (R/L and Rs measurements) and
- * is intended for explicit bring-up/tuning sessions.
+ * Posts commissioning request to state machine. This state-machine path runs
+ * current offsets plus RoverL electrical bootstrap. The shell-level
+ * `motor commission run` command extends that with production bidirectional
+ * Rs, demodulated Ld/Lq, encoder mapping, flux, and mechanical tuning.
  *
  * @return 0 on success, negative errno on failure
  */

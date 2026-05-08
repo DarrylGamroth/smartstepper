@@ -46,9 +46,6 @@
 		roverl-est-freq-hz = <250>;
 		roverl-est-settling-ms = <50>;
 		roverl-est-duration-ms = <5000>;
-		rs-est-current-ma = <100>;
-		rs-est-rampup-ms = <1000>;
-		rs-est-duration-ms = <1000>;
 		commission-electrical-rs-current-ma = <100>;
 		commission-electrical-current-limit-ma = <100>;
 		commission-electrical-demod-pulse-mv = <450>;

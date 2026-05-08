@@ -106,7 +106,7 @@ motor_boot_calibration_complete(struct motor_parameters *params)
 static inline enum smf_state_result
 motor_commissioning_identification_complete(struct motor_parameters *params)
 {
-	LOG_INF("Commissioning identification complete: R/L and Rs measured");
+	LOG_INF("Commissioning electrical bootstrap complete: RoverL provisional model active");
 	LOG_INF("Encoder commutation offset requires explicit generated-sweep encoder commissioning");
 	smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_IDLE]);
 	return SMF_EVENT_HANDLED;
@@ -395,12 +395,15 @@ void motor_state_roverl_meas_exit(void *obj)
 				      BIT(MOTOR_FEATURE_PI_CONTROL));
 }
 
-/* State: RS_EST - Measure stator resistance via DC injection (TI method) */
+/* State: RS_EST - legacy diagnostic DC stator resistance measurement.
+ * Baseline commissioning does not enter this state; it uses RoverL as the
+ * bootstrap and production bidirectional Rs for the accepted model.
+ */
 void motor_state_rs_est_entry(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Entering RS_EST state");
+	LOG_INF("Entering diagnostic RS_EST state");
 
 	/* Additional RS_EST requirements (PWM output is provided by PREPARE_ONLINE). */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
@@ -480,7 +483,7 @@ void motor_state_rs_est_exit(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
-	LOG_INF("Exiting RS_EST state");
+	LOG_INF("Exiting diagnostic RS_EST state");
 
 	/* Clear this state's additional requirements. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |

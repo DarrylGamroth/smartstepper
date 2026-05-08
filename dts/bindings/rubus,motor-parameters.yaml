@@ -1,7 +1,13 @@
 # Copyright (c) 2024 Rubus Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-description: Motor electrical parameters
+description: >
+  Motor identity, hard limits, and conservative boot fallback model.
+
+  Values in this node must be safe enough for initial current control and
+  commissioning after erased settings. They are not necessarily the active
+  commissioned model once runtime identification or Settings/ZMS values are
+  applied.
 
 compatible: "rubus,motor-parameters"
 
@@ -9,17 +15,17 @@ properties:
   inductance-d-uh:
     type: int
     required: true
-    description: D-axis inductance in microhenries
+    description: Boot/fallback D-axis inductance in microhenries
 
   inductance-q-uh:
     type: int
     required: true
-    description: Q-axis inductance in microhenries
+    description: Boot/fallback Q-axis inductance in microhenries
 
   resistance-mohms:
     type: int
     required: true
-    description: Phase resistance in milliohms
+    description: Boot/fallback phase resistance in milliohms
 
   flux_linkage_uvphz:
     type: int

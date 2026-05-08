@@ -34,9 +34,6 @@
 		roverl-est-freq-hz = <250>;
 		roverl-est-settling-ms = <50>;
 		roverl-est-duration-ms = <5000>;
-		rs-est-current-ma = <300>;
-		rs-est-rampup-ms = <1000>;
-		rs-est-duration-ms = <1000>;
 		commission-electrical-rs-current-ma = <300>;
 		commission-electrical-current-limit-ma = <300>;
 		commission-electrical-demod-pulse-mv = <500>;
@@ -52,7 +49,7 @@
 
 	motor_parameters: motor_parameters {
 		compatible = "rubus,motor-parameters";
-		/* Updated from on-hardware commissioning (ROVERL + RS_EST). */
+		/* Boot fallback updated from on-hardware electrical commissioning. */
 		inductance-d-uh = <2903>;
 		inductance-q-uh = <2903>;
 		resistance-mohms = <2253>;

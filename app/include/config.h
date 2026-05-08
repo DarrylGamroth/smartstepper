@@ -603,17 +603,27 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 #define ROVERL_EST_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_freq_hz))
 #define ROVERL_EST_SETTLING_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms) / 1000.0f)
 #define ROVERL_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms) / 1000.0f)
-#define RS_EST_CURRENT_A ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_current_ma) / 1000.0f)
-#define RS_EST_RAMPUP_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms) / 1000.0f)
-#define RS_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms) / 1000.0f)
-#define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for accurate measurement */
+/* Legacy diagnostic DC Rs state. Baseline commissioning uses RoverL first, then
+ * production bidirectional Rs. If rs-est-* is absent, mirror RoverL/current
+ * command defaults so old diagnostic builds still compile.
+ */
+#define RS_EST_CURRENT_A \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_current_ma, \
+			       DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma)) / 1000.0f)
+#define RS_EST_RAMPUP_S \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_rampup_ms, \
+			       CURRENT_COMMAND_RAMP_MS) / 1000.0f)
+#define RS_EST_DURATION_S \
+	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_duration_ms, \
+			       DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms)) / 1000.0f)
+#define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for legacy diagnostic measurement */
 #define COMMISSION_ELECTRICAL_RS_CURRENT_A \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
-			       DT_PROP(USER_PARAMS_NODE, rs_est_current_ma)) / 1000.0f)
+			       DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma)) / 1000.0f)
 #define COMMISSION_ELECTRICAL_CURRENT_LIMIT_A \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma, \
 			       DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
-					  DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) / 1000.0f)
+					  DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma))) / 1000.0f)
 #define COMMISSION_ELECTRICAL_SAMPLES \
 	DT_PROP(USER_PARAMS_NODE, commission_electrical_samples)
 #define COMMISSION_ELECTRICAL_MIN_SAMPLES \
@@ -622,10 +632,10 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 	DT_PROP(USER_PARAMS_NODE, commission_electrical_max_samples)
 #define COMMISSION_ELECTRICAL_SETTLE_MS \
 	DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_settle_ms, \
-		   DT_PROP(USER_PARAMS_NODE, rs_est_duration_ms))
+		   DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms))
 #define COMMISSION_ELECTRICAL_CURRENT_RAMP_MS \
 	DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_ramp_ms, \
-		   DT_PROP(USER_PARAMS_NODE, rs_est_rampup_ms))
+		   CURRENT_COMMAND_RAMP_MS)
 #define COMMISSION_ELECTRICAL_L_PULSE_V \
 	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_mv) / 1000.0f)
 #define COMMISSION_ELECTRICAL_L_PULSE_MS \
@@ -656,15 +666,15 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 #define COMMISSION_ELECTRICAL_VALIDATE_ERROR_A \
 	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_validate_error_ua) / 1000000.0f)
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
-			DT_PROP(USER_PARAMS_NODE, rs_est_current_ma)) > 0,
+			DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma)) > 0,
 	     "commission-electrical-rs-current-ma must be positive");
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma,
 			DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
-				   DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) > 0,
+				   DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma))) > 0,
 	     "commission-electrical-current-limit-ma must be positive");
 BUILD_ASSERT(DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma,
 			DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma,
-				   DT_PROP(USER_PARAMS_NODE, rs_est_current_ma))) <=
+				   DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma))) <=
 		     DT_PROP(DT_PATH(motor_parameters), max_current_ma),
 	     "commission-electrical-current-limit-ma must be <= motor max-current-ma");
 BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, commission_electrical_samples) >=
