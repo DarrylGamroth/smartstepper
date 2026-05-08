@@ -481,6 +481,14 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 	if (g_motor_params == NULL) {
 		return -ENODEV;
 	}
+	if (!g_motor_params->calibration.complete ||
+	    !g_motor_params->calibration.encoder_mapping_complete) {
+		shell_error(sh,
+			    "Run boot/generated-sweep commissioning first: cal_complete=%u enc_mapped=%u",
+			    g_motor_params->calibration.complete ? 1U : 0U,
+			    g_motor_params->calibration.encoder_mapping_complete ? 1U : 0U);
+		return -EACCES;
+	}
 
 	float32_t speed_hz;
 	float32_t cycles;
@@ -826,6 +834,14 @@ int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, ch
 	if (!ripple_result.valid) {
 		shell_error(sh, "No valid staged ripple table to validate");
 		return -EINVAL;
+	}
+	if (!g_motor_params->calibration.complete ||
+	    !g_motor_params->calibration.encoder_mapping_complete) {
+		shell_error(sh,
+			    "Run boot/generated-sweep commissioning first: cal_complete=%u enc_mapped=%u",
+			    g_motor_params->calibration.complete ? 1U : 0U,
+			    g_motor_params->calibration.encoder_mapping_complete ? 1U : 0U);
+		return -EACCES;
 	}
 
 	float32_t speed_hz;
