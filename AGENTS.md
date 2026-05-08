@@ -414,6 +414,20 @@ motor settings save controllers
 
 - Do not use `motor settings save all` during bring-up unless every persisted
   group is known good.
+- Settings autoload is opt-in and persisted separately from the commissioned
+  values. Enable it only after `model electrical` and `model encoder` are saved
+  and verified:
+
+```text
+motor settings autoload enable baseline
+```
+
+- Baseline autoload loads only the electrical model and encoder map. It does
+  not load ADC current offsets, controller tuning, limits, detent, flux, or
+  mechanical ID.
+- Autoload must never bypass boot current-offset calibration. Current offsets
+  are intentionally measured on each boot before current-control states are
+  allowed.
 - Mechanical/flux/tune workflow remains under `motor commission auto run
   <slow|confirm> [apply]` and should be run separately from the baseline gate.
 

@@ -19,6 +19,7 @@
 
 #define MOTOR_SETTINGS_GROUP_USAGE \
 	"[model electrical|model encoder|identity|limits|controllers|detent|all]"
+#define MOTOR_SETTINGS_AUTOLOAD_USAGE "[baseline|model electrical|model encoder]"
 
 static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups)
 {
@@ -38,6 +39,10 @@ static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups
 			return ((first + 2U) == argc) ? 0 : -EINVAL;
 		}
 		return -EINVAL;
+	}
+	if (strcmp(argv[first], "baseline") == 0) {
+		*groups = MOTOR_SETTINGS_GROUP_BASELINE;
+		return ((first + 1U) == argc) ? 0 : -EINVAL;
 	}
 	if ((first + 1U) != argc) {
 		return -EINVAL;
@@ -331,8 +336,63 @@ int cmd_motor_settings_autoload_status(const struct shell *sh, size_t argc, char
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
+	bool enabled = false;
+	uint32_t groups = 0U;
+	int ret = motor_settings_autoload_read(&enabled, &groups);
+	if (ret != 0) {
+		shell_error(sh, "Failed to read autoload settings (err %d)", ret);
+		return ret;
+	}
+
 	shell_print(sh, "Motor Settings Autoload:");
-	shell_print(sh, "  State: DISABLED");
-	shell_print(sh, "  Reason: explicit load only until HIL reboot/reset gates pass");
+	shell_print(sh, "  State: %s", enabled ? "ENABLED" : "DISABLED");
+	print_groups(sh, "  Groups", groups);
+	shell_print(sh, "  Boot guard: ADC current offsets are still calibrated at boot and are not persisted.");
+	return 0;
+}
+
+int cmd_motor_settings_autoload_enable(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t groups = MOTOR_SETTINGS_GROUP_BASELINE;
+
+	if (argc > 3) {
+		shell_error(sh, "Usage: motor settings autoload enable "
+			    MOTOR_SETTINGS_AUTOLOAD_USAGE);
+		return -EINVAL;
+	}
+	if (argc >= 2 && parse_groups(argc, argv, 1U, &groups) != 0) {
+		shell_error(sh, "Unknown autoload group. Usage: motor settings autoload enable "
+			    MOTOR_SETTINGS_AUTOLOAD_USAGE);
+		return -EINVAL;
+	}
+
+	int ret = require_mutation_safe(sh);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_settings_autoload_set(true, groups);
+	if (ret != 0) {
+		shell_error(sh, "Failed to enable autoload (err %d)", ret);
+		return ret;
+	}
+	print_groups(sh, "Autoload enabled groups", groups);
+	return 0;
+}
+
+int cmd_motor_settings_autoload_disable(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	int ret = require_mutation_safe(sh);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_settings_autoload_set(false, 0U);
+	if (ret != 0) {
+		shell_error(sh, "Failed to disable autoload (err %d)", ret);
+		return ret;
+	}
+	shell_print(sh, "Autoload disabled");
 	return 0;
 }

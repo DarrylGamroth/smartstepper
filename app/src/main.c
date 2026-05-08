@@ -17,6 +17,7 @@
 #include "motor_isr.h"
 #include "motor_hardware.h"
 #include "motor_control_api.h"
+#include "motor_settings.h"
 #include "config.h"
 #include "shell_commands.h"
 #include "app_update.h"
@@ -42,6 +43,16 @@ int main(void)
 
 	/* Get motor parameters pointer from state machine */
 	struct motor_parameters *params = motor_sm_get_params();
+
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		uint32_t loaded = 0U;
+		int rc = motor_settings_autoload_apply(params, &loaded);
+		if (rc != 0) {
+			LOG_WRN("Motor settings autoload failed: %d", rc);
+		} else if (loaded != 0U) {
+			LOG_INF("Motor settings autoloaded groups: 0x%08x", loaded);
+		}
+	}
 
 	/* Set shell access to motor parameters */
 	shell_set_motor_params(params);

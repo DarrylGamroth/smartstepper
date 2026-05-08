@@ -32,6 +32,8 @@
 #define KEY_META_SCHEMA "motor/meta/schema_version"
 #define KEY_META_GENERATION "motor/meta/generation"
 #define KEY_META_VALID_GROUPS "motor/meta/valid_groups"
+#define KEY_AUTOLOAD_ENABLED "motor/autoload/enabled"
+#define KEY_AUTOLOAD_GROUPS "motor/autoload/groups"
 
 #define KEY_ENCODER_DIRECTION "motor/encoder/direction_sign"
 #define KEY_ENCODER_OFFSET "motor/encoder/commutation_offset_mech_rad"
@@ -133,6 +135,7 @@
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL \
 	(MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS | MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD | \
 	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ)
+#define MOTOR_SETTINGS_AUTOLOAD_ALLOWED_GROUPS MOTOR_SETTINGS_GROUP_BASELINE
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
@@ -242,6 +245,8 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_FIELD("meta/schema_version", schema_version, 0U);
 	LOAD_FIELD("meta/generation", generation, 0U);
 	LOAD_FIELD("meta/valid_groups", valid_groups, 0U);
+	LOAD_FIELD("autoload/enabled", autoload_enabled, 0U);
+	LOAD_FIELD("autoload/groups", autoload_groups, 0U);
 	LOAD_FIELD("encoder/direction_sign", encoder_direction_sign, MOTOR_SETTINGS_GROUP_ENCODER);
 	LOAD_FIELD("encoder/commutation_offset_mech_rad", encoder_commutation_offset_mech_rad, MOTOR_SETTINGS_GROUP_ENCODER);
 	LOAD_FIELD("encoder/trim_elec_rad", encoder_trim_elec_rad, MOTOR_SETTINGS_GROUP_ENCODER);
@@ -347,6 +352,16 @@ static bool settings_mutation_allowed(const struct motor_parameters *params)
 	       atomic_get(&params->control_armed) == 0 &&
 	       !motor_state_ptr_is_online_control_state(params->state_for_isr) &&
 	       !params->calibration.running;
+}
+
+static bool settings_groups_available(const struct motor_settings_snapshot *snapshot,
+				      uint32_t present_groups, uint32_t groups)
+{
+	return snapshot != NULL &&
+	       snapshot->schema_version == MOTOR_SETTINGS_SCHEMA_VERSION &&
+	       (groups & ~MOTOR_SETTINGS_GROUP_ALL) == 0U &&
+	       (snapshot->valid_groups & groups) == groups &&
+	       (present_groups & groups) == groups;
 }
 
 static uint32_t next_generation(void)
@@ -737,10 +752,7 @@ int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 static bool snapshot_group_available(const struct motor_settings_snapshot *snapshot,
 					     uint32_t present_groups, uint32_t group)
 {
-	return snapshot != NULL &&
-	       snapshot->schema_version == MOTOR_SETTINGS_SCHEMA_VERSION &&
-	       group_enabled(snapshot->valid_groups, group) &&
-	       group_enabled(present_groups, group);
+	return settings_groups_available(snapshot, present_groups, group);
 }
 
 static int apply_identity_group(struct motor_parameters *params,
@@ -1231,12 +1243,97 @@ int motor_settings_clear_all(void)
 	if (ret != 0) { return ret; }
 	ret = delete_key(KEY_META_GENERATION);
 	if (ret != 0) { return ret; }
-	return delete_key(KEY_META_VALID_GROUPS);
+	ret = delete_key(KEY_META_VALID_GROUPS);
+	if (ret != 0) { return ret; }
+	ret = delete_key(KEY_AUTOLOAD_ENABLED);
+	if (ret != 0) { return ret; }
+	return delete_key(KEY_AUTOLOAD_GROUPS);
 }
 
 bool motor_settings_autoload_enabled(void)
 {
-	return false;
+	bool enabled = false;
+	uint32_t groups = 0U;
+
+	return motor_settings_autoload_read(&enabled, &groups) == 0 && enabled &&
+	       groups != 0U;
+}
+
+int motor_settings_autoload_read(bool *enabled, uint32_t *groups)
+{
+	struct motor_settings_snapshot snap = {0};
+	uint32_t present = 0U;
+	int ret = motor_settings_read(&snap, &present);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint32_t autoload_groups =
+		snap.autoload_groups & MOTOR_SETTINGS_AUTOLOAD_ALLOWED_GROUPS;
+	bool autoload_enabled = snap.autoload_enabled && autoload_groups != 0U &&
+				settings_groups_available(&snap, present, autoload_groups);
+
+	if (enabled != NULL) {
+		*enabled = autoload_enabled;
+	}
+	if (groups != NULL) {
+		*groups = autoload_enabled ? autoload_groups : 0U;
+	}
+	return 0;
+}
+
+int motor_settings_autoload_set(bool enabled, uint32_t groups)
+{
+	groups &= MOTOR_SETTINGS_GROUP_ALL;
+
+	if (!enabled) {
+		bool disabled = false;
+		uint32_t no_groups = 0U;
+		int ret = save_one(KEY_AUTOLOAD_ENABLED, &disabled, sizeof(disabled));
+		if (ret != 0) {
+			return ret;
+		}
+		return save_one(KEY_AUTOLOAD_GROUPS, &no_groups, sizeof(no_groups));
+	}
+
+	if (groups == 0U || (groups & ~MOTOR_SETTINGS_AUTOLOAD_ALLOWED_GROUPS) != 0U) {
+		return -ENOTSUP;
+	}
+
+	struct motor_settings_snapshot snap = {0};
+	uint32_t present = 0U;
+	int ret = motor_settings_read(&snap, &present);
+	if (ret != 0) {
+		return ret;
+	}
+	if (!settings_groups_available(&snap, present, groups)) {
+		return -ENOENT;
+	}
+
+	bool enabled_value = true;
+	ret = save_one(KEY_AUTOLOAD_GROUPS, &groups, sizeof(groups));
+	if (ret != 0) {
+		return ret;
+	}
+	return save_one(KEY_AUTOLOAD_ENABLED, &enabled_value, sizeof(enabled_value));
+}
+
+int motor_settings_autoload_apply(struct motor_parameters *params,
+				  uint32_t *loaded_groups)
+{
+	bool enabled = false;
+	uint32_t groups = 0U;
+	int ret = motor_settings_autoload_read(&enabled, &groups);
+	if (ret != 0) {
+		return ret;
+	}
+	if (!enabled || groups == 0U) {
+		if (loaded_groups != NULL) {
+			*loaded_groups = 0U;
+		}
+		return 0;
+	}
+	return motor_settings_load(params, groups, loaded_groups);
 }
 
 const char *motor_settings_key_root(void)

@@ -23,6 +23,8 @@ struct motor_parameters;
 	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL | \
 	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT | \
 	 MOTOR_SETTINGS_GROUP_IDENTITY | MOTOR_SETTINGS_GROUP_LIMITS)
+#define MOTOR_SETTINGS_GROUP_BASELINE \
+	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)
 
 #define MOTOR_SETTINGS_SCHEMA_VERSION 5U
 
@@ -30,6 +32,8 @@ struct motor_settings_snapshot {
 	uint32_t schema_version;
 	uint32_t generation;
 	uint32_t valid_groups;
+	bool autoload_enabled;
+	uint32_t autoload_groups;
 
 	int8_t encoder_direction_sign;
 	float32_t encoder_commutation_offset_mech_rad;
@@ -81,6 +85,10 @@ int motor_settings_load(struct motor_parameters *params,
 int motor_settings_clear(uint32_t groups);
 int motor_settings_clear_all(void);
 bool motor_settings_autoload_enabled(void);
+int motor_settings_autoload_read(bool *enabled, uint32_t *groups);
+int motor_settings_autoload_set(bool enabled, uint32_t groups);
+int motor_settings_autoload_apply(struct motor_parameters *params,
+				  uint32_t *loaded_groups);
 const char *motor_settings_key_root(void);
 
 #endif /* MOTOR_SETTINGS_H_ */

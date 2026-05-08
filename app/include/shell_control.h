@@ -49,5 +49,7 @@ int cmd_motor_settings_save(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_settings_load(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_settings_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_settings_autoload_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_autoload_enable(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_settings_autoload_disable(const struct shell *sh, size_t argc, char **argv);
 
 #endif /* SHELL_CONTROL_H_ */
