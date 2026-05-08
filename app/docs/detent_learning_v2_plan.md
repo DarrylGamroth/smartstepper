@@ -182,3 +182,27 @@ HIL note:
 - The required `0.05 Hz x 3` versus `0.10 Hz x 10` comparison remains open as
   a detent-validation task. Do not use older AEAT-9955 encoder limitations as
   evidence against the MT6835 PI velocity baseline.
+
+2026-05-08 MT6835 HIL:
+
+- `motor commission detent run 0.10 10 1 0.12` was rejected by the command
+  duration guard: `100 s` per direction exceeds the current `60 s` per-
+  direction safety limit.
+- `motor commission detent run 0.20 10 1 0.12` completed and staged a full
+  table:
+  - samples accepted/rejected: `722555 / 1277726`,
+  - bins: `256/256`, raw `256`, filled `0`,
+  - forward/reverse/both coverage: `75.8% / 81.2% / 57.0%`,
+  - removed DC bias: `0.00100 A`,
+  - Iq FF range: `-0.01172..0.01096 A`,
+  - confidence: `0.74`,
+  - encoder counters: warn/error/fault all zero.
+- Structural gates passed, but validation correctly rejected enabled apply:
+  - `motor commission detent validate 0.20 3000`,
+  - off RMS `0.0409 Hz`, on RMS `0.0448 Hz`,
+  - off peak `0.1331 Hz`, on peak `0.1367 Hz`,
+  - improvement `-9.6%`,
+  - recommendation `DO_NOT_APPLY`.
+- Conclusion: the hardened staging/validation logic is safe and rejects this
+  map, but the current velocity-loop-derived capture is not yet production-
+  useful. Next improvement should address capture quality, not runtime lookup.
