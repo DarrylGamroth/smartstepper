@@ -829,6 +829,22 @@ static int apply_model_electrical_group(struct motor_parameters *params,
 		params->flux_model_source = MOTOR_MODEL_SOURCE_FALLBACK;
 	}
 	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;
+
+	float32_t kp_d = params->Ld_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
+	float32_t kp_q = params->Lq_measured_H * CURRENT_LOOP_BANDWIDTH_RPS;
+	float32_t ki_d = (params->Rs_measured_ohm / params->Ld_measured_H) /
+			 CONTROL_LOOP_FREQUENCY_HZ;
+	float32_t ki_q = (params->Rs_measured_ohm / params->Lq_measured_H) /
+			 CONTROL_LOOP_FREQUENCY_HZ;
+	if (!finite_positive(kp_d) || !finite_positive(kp_q) ||
+	    !finite_positive(ki_d) || !finite_positive(ki_q)) {
+		return -ERANGE;
+	}
+
+	pi_set_gains(&params->pi_Id, kp_d, ki_d);
+	pi_set_gains(&params->pi_Iq, kp_q, ki_q);
+	pi_set_ui(&params->pi_Id, 0.0f);
+	pi_set_ui(&params->pi_Iq, 0.0f);
 	return 0;
 }
 

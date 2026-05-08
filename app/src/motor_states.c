@@ -43,6 +43,7 @@
 #include "motor/runtime/config_snapshot.h"
 #include "motor_operating_mode.h"
 #include "motor_state_transition.h"
+#include "motor_settings.h"
 
 LOG_MODULE_REGISTER(motor_states, CONFIG_APP_LOG_LEVEL);
 
@@ -309,7 +310,7 @@ static void state_timer_expiry(struct k_timer *timer)
 }
 
 /* State machine thread stack and data */
-#define MOTOR_SM_THREAD_STACK_SIZE 4096
+#define MOTOR_SM_THREAD_STACK_SIZE 8192
 #define MOTOR_SM_THREAD_PRIORITY 5
 
 K_THREAD_STACK_DEFINE(motor_sm_thread_stack, MOTOR_SM_THREAD_STACK_SIZE);
@@ -556,8 +557,6 @@ static void motor_state_ctrl_init_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering CTRL_INIT state");
-
-	config_print_parameters();
 
 	/* Initialize filters and PI controllers from devicetree parameters */
 	config_init_filters(params);
@@ -870,6 +869,19 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->rls.max_residual_v = RLS_MAX_RESIDUAL;
 	params->rls.max_voltage_v = RLS_MAX_VOLTAGE_V;
 #endif /* CONFIG_RLS_PARAMETER_ESTIMATION */
+
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		uint32_t loaded = 0U;
+		int ret = motor_settings_autoload_apply(params, &loaded);
+
+		if (ret != 0) {
+			LOG_WRN("Motor settings autoload failed: %d", ret);
+		} else if (loaded != 0U) {
+			LOG_INF("Motor settings autoloaded groups: 0x%08x", loaded);
+		}
+	}
+
+	config_print_parameters();
 }
 
 static enum smf_state_result motor_state_ctrl_init_run(void *obj)
