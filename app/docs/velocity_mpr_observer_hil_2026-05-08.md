@@ -138,6 +138,58 @@ Interpretation:
 - MPR is stable but under-commanding torque compared with the PI baseline.
 - Next work should tune the MPR bandwidth-to-parameter mapping, especially `q_speed`, `r_delta_iq`, and `max_delta_iq_a`, using the 2 Hz PI case as the baseline.
 
+## Update: Persisted Flux/Kt and PI Baseline
+
+Later on 2026-05-08, flux-only commissioning was split from mechanical ID and
+validated on the same MT6835 target:
+
+```text
+motor commission flux auto slow apply
+motor settings save model electrical
+```
+
+HIL result:
+
+```text
+psi_f=0.00451077 Wb
+Kt=0.33830747 Nm/A
+R2=0.9889
+rms=0.0887 V
+N=361
+```
+
+After reset, Settings/ZMS autoload restored Rs/Ld/Lq/psi_f/Kt. This removed the
+previous `Kt=0` blocker for model-based velocity PI tuning.
+
+The current validated MT6835 velocity PI baseline is:
+
+```text
+motor velocity pi bandwidth 10.000 1.000 0.225
+```
+
+Result:
+
+- `+/-0.1`, `+/-0.3`, `+/-0.5`, `+/-1.0 Hz` passed in
+  `hil_logs/20260508_123115_velocity-sweep.log`.
+- `+/-3 Hz` and `+5 Hz` passed in
+  `hil_logs/20260508_123552_velocity-sweep.log`.
+- A direct `-5 Hz` test from idle passed in
+  `hil_logs/20260508_124153_velocity-sweep.log`.
+- An immediate `+5 -> 0 -> -5 Hz` sequence tripped
+  `ENCODER_FAULT/velocity_spike` with zero encoder transport/parity/CRC/glitch
+  counters. This is treated as a reversal-transient/plausibility issue, not a
+  steady-state encoder or current-model failure.
+
+The validated controller intent was saved with:
+
+```text
+motor settings save controllers
+```
+
+This stored PI outer-loop mode, `10 Hz` velocity bandwidth, `0.225 A` velocity
+Iq limit, and DOB disabled. Controller settings do not autoload by default;
+autoload remains limited to the baseline electrical model and encoder map.
+
 ## Current Conclusion
 
 For MT6835 hardware:
@@ -145,12 +197,20 @@ For MT6835 hardware:
 1. Encoder transport is clean.
 2. Angle observer is producing sane encoder-fed position/velocity during `velocity_encoder`.
 3. The immediate limitation is regulator tuning, not feedback quality.
-4. Use velocity PI at about `2 Hz`, `zeta=1.0`, `Iq limit=0.225 A` as the current baseline.
-5. Fix MPR bandwidth mapping before evaluating DOB or detent feedforward as mechanical-ID aids.
+4. Use velocity PI at `10 Hz`, `zeta=1.0`, `Iq limit=0.225 A` as the current baseline.
+5. Investigate high-speed reversal transients separately from steady velocity tracking.
+6. Fix MPR bandwidth mapping before evaluating DOB or detent feedforward as mechanical-ID aids.
 
 ## Next Recommended Work
 
-1. Update the default commissioned velocity PI bandwidth from `1 Hz`-class behavior to the verified `2 Hz` baseline for this motor profile.
-2. Rework `motor_mpr_velocity_config_from_bandwidth()` so `motor velocity mpr bandwidth <hz>` produces distinct, useful parameter sets over `0.5..4 Hz`.
-3. Add an automated PI-vs-MPR HIL sweep report that records status velocity and trace-average velocity separately.
-4. Only after MPR tracks the PI baseline, re-test DOB and electrical ripple/detent feedforward.
+1. Use the saved `10 Hz`, `zeta=1.0`, `Iq=0.225 A` PI controller intent as
+   the current MT6835 comparison baseline.
+2. Rework `motor_mpr_velocity_config_from_bandwidth()` so
+   `motor velocity mpr bandwidth <hz>` produces distinct, useful parameter sets
+   over `0.5..10 Hz`.
+3. Add an automated PI-vs-MPR HIL sweep report that records status velocity and
+   trace-average velocity separately.
+4. Investigate the `+5 -> -5 Hz` reversal `velocity_spike` separately from
+   steady velocity tracking.
+5. Only after MPR tracks the PI baseline, re-test DOB and electrical
+   ripple/detent feedforward.

@@ -441,6 +441,18 @@ motor settings save model electrical
 - `motor commission flux auto ...` runs only the closed-loop velocity flux
   sweep and stops before mechanical ID. Use it when Rs/Ld/Lq and encoder mapping
   are trusted but mechanical ID is not yet reliable enough for automatic tuning.
+- Current MT6835 HIL velocity PI baseline after saved electrical model and
+  encoder map:
+
+```text
+motor velocity pi bandwidth 10.000 1.000 0.225
+motor settings save controllers
+```
+
+- This controller baseline passed `+/-0.1`, `+/-0.3`, `+/-0.5`, `+/-1`,
+  `+/-3`, and steady `+/-5 Hz` HIL checks on 2026-05-08. An immediate
+  high-speed `+5 -> -5 Hz` reversal tripped `ENCODER_FAULT/velocity_spike`, so
+  reversal profiling should be tested separately from steady velocity tracking.
 
 ## Encoder Direction Mapping
 
