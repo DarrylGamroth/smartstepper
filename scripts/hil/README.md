@@ -36,8 +36,8 @@ python3 scripts/hil/hil_telnet.py encoder-validate \
 ```
 
 Use the split scenarios while bringing up encoder control. They run the
-standard commissioning workflow first, isolate the failing layer, and still send
-stop commands at script exit:
+standard baseline commissioning workflow first, isolate the failing layer, and
+still send stop commands at script exit:
 
 ```bash
 python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion \
@@ -57,9 +57,11 @@ python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
 ```
 
 Use the mechanical identification v2 scenario to run the staged
-friction/inertia workflow without applying the staged mechanical model. The
-verdict checks that windowed acceleration is present and that any accepted
-mechanical model passed the confidence gate:
+friction/inertia workflow separately from baseline electrical + encoder
+commissioning. The scenario runs baseline commissioning first, then runs
+`motor commission auto run <profile>` without applying the staged mechanical
+model. The verdict checks that windowed acceleration is present and that any
+accepted mechanical model passed the confidence gate:
 
 ```bash
 python3 scripts/hil/hil_telnet.py mechanical-id-v2 \
@@ -69,9 +71,9 @@ python3 scripts/hil/hil_telnet.py mechanical-id-v2 \
 ```
 
 Use the advanced motion scenario after basic encoder validation is passing. It
-runs standard commissioning, captures a forward/reverse detent map, validates
-detent off/on ripple, then checks selected PI/MPR/DOB/detent combinations with
-the same velocity-validation command:
+runs standard baseline commissioning, captures a forward/reverse detent map,
+validates detent off/on ripple, then checks selected PI/MPR/DOB/detent
+combinations with the same velocity-validation command:
 
 ```bash
 python3 scripts/hil/hil_telnet.py mpr-dob-detent \
@@ -88,12 +90,8 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
 Use the velocity sweep scenario for PI/MPR baseline tuning. It records an
 encoder trace for each target and evaluates direction, minimum motion, trace
 quality, and velocity error. With `--velocity-sweep-commission standard`, the
-script first runs production electrical ID so demodulated `Ld/Lq` are staged
-and then reapplied through standard commissioning. Use
-`--skip-production-electrical` only when reusing already-staged values in the
-same target session.
-The default production electrical ID settings are the currently validated
-MT6835 values: `0.300 A`, `0.500 V`, `128` samples.
+script first runs standard baseline commissioning, which includes current
+offsets, RoverL bootstrap, production Rs/Ld/Lq, and encoder mapping.
 
 ```bash
 python3 scripts/hil/hil_telnet.py velocity-sweep \
@@ -121,8 +119,8 @@ python3 scripts/hil/hil_telnet.py mpr-dob-detent \
   --mpr-bandwidth-hz 1.0
 ```
 
-The `mpr-dob-detent` scenario also runs production electrical ID before
-standard commissioning unless `--skip-production-electrical` is supplied.
+The `mpr-dob-detent` scenario also runs standard baseline commissioning before
+advanced feature checks.
 
 Logs are saved under `hil_logs/` by default. Use `--no-log` to disable file
 logging or `--log-dir <path>` to choose another location.

@@ -138,5 +138,7 @@ motor commission electrical clear
 ```
 
 `motor commission electrical` is the production-oriented electrical ID path. It
-is intentionally separate from the older Rs/R-over-L bootstrap estimator so both
-paths can be compared before replacing the fallback.
+is included in `motor commission run`, which now performs only the baseline
+current-offset/electrical-ID/encoder-mapping workflow. RoverL remains a
+bootstrap/fallback estimator inside that flow. Flux, mechanical ID, auto tuning,
+MPR, DOB, detent, and ripple feedforward are separate commissioning steps.

@@ -240,23 +240,6 @@ static void motor_commission_restore_timeout(uint32_t timeout_ms)
 	motor_command_feed_watchdog(g_motor_params);
 }
 
-static void motor_commission_apply_auto_iq_floor(void)
-{
-	if (g_motor_params == NULL ||
-	    g_motor_params->velocity_cl_iq_limit_A >= COMMISSION_STANDARD_MIN_AUTO_IQ_A) {
-		return;
-	}
-
-	g_motor_params->velocity_cl_iq_limit_A = COMMISSION_STANDARD_MIN_AUTO_IQ_A;
-	g_motor_params->velocity_mpr_cfg.iq_limit_a = COMMISSION_STANDARD_MIN_AUTO_IQ_A;
-	if (g_motor_params->velocity_dob_cfg.iq_ff_limit_a <= 0.0f ||
-	    g_motor_params->velocity_dob_cfg.iq_ff_limit_a >
-		    COMMISSION_STANDARD_MIN_AUTO_IQ_A) {
-		g_motor_params->velocity_dob_cfg.iq_ff_limit_a =
-			COMMISSION_STANDARD_MIN_AUTO_IQ_A;
-	}
-}
-
 static const char *motor_commission_electrical_source_name(uint8_t source)
 {
 	switch (source) {
@@ -327,7 +310,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "Standard commissioning workflow started (%s%s)",
 		    confirm_profile ? "confirm" : "slow",
 		    apply_on_success ? ", apply" : "");
-	shell_print(sh, "[0/4] Reset to safe idle and clear stale commissioning data");
+	shell_print(sh, "[0/3] Reset to safe idle and clear stale commissioning data");
 	int ret = motor_commission_prepare_idle_zero_current(
 		MOTOR_COMMISSION_MOTION_ZERO_SETTLE_MS);
 	if (ret != 0) {
@@ -349,7 +332,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		}
 	}
 
-	shell_print(sh, "[1/4] Electrical identification: current offsets, RoverL bootstrap, production Rs/Ld/Lq");
+	shell_print(sh, "[1/3] Electrical identification: current offsets, RoverL bootstrap, production Rs/Ld/Lq");
 	ret = motor_api_request_commission();
 	if (ret != 0) {
 		shell_error(sh, "Failed to request state commissioning (err %d)", ret);
@@ -395,39 +378,22 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->Ls_measured_H,
 		    (double)g_motor_params->R_over_L_measured);
 
-	shell_print(sh, "[2/4] Encoder commutation mapping");
+	shell_print(sh, "[2/3] Encoder commutation mapping");
 	ret = motor_commission_encoder_default_map_apply(sh, false, false);
 	if (ret != 0) {
 		shell_error(sh, "Encoder commutation mapping failed (err %d)", ret);
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}
-
-	shell_print(sh, "[3/4] Flux and mechanical identification");
-	motor_commission_apply_auto_iq_floor();
-	ret = cmd_motor_arm(sh, 0, NULL);
-	if (ret != 0) {
-		shell_error(sh, "Failed to arm before auto commissioning (err %d)", ret);
-		motor_commission_standard_cleanup(saved_timeout_ms);
-		return ret;
-	}
-	char *auto_argv[3] = {
-		"run",
-		confirm_profile ? "confirm" : "slow",
-		"apply",
-	};
-	size_t auto_argc = apply_on_success ? 3U : 2U;
-	ret = cmd_motor_commission_auto_run(sh, auto_argc, auto_argv);
-	if (ret != 0) {
-		shell_error(sh, "Auto identify/tune failed (err %d)", ret);
-		motor_commission_standard_cleanup(saved_timeout_ms);
-		return ret;
-	}
 	g_motor_params->calibration.commissioning_complete = true;
+	shell_print(sh,
+		    "  Baseline electrical model and encoder mapping are active; save trusted values explicitly with 'motor settings save baseline model'.");
+	shell_print(sh,
+		    "  Flux, mechanical ID, auto tuning, MPR, DOB, and detent are separate advanced commissioning steps.");
 
-	shell_print(sh, "[4/4] Return to safe idle");
+	shell_print(sh, "[3/3] Return to safe idle");
 	motor_commission_standard_cleanup(saved_timeout_ms);
-	shell_print(sh, "Standard commissioning workflow complete");
+	shell_print(sh, "Standard baseline commissioning workflow complete");
 	return 0;
 }
 

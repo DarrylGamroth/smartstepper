@@ -4,6 +4,12 @@ Hardware: `smartstepper_v2` with `configs/motor_mt6835_2a.overlay`
 
 Purpose: determine whether current velocity/MPR problems are dominated by encoder/observer quality or by regulator tuning.
 
+Status note: this is a dated HIL report. The old `motor commission boot ...`
+workflow referenced below has been removed from the supported command tree. Use
+`motor commission run confirm apply` for the current standard commissioning
+flow, then explicitly save trusted groups with `motor settings save ...` if
+persistence is desired.
+
 ## Fixes Applied Before Testing
 
 - `motor commission boot [current_a] [velocity_hz] [cycles] [online|idle]` accepted only three optional shell arguments even though the handler supports four. This prevented the `online` completion argument from running. Fixed shell registration.

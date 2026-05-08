@@ -129,7 +129,8 @@ Decision:
 
 ## Recommended Default Commissioning Contract
 
-Until persistence exists, every boot should run a short working sequence:
+Until settings autoload is enabled, every boot should run a short working
+sequence:
 
 ```text
 motor state clear_error
@@ -152,6 +153,20 @@ motor state status
 ```
 
 Do not require this sequence to run mechanical ID, detent learning, MPR, or DOB.
+
+After this sequence passes and the staged values are applied, save only the
+validated groups:
+
+```text
+motor settings save baseline model
+```
+
+Save controller settings separately only after velocity/position PI or MPR
+tuning has been validated:
+
+```text
+motor settings save controllers
+```
 
 ## Default Control Bring-Up Order
 
@@ -230,7 +245,8 @@ The following docs are historical or partially superseded and should not be used
 
 Before adding or tuning advanced control features:
 
-1. Make `motor commission run` stop treating mechanical ID as required for the baseline commissioned state.
+1. Done: `motor commission run` no longer treats mechanical ID as required for
+   the baseline commissioned state.
 2. Split standard commissioning into explicit stages:
    - `baseline`: current offsets + production electrical ID + encoder map + PI defaults.
    - `identify`: flux/mechanical/acceleration capability diagnostics.

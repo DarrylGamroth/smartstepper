@@ -170,6 +170,30 @@ Load validates selected values before applying. After apply:
 - detent metadata reload resets detent runtime state and only enables the map if
   its stored CRC matches the current volatile table.
 
+## Commissioning Save Policy
+
+Commissioning never saves to non-volatile storage implicitly. The operator must
+run an explicit `motor settings save ...` command after the relevant
+commissioning stage has passed validation and has been applied to the active
+runtime configuration.
+
+Recommended save points:
+
+- After production electrical ID passes and `motor commission electrical apply`
+  has updated the active current model: `motor settings save model`.
+- After standard commissioning passes encoder mapping and applies it:
+  `motor settings save baseline model`.
+- After velocity/position controller tuning has been validated:
+  `motor settings save controllers`.
+- After runtime motion limits are intentionally changed and validated:
+  `motor settings save limits`.
+- After a detent table is captured and off/on validation shows improvement or no
+  regression: `motor settings save detent`.
+
+Avoid `motor settings save all` during bring-up unless every group is known good.
+Do not save ADC current offsets; they are intentionally excluded and must be
+measured every boot.
+
 ## HIL Gate Before Autoload
 
 Autoload remains disabled until these pass repeatedly:

@@ -3,7 +3,8 @@
 ## In Scope
 
 - MT6835 encoder target using the fast `encoder_rt` path.
-- Production electrical ID followed by standard commissioning.
+- Standard baseline commissioning: current offsets, RoverL bootstrap,
+  production electrical ID, and encoder mapping.
 - Velocity encoder control using PI and MPR.
 - DOB as bounded feedforward residual correction.
 - Detent feedforward as an optional commissioned table.
@@ -19,14 +20,16 @@
 
 ## Current Baseline
 
-Latest MT6835 standard commissioning with demodulated `Ld/Lq` applied:
+Latest MT6835 baseline commissioning with demodulated `Ld/Lq` applied:
 
 - `Rs ~= 2.32 ohm`
 - `Ld ~= 4.2 mH`
 - `Lq ~= 2.0 mH`
-- `psi_f ~= 4.4 mWb`
-- `Kt ~= 0.33 Nm/A`
 - encoder acquisition errors: zero transport/frame/parity/CRC/status/glitch errors in the last full run
+
+Flux, `Kt`, mechanical `J/B/Tc`, DOB, and detent feedforward are advanced
+commissioning steps. They are not prerequisites for baseline velocity PI/MPR
+bring-up.
 
 ## Required Safety Posture
 

@@ -6,12 +6,14 @@ Persistence: out of scope until runtime behavior is repeatable.
 
 ## Objective
 
-Return to controller work now that encoder acquisition, electrical ID, and standard commissioning are stable enough for closed-loop testing.
+Return to controller work now that encoder acquisition, electrical ID, and
+standard baseline commissioning are stable enough for closed-loop testing.
 
 The work is staged deliberately:
 
 1. Preserve a known-good commissioning and encoder-diagnostic baseline.
-2. Establish velocity PI performance from measured `Kt/J/B/Tc`.
+2. Establish velocity PI performance from the validated current loop and an
+   explicit controller-bandwidth command.
 3. Compare velocity MPR using the user-facing `motor velocity mpr bandwidth <hz>` interface.
 4. Enable DOB only after PI/MPR are stable and use it as residual disturbance correction.
 5. Reintroduce detent feedforward only after the baseline regulator is clean.

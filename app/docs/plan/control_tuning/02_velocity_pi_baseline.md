@@ -2,14 +2,18 @@
 
 ## Goal
 
-Establish the reference velocity-controller performance using model-derived PI gains and measured current-loop parameters.
+Establish the reference velocity-controller performance using the validated
+current-loop model and the user-facing bandwidth command.
 
 ## Workflow
 
-1. Run production electrical ID.
-2. Run standard commissioning so `Kt/J/B/Tc` are measured.
+1. Run standard baseline commissioning so current offsets, production
+   electrical ID, and encoder mapping are active.
 3. Set outer mode to PI.
 4. Run velocity sweep points over the useful bus-limited range.
+
+Mechanical `J/B/Tc` identification is now a separate advanced workflow and must
+not block the PI baseline sweep.
 
 Recommended sweep targets for this motor:
 

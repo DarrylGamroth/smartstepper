@@ -381,10 +381,37 @@ tio -b 115200 /dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTE3B04Y-if00-port0
 - Preferred command:
 
 ```bash
-podman exec wonderful_goldberg bash -lc 'west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2 --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
 ```
 
 - You are allowed to control and test the real motor through the serial shell interface listed above.
+
+## Commissioning Workflow
+
+- `motor commission run <slow|confirm> apply` is the baseline restart
+  commissioning workflow. It runs current-offset calibration, RoverL bootstrap,
+  production bidirectional Rs + demodulated Ld/Lq, applies the current model,
+  performs generated-sweep encoder mapping, and applies the encoder map.
+- Baseline commissioning intentionally does **not** run flux ID, mechanical ID,
+  auto tuning, MPR, DOB, detent, or ripple feedforward. Those are separate
+  advanced commissioning/tuning steps.
+- After baseline commissioning passes, persist only the validated groups:
+
+```text
+motor settings save baseline model
+```
+
+- Save controller settings only after velocity/position PI or MPR tuning has
+  been validated:
+
+```text
+motor settings save controllers
+```
+
+- Do not use `motor settings save all` during bring-up unless every persisted
+  group is known good.
+- Mechanical/flux/tune workflow remains under `motor commission auto run
+  <slow|confirm> [apply]` and should be run separately from the baseline gate.
 
 ## Encoder Direction Mapping
 

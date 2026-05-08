@@ -164,7 +164,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run confirm apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor encoder control_status",
@@ -290,7 +290,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run confirm apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate current 0.030 160",
@@ -329,7 +329,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run confirm apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.050 1000",
@@ -367,7 +367,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run confirm apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.050 1000",
@@ -407,7 +407,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run slow apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission detent status",
@@ -590,7 +590,7 @@ Encoder Control Readiness:
         results = [
             hil_telnet.ShellResult(
                 "motor commission run confirm apply",
-                "Standard commissioning workflow complete\n",
+                "Standard baseline commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.500 1000",
@@ -767,7 +767,7 @@ Encoder raw trace summary:
 
         reason = hil_telnet._command_success_failure_reason(
             cmd,
-            "Standard commissioning workflow complete\n",
+            "Standard baseline commissioning workflow complete\n",
         )
 
         self.assertIsNone(reason)
@@ -897,6 +897,10 @@ Encoder raw trace summary:
                 "Motor Status:\n  State: IDLE (7)\n  Error: NONE (0)\n",
             ),
             hil_telnet.ShellResult(
+                "motor commission auto run confirm",
+                "Auto commission complete. Run 'motor commission auto apply' to apply.\n",
+            ),
+            hil_telnet.ShellResult(
                 "motor commission status",
                 """
 Commission Status:
@@ -924,6 +928,10 @@ Commission Status:
             hil_telnet.ShellResult(
                 "motor state status",
                 "Motor Status:\n  State: IDLE (7)\n  Error: NONE (0)\n",
+            ),
+            hil_telnet.ShellResult(
+                "motor commission auto run confirm",
+                "Auto commission complete. Run 'motor commission auto apply' to apply.\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission status",

@@ -264,8 +264,9 @@ def scenario_standard_commission(args: argparse.Namespace) -> list[ShellCommand]
             f"motor commission run {args.commission_profile} apply",
             timeout_s=args.standard_commission_timeout_s,
             note=(
-                "Standard commissioning: current offsets, R/L bootstrap, production "
-                "Rs/Ld/Lq, encoder mapping, flux ID, and mechanical ID."
+                "Standard baseline commissioning: current offsets, R/L bootstrap, "
+                "production Rs/Ld/Lq, and encoder mapping. Flux/mechanical ID "
+                "are separate advanced commissioning steps."
             ),
             require_success=True,
         ),
@@ -542,25 +543,17 @@ def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
     targets = _velocity_sweep_targets(args)
     commission_timeout_s = args.standard_commission_timeout_s
     if args.velocity_sweep_commission == "standard":
-        commission_commands = []
-        if not args.skip_production_electrical:
-            commission_commands.extend(production_electrical_id_commands(args, validate=True))
-        commission_commands.extend([
+        commission_commands = [
             ShellCommand(f"motor commission run {args.commission_profile} apply",
                          timeout_s=commission_timeout_s,
                          note=(
-                             "Standard commissioning: R/L excitation does not rotate; "
-                             "encoder mapping is a slow generated sweep; mechanical ID "
-                             "moves forward/reverse."
+                             "Standard baseline commissioning: R/L excitation does not "
+                             "rotate; encoder mapping is a slow generated sweep."
                          ),
                          require_success=True),
-            # The standard workflow can reject auto-tune repeatability while still
-            # leaving valid flux/mechanical estimates staged. Apply those active
-            # model values explicitly before deriving PI/MPR bandwidth settings.
-            ShellCommand("motor commission apply", timeout_s=3.0),
             ShellCommand("motor commission status", timeout_s=3.0),
             ShellCommand("motor info measured", timeout_s=3.0),
-        ])
+        ]
     else:
         commission_commands = []
 
@@ -667,14 +660,11 @@ def scenario_mpr_dob_detent(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
-        *([] if args.skip_production_electrical
-          else production_electrical_id_commands(args, validate=True)),
         ShellCommand(f"motor commission run {args.commission_profile} apply",
                      timeout_s=args.standard_commission_timeout_s,
                      note=(
-                         "Standard commissioning: R/L excitation does not rotate; "
-                         "encoder mapping is a slow generated sweep; mechanical ID "
-                         "moves forward/reverse."
+                         "Standard baseline commissioning: R/L excitation does not "
+                         "rotate; encoder mapping is a slow generated sweep."
                      ),
                      require_success=True),
         ShellCommand("motor commission status", timeout_s=3.0),
@@ -736,15 +726,22 @@ def scenario_mechanical_id_v2(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor state idle", timeout_s=2.0),
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
-        *([] if args.skip_production_electrical
-          else production_electrical_id_commands(args, validate=True)),
         ShellCommand(
-            f"motor commission run {args.mechanical_id_profile}",
+            f"motor commission run {args.mechanical_id_profile} apply",
             timeout_s=args.standard_commission_timeout_s,
             note=(
-                "Mechanical ID v2: standard commissioning runs encoder mapping, "
-                "flux ID, staged friction plateau fit, transient inertia fit, "
-                "and confidence gating. Apply is intentionally not requested here."
+                "Mechanical ID v2 precondition: run baseline electrical + encoder "
+                "commissioning first."
+            ),
+            require_success=True,
+        ),
+        ShellCommand("motor arm", timeout_s=2.0),
+        ShellCommand(
+            f"motor commission auto run {args.mechanical_id_profile}",
+            timeout_s=args.standard_commission_timeout_s,
+            note=(
+                "Mechanical ID v2: run the separate advanced flux/mechanical "
+                "identify/tune workflow. Apply is intentionally not requested here."
             ),
             require_success=True,
         ),
@@ -817,6 +814,14 @@ def _combined_text(results: Sequence[ShellResult]) -> str:
     return "\n".join(result.response for result in results)
 
 
+def _standard_commission_complete(text: str) -> bool:
+    lower = text.lower()
+    return (
+        "standard baseline commissioning workflow complete" in lower or
+        "standard commissioning workflow complete" in lower
+    )
+
+
 def _command_success_failure_reason(cmd: ShellCommand, response: str) -> str | None:
     if not cmd.require_success:
         return None
@@ -824,11 +829,15 @@ def _command_success_failure_reason(cmd: ShellCommand, response: str) -> str | N
     lower = response.lower()
     command = cmd.command
     if command.startswith("motor commission run"):
-        if ("standard commissioning workflow complete" in lower or
+        if (_standard_commission_complete(response) or
             "auto commission complete" in lower or
             "auto commission complete and applied" in lower):
             return None
-        return "standard commissioning did not complete"
+        return "standard baseline commissioning did not complete"
+    if command.startswith("motor commission auto run"):
+        if "auto commission complete" in lower or "auto commission complete and applied" in lower:
+            return None
+        return "auto mechanical/flux commissioning did not complete"
 
     if command.startswith("motor commission encoder robust"):
         if "encoder mapping result: valid=yes" in lower:
@@ -1690,23 +1699,27 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         "velocity-validate",
         "position-validate",
     ):
-        complete = "Standard commissioning workflow complete" in text
+        complete = _standard_commission_complete(text)
         _check(checks, "standard_commission_complete", complete,
-               "Standard commissioning completed" if complete
-               else "Standard commissioning completion text not found")
+               "Standard baseline commissioning completed" if complete
+               else "Standard baseline commissioning completion text not found")
 
     if args.scenario == "encoder-robust":
         _evaluate_encoder_robust(checks, results)
 
     if args.scenario == "mpr-dob-detent":
-        complete = "Standard commissioning workflow complete" in text
+        complete = _standard_commission_complete(text)
         _check(checks, "standard_commission_complete", complete,
-               "Standard commissioning completed" if complete
-               else "Standard commissioning completion text not found")
+               "Standard baseline commissioning completed" if complete
+               else "Standard baseline commissioning completion text not found")
         _evaluate_detent_capture(checks, results)
         _evaluate_all_velocity_validations(args, checks, results)
 
     if args.scenario == "mechanical-id-v2":
+        auto_complete = "Auto commission complete" in text
+        _check(checks, "auto_commission_complete", auto_complete,
+               "Separate auto mechanical/flux commissioning completed"
+               if auto_complete else "Auto mechanical/flux commissioning completion text not found")
         status_response = _last_response(results, "motor commission status")
         mech_v2 = _parse_mechanical_v2_status(status_response)
         if mech_v2 is None:
@@ -1738,13 +1751,13 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
 
     if args.scenario == "velocity-sweep":
         if args.velocity_sweep_commission == "standard":
-            complete = "Standard commissioning workflow complete" in text
+            complete = _standard_commission_complete(text)
             applied = "Commissioning results applied to active runtime parameters" in text
             _check(checks, "standard_commission_complete_or_estimates_applied",
                    complete or applied,
-                   "Standard commissioning completed or valid estimates were applied"
+                   "Standard baseline commissioning completed or valid estimates were applied"
                    if complete or applied
-                   else "No standard commissioning completion/apply evidence found")
+                   else "No standard baseline commissioning completion/apply evidence found")
             _check(checks, "commission_estimates_applied", applied,
                    "Commissioning estimates applied to active model" if applied
                    else "Commissioning estimates were not applied to active model")
@@ -1871,9 +1884,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--standard-commission-timeout-s", type=float, default=120.0,
                         help="Timeout for 'motor commission run <profile> apply'.")
     parser.add_argument("--commission-profile", choices=("slow", "confirm"), default="confirm",
-                        help="Auto-commissioning motion profile used by mpr-dob-detent.")
+                        help="Baseline commissioning profile used before HIL motion scenarios.")
     parser.add_argument("--mechanical-id-profile", choices=("slow", "confirm"), default="confirm",
-                        help="Standard commissioning profile used by mechanical-id-v2.")
+                        help="Profile used for baseline precondition and separate auto mechanical ID.")
     parser.add_argument("--min-mech-confidence", type=float, default=0.50,
                         help="Minimum confidence accepted for a valid mechanical v2 model.")
     parser.add_argument("--detent-hz", type=float, default=0.10,
@@ -1898,8 +1911,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                         help="Hold time for production electrical current-step validation.")
     parser.add_argument("--electrical-id-max-error", type=float, default=0.01,
                         help="Average current error limit for production electrical validation.")
-    parser.add_argument("--skip-production-electrical", action="store_true",
-                        help="Skip production Rs/Ld/Lq ID before standard control-tuning scenarios.")
     parser.add_argument(
         "--feature-combo",
         action="append",
