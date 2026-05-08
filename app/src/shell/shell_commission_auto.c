@@ -556,8 +556,11 @@ struct motor_commission_mech_aggregate {
 	float32_t sum_t0;
 	float32_t sum_rms;
 	float32_t sum_r2;
+	float32_t sum_confidence;
 	float32_t min_r2;
 	float32_t max_rms;
+	float32_t min_confidence;
+	float32_t max_confidence;
 	int8_t fit_torque_sign;
 };
 
@@ -584,10 +587,14 @@ static void motor_commission_mech_aggregate_add(
 	if (agg->count == 0U) {
 		agg->min_r2 = res->mech_r2;
 		agg->max_rms = res->mech_residual_rms_nm;
+		agg->min_confidence = res->mech_confidence;
+		agg->max_confidence = res->mech_confidence;
 		agg->fit_torque_sign = res->mech_fit_torque_sign;
 	} else {
 		agg->min_r2 = fminf(agg->min_r2, res->mech_r2);
 		agg->max_rms = fmaxf(agg->max_rms, res->mech_residual_rms_nm);
+		agg->min_confidence = fminf(agg->min_confidence, res->mech_confidence);
+		agg->max_confidence = fmaxf(agg->max_confidence, res->mech_confidence);
 		if (agg->fit_torque_sign != res->mech_fit_torque_sign) {
 			agg->fit_torque_sign = 0;
 		}
@@ -605,6 +612,7 @@ static void motor_commission_mech_aggregate_add(
 	agg->sum_t0 += res->offset_friction_nm;
 	agg->sum_rms += res->mech_residual_rms_nm;
 	agg->sum_r2 += res->mech_r2;
+	agg->sum_confidence += res->mech_confidence;
 }
 
 static int motor_commission_mech_aggregate_finalize(
@@ -642,14 +650,13 @@ static int motor_commission_mech_aggregate_finalize(
 
 	float32_t j_cv = res->inertia_stddev_kgm2 /
 			 fmaxf(fabsf(res->inertia_kgm2), 1.0e-9f);
-	float32_t b_cv = res->viscous_friction_stddev_nm_per_rad_s /
-			 fmaxf(fabsf(res->viscous_friction_nm_per_rad_s), 1.0e-9f);
-	float32_t tc_cv = res->coulomb_friction_stddev_nm /
-			  fmaxf(fabsf(res->coulomb_friction_nm), 1.0e-9f);
-	float32_t spread_penalty = clampf((0.50f * j_cv) + (0.25f * b_cv) +
-					  (0.25f * tc_cv),
-					  0.0f, 0.75f);
-	res->mech_confidence = clampf(res->mech_r2, 0.0f, 1.0f) * (1.0f - spread_penalty);
+	/*
+	 * Per-capture confidence has already gated each accepted run. Keep
+	 * aggregate confidence tied to the weakest accepted capture instead of
+	 * rejecting on B spread: viscous friction is weakly observable on small
+	 * hybrid steppers and may collapse to zero while J/Tc remain useful.
+	 */
+	res->mech_confidence = agg->min_confidence;
 	res->mech_valid = isfinite(res->inertia_kgm2) && res->inertia_kgm2 > 0.0f &&
 			  isfinite(res->viscous_friction_nm_per_rad_s) &&
 			  res->viscous_friction_nm_per_rad_s >= 0.0f &&
@@ -658,14 +665,17 @@ static int motor_commission_mech_aggregate_finalize(
 			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f &&
 			  isfinite(res->mech_confidence) &&
 			  res->mech_confidence >= COMMISSION_AUTO_MECH_MIN_CONFIDENCE;
+	if (res->mech_valid && j_cv > 1.0f) {
+		res->mech_valid = false;
+	}
 	res->mech_v2_valid = res->mech_valid;
 	res->mech_friction_valid = res->mech_valid;
 	res->mech_inertia_valid = res->mech_valid;
 	if (!res->mech_valid) {
 		res->mech_reject_reason =
 			(res->mech_confidence < COMMISSION_AUTO_MECH_MIN_CONFIDENCE) ?
-			MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE :
-			MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
+				MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE :
+				MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
 	}
 	return res->mech_valid ? 0 : -ERANGE;
 }

@@ -54,7 +54,7 @@ Status: in progress
 
 ## Stage 3 - Fit Robustness
 
-Status: pending
+Status: in progress
 
 - Review the friction and inertia estimators for sensitivity to low-speed
   hybrid-stepper detent torque.
@@ -64,6 +64,10 @@ Status: pending
   - Coulomb friction must be non-negative.
 - Investigate whether detent-feedforward-compensated samples should be used for
   the production mechanical fit after detent map commissioning is reliable.
+- Treat run-to-run spread as diagnostic unless it indicates an unusable inertia
+  estimate. Per-capture confidence already gates each accepted run; aggregate
+  confidence should not fail solely because viscous friction is weakly
+  observable and one valid run selects the zero-B fallback.
 
 ## Stage 4 - HIL Repeatability Gate
 
