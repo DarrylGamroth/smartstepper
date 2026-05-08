@@ -75,7 +75,7 @@ Status: partial
 
 ## Stage 3A - Baseline Confidence Recovery
 
-Status: in progress
+Status: done
 
 - Improve the mechanical fit so per-capture confidence clears `0.50` without
   relaxing the gate.
@@ -89,6 +89,9 @@ Status: in progress
   quality. The previous metric was effectively pure R2; HIL showed valid,
   low-residual hybrid-stepper fits around `0.48..0.50` because deterministic
   detent/ripple lowers R2 even when residual torque is small.
+- HIL result: full MT6835 commissioning passed with the default `0.50`
+  confidence gate restored. Per-capture mechanical confidence was
+  `0.619..0.623`; aggregate confidence was `0.62`.
 
 ## Stage 4 - HIL Repeatability Gate
 
