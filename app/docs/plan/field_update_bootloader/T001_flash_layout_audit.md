@@ -47,9 +47,12 @@ Use the full 2 MiB internal flash with 128 KiB alignment:
 | Partition | Offset | Size | Purpose |
 | --- | ---: | ---: | --- |
 | `mcuboot` | `0x00000000` | 128 KiB | Bootloader |
-| `image-0` | `0x00020000` | 896 KiB | Primary app slot |
-| `image-1` | `0x00100000` | 896 KiB | Secondary app slot |
-| `settings_storage` | `0x001E0000` | 128 KiB | Settings/ZMS |
+| `image-0` | `0x00020000` | 832 KiB | Primary app slot |
+| `image-1` | `0x000F0000` | 832 KiB | Secondary app slot |
+| `settings_storage` | `0x001C0000` | 256 KiB | Settings/ZMS |
+
+The settings partition is 256 KiB because STM32H743 internal flash erase
+sectors are 128 KiB in this region and ZMS requires at least two sectors.
 
 This layout gives each app slot enough room for the current ~490 KiB image plus
 substantial growth, keeps settings in internal flash, and still uses all 2 MiB

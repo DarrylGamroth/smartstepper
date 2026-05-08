@@ -122,7 +122,10 @@ What sysbuild means here:
 MCUboot notes:
 
 - The smartstepper_v2 base DTS allocates internal flash as 128 KiB MCUboot,
-  896 KiB slot0, 896 KiB slot1, and 128 KiB `settings_storage`.
+  832 KiB slot0, 832 KiB slot1, and 256 KiB `settings_storage`.
+  Settings/ZMS needs at least two internal-flash erase sectors on STM32H743;
+  the settings partition must not be reduced below 256 KiB unless the backend
+  or flash geometry changes.
 - The sysbuild requires the `zcbor` Zephyr module for MCUmgr/CBOR support.
   Checksum-verified MCUmgr image upload also requires Zephyr's
   `tf-psa-crypto` module through `CONFIG_IMG_ENABLE_IMAGE_CHECK=y`. Both are

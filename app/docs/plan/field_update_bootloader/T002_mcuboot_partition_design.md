@@ -24,17 +24,20 @@ settings.
 Use this as the first implementation target:
 
 - `mcuboot`: 128 KiB at `0x00000000`
-- `image-0`: 896 KiB at `0x00020000`
-- `image-1`: 896 KiB at `0x00100000`
-- `settings_storage`: 128 KiB at `0x001E0000`
+- `image-0`: 832 KiB at `0x00020000`
+- `image-1`: 832 KiB at `0x000F0000`
+- `settings_storage`: 256 KiB at `0x001C0000`
 
 Rationale:
 
 - It uses the full 2 MiB STM32H743 internal flash instead of the current
   under-allocated 640 KiB map.
 - It keeps the boot path independent of QSPI.
-- It leaves enough headroom for the current ~490 KiB application image.
+- It leaves enough headroom for the current ~560 KiB application image.
 - It keeps critical motor settings in internal flash.
+- It gives Settings/ZMS two STM32H743 internal-flash erase sectors. ZMS mount
+  requires at least two sectors; the previous 128 KiB settings partition was
+  only one sector and could not register a settings save backend.
 - It avoids needing QSPI support inside MCUboot for the first field-update
   bring-up.
 

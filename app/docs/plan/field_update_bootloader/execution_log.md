@@ -16,10 +16,12 @@
   about 490 KiB, so the existing 256 KiB image slots are invalid for MCUboot.
 - 2026-05-07: T002/T003 base layout implemented in
   `boards/rubus/smartstepper_v2/smartstepper_v2.dts`: 128 KiB MCUboot,
-  896 KiB slot0, 896 KiB slot1, and 128 KiB internal-flash
+  832 KiB slot0, 832 KiB slot1, and 256 KiB internal-flash
   `settings_storage`. EEPROM child fixed partitions were removed from the base
   DTS because EEPROM is deferred and MCUboot's flash map cannot reference an
   EEPROM device when the bootloader image does not build the I2C/EEPROM stack.
+  The settings partition is two STM32H743 erase sectors because ZMS cannot
+  mount with a single-sector partition.
 - 2026-05-07: T004 sysbuild files added. `app/sysbuild.conf` enables MCUboot
   with ECDSA-P256 signing and swap-using-offset. `app/sysbuild/mcuboot.conf`
   disables `CONFIG_CODE_DATA_RELOCATION` for the bootloader image because the
@@ -30,8 +32,8 @@
   --sysbuild -p always -b smartstepper_v2/stm32h743xx /workspace/chopper/app
   -d /workspace/build/chopper/smartstepper_v2_mcuboot -S serial-shell
   -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_mt6835_2a.overlay"'`.
-  Evidence: MCUboot image uses 35,592 B of 128 KiB FLASH; signed application
-  uses 503,356 B of the 896 KiB slot region. Artifacts include
+  Evidence at the time: MCUboot image uses 35,592 B of 128 KiB FLASH; signed application
+  uses 503,356 B of the then-896 KiB slot region. Artifacts include
   `app/zephyr/zephyr.signed.bin`, `app/zephyr/zephyr.signed.hex`, and
   `mcuboot/zephyr/zephyr.bin`.
 - 2026-05-07: T003 storage backend Kconfig enabled in `app/prj.conf`:
@@ -43,9 +45,8 @@
   `CONFIG_BOOTLOADER_MCUBOOT=y`, `CONFIG_FLASH_MAP=y`,
   `CONFIG_SETTINGS_ZMS=y`, and `# CONFIG_SETTINGS_NONE is not set`.
 - 2026-05-07: MT6835 MCUboot sysbuild revalidated after enabling Settings/ZMS.
-  Evidence: app image uses 504,948 B of the 896 KiB slot region and emits signed
-  artifacts successfully. This leaves about 281 KiB slot headroom before
-  compression/feature growth decisions are required.
+  Evidence at the time: app image uses 504,948 B of the then-896 KiB slot
+  region and emits signed artifacts successfully.
 - 2026-05-07: T005/T006 runtime update support implemented. `west.yml` now
   includes the Zephyr `zcbor` module required by MCUmgr CBOR support. The
   application enables `CONFIG_MCUMGR`, image and OS management groups,
@@ -76,7 +77,7 @@
   --sysbuild -p always -b smartstepper_v2/stm32h743xx /workspace/chopper/app
   -d /workspace/build/chopper/smartstepper_v2_mcuboot_aeat -S serial-shell
   -S serial-console -- -DDTC_OVERLAY_FILE="boards/smartstepper_v2.overlay;configs/motor_aeat9955_067a.overlay"'`.
-  Evidence: app image uses 543,100 B of the 896 KiB slot region; MCUboot uses
+  Evidence: app image uses 543,100 B of the 832 KiB slot region; MCUboot uses
   35,592 B of the 128 KiB boot partition.
 - 2026-05-07: Removed the app-level
   `CONFIG_MCUMGR_GRP_IMG_TOO_LARGE_SYSBUILD=y` choice selection after it caused
