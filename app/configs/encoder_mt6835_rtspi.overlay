@@ -1,0 +1,32 @@
+/*
+ * Fast encoder overlay for MT6835 over the low-latency rt_spi transport.
+ *
+ * This file selects encoder hardware only. Pair it with a motor profile or
+ * safe identification overlay that defines /user_parameters and
+ * /motor_parameters.
+ */
+
+/ {
+	aliases {
+		encoder1 = &mt6835;
+	};
+};
+
+&spi2 {
+	compatible = "rubus,stm32-rt-spi";
+	status = "okay";
+	spi-clock-frequency = <DT_FREQ_M(12)>;
+	max-frame-len = <6>;
+	cs-mode = "hardware";
+	spi-cpol;
+	spi-cpha;
+	fifo-enable;
+
+	mt6835: mt6835@0 {
+		compatible = "magntek,mt6835-fast";
+		reg = <0>;
+		pipeline-delay-samples = <0>;
+		cal-en-gpios = <&gpiog 13 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};

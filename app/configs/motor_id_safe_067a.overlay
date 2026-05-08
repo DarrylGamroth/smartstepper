@@ -1,0 +1,91 @@
+/*
+ * Safe identification defaults for a 50 pole-pair hybrid stepper in the
+ * ~0.67 A class on a 24 V bus.
+ *
+ * This overlay intentionally contains only motor/control/fault defaults. Pair
+ * it with an encoder overlay such as encoder_aeat9955_rtspi.overlay. Values
+ * here should be conservative enough to bring up the PI current controller, run
+ * current offsets, bidirectional Rs, R/L bootstrap, and demodulated Ld/Lq
+ * identification before commissioned settings are saved.
+ */
+
+/ {
+	user_parameters: user_parameters {
+		compatible = "rubus,user-parameters";
+		nominal_voltage-mv = <24000>;
+		pwm-frequency-hz = <20000>;
+		control-loop-frequency-hz = <20000>;
+		current-loop-bandwidth-hz = <150>;
+		current-command-ramp-ms = <100>;
+		offset-pole-hz = <300>;
+		encoder-direction-sign = <(-1)>;
+		align-current-ma = <100>;
+		align-duration-ms = <200>;
+		brake-current-ma = <1000>;
+		max-modulation-index-mpu = <950>;
+
+		roverl-est-current-ma = <100>;
+		roverl-est-freq-hz = <250>;
+		roverl-est-settling-ms = <50>;
+		roverl-est-duration-ms = <5000>;
+		rs-est-current-ma = <100>;
+		rs-est-rampup-ms = <1000>;
+		rs-est-duration-ms = <1000>;
+
+		commission-electrical-rs-current-ma = <100>;
+		commission-electrical-current-limit-ma = <100>;
+		commission-electrical-samples = <128>;
+		commission-electrical-settle-ms = <1000>;
+		commission-electrical-current-ramp-ms = <1000>;
+		commission-electrical-l-pulse-mv = <450>;
+		commission-electrical-l-pulse-ms = <5>;
+		commission-electrical-demod-pulse-mv = <450>;
+		commission-electrical-demod-pulse-ms = <2>;
+		commission-electrical-demod-half-cycles = <40>;
+		commission-electrical-max-pulse-mv = <500>;
+
+		rls-excitation-current-ma = <100>;
+		velocity-max-hz = <50>;
+		velocity-max-accel-hz-per-s = <10>;
+		velocity-initial-hz = <0>;
+
+		commission-standard-min-auto-iq-ma = <250>;
+		commission-validate-current-default-iq-ma = <80>;
+		commission-auto-post-wait-ms = <2500>;
+		commission-auto-mech-runs = <3>;
+		commission-auto-mech-max-attempts = <5>;
+		commission-auto-mech-cycles-per-capture = <1>;
+		commission-auto-mech-accel-margin-mpu = <1250>;
+		commission-auto-mech-validate-rms-unm = <5000>;
+		commission-auto-mech-validate-rms-gain-mpu = <5000>;
+		commission-auto-mech-min-confidence-mpu = <500>;
+		commission-auto-slow-flux-min-mhz = <250>;
+		commission-auto-slow-flux-max-mhz = <750>;
+		commission-auto-slow-mech-max-mhz = <1000>;
+		commission-auto-slow-mech-base-mhz = <500>;
+		commission-auto-slow-mech-dither-mhz = <150>;
+		commission-auto-normal-flux-min-mhz = <500>;
+		commission-auto-normal-flux-max-mhz = <3000>;
+		commission-auto-normal-mech-max-mhz = <3000>;
+		commission-auto-normal-mech-base-mhz = <1500>;
+		commission-auto-normal-mech-dither-mhz = <500>;
+	};
+
+	motor_parameters: motor_parameters {
+		compatible = "rubus,motor-parameters";
+		inductance-d-uh = <3400>;
+		inductance-q-uh = <3400>;
+		resistance-mohms = <5600>;
+		flux_linkage_uvphz = <17675>;
+		pole-pairs = <50>;
+		max-current-ma = <670>;
+		inertia-mgcm2 = <9000>;
+		max-speed-hz = <50>;
+	};
+
+	fault_detection: fault_detection {
+		compatible = "rubus,fault-detection";
+		encoder-fault-threshold = <100>;
+		overcurrent-threshold-ma = <800>;
+	};
+};

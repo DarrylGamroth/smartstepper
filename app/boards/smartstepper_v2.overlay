@@ -41,10 +41,6 @@
 		zephyr,shell-uart = &usart1;
 	};
 
-	aliases {
-		encoder1 = &aeat9955;
-	};
-
 	photo_interruptor_enable {
 		compatible = "rubus,app-gpio";
 		gpios = <&gpioe 1 GPIO_ACTIVE_HIGH>;
@@ -75,11 +71,6 @@
 // };
 
 &usart1 {
-	status = "okay";
-};
-
-&spi2 {
-	fifo-enable;
 	status = "okay";
 };
 

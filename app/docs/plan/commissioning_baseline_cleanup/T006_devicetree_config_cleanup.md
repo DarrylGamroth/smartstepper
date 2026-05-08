@@ -192,8 +192,16 @@ should remain dedicated motor commands, as planned in T007:
    - Move any selected motor values from board overlay into motor profile
      overlays.
 
-2. Audit `app/configs/motor_mt6835_2a.overlay` and
-   `app/configs/motor_aeat9955_067a.overlay`.
+2. Audit encoder and motor-ID overlays.
+   - Encoder-only overlays:
+     - `app/configs/encoder_mt6835_rtspi.overlay`
+     - `app/configs/encoder_aeat9955_rtspi.overlay`
+   - Conservative identification overlays:
+     - `app/configs/motor_id_safe_2a.overlay`
+     - `app/configs/motor_id_safe_067a.overlay`
+   - Full convenience profiles:
+     - `app/configs/motor_mt6835_2a.overlay`
+     - `app/configs/motor_aeat9955_067a.overlay`
    - Add section comments for encoder selection, control defaults, safety
      limits, fallback motor model, and commissioning defaults.
    - Remove stale wording that implies DT values are active commissioned values.

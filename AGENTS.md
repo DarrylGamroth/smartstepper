@@ -171,9 +171,24 @@ podman exec wonderful_goldberg bash -lc '\
 
 Overlay note:
 
-- The build requires a motor profile overlay that defines `/user_parameters` and `/motor_parameters`.
-- Default profile is `configs/motor_mt6835_2a.overlay`.
-- For AEAT-9955 hardware, switch to `configs/motor_aeat9955_067a.overlay`.
+- The build requires overlays that define:
+  - exactly one control encoder alias (`encoder1`), usually through an encoder
+    overlay,
+  - `/user_parameters`,
+  - `/motor_parameters`,
+  - `/fault_detection`.
+- Preferred bring-up composition is board + encoder + safe motor-ID overlay:
+  - MT6835: `boards/smartstepper_v2.overlay;configs/encoder_mt6835_rtspi.overlay;configs/motor_id_safe_2a.overlay`
+  - AEAT-9955: `boards/smartstepper_v2.overlay;configs/encoder_aeat9955_rtspi.overlay;configs/motor_id_safe_067a.overlay`
+- The safe motor-ID overlays are conservative boot/identification defaults.
+  They should be adequate for current-offset calibration, PI current control,
+  bidirectional Rs, R/L bootstrap, and demodulated Ld/Lq identification before
+  commissioned values are saved to Settings/ZMS.
+- Full convenience profiles still exist:
+  - `configs/motor_mt6835_2a.overlay`
+  - `configs/motor_aeat9955_067a.overlay`
+- Devicetree should describe safe fallback identity/limits. Final commissioned
+  values should be loaded through `motor settings ...` once trusted.
 
 ## Planning and Scope Control
 

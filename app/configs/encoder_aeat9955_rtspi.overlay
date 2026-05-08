@@ -1,0 +1,32 @@
+/*
+ * Fast encoder overlay for AEAT-9955 over the low-latency rt_spi transport.
+ *
+ * This file selects encoder hardware only. Pair it with a motor profile or
+ * safe identification overlay that defines /user_parameters and
+ * /motor_parameters.
+ */
+
+/ {
+	aliases {
+		/delete-property/ encoder0;
+		encoder1 = &aeat9955;
+	};
+};
+
+&spi3 {
+	compatible = "rubus,stm32-rt-spi";
+	status = "okay";
+	spi-clock-frequency = <DT_FREQ_M(4)>;
+	max-frame-len = <8>;
+	cs-mode = "hardware";
+	spi-cpha;
+	fifo-enable;
+
+	aeat9955: aeat9955@0 {
+		compatible = "brcm,aeat-9955-fast";
+		reg = <0>;
+		pipeline-delay-samples = <0>;
+		spi4-mode = "spi4-8-crc16";
+		status = "okay";
+	};
+};
