@@ -14,6 +14,7 @@
 
 #include "config.h"
 #include "motor_hardware.h"
+#include "motor_state_utils.h"
 
 #if DT_NODE_EXISTS(DT_ALIAS(encoder1)) && DT_NODE_HAS_COMPAT(DT_ALIAS(encoder1), brcm_aeat_9955_fast)
 #include <drivers/encoder/aeat9955_fast.h>
@@ -239,7 +240,8 @@ bool motor_encoder_control_ready_for_transition(const struct motor_parameters *p
 	}
 
 	bool allow_active_acquisition =
-		motor_encoder_control_mode_requires_encoder(current_state);
+		motor_encoder_control_mode_requires_encoder(current_state) ||
+		motor_state_is_online_submode(current_state);
 	struct motor_encoder_control_status status = {0};
 	int ret = motor_encoder_control_get_status_internal(params,
 							    check_registers &&
