@@ -132,7 +132,7 @@
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX BIT(3)
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL \
 	(MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS | MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD | \
-	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ | MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX)
+	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ)
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
@@ -434,8 +434,7 @@ static int save_model_electrical_group(const struct motor_parameters *params)
 {
 	if (!finite_positive(params->Rs_measured_ohm) ||
 	    !finite_positive(params->Ld_measured_H) ||
-	    !finite_positive(params->Lq_measured_H) ||
-	    !finite_positive(params->flux_linkage_wb_active)) {
+	    !finite_positive(params->Lq_measured_H)) {
 		return -ERANGE;
 	}
 
@@ -443,7 +442,15 @@ static int save_model_electrical_group(const struct motor_parameters *params)
 	SAVE_SCALAR(KEY_MODEL_ELEC_RS, params->Rs_measured_ohm);
 	SAVE_SCALAR(KEY_MODEL_ELEC_LD, params->Ld_measured_H);
 	SAVE_SCALAR(KEY_MODEL_ELEC_LQ, params->Lq_measured_H);
-	SAVE_SCALAR(KEY_MODEL_ELEC_FLUX, params->flux_linkage_wb_active);
+	if (finite_positive(params->flux_linkage_wb_active) &&
+	    params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED) {
+		SAVE_SCALAR(KEY_MODEL_ELEC_FLUX, params->flux_linkage_wb_active);
+	} else {
+		ret = delete_key(KEY_MODEL_ELEC_FLUX);
+		if (ret != 0) {
+			return ret;
+		}
+	}
 	return clear_legacy_model_keys();
 }
 
@@ -788,8 +795,7 @@ static int apply_model_electrical_group(struct motor_parameters *params,
 {
 	if (!finite_positive(snapshot->model_rs_ohm) ||
 	    !finite_positive(snapshot->model_ld_h) ||
-	    !finite_positive(snapshot->model_lq_h) ||
-	    !finite_positive(snapshot->model_flux_linkage_wb)) {
+	    !finite_positive(snapshot->model_lq_h)) {
 		return -ERANGE;
 	}
 
@@ -799,10 +805,17 @@ static int apply_model_electrical_group(struct motor_parameters *params,
 	params->Ls_measured_H = 0.5f * (params->Ld_measured_H + params->Lq_measured_H);
 	params->R_over_L_measured = params->Rs_measured_ohm / params->Ls_measured_H;
 	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS;
-	params->flux_linkage_wb_active = snapshot->model_flux_linkage_wb;
-	params->torque_gain_nm_per_a_active =
-		motor_torque_gain_from_flux(snapshot->model_flux_linkage_wb);
-	params->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
+	if (finite_positive(snapshot->model_flux_linkage_wb)) {
+		params->flux_linkage_wb_active = snapshot->model_flux_linkage_wb;
+		params->torque_gain_nm_per_a_active =
+			motor_torque_gain_from_flux(snapshot->model_flux_linkage_wb);
+		params->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
+	} else {
+		params->flux_linkage_wb_active = MOTOR_FLUX_LINKAGE_WB;
+		params->torque_gain_nm_per_a_active =
+			motor_torque_gain_from_flux(MOTOR_FLUX_LINKAGE_WB);
+		params->flux_model_source = MOTOR_MODEL_SOURCE_FALLBACK;
+	}
 	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;
 	return 0;
 }

@@ -139,9 +139,13 @@ static void print_snapshot(const struct shell *sh,
 			    (double)s->model_rs_ohm,
 			    (double)s->model_ld_h,
 			    (double)s->model_lq_h);
-		shell_print(sh, "    psi_f=%.8f Wb Kt=%.8f Nm/A (derived)",
-			    (double)s->model_flux_linkage_wb,
-			    (double)motor_torque_gain_from_flux(s->model_flux_linkage_wb));
+		if (s->model_flux_linkage_wb > 0.0f) {
+			shell_print(sh, "    psi_f=%.8f Wb Kt=%.8f Nm/A (derived)",
+				    (double)s->model_flux_linkage_wb,
+				    (double)motor_torque_gain_from_flux(s->model_flux_linkage_wb));
+		} else {
+			shell_print(sh, "    psi_f/Kt: unknown");
+		}
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U) {
 		shell_print(sh, "  Limits:");

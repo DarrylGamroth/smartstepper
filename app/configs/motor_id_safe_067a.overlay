@@ -48,7 +48,6 @@
 		inductance-d-uh = <3400>;
 		inductance-q-uh = <3400>;
 		resistance-mohms = <5600>;
-		flux_linkage_uvphz = <17675>;
 		pole-pairs = <50>;
 		max-current-ma = <670>;
 		inertia-mgcm2 = <9000>;

@@ -14,7 +14,7 @@ Make devicetree bindings and config macros match the new ownership model.
    - fallback `resistance-mohms`,
    - fallback `inductance-d-uh`,
    - fallback `inductance-q-uh`,
-   - fallback `flux_linkage_uvphz`,
+   - optional fallback `flux_linkage_uvphz` when a reliable profile value exists,
    - fallback `inertia-mgcm2`.
 2. Keep `/user_parameters` for control/profile/procedure defaults for now, but
    document that the name is historical.

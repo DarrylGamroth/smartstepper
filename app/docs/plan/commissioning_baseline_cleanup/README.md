@@ -49,8 +49,8 @@ Required before normal encoder-control work:
 2. Production electrical ID: bidirectional Rs + demodulated Ld/Lq.
 3. Apply current PI from production electrical ID.
 4. Generated Id-axis encoder mapping.
-5. Flux identification if quality passes; otherwise keep fallback flux and mark
-   velocity-limit confidence reduced.
+5. Flux identification if quality passes; otherwise keep flux/Kt unknown unless
+   a reliable optional fallback was provided.
 6. Velocity PI bandwidth/defaults staged from measured/fallback model.
 
 ### Identify

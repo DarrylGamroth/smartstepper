@@ -63,8 +63,6 @@
 		inductance-d-uh = <3400>;
 		inductance-q-uh = <3400>;
 		resistance-mohms = <5600>;
-		/* Boot/fallback only; commissioning estimates runtime psi_f/Kt. */
-		flux_linkage_uvphz = <17675>;
 		pole-pairs = <50>;
 		max-current-ma = <670>;
 		/* Boot/fallback only; commissioning estimates runtime inertia. */

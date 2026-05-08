@@ -138,7 +138,8 @@ motor settings clear [model electrical|model encoder|identity|limits|controllers
 motor settings autoload status
 ```
 
-`model electrical` stores only the active electrical model (`Rs/Ld/Lq/psi_f`).
+`model electrical` stores the active electrical model. `Rs/Ld/Lq` are required;
+`psi_f` is saved only after flux commissioning has produced a measured value.
 `model encoder` stores the encoder mapping group. Mechanical ID values are not
 part of baseline persistence yet. ADC current offsets are intentionally excluded
 and must be measured on every boot.
@@ -162,8 +163,8 @@ Load validates selected values before applying. After apply:
   trust state,
 - identity reload verifies the persisted motor identity matches this firmware
   image,
-- electrical model reload updates active Rs/Ld/Lq/flux, derives cached Kt, and
-  updates electrical model source markers,
+- electrical model reload updates active Rs/Ld/Lq, applies `psi_f` when present,
+  derives cached Kt from `psi_f`, and updates electrical model source markers,
 - limits reload applies runtime motion profile velocity/acceleration limits and
   command timeout, and validates compile-time electrical safety limits,
 - controller reload recomputes PI/MPR/DOB coefficients from stored tuning

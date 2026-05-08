@@ -29,11 +29,12 @@ properties:
 
   flux_linkage_uvphz:
     type: int
-    required: true
     description: >
-      Boot/fallback permanent magnet flux linkage in microvolt-seconds per Hz.
-      Commissioning should estimate and stage the runtime value before closed-loop
-      tuning is trusted.
+      Optional boot/fallback permanent magnet flux linkage in microvolt-seconds
+      per Hz. Omit when no reliable datasheet/profile value exists. A missing
+      value is treated as unknown; commissioning should estimate and stage the
+      runtime value before BEMF limits, torque-domain tuning, MPR, DOB, or
+      mechanical ID are trusted.
 
   pole-pairs:
     type: int

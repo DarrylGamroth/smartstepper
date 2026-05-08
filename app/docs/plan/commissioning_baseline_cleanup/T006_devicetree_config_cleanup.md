@@ -66,7 +66,7 @@ future Settings/ZMS persistence:
 | current ADC offsets | commissioned baseline record |
 | generated-sweep encoder electrical offset / commutation map | commissioned baseline record |
 | measured Rs/Ld/Lq | commissioned baseline record, with DT as fallback |
-| measured flux linkage / Kt | commissioned baseline record, with DT as fallback |
+| measured flux linkage / Kt | commissioned flux record; DT flux is optional and may be unknown |
 | measured inertia/friction | advisory/mechanical record only after confidence gates |
 | velocity/position PI gains | controller record or bandwidth-derived runtime config |
 | MPR/DOB gains and enable states | controller record only after HIL validation |
@@ -85,7 +85,7 @@ hard-limit values:
 - `resistance-mohms`
 - `inductance-d-uh`
 - `inductance-q-uh`
-- `flux_linkage_uvphz`
+- `flux_linkage_uvphz` only when a reliable datasheet/profile fallback exists
 - `inertia-mgcm2`
 
 Required cleanup:

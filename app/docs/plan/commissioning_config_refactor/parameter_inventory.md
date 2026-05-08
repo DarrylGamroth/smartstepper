@@ -53,7 +53,7 @@ These belong in `motor_id_safe_*.overlay` and full motor profile overlays:
 | `resistance-mohms` | fallback model | Safe boot/default only; production bidirectional Rs supersedes it in RAM. |
 | `inductance-d-uh` | fallback model | Safe boot/default only; demod `Ld` supersedes it in RAM. |
 | `inductance-q-uh` | fallback model | Safe boot/default only; demod `Lq` supersedes it in RAM. |
-| `flux_linkage_uvphz` | fallback model | Safe boot/default only; flux ID supersedes it in RAM when accepted. |
+| `flux_linkage_uvphz` | optional fallback model | Omit when no reliable datasheet/profile value exists; flux ID supersedes it in RAM when accepted. |
 | `inertia-mgcm2` | fallback/advisory model | Use only after confidence gates; not required for baseline. |
 | `align-current-ma` | motor/current-class bootstrap current | May stay motor-specific until generated-sweep mapping fully replaces boot align. |
 | `align-duration-ms` | motor/current-class bootstrap timing | Motor/encoder mapping setup behavior. |
