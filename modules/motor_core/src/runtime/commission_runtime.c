@@ -46,6 +46,10 @@
 #define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN 0.25f
 #define MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX 10.0f
 #define MOTOR_COMMISSION_MECH_MAX_RESIDUAL_NM 0.20f
+#define MOTOR_COMMISSION_MECH_RESIDUAL_SCORE_NM 0.020f
+#define MOTOR_COMMISSION_MECH_CONF_R2_WEIGHT 0.55f
+#define MOTOR_COMMISSION_MECH_CONF_RESIDUAL_WEIGHT \
+	(1.0f - MOTOR_COMMISSION_MECH_CONF_R2_WEIGHT)
 
 static inline uint32_t motor_commission_default_decimation_hz(float32_t control_loop_frequency_hz)
 {
@@ -89,6 +93,42 @@ static inline bool motor_commission_obs_matches_expected(
 	default:
 		return false;
 	}
+}
+
+static float32_t motor_commission_mech_residual_score(float32_t residual_rms_nm)
+{
+	if (!isfinite(residual_rms_nm) || residual_rms_nm < 0.0f) {
+		return 0.0f;
+	}
+
+	return clampf(1.0f - (residual_rms_nm / MOTOR_COMMISSION_MECH_RESIDUAL_SCORE_NM),
+		      0.0f, 1.0f);
+}
+
+static float32_t motor_commission_mech_candidate_confidence(
+	const struct motor_mech_friction_id_result *friction,
+	const struct motor_mech_inertia_id_result *inertia)
+{
+	if (friction == NULL || inertia == NULL || !friction->valid || !inertia->valid) {
+		return 0.0f;
+	}
+
+	float32_t r2_score = 0.5f * clampf(friction->r2, 0.0f, 1.0f) +
+			     0.5f * clampf(inertia->r2, 0.0f, 1.0f);
+	float32_t residual_rms_nm = 0.5f * (friction->residual_rms_nm +
+					    inertia->residual_rms_nm);
+	float32_t residual_score =
+		motor_commission_mech_residual_score(residual_rms_nm);
+	float32_t confidence =
+		(MOTOR_COMMISSION_MECH_CONF_R2_WEIGHT * r2_score) +
+		(MOTOR_COMMISSION_MECH_CONF_RESIDUAL_WEIGHT * residual_score);
+
+	if (inertia->plausibility_ratio < MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN ||
+	    inertia->plausibility_ratio > MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX) {
+		confidence *= 0.75f;
+	}
+
+	return clampf(confidence, 0.0f, 1.0f);
 }
 
 static bool motor_commission_obs_velocity_tracking_ok(
@@ -858,13 +898,8 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 			continue;
 		}
 
-		float32_t confidence = 0.5f * clampf(friction.r2, 0.0f, 1.0f) +
-				       0.5f * clampf(inertia.r2, 0.0f, 1.0f);
-		if (inertia.plausibility_ratio < MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MIN ||
-		    inertia.plausibility_ratio > MOTOR_COMMISSION_MECH_WARN_PLAUSIBILITY_MAX) {
-			confidence *= 0.75f;
-		}
-		confidence = clampf(confidence, 0.0f, 1.0f);
+		float32_t confidence =
+			motor_commission_mech_candidate_confidence(&friction, &inertia);
 
 		if (confidence > best_confidence) {
 			best_confidence = confidence;

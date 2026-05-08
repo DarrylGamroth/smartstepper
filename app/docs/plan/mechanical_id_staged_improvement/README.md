@@ -75,7 +75,7 @@ Status: partial
 
 ## Stage 3A - Baseline Confidence Recovery
 
-Status: pending
+Status: in progress
 
 - Improve the mechanical fit so per-capture confidence clears `0.50` without
   relaxing the gate.
@@ -85,6 +85,10 @@ Status: pending
   - review confidence math so low residual and physical plausibility contribute
     explicitly instead of relying mostly on R2,
   - run repeatability tests before marking the baseline complete.
+- First implementation step: update confidence to combine R2 with residual
+  quality. The previous metric was effectively pure R2; HIL showed valid,
+  low-residual hybrid-stepper fits around `0.48..0.50` because deterministic
+  detent/ripple lowers R2 even when residual torque is small.
 
 ## Stage 4 - HIL Repeatability Gate
 
