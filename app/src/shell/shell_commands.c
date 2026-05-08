@@ -234,16 +234,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile,
 
 /* motor chopper calib subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper_calib,
-	SHELL_CMD_ARG(start, NULL, "Capture edges <slots> <revs> <velocity_hz>", cmd_motor_chopper_calib_start, 4, 0),
+	SHELL_CMD_ARG(start, NULL, "Capture slot/tooth edges <revs> <velocity_hz>", cmd_motor_chopper_calib_start, 3, 0),
 	SHELL_CMD(stop, NULL, "Stop active calibration capture", cmd_motor_chopper_calib_stop),
-	SHELL_CMD(status, NULL, "Show calibration capture/midpoint status", cmd_motor_chopper_calib_status),
-	SHELL_CMD(apply, NULL, "Apply midpoint table to profile sequence points", cmd_motor_chopper_calib_apply),
+	SHELL_CMD(status, NULL, "Show calibration capture and slot/tooth midpoint status", cmd_motor_chopper_calib_status),
+	SHELL_CMD(apply, NULL, "Apply slot/tooth midpoint table to profile sequence points", cmd_motor_chopper_calib_apply),
 	SHELL_CMD(clear, NULL, "Clear calibration buffers and midpoint table", cmd_motor_chopper_calib_clear),
 	SHELL_SUBCMD_SET_END
 );
 
 /* motor chopper subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper,
+	SHELL_CMD_ARG(geometry, NULL, "Get/set wheel geometry [slots [teeth]]", cmd_motor_chopper_geometry, 1, 2),
+	SHELL_CMD_ARG(sensor, NULL, "Get/set photo-interrupter emitter [0|1]", cmd_motor_chopper_sensor, 1, 1),
 	SHELL_CMD(calib, &sub_motor_chopper_calib, "Chopper midpoint calibration", NULL),
 	SHELL_SUBCMD_SET_END
 );

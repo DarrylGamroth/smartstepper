@@ -40,6 +40,20 @@ properties:
       references ramp from zero to max-current over this interval unless a
       calibration state programs a more specific trajectory rate.
 
+  chopper-slot-count:
+    type: int
+    default: 8
+    description: >
+      Number of transmissive slots in the chopper wheel. For a standard
+      single-track wheel the opaque tooth count is derived from this value,
+      giving 2 * chopper-slot-count edge regions and centerpoints.
+
+  chopper-tooth-count:
+    type: int
+    description: >
+      Optional opaque tooth count for nonstandard wheels. If omitted, the
+      tooth count defaults to chopper-slot-count.
+
   offset-pole-hz:
     type: int
     required: true

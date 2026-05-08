@@ -18,7 +18,7 @@
 #include "shell_control.h"
 
 #define MOTOR_SETTINGS_GROUP_USAGE \
-	"[model electrical|model encoder|identity|limits|controllers|detent|all]"
+	"[model electrical|model encoder|identity|limits|controllers|detent|chopper|all]"
 #define MOTOR_SETTINGS_AUTOLOAD_USAGE "[baseline|model electrical|model encoder]"
 
 static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups)
@@ -63,6 +63,10 @@ static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups
 		*groups = MOTOR_SETTINGS_GROUP_DETENT;
 		return 0;
 	}
+	if (strcmp(argv[first], "chopper") == 0) {
+		*groups = MOTOR_SETTINGS_GROUP_CHOPPER;
+		return 0;
+	}
 	if (strcmp(argv[first], "all") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_ALL;
 		return 0;
@@ -78,14 +82,15 @@ static const char *yesno(bool value)
 static void print_groups(const struct shell *sh, const char *label, uint32_t groups)
 {
 	shell_print(sh,
-		    "%s: encoder=%s identity=%s model_electrical=%s limits=%s controllers=%s detent=%s",
+		    "%s: encoder=%s identity=%s model_electrical=%s limits=%s controllers=%s detent=%s chopper=%s",
 		    label,
 		    yesno((groups & MOTOR_SETTINGS_GROUP_ENCODER) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_IDENTITY) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_CONTROLLERS) != 0U),
-		    yesno((groups & MOTOR_SETTINGS_GROUP_DETENT) != 0U));
+		    yesno((groups & MOTOR_SETTINGS_GROUP_DETENT) != 0U),
+		    yesno((groups & MOTOR_SETTINGS_GROUP_CHOPPER) != 0U));
 }
 
 static bool mutation_safe(const struct motor_parameters *params)
@@ -192,6 +197,23 @@ static void print_snapshot(const struct shell *sh,
 			    (double)s->detent_gain,
 			    (double)s->detent_iq_ff_limit_a,
 			    s->detent_table_crc32);
+	}
+	if ((present_groups & MOTOR_SETTINGS_GROUP_CHOPPER) != 0U) {
+		shell_print(sh, "  Chopper map:");
+		shell_print(sh, "    slots=%u teeth=%u centers=%u",
+			    s->chopper_slots, s->chopper_teeth, s->chopper_center_count);
+		for (uint16_t i = 0U;
+		     i < s->chopper_center_count && i < MOTOR_SETTINGS_CHOPPER_MAX_CENTERS;
+		     i++) {
+			const char *kind = "unknown";
+			if (s->chopper_center_kind[i] == CHOPPER_REGION_KIND_SLOT) {
+				kind = "slot";
+			} else if (s->chopper_center_kind[i] == CHOPPER_REGION_KIND_TOOTH) {
+				kind = "tooth";
+			}
+			shell_print(sh, "    [%u] %-7s %.3f deg", i, kind,
+				    (double)(s->chopper_centers_rad[i] * 180.0f / PI_F32));
+		}
 	}
 	shell_print(sh, "  Note: ADC current offsets are intentionally boot-calibrated and not persisted.");
 }

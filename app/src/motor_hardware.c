@@ -177,3 +177,17 @@ int motor_hardware_set_photo_interruptor_enable(bool enable)
 {
 	return gpio_pin_set_dt(&pi_enable, enable ? 1 : 0);
 }
+
+int motor_hardware_get_photo_interruptor_enable(bool *enabled)
+{
+	if (enabled == NULL) {
+		return -EINVAL;
+	}
+
+	int ret = gpio_pin_get_dt(&pi_enable);
+	if (ret < 0) {
+		return ret;
+	}
+	*enabled = ret != 0;
+	return 0;
+}

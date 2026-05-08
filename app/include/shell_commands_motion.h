@@ -23,6 +23,8 @@ int cmd_motor_profile_cancel(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_profile_status(const struct shell *sh, size_t argc, char **argv);
 
 /* Chopper calibration commands */
+int cmd_motor_chopper_geometry(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_chopper_sensor(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_chopper_calib_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_chopper_calib_stop(const struct shell *sh, size_t argc, char **argv);

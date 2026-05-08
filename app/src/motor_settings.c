@@ -21,6 +21,7 @@
 #include "motor/control/mpr.h"
 #include "motor/compensation/detent_map.h"
 #include "motor/filters/pi.h"
+#include "motor/math/angle_wrap.h"
 #include "motor/math/math_constants.h"
 #include "motor/observers/angle_observer.h"
 #include "motor/control/position_regulator.h"
@@ -91,6 +92,12 @@
 #define KEY_DETENT_LIMIT "motor/detent/iq_ff_limit_a"
 #define KEY_DETENT_TABLE_CRC "motor/detent/table_crc32"
 
+#define KEY_CHOPPER_SLOTS "motor/chopper/slots"
+#define KEY_CHOPPER_TEETH "motor/chopper/teeth"
+#define KEY_CHOPPER_CENTER_COUNT "motor/chopper/center_count"
+#define KEY_CHOPPER_CENTERS "motor/chopper/centers_rad"
+#define KEY_CHOPPER_CENTER_KIND "motor/chopper/center_kind"
+
 #define KEY_LIMITS_NOMINAL_VOLTAGE "motor/limits/nominal_voltage_v"
 #define KEY_LIMITS_MAX_CURRENT "motor/limits/max_current_a"
 #define KEY_LIMITS_BRAKE_CURRENT "motor/limits/brake_current_a"
@@ -133,7 +140,19 @@
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL \
 	(MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS | MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD | \
 	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS BIT(0)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_TEETH BIT(1)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT BIT(2)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS BIT(3)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_KIND BIT(4)
+#define MOTOR_SETTINGS_CHOPPER_FIELDS_ALL \
+	(MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS | MOTOR_SETTINGS_CHOPPER_FIELD_TEETH | \
+	 MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT | MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS | \
+	 MOTOR_SETTINGS_CHOPPER_FIELD_KIND)
 #define MOTOR_SETTINGS_AUTOLOAD_ALLOWED_GROUPS MOTOR_SETTINGS_GROUP_BASELINE
+
+BUILD_ASSERT(MOTOR_SETTINGS_CHOPPER_MAX_CENTERS == MOTOR_PROFILE_SEQUENCE_MAX_POINTS,
+	     "Settings chopper table size must match profile sequence size");
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
@@ -142,6 +161,7 @@ struct motor_settings_read_ctx {
 	uint32_t model_electrical_fields;
 	uint32_t controller_fields;
 	uint32_t limit_fields;
+	uint32_t chopper_fields;
 	uint32_t present_meta;
 	int error;
 };
@@ -230,6 +250,18 @@ static int read_exact(settings_read_cb read_cb, void *cb_arg, void *dst, size_t 
 		} \
 	} while (false)
 
+#define LOAD_CHOPPER_FIELD(key_lit, field, field_bit) \
+	do { \
+		if (strcmp(key, (key_lit)) == 0) { \
+			ctx->error = read_exact(read_cb, cb_arg, &ctx->snapshot->field, sizeof(ctx->snapshot->field)); \
+			if (ctx->error == 0) { \
+				ctx->present_groups |= MOTOR_SETTINGS_GROUP_CHOPPER; \
+				ctx->chopper_fields |= (field_bit); \
+			} \
+			return ctx->error == 0 ? 0 : 1; \
+		} \
+	} while (false)
+
 static int settings_read_cb_direct(const char *key, size_t len,
 				   settings_read_cb read_cb, void *cb_arg, void *param)
 {
@@ -281,6 +313,16 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_FIELD("detent/gain", detent_gain, MOTOR_SETTINGS_GROUP_DETENT);
 	LOAD_FIELD("detent/iq_ff_limit_a", detent_iq_ff_limit_a, MOTOR_SETTINGS_GROUP_DETENT);
 	LOAD_FIELD("detent/table_crc32", detent_table_crc32, MOTOR_SETTINGS_GROUP_DETENT);
+	LOAD_CHOPPER_FIELD("chopper/slots", chopper_slots,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS);
+	LOAD_CHOPPER_FIELD("chopper/teeth", chopper_teeth,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_TEETH);
+	LOAD_CHOPPER_FIELD("chopper/center_count", chopper_center_count,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT);
+	LOAD_CHOPPER_FIELD("chopper/centers_rad", chopper_centers_rad,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS);
+	LOAD_CHOPPER_FIELD("chopper/center_kind", chopper_center_kind,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_KIND);
 	LOAD_LIMIT_FIELD("limits/nominal_voltage_v", limits_nominal_voltage_v,
 			 MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE);
 	LOAD_LIMIT_FIELD("limits/max_current_a", limits_max_current_a,
@@ -302,6 +344,7 @@ static int settings_read_cb_direct(const char *key, size_t len,
 #undef LOAD_IDENTITY_FIELD
 #undef LOAD_LIMIT_FIELD
 #undef LOAD_MODEL_ELECTRICAL_FIELD
+#undef LOAD_CHOPPER_FIELD
 
 int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *present_groups)
 {
@@ -336,6 +379,10 @@ int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *pres
 	if ((ctx.limit_fields & MOTOR_SETTINGS_LIMIT_FIELDS_ALL) !=
 	    MOTOR_SETTINGS_LIMIT_FIELDS_ALL) {
 		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_LIMITS;
+	}
+	if ((ctx.chopper_fields & MOTOR_SETTINGS_CHOPPER_FIELDS_ALL) !=
+	    MOTOR_SETTINGS_CHOPPER_FIELDS_ALL) {
+		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_CHOPPER;
 	}
 
 	if (present_groups != NULL) {
@@ -676,6 +723,46 @@ static int save_detent_group(const struct motor_parameters *params)
 	return 0;
 }
 
+static int save_chopper_group(const struct motor_parameters *params)
+{
+	if (params->chopper_cal.slots == 0U ||
+	    params->chopper_cal.teeth == 0U ||
+	    params->chopper_cal.midpoint_count == 0U ||
+	    params->chopper_cal.midpoint_count > MOTOR_SETTINGS_CHOPPER_MAX_CENTERS ||
+	    params->chopper_cal.midpoint_count !=
+		    (uint16_t)(params->chopper_cal.slots + params->chopper_cal.teeth) ||
+	    !params->chopper_cal.valid) {
+		return -ERANGE;
+	}
+
+	for (uint16_t i = 0U; i < params->chopper_cal.midpoint_count; i++) {
+		if (!isfinite(params->chopper_cal.blade_midpoints_rad[i])) {
+			return -ERANGE;
+		}
+	}
+
+	int ret;
+	uint16_t slots = params->chopper_cal.slots;
+	uint16_t teeth = params->chopper_cal.teeth;
+	uint16_t center_count = params->chopper_cal.midpoint_count;
+	float32_t centers[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
+	uint8_t kinds[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
+
+	for (uint16_t i = 0U; i < center_count; i++) {
+		centers[i] = params->chopper_cal.blade_midpoints_rad[i];
+		kinds[i] = params->chopper_cal.midpoint_kind[i];
+	}
+
+	SAVE_SCALAR(KEY_CHOPPER_SLOTS, slots);
+	SAVE_SCALAR(KEY_CHOPPER_TEETH, teeth);
+	SAVE_SCALAR(KEY_CHOPPER_CENTER_COUNT, center_count);
+	ret = save_one(KEY_CHOPPER_CENTERS, centers, sizeof(centers));
+	if (ret != 0) {
+		return ret;
+	}
+	return save_one(KEY_CHOPPER_CENTER_KIND, kinds, sizeof(kinds));
+}
+
 int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 			uint32_t *saved_groups)
 {
@@ -728,6 +815,13 @@ int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 			return ret;
 		}
 		written |= MOTOR_SETTINGS_GROUP_DETENT;
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CHOPPER)) {
+		ret = save_chopper_group(params);
+		if (ret != 0) {
+			return ret;
+		}
+		written |= MOTOR_SETTINGS_GROUP_CHOPPER;
 	}
 
 	struct motor_settings_snapshot existing = {0};
@@ -1016,6 +1110,59 @@ static int apply_detent_group(struct motor_parameters *params,
 	return 0;
 }
 
+static int apply_chopper_group(struct motor_parameters *params,
+			       const struct motor_settings_snapshot *snapshot)
+{
+	uint32_t center_count = snapshot->chopper_center_count;
+	if (snapshot->chopper_slots == 0U ||
+	    snapshot->chopper_teeth == 0U ||
+	    center_count == 0U ||
+	    center_count > CHOPPER_CAL_MAX_SLOTS ||
+	    center_count != ((uint32_t)snapshot->chopper_slots + snapshot->chopper_teeth)) {
+		return -ERANGE;
+	}
+
+	for (uint16_t i = 0U; i < center_count; i++) {
+		if (!isfinite(snapshot->chopper_centers_rad[i])) {
+			return -ERANGE;
+		}
+	}
+
+	params->chopper_cal.active = false;
+	params->chopper_cal.complete = true;
+	params->chopper_cal.valid = true;
+	params->chopper_cal.slots = snapshot->chopper_slots;
+	params->chopper_cal.teeth = snapshot->chopper_teeth;
+	params->chopper_cal.revs_target = 0U;
+	params->chopper_cal.samples_per_edge = 0U;
+	params->chopper_cal.midpoint_count = snapshot->chopper_center_count;
+	params->chopper_cal.total_edges_target = 0U;
+	params->chopper_cal.total_edges_captured = 0U;
+	params->chopper_cal.discarded_edges = 0U;
+	params->chopper_cal.spacing_min_rad = 0.0f;
+	params->chopper_cal.spacing_max_rad = 0.0f;
+	params->chopper_cal.spacing_mean_rad = 0.0f;
+	params->chopper_cal.spacing_max_error_rad = 0.0f;
+	params->chopper_cal.speed_target_rad_s = 0.0f;
+	params->chopper_cal.edge_min_step_rad = 0.0f;
+
+	for (uint16_t i = 0U; i < CHOPPER_CAL_MAX_EDGES; i++) {
+		params->chopper_cal.edge_sum_rad[i] = 0.0f;
+		params->chopper_cal.edge_count[i] = 0U;
+		params->chopper_cal.edge_status[i] = 0U;
+	}
+	for (uint16_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
+		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
+		params->chopper_cal.midpoint_kind[i] = CHOPPER_REGION_KIND_UNKNOWN;
+	}
+	for (uint16_t i = 0U; i < center_count; i++) {
+		params->chopper_cal.blade_midpoints_rad[i] =
+			wrap_rad_2pi(snapshot->chopper_centers_rad[i]);
+		params->chopper_cal.midpoint_kind[i] = snapshot->chopper_center_kind[i];
+	}
+	return 0;
+}
+
 int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 			uint32_t *loaded_groups)
 {
@@ -1095,6 +1242,16 @@ int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 			return ret;
 		}
 		loaded |= MOTOR_SETTINGS_GROUP_DETENT;
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CHOPPER)) {
+		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_CHOPPER)) {
+			return -ENOENT;
+		}
+		ret = apply_chopper_group(params, &snap);
+		if (ret != 0) {
+			return ret;
+		}
+		loaded |= MOTOR_SETTINGS_GROUP_CHOPPER;
 	}
 
 	config_init_runtime_adapters(params);
@@ -1197,6 +1354,19 @@ static int clear_detent_keys(void)
 	return 0;
 }
 
+static int clear_chopper_keys(void)
+{
+	const char *keys[] = { KEY_CHOPPER_SLOTS, KEY_CHOPPER_TEETH,
+		KEY_CHOPPER_CENTER_COUNT, KEY_CHOPPER_CENTERS, KEY_CHOPPER_CENTER_KIND };
+	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
+		int ret = delete_key(keys[i]);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+	return 0;
+}
+
 int motor_settings_clear(uint32_t groups)
 {
 	groups &= MOTOR_SETTINGS_GROUP_ALL;
@@ -1235,6 +1405,10 @@ int motor_settings_clear(uint32_t groups)
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_DETENT)) {
 		ret = clear_detent_keys();
+		if (ret != 0) { return ret; }
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CHOPPER)) {
+		ret = clear_chopper_keys();
 		if (ret != 0) { return ret; }
 	}
 

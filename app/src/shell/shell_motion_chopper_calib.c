@@ -43,6 +43,10 @@ static void motor_chopper_cal_reset_buffers(struct motor_parameters *params)
 	params->chopper_cal.total_edges_target = 0U;
 	params->chopper_cal.total_edges_captured = 0U;
 	params->chopper_cal.discarded_edges = 0U;
+	params->chopper_cal.spacing_min_rad = 0.0f;
+	params->chopper_cal.spacing_max_rad = 0.0f;
+	params->chopper_cal.spacing_mean_rad = 0.0f;
+	params->chopper_cal.spacing_max_error_rad = 0.0f;
 	params->chopper_cal.last_wrapped_rad = 0.0f;
 	params->chopper_cal.last_unwrapped_rad = 0.0f;
 	params->chopper_cal.start_unwrapped_rad = 0.0f;
@@ -50,9 +54,11 @@ static void motor_chopper_cal_reset_buffers(struct motor_parameters *params)
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_EDGES; i++) {
 		params->chopper_cal.edge_sum_rad[i] = 0.0f;
 		params->chopper_cal.edge_count[i] = 0U;
+		params->chopper_cal.edge_status[i] = 0U;
 	}
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
 		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
+		params->chopper_cal.midpoint_kind[i] = CHOPPER_REGION_KIND_UNKNOWN;
 	}
 }
 
@@ -64,16 +70,75 @@ static inline void motor_chopper_cal_restore_timeout(struct motor_parameters *pa
 	params->command_timeout_ms = params->chopper_cal.saved_timeout_ms;
 }
 
+static uint16_t motor_chopper_cal_edge_bins(const struct motor_chopper_cal_ctx *cal)
+{
+	if (cal == NULL || cal->slots == 0U || cal->teeth == 0U) {
+		return 0U;
+	}
+	uint32_t bins = (uint32_t)cal->slots + (uint32_t)cal->teeth;
+
+	return bins <= CHOPPER_CAL_MAX_SLOTS ? (uint16_t)bins : 0U;
+}
+
+static bool motor_chopper_cal_geometry_valid(uint16_t slots, uint16_t teeth)
+{
+	uint32_t centers = (uint32_t)slots + (uint32_t)teeth;
+
+	return slots > 0U && teeth > 0U && centers <= CHOPPER_CAL_MAX_SLOTS;
+}
+
+struct chopper_edge_mean {
+	float32_t angle_rad;
+	uint8_t status;
+};
+
+static void motor_chopper_sort_edges(struct chopper_edge_mean *edges, uint16_t count)
+{
+	for (uint16_t i = 1U; i < count; i++) {
+		struct chopper_edge_mean key = edges[i];
+		uint16_t j = i;
+
+		while (j > 0U && edges[j - 1U].angle_rad > key.angle_rad) {
+			edges[j] = edges[j - 1U];
+			j--;
+		}
+		edges[j] = key;
+	}
+}
+
+static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status)
+{
+	if ((status & TIMER_IC_STATUS_EDGE_RISING) != 0U) {
+		return CHOPPER_REGION_KIND_SLOT;
+	}
+	if ((status & TIMER_IC_STATUS_EDGE_FALLING) != 0U) {
+		return CHOPPER_REGION_KIND_TOOTH;
+	}
+	return CHOPPER_REGION_KIND_UNKNOWN;
+}
+
+static const char *motor_chopper_region_kind_name(uint8_t kind)
+{
+	switch (kind) {
+	case CHOPPER_REGION_KIND_SLOT:
+		return "slot";
+	case CHOPPER_REGION_KIND_TOOTH:
+		return "tooth";
+	default:
+		return "unknown";
+	}
+}
+
 static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 {
 	if (!params) {
 		return -ENODEV;
 	}
-	if (params->chopper_cal.slots == 0U || params->chopper_cal.slots > CHOPPER_CAL_MAX_SLOTS) {
+	uint16_t edge_bins = motor_chopper_cal_edge_bins(&params->chopper_cal);
+	if (edge_bins == 0U) {
 		return -EINVAL;
 	}
 
-	uint16_t edge_bins = (uint16_t)(2U * params->chopper_cal.slots);
 	for (uint16_t i = 0U; i < edge_bins; i++) {
 		if (params->chopper_cal.edge_count[i] == 0U) {
 			params->chopper_cal.valid = false;
@@ -82,21 +147,43 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 		}
 	}
 
-	for (uint16_t i = 0U; i < params->chopper_cal.slots; i++) {
-		uint16_t rise_idx = (uint16_t)(2U * i);
-		uint16_t fall_idx = (uint16_t)(rise_idx + 1U);
-		float32_t rise_mean =
-			params->chopper_cal.edge_sum_rad[rise_idx] /
-			(float32_t)params->chopper_cal.edge_count[rise_idx];
-		float32_t fall_mean =
-			params->chopper_cal.edge_sum_rad[fall_idx] /
-			(float32_t)params->chopper_cal.edge_count[fall_idx];
-		float32_t midpoint = rise_mean + 0.5f * (fall_mean - rise_mean);
+	struct chopper_edge_mean edges[CHOPPER_CAL_MAX_SLOTS];
+	for (uint16_t i = 0U; i < edge_bins; i++) {
+		float32_t mean = params->chopper_cal.edge_sum_rad[i] /
+				 (float32_t)params->chopper_cal.edge_count[i];
+		edges[i].angle_rad = wrap_rad_2pi(mean);
+		edges[i].status = params->chopper_cal.edge_status[i];
+	}
+	motor_chopper_sort_edges(edges, edge_bins);
+
+	float32_t ideal_spacing = 2.0f * PI_F32 / (float32_t)edge_bins;
+	float32_t spacing_sum = 0.0f;
+	float32_t spacing_min = 2.0f * PI_F32;
+	float32_t spacing_max = 0.0f;
+	float32_t spacing_max_error = 0.0f;
+	for (uint16_t i = 0U; i < edge_bins; i++) {
+		float32_t a = edges[i].angle_rad;
+		float32_t b = edges[(uint16_t)((i + 1U) % edge_bins)].angle_rad;
+		if ((i + 1U) == edge_bins) {
+			b += 2.0f * PI_F32;
+		}
+		float32_t spacing = b - a;
+		float32_t midpoint = a + (0.5f * spacing);
 
 		params->chopper_cal.blade_midpoints_rad[i] = wrap_rad_2pi(midpoint);
+		params->chopper_cal.midpoint_kind[i] =
+			motor_chopper_region_kind_from_edge_status(edges[i].status);
+		spacing_sum += spacing;
+		spacing_min = fminf(spacing_min, spacing);
+		spacing_max = fmaxf(spacing_max, spacing);
+		spacing_max_error = fmaxf(spacing_max_error, fabsf(spacing - ideal_spacing));
 	}
 
-	params->chopper_cal.midpoint_count = params->chopper_cal.slots;
+	params->chopper_cal.midpoint_count = edge_bins;
+	params->chopper_cal.spacing_min_rad = spacing_min;
+	params->chopper_cal.spacing_max_rad = spacing_max;
+	params->chopper_cal.spacing_mean_rad = spacing_sum / (float32_t)edge_bins;
+	params->chopper_cal.spacing_max_error_rad = spacing_max_error;
 	params->chopper_cal.valid = true;
 	return 0;
 }
@@ -131,7 +218,8 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	if (!params || !params->chopper_cal.active) {
 		return;
 	}
-	if (!motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) ||
+	if ((!motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED) &&
+	     !motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_ENCODER)) ||
 	    atomic_get(&params->control_armed) == 0) {
 		params->chopper_cal.active = false;
 		params->chopper_cal.complete = false;
@@ -145,8 +233,7 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 		return;
 	}
 
-	uint16_t slots = params->chopper_cal.slots;
-	uint16_t edge_bins = (uint16_t)(2U * slots);
+	uint16_t edge_bins = motor_chopper_cal_edge_bins(&params->chopper_cal);
 	if (edge_bins == 0U || edge_bins > CHOPPER_CAL_MAX_EDGES) {
 		params->chopper_cal.discarded_edges++;
 		return;
@@ -174,6 +261,11 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	uint16_t bin = (uint16_t)(captured % edge_bins);
 	params->chopper_cal.edge_sum_rad[bin] += unwrapped_rad;
 	params->chopper_cal.edge_count[bin]++;
+	if ((status & (TIMER_IC_STATUS_EDGE_RISING | TIMER_IC_STATUS_EDGE_FALLING)) != 0) {
+		params->chopper_cal.edge_status[bin] =
+			(uint8_t)(status & (TIMER_IC_STATUS_EDGE_RISING |
+					    TIMER_IC_STATUS_EDGE_FALLING));
+	}
 	params->chopper_cal.total_edges_captured = captured + 1U;
 
 	if (params->chopper_cal.total_edges_captured >= params->chopper_cal.total_edges_target) {
@@ -201,7 +293,6 @@ int cmd_motor_chopper_calib_clear(const struct shell *sh, size_t argc, char **ar
 #endif
 
 	g_motor_params->chopper_cal.active = false;
-	g_motor_params->chopper_cal.slots = 0U;
 	g_motor_params->chopper_cal.revs_target = 0U;
 	g_motor_params->chopper_cal.samples_per_edge = 0U;
 	g_motor_params->chopper_cal.speed_target_rad_s = 0.0f;
@@ -217,11 +308,98 @@ int cmd_motor_chopper_calib_clear(const struct shell *sh, size_t argc, char **ar
 	return 0;
 }
 
-/* motor chopper calib start <slots> <revs> <speed_hz> */
+/* motor chopper geometry [slots [teeth]] */
+int cmd_motor_chopper_geometry(const struct shell *sh, size_t argc, char **argv)
+{
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	if (argc == 1U) {
+		uint16_t centers = motor_chopper_cal_edge_bins(&g_motor_params->chopper_cal);
+		shell_print(sh, "Chopper Geometry:");
+		shell_print(sh, "  Slots:        %u", g_motor_params->chopper_cal.slots);
+		shell_print(sh, "  Teeth:        %u", g_motor_params->chopper_cal.teeth);
+		shell_print(sh, "  Centerpoints: %u", centers);
+		shell_print(sh, "  Map valid:    %s", g_motor_params->chopper_cal.valid ? "YES" : "NO");
+		return 0;
+	}
+	if (argc != 2U && argc != 3U) {
+		shell_error(sh, "Usage: motor chopper geometry [slots [teeth]]");
+		return -EINVAL;
+	}
+	if (g_motor_params->chopper_cal.active || g_motor_params->profile_seq.running) {
+		shell_error(sh, "Stop chopper calibration/sequence before changing geometry");
+		return -EBUSY;
+	}
+
+	uint32_t slots_u32 = 0U;
+	uint32_t teeth_u32 = 0U;
+	if (!shell_parse_u32(argv[1], &slots_u32)) {
+		shell_error(sh, "slots must be positive");
+		return -EINVAL;
+	}
+	teeth_u32 = (argc == 3U) ? 0U : slots_u32;
+	if (argc == 3U && !shell_parse_u32(argv[2], &teeth_u32)) {
+		shell_error(sh, "teeth must be positive");
+		return -EINVAL;
+	}
+	if (slots_u32 == 0U || teeth_u32 == 0U ||
+	    slots_u32 > UINT16_MAX || teeth_u32 > UINT16_MAX ||
+	    !motor_chopper_cal_geometry_valid((uint16_t)slots_u32, (uint16_t)teeth_u32)) {
+		shell_error(sh, "slots and teeth must be positive and total <= %u",
+			    CHOPPER_CAL_MAX_SLOTS);
+		return -EINVAL;
+	}
+
+	g_motor_params->chopper_cal.slots = (uint16_t)slots_u32;
+	g_motor_params->chopper_cal.teeth = (uint16_t)teeth_u32;
+	motor_chopper_cal_reset_buffers(g_motor_params);
+	shell_print(sh, "Chopper geometry set: slots=%u teeth=%u centers=%u",
+		    g_motor_params->chopper_cal.slots,
+		    g_motor_params->chopper_cal.teeth,
+		    motor_chopper_cal_edge_bins(&g_motor_params->chopper_cal));
+	return 0;
+}
+
+/* motor chopper sensor [0|1] */
+int cmd_motor_chopper_sensor(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc == 1U) {
+		bool enabled = false;
+		int ret = motor_hardware_get_photo_interruptor_enable(&enabled);
+		if (ret < 0) {
+			shell_error(sh, "Failed to read photo-interrupter enable GPIO (%d)", ret);
+			return ret;
+		}
+		shell_print(sh, "Photo-interrupter emitter: %s", enabled ? "enabled" : "disabled");
+		return 0;
+	}
+	if (argc != 2U) {
+		shell_error(sh, "Usage: motor chopper sensor [0|1]");
+		return -EINVAL;
+	}
+
+	bool enable = false;
+	if (!shell_parse_bool01(argv[1], &enable)) {
+		shell_error(sh, "sensor value must be 0/1, true/false, on/off");
+		return -EINVAL;
+	}
+	int ret = motor_hardware_set_photo_interruptor_enable(enable);
+	if (ret < 0) {
+		shell_error(sh, "Failed to set photo-interrupter enable GPIO (%d)", ret);
+		return ret;
+	}
+	shell_print(sh, "Photo-interrupter emitter %s", enable ? "enabled" : "disabled");
+	return 0;
+}
+
+/* motor chopper calib start <revs> <velocity_hz> */
 int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **argv)
 {
-	if (argc != 4) {
-		shell_error(sh, "Usage: motor chopper calib start <slots> <revs> <speed_hz>");
+	if (argc != 3) {
+		shell_error(sh, "Usage: motor chopper calib start <revs> <velocity_hz>");
 		return -EINVAL;
 	}
 
@@ -247,8 +425,11 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	}
 #endif
 
-	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr, MOTOR_STATE_ONLINE_VELOCITY_GENERATED)) {
-		shell_error(sh, "Calibration requires ONLINE_VELOCITY_GENERATED mode.");
+	if (!motor_state_ptr_is_mode(g_motor_params->state_for_isr,
+				     MOTOR_STATE_ONLINE_VELOCITY_GENERATED) &&
+	    !motor_state_ptr_is_mode(g_motor_params->state_for_isr,
+				     MOTOR_STATE_ONLINE_VELOCITY_ENCODER)) {
+		shell_error(sh, "Calibration requires velocity_generated or velocity_encoder mode.");
 		return -EACCES;
 	}
 
@@ -257,38 +438,36 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 		return -EACCES;
 	}
 
-	uint32_t slots_u32 = 0U;
-	if (!shell_parse_u32(argv[1], &slots_u32) || slots_u32 == 0U ||
-	    slots_u32 > CHOPPER_CAL_MAX_SLOTS) {
-		shell_error(sh, "slots must be 1..%u", CHOPPER_CAL_MAX_SLOTS);
+	uint16_t edge_bins = motor_chopper_cal_edge_bins(&g_motor_params->chopper_cal);
+	if (edge_bins == 0U) {
+		shell_error(sh, "Invalid geometry; run 'motor chopper geometry <slots> [teeth]'");
 		return -EINVAL;
 	}
 
 	uint32_t revs_u32 = 0U;
-	if (!shell_parse_u32(argv[2], &revs_u32) || revs_u32 == 0U || revs_u32 > 10000U) {
+	if (!shell_parse_u32(argv[1], &revs_u32) || revs_u32 == 0U || revs_u32 > 10000U) {
 		shell_error(sh, "revs must be 1..10000");
 		return -EINVAL;
 	}
 
-	float speed_hz = 0.0f;
-	if (!shell_parse_finite_float(argv[3], &speed_hz) || speed_hz <= 0.0f) {
-		shell_error(sh, "speed_hz must be a positive finite value");
+	float velocity_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &velocity_hz) || fabsf(velocity_hz) <= 1e-5f) {
+		shell_error(sh, "velocity_hz must be a non-zero finite value");
 		return -EINVAL;
 	}
 
-	uint16_t slots = (uint16_t)slots_u32;
 	uint16_t revs = (uint16_t)revs_u32;
-	uint64_t edges_target_u64 = 2ULL * (uint64_t)slots * (uint64_t)revs;
+	uint64_t edges_target_u64 = (uint64_t)edge_bins * (uint64_t)revs;
 	if (edges_target_u64 > UINT32_MAX) {
 		shell_error(sh, "Edge target too large");
 		return -ERANGE;
 	}
 
-	float32_t speed_target_rad_s = speed_hz * 2.0f * PI_F32;
+	float32_t speed_target_rad_s = velocity_hz * 2.0f * PI_F32;
 	speed_target_rad_s = clampf(speed_target_rad_s, -g_motor_params->profile_max_velocity_rad_s,
 				    g_motor_params->profile_max_velocity_rad_s);
 	if (fabsf(speed_target_rad_s) < 1e-4f) {
-		shell_error(sh, "speed_hz too small after clamping");
+		shell_error(sh, "velocity_hz too small after clamping");
 		return -EINVAL;
 	}
 
@@ -307,7 +486,6 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	}
 
 	g_motor_params->chopper_cal.active = false;
-	g_motor_params->chopper_cal.slots = slots;
 	g_motor_params->chopper_cal.revs_target = revs;
 	g_motor_params->chopper_cal.samples_per_edge = revs;
 	g_motor_params->chopper_cal.speed_target_rad_s = speed_target_rad_s;
@@ -344,8 +522,9 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 	traj_set_target_value(&g_motor_params->traj_velocity, speed_target_rad_s);
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh,
-		    "Chopper calibration started: slots=%u revs=%u edges=%u speed=%.3f Hz (channel=%u)",
-		    slots, revs, g_motor_params->chopper_cal.total_edges_target,
+		    "Chopper calibration started: slots=%u teeth=%u revs=%u edges=%u velocity=%.3f Hz (channel=%u)",
+		    g_motor_params->chopper_cal.slots, g_motor_params->chopper_cal.teeth,
+		    revs, g_motor_params->chopper_cal.total_edges_target,
 		    (double)(speed_target_rad_s / (2.0f * PI_F32)),
 		    CHOPPER_CAL_CAPTURE_CHANNEL);
 	return 0;
@@ -408,12 +587,19 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 		(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
 	}
 #endif
+	if (!g_motor_params->chopper_cal.active && g_motor_params->chopper_cal.complete) {
+		int ret = motor_hardware_set_photo_interruptor_enable(false);
+		if (ret < 0) {
+			shell_warn(sh, "Failed to disable photo interrupter output (%d)", ret);
+		}
+	}
 
 	shell_print(sh, "Chopper Calibration:");
 	shell_print(sh, "  Active:         %s", g_motor_params->chopper_cal.active ? "YES" : "NO");
 	shell_print(sh, "  Complete:       %s", g_motor_params->chopper_cal.complete ? "YES" : "NO");
 	shell_print(sh, "  Valid:          %s", g_motor_params->chopper_cal.valid ? "YES" : "NO");
 	shell_print(sh, "  Slots:          %u", g_motor_params->chopper_cal.slots);
+	shell_print(sh, "  Teeth:          %u", g_motor_params->chopper_cal.teeth);
 	shell_print(sh, "  Revolutions:    %u", g_motor_params->chopper_cal.revs_target);
 	shell_print(sh, "  Samples/edge:   %u", g_motor_params->chopper_cal.samples_per_edge);
 	shell_print(sh, "  Speed target:   %.3f Hz",
@@ -423,10 +609,20 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 		    g_motor_params->chopper_cal.total_edges_target);
 	shell_print(sh, "  Discarded:      %u", g_motor_params->chopper_cal.discarded_edges);
 	shell_print(sh, "  Midpoints:      %u", g_motor_params->chopper_cal.midpoint_count);
+	if (g_motor_params->chopper_cal.valid) {
+		shell_print(sh, "  Spacing min/max/mean/error: %.3f / %.3f / %.3f / %.3f deg",
+			    (double)(g_motor_params->chopper_cal.spacing_min_rad * 180.0f / PI_F32),
+			    (double)(g_motor_params->chopper_cal.spacing_max_rad * 180.0f / PI_F32),
+			    (double)(g_motor_params->chopper_cal.spacing_mean_rad * 180.0f / PI_F32),
+			    (double)(g_motor_params->chopper_cal.spacing_max_error_rad * 180.0f / PI_F32));
+		shell_print(sh, "  Labels:         slot=logical-high region after rising edge; tooth=logical-low region after falling edge");
+	}
 
 	if (g_motor_params->chopper_cal.valid && g_motor_params->chopper_cal.midpoint_count > 0U) {
 		for (uint16_t i = 0U; i < g_motor_params->chopper_cal.midpoint_count; i++) {
-			shell_print(sh, "    [%u] %.3f deg", i,
+			const char *kind = motor_chopper_region_kind_name(
+				g_motor_params->chopper_cal.midpoint_kind[i]);
+			shell_print(sh, "    [%u] %-5s %.3f deg", i, kind,
 				    (double)(g_motor_params->chopper_cal.blade_midpoints_rad[i] *
 					     180.0f / PI_F32));
 		}

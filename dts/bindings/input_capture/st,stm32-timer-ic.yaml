@@ -28,3 +28,11 @@ properties:
   pinctrl-names:
     required: true
 
+  capture-gpios:
+    type: phandle-array
+    description: >
+      Optional GPIOs corresponding to timer input-capture channels. When a
+      channel is configured for both-edge capture, the STM32 timer does not
+      expose which edge latched the CCR value. If provided, the driver samples
+      the logical input level in the capture ISR and reports rising/falling
+      status flags to the callback.

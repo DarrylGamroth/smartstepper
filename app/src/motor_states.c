@@ -783,7 +783,8 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->chopper_cal.active = false;
 	params->chopper_cal.complete = false;
 	params->chopper_cal.valid = false;
-	params->chopper_cal.slots = 0U;
+	params->chopper_cal.slots = CHOPPER_SLOTS_DEFAULT;
+	params->chopper_cal.teeth = CHOPPER_TEETH_DEFAULT;
 	params->chopper_cal.revs_target = 0U;
 	params->chopper_cal.samples_per_edge = 0U;
 	params->chopper_cal.midpoint_count = 0U;
@@ -791,6 +792,10 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->chopper_cal.total_edges_captured = 0U;
 	params->chopper_cal.discarded_edges = 0U;
 	params->chopper_cal.saved_timeout_ms = COMMAND_TIMEOUT_DEFAULT_MS;
+	params->chopper_cal.spacing_min_rad = 0.0f;
+	params->chopper_cal.spacing_max_rad = 0.0f;
+	params->chopper_cal.spacing_mean_rad = 0.0f;
+	params->chopper_cal.spacing_max_error_rad = 0.0f;
 	params->chopper_cal.edge_min_step_rad = 0.0f;
 	params->chopper_cal.speed_target_rad_s = 0.0f;
 	params->chopper_cal.last_wrapped_rad = 0.0f;
@@ -800,9 +805,11 @@ static void motor_state_ctrl_init_entry(void *obj)
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_EDGES; i++) {
 		params->chopper_cal.edge_sum_rad[i] = 0.0f;
 		params->chopper_cal.edge_count[i] = 0U;
+		params->chopper_cal.edge_status[i] = 0U;
 	}
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
 		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
+		params->chopper_cal.midpoint_kind[i] = CHOPPER_REGION_KIND_UNKNOWN;
 	}
 
 	#ifdef CONFIG_RLS_PARAMETER_ESTIMATION

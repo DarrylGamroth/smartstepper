@@ -96,4 +96,12 @@ int motor_hardware_get_gate_driver_faults(bool *fault_a, bool *fault_b);
  */
 int motor_hardware_set_photo_interruptor_enable(bool enable);
 
+/**
+ * @brief Read the current photo interruptor emitter enable GPIO state.
+ *
+ * @param enabled receives true when the output is active
+ * @return 0 on success, negative error code on failure
+ */
+int motor_hardware_get_photo_interruptor_enable(bool *enabled);
+
 #endif /* MOTOR_HARDWARE_H */

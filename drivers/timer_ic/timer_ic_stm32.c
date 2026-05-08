@@ -15,6 +15,7 @@
 #include <stm32_ll_tim.h>
 #include <drivers/timer_ic.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
@@ -38,6 +39,7 @@ struct timer_ic_stm32_capture_data
 	timer_ic_capture_callback_handler_t callback;
 	void *user_data;
 	bool continuous;
+	timer_ic_flags_t edge_flags;
 };
 
 /** Capture data. */
@@ -56,6 +58,7 @@ struct timer_ic_stm32_config
 	uint32_t countermode;
 	struct stm32_pclken pclken;
 	const struct pinctrl_dev_config *pcfg;
+	struct gpio_dt_spec capture_gpios[NUM_CC_CHANNELS];
 	void (*irq_config_func)(const struct device *dev);
 };
 
@@ -278,6 +281,7 @@ static int timer_ic_stm32_configure_capture(const struct device *dev,
 	cpt->callback = cb; /* even if the cb is reset, this is not an error */
 	cpt->user_data = user_data;
 	cpt->continuous = (flags & TIMER_IC_CAPTURE_MODE_CONTINUOUS) ? true : false;
+	cpt->edge_flags = flags & TIMER_IC_CAPTURE_EDGE_MASK;
 
 	ret = init_capture_channel(dev, channel, flags);
 	if (ret < 0)
@@ -286,6 +290,34 @@ static int timer_ic_stm32_configure_capture(const struct device *dev,
 	}
 
 	return 0;
+}
+
+static int timer_ic_stm32_edge_status(const struct timer_ic_stm32_config *cfg,
+				      const struct timer_ic_stm32_capture_data *cpt,
+				      uint32_t channel)
+{
+	timer_ic_flags_t edge = cpt->edge_flags & TIMER_IC_CAPTURE_EDGE_MASK;
+
+	if ((edge & TIMER_IC_CAPTURE_EDGE_BOTH) == TIMER_IC_CAPTURE_EDGE_RISING) {
+		return TIMER_IC_STATUS_EDGE_RISING;
+	}
+	if ((edge & TIMER_IC_CAPTURE_EDGE_BOTH) == TIMER_IC_CAPTURE_EDGE_FALLING) {
+		return TIMER_IC_STATUS_EDGE_FALLING;
+	}
+	if ((edge & TIMER_IC_CAPTURE_EDGE_BOTH) != TIMER_IC_CAPTURE_EDGE_BOTH) {
+		return 0;
+	}
+
+	const struct gpio_dt_spec *gpio = &cfg->capture_gpios[channel];
+	if (!gpio->port || !device_is_ready(gpio->port)) {
+		return 0;
+	}
+
+	int level = gpio_pin_get_dt(gpio);
+	if (level < 0) {
+		return level;
+	}
+	return level > 0 ? TIMER_IC_STATUS_EDGE_RISING : TIMER_IC_STATUS_EDGE_FALLING;
 }
 
 static int timer_ic_stm32_enable_capture(const struct device *dev, uint32_t channel)
@@ -346,10 +378,11 @@ static void timer_ic_stm32_isr(const struct device *dev)
 		{
 			struct timer_ic_stm32_capture_data *cpt = &data->capture[channel];
 			uint32_t counts;
-			int status = 0;
+			int status;
 
 			clear_capture_interrupt[channel](cfg->timer);
 			counts = get_channel_capture[channel](cfg->timer);
+			status = timer_ic_stm32_edge_status(cfg, cpt, channel);
 
 			if (!cpt->continuous)
 			{
@@ -469,6 +502,9 @@ static int timer_ic_stm32_init(const struct device *dev)
 #define CAPTURE_INIT(index) \
 	.irq_config_func = timer_ic_stm32_irq_config_func_##index
 
+#define CAPTURE_GPIO_BY_IDX_OR_EMPTY(index, idx) \
+	GPIO_DT_SPEC_INST_GET_BY_IDX_OR(index, capture_gpios, idx, {0})
+
 #define TIMER_IC_DEVICE_INIT(index)                                             \
 	static struct timer_ic_stm32_data timer_ic_stm32_data_##index;              \
 	IRQ_CONFIG_FUNC(index)                                                      \
@@ -481,6 +517,12 @@ static int timer_ic_stm32_init(const struct device *dev)
 		.countermode = DT_PROP(DT_INST_PARENT(index), st_countermode),          \
 		.pclken = STM32_CLOCK_INFO(0, DT_INST_PARENT(index)),                   \
 		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(index),                          \
+		.capture_gpios = {                                                      \
+			CAPTURE_GPIO_BY_IDX_OR_EMPTY(index, 0),                              \
+			CAPTURE_GPIO_BY_IDX_OR_EMPTY(index, 1),                              \
+			CAPTURE_GPIO_BY_IDX_OR_EMPTY(index, 2),                              \
+			CAPTURE_GPIO_BY_IDX_OR_EMPTY(index, 3),                              \
+		},                                                                       \
 		CAPTURE_INIT(index)};                                                   \
                                                                                 \
 	DEVICE_DT_INST_DEFINE(index, &timer_ic_stm32_init, NULL,                    \

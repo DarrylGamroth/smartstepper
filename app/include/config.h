@@ -154,6 +154,10 @@ struct motor_electrical_id_capture_ctx {
 #define PROFILE_SEQUENCE_TRIGGER_EDGE_FALLING 1U
 #define PROFILE_SEQUENCE_TRIGGER_EDGE_BOTH 2U
 
+#define CHOPPER_REGION_KIND_UNKNOWN 0U
+#define CHOPPER_REGION_KIND_SLOT 1U
+#define CHOPPER_REGION_KIND_TOOTH 2U
+
 #define MOTOR_CALIBRATION_MODE_BOOT 0U
 #define MOTOR_CALIBRATION_MODE_COMMISSIONING 1U
 
@@ -281,14 +285,19 @@ struct motor_chopper_cal_ctx {
 	bool active;            /* Edge capture in progress */
 	bool complete;          /* Capture complete and midpoint table valid */
 	bool valid;             /* Midpoint table can be used */
-	uint16_t slots;         /* Number of blades/slots being calibrated */
+	uint16_t slots;         /* Number of optical slots being calibrated */
+	uint16_t teeth;         /* Number of opaque teeth being calibrated */
 	uint16_t revs_target;   /* Number of revolutions to average */
 	uint16_t samples_per_edge; /* Expected samples per edge bin */
 	uint16_t midpoint_count; /* Number of valid midpoint entries */
-	uint32_t total_edges_target;   /* 2 * slots * revs */
+	uint32_t total_edges_target;   /* (slots + teeth) * revs */
 	uint32_t total_edges_captured; /* Number of accepted edges */
 	uint32_t discarded_edges;      /* Edges rejected by sanity checks */
 	uint32_t saved_timeout_ms;     /* Timeout restored after calibration */
+	float32_t spacing_min_rad;     /* Minimum adjacent edge spacing */
+	float32_t spacing_max_rad;     /* Maximum adjacent edge spacing */
+	float32_t spacing_mean_rad;    /* Mean adjacent edge spacing */
+	float32_t spacing_max_error_rad; /* Max absolute spacing error vs ideal */
 	float32_t edge_min_step_rad;   /* Reject edges too close together */
 	float32_t speed_target_rad_s;  /* Open-loop speed command used for calibration */
 	float32_t last_wrapped_rad;    /* Last wrapped encoder angle sample */
@@ -296,7 +305,9 @@ struct motor_chopper_cal_ctx {
 	float32_t start_unwrapped_rad; /* Unwrapped angle when capture started */
 	float32_t edge_sum_rad[CHOPPER_CAL_MAX_EDGES];      /* Unwrapped angle sum per edge bin */
 	uint32_t edge_count[CHOPPER_CAL_MAX_EDGES];         /* Sample count per edge bin */
-	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Final midpoint table [0, 2pi) */
+	uint8_t edge_status[CHOPPER_CAL_MAX_EDGES];         /* TIMER_IC_STATUS_EDGE_* observed per bin */
+	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Alternating slot/tooth centers [0, 2pi) */
+	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];       /* CHOPPER_REGION_KIND_* per midpoint */
 };
 
 struct motor_calibration_ctx {
@@ -612,6 +623,13 @@ struct motor_parameters {
 
 /* Devicetree parameter extraction with unit conversion */
 #define USER_PARAMS_NODE DT_PATH(user_parameters)
+#define CHOPPER_SLOTS_DEFAULT DT_PROP_OR(USER_PARAMS_NODE, chopper_slot_count, 8)
+#define CHOPPER_TEETH_DEFAULT DT_PROP_OR(USER_PARAMS_NODE, chopper_tooth_count, CHOPPER_SLOTS_DEFAULT)
+#define CHOPPER_CENTER_COUNT_DEFAULT (CHOPPER_SLOTS_DEFAULT + CHOPPER_TEETH_DEFAULT)
+BUILD_ASSERT(CHOPPER_SLOTS_DEFAULT > 0, "user_parameters.chopper-slot-count must be positive");
+BUILD_ASSERT(CHOPPER_TEETH_DEFAULT > 0, "user_parameters.chopper-tooth-count must be positive");
+BUILD_ASSERT(CHOPPER_CENTER_COUNT_DEFAULT <= CHOPPER_CAL_MAX_SLOTS,
+	     "user_parameters chopper slot + tooth count exceeds sequence table size");
 #define NOMINAL_VOLTAGE_V ((float32_t)DT_PROP(USER_PARAMS_NODE, nominal_voltage_mv) / 1000.0f)
 #define PWM_FREQUENCY_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, pwm_frequency_hz))
 #define CONTROL_LOOP_FREQUENCY_HZ_U DT_PROP(USER_PARAMS_NODE, control_loop_frequency_hz)

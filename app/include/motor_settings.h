@@ -19,14 +19,17 @@ struct motor_parameters;
 #define MOTOR_SETTINGS_GROUP_DETENT           (1U << 3)
 #define MOTOR_SETTINGS_GROUP_IDENTITY         (1U << 4)
 #define MOTOR_SETTINGS_GROUP_LIMITS           (1U << 5)
+#define MOTOR_SETTINGS_GROUP_CHOPPER          (1U << 6)
 #define MOTOR_SETTINGS_GROUP_ALL \
 	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL | \
 	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT | \
-	 MOTOR_SETTINGS_GROUP_IDENTITY | MOTOR_SETTINGS_GROUP_LIMITS)
+	 MOTOR_SETTINGS_GROUP_IDENTITY | MOTOR_SETTINGS_GROUP_LIMITS | \
+	 MOTOR_SETTINGS_GROUP_CHOPPER)
 #define MOTOR_SETTINGS_GROUP_BASELINE \
 	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)
 
 #define MOTOR_SETTINGS_SCHEMA_VERSION 5U
+#define MOTOR_SETTINGS_CHOPPER_MAX_CENTERS 64U
 
 struct motor_settings_snapshot {
 	uint32_t schema_version;
@@ -72,6 +75,12 @@ struct motor_settings_snapshot {
 	float32_t detent_gain;
 	float32_t detent_iq_ff_limit_a;
 	uint32_t detent_table_crc32;
+
+	uint16_t chopper_slots;
+	uint16_t chopper_teeth;
+	uint16_t chopper_center_count;
+	float32_t chopper_centers_rad[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
+	uint8_t chopper_center_kind[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
 };
 
 int motor_settings_read(struct motor_settings_snapshot *snapshot,

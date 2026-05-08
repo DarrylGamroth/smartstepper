@@ -86,6 +86,7 @@
 		compatible = "st,stm32-timer-ic";
 		pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pb3>;
 		pinctrl-names = "default";
+		capture-gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>, <&gpiob 3 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 };

@@ -27,6 +27,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys_clock.h>
 #include <zephyr/sys/math_extras.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/toolchain.h>
 
 #include <zephyr/dt-bindings/pwm/pwm.h>
@@ -64,6 +65,12 @@ extern "C" {
 /** Timer pin capture captures period/pulse width continuously. */
 #define TIMER_IC_CAPTURE_MODE_CONTINUOUS	(1U << TIMER_IC_CAPTURE_MODE_SHIFT)
 
+/** Callback status flag: capture occurred on a rising edge. */
+#define TIMER_IC_STATUS_EDGE_RISING		BIT(0)
+
+/** Callback status flag: capture occurred on a falling edge. */
+#define TIMER_IC_STATUS_EDGE_FALLING		BIT(1)
+
 /** @} */
 
 /**
@@ -86,9 +93,8 @@ typedef uint16_t timer_ic_flags_t;
  * @param channel Timer channel.
 
  * @param cycles Captured timer value (in clock cycles). HW specific.
- * @param status Status for the Timer capture (0 if no error, negative errno
- *               otherwise. See timer_ic_capture_cycles() return value
- *               descriptions for details).
+ * @param status Status for the Timer capture. Negative values are errno-style
+ *               errors. Non-negative values may include TIMER_IC_STATUS_* flags.
  * @param user_data User data passed to timer_ic_configure_capture()
  */
 typedef void (*timer_ic_capture_callback_handler_t)(const struct device *dev,

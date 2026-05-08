@@ -25,6 +25,7 @@
 		control-loop-frequency-hz = <20000>;
 		current-loop-bandwidth-hz = <150>;
 		current-command-ramp-ms = <100>;
+		chopper-slot-count = <8>;
 		offset-pole-hz = <300>;
 		/*
 		 * AEAT-9955 positive direction is clockwise looking from the back
