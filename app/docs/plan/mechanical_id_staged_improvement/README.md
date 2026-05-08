@@ -16,7 +16,7 @@ identify the weak component.
 
 ## Stage 1 - Low-Risk Capture Improvement
 
-Status: in progress
+Status: done
 
 - Increase the default mechanical capture window without exceeding the bounded
   commissioning sample buffer.
@@ -40,7 +40,7 @@ Validation:
 
 ## Stage 2 - Configurable Quality Policy
 
-Status: in progress
+Status: done
 
 - Move the mechanical confidence threshold and plausibility warning limits into
   the commissioning config path rather than hard-coding them in runtime code.
@@ -54,7 +54,7 @@ Status: in progress
 
 ## Stage 3 - Fit Robustness
 
-Status: in progress
+Status: done
 
 - Review the friction and inertia estimators for sensitivity to low-speed
   hybrid-stepper detent torque.
