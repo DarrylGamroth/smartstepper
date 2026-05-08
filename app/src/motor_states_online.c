@@ -216,6 +216,18 @@ enum smf_state_result motor_state_online_run(void *obj)
 		motor_api_apply_param_update(params);
 		return SMF_EVENT_HANDLED;
 
+	case MOTOR_EVENT_CALIBRATE_REQUEST:
+		LOG_INF("Calibrate request received from ONLINE, running boot calibration");
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		return SMF_EVENT_HANDLED;
+
+	case MOTOR_EVENT_COMMISSION_REQUEST:
+		LOG_INF("Commission request received from ONLINE, running commissioning sequence");
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_COMMISSIONING;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
+		return SMF_EVENT_HANDLED;
+
 	case MOTOR_EVENT_MODE_CHANGE:
 		/* Transition to requested control mode substate */
 		LOG_INF("%s event: changing to state %s",

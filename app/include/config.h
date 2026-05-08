@@ -297,6 +297,7 @@ struct motor_chopper_cal_ctx {
 
 struct motor_calibration_ctx {
 	bool complete;  /* True if calibration has been run successfully */
+	bool current_offsets_valid; /* True only after the latest OFFSET_MEAS finalized */
 	bool running;   /* True while calibration/commissioning state machine is active */
 	bool commissioning_complete; /* True if commissioning sequence has completed at least once */
 	bool encoder_mapping_complete; /* True once generated-sweep encoder mapping has been applied */

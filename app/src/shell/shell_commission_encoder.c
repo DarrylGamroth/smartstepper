@@ -108,13 +108,13 @@ static int motor_commission_wait_for_offset_calibration(uint32_t timeout_ms)
 		}
 		if (g_motor_params != NULL &&
 		    (g_motor_params->calibration.running ||
-		     !g_motor_params->calibration.complete ||
+		     !g_motor_params->calibration.current_offsets_valid ||
 		     state == MOTOR_STATE_OFFSET_MEAS)) {
 			observed_calibration = true;
 		}
 		if (g_motor_params != NULL &&
 		    observed_calibration &&
-		    g_motor_params->calibration.complete &&
+		    g_motor_params->calibration.current_offsets_valid &&
 		    !g_motor_params->calibration.running &&
 		    state != MOTOR_STATE_PREPARE_ONLINE &&
 		    state != MOTOR_STATE_OFFSET_MEAS) {
@@ -508,7 +508,7 @@ int cmd_motor_commission_encoder_run(const struct shell *sh, size_t argc, char *
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
-	if (!g_motor_params->calibration.complete) {
+	if (!g_motor_params->calibration.current_offsets_valid) {
 		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
 		return -EACCES;
 	}
@@ -541,7 +541,7 @@ int cmd_motor_commission_encoder_robust(const struct shell *sh, size_t argc, cha
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
-	if (!g_motor_params->calibration.complete) {
+	if (!g_motor_params->calibration.current_offsets_valid) {
 		shell_error(sh, "Calibration is not complete; run calibration before encoder detect");
 		return -EACCES;
 	}
@@ -705,7 +705,7 @@ static int motor_commission_encoder_map_apply(
 		shell_print(sh, "  offsets: Ia=%.4f Ib=%.4f",
 			    (double)g_motor_params->Ia_offset,
 			    (double)g_motor_params->Ib_offset);
-	} else if (!g_motor_params->calibration.complete) {
+	} else if (!g_motor_params->calibration.current_offsets_valid) {
 		shell_error(sh,
 			    "Current offsets are not complete; run the standard commissioning workflow");
 		return -EACCES;

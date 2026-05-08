@@ -728,6 +728,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->command_timeout_count = 0U;
 	params->command_timeout_latched = false;
 	params->calibration.complete = false;
+	params->calibration.current_offsets_valid = false;
 	params->calibration.running = false;
 	params->calibration.commissioning_complete = false;
 	params->calibration.encoder_mapping_complete = false;
@@ -907,7 +908,7 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 	/* Process current event */
 	switch (params->event.type) {
 	case MOTOR_EVENT_ONLINE:
-		if (params->calibration.complete) {
+		if (params->calibration.current_offsets_valid) {
 			bool fallback_used = false;
 			char reason[96] = {0};
 			enum motor_state online_mode =
@@ -940,7 +941,9 @@ static enum smf_state_result motor_state_idle_run(void *obj)
 			return SMF_EVENT_HANDLED;
 		}
 
-		LOG_WRN("ONLINE request ignored: calibration not complete");
+		LOG_INF("ONLINE request requires current offsets; running boot calibration first");
+		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
+		smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_CALIBRATION]);
 		return SMF_EVENT_HANDLED;
 
 	case MOTOR_EVENT_PREPARE_ONLINE:
@@ -1001,7 +1004,7 @@ static void motor_state_prepare_online_entry(void *obj)
 	drv8328_enable_channel(gate_driver_b, 1);
 
 	/* First PREPARE_ONLINE entry after boot runs fast boot calibration sequence. */
-	if (!params->calibration.complete &&
+	if (!params->calibration.current_offsets_valid &&
 	    params->calibration.mode != MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 		params->calibration.mode = MOTOR_CALIBRATION_MODE_BOOT;
 	}
@@ -1059,7 +1062,7 @@ static enum smf_state_result motor_state_prepare_online_run(void *obj)
 		/* Auto-enter ONLINE once PREPARE_ONLINE has no active calibration and the required
 	 * boot calibration has already completed.
 	 */
-	if (!params->calibration.running && params->calibration.complete) {
+	if (!params->calibration.running && params->calibration.current_offsets_valid) {
 		bool fallback_used = false;
 		char reason[96] = {0};
 		enum motor_state online_mode =

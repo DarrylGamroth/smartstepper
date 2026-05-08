@@ -34,7 +34,7 @@ static int motor_commission_prepare_pi_encoder_validation(const struct shell *sh
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
-	if (!g_motor_params->calibration.complete) {
+	if (!g_motor_params->calibration.current_offsets_valid) {
 		shell_error(sh, "Current offsets are not complete; run 'motor commission run confirm apply' first");
 		return -EACCES;
 	}
@@ -317,7 +317,7 @@ int cmd_motor_commission_validate_velocity(const struct shell *sh, size_t argc, 
 			shell_error(sh, "Motor not initialized");
 			return -ENODEV;
 		}
-		if (!g_motor_params->calibration.complete ||
+		if (!g_motor_params->calibration.current_offsets_valid ||
 		    !g_motor_params->calibration.encoder_mapping_complete) {
 			shell_error(sh, "Calibration/mapping incomplete; run commissioning first");
 			return -EACCES;

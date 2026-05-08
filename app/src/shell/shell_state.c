@@ -163,6 +163,8 @@ int cmd_motor_state_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  Timeout count: %u", g_motor_params->command_timeout_count);
 	shell_print(sh, "  Auto keepalive: %s", autonomous_keepalive ? "ACTIVE" : "INACTIVE");
 	shell_print(sh, "  Cal complete: %s", g_motor_params->calibration.complete ? "YES" : "NO");
+	shell_print(sh, "  Offsets valid:%s",
+		    g_motor_params->calibration.current_offsets_valid ? " YES" : " NO");
 	shell_print(sh, "  Cal running:  %s", g_motor_params->calibration.running ? "YES" : "NO");
 	shell_print(sh, "  Cal mode:     %s",
 		    motor_calibration_mode_to_string(g_motor_params->calibration.mode));
@@ -401,4 +403,3 @@ int cmd_motor_state_mode_position_encoder(const struct shell *sh, size_t argc, c
 	return motor_request_mode_change(sh, MOTOR_STATE_ONLINE_POSITION_ENCODER,
 					 "position_encoder");
 }
-

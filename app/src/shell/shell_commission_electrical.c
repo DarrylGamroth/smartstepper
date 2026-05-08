@@ -146,7 +146,7 @@ static int electrical_id_ensure_current_offsets(const struct shell *sh, bool for
 {
 	int ret;
 
-	if (!force && g_motor_params->calibration.complete) {
+	if (!force && g_motor_params->calibration.current_offsets_valid) {
 		return 0;
 	}
 
@@ -171,8 +171,8 @@ static int electrical_id_ensure_current_offsets(const struct shell *sh, bool for
 		}
 		if (saw_calibration_start &&
 		    !g_motor_params->calibration.running &&
-		    g_motor_params->calibration.complete &&
-		    state != MOTOR_STATE_OFFSET_MEAS &&
+			    g_motor_params->calibration.current_offsets_valid &&
+			    state != MOTOR_STATE_OFFSET_MEAS &&
 		    state != MOTOR_STATE_CALIBRATION) {
 			shell_print(sh, "Current offsets ready: Ia=%.4f Ib=%.4f",
 				    (double)g_motor_params->Ia_offset,
@@ -197,7 +197,8 @@ static int electrical_id_enter_generated_current_mode(const struct shell *sh,
 		return ret;
 	}
 
-	ran_current_offsets = force_current_offsets || !g_motor_params->calibration.complete;
+	ran_current_offsets = force_current_offsets ||
+			      !g_motor_params->calibration.current_offsets_valid;
 	ret = electrical_id_ensure_current_offsets(sh, force_current_offsets);
 	if (ret != 0) {
 		return ret;

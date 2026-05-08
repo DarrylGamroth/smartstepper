@@ -76,6 +76,46 @@ static inline bool motor_calibration_start_timer_or_fault(struct motor_parameter
 	return false;
 }
 
+#define MOTOR_CURRENT_OFFSET_MAX_CHANNEL_DELTA_A 0.060f
+#define MOTOR_CURRENT_OFFSET_MIN_ABS_A (0.25f * CURRENT_SENSE_FULL_SCALE_A)
+#define MOTOR_CURRENT_OFFSET_MAX_ABS_A (1.75f * CURRENT_SENSE_FULL_SCALE_A)
+
+static int motor_calibration_finalize_current_offsets(struct motor_parameters *params)
+{
+	int ret = motor_offset_measurement_finalize(&params->filter_Ia, &params->filter_Ib,
+						    &params->Ia_offset, &params->Ib_offset);
+	if (ret != 0) {
+		LOG_ERR("Offset finalize failed: %d", ret);
+		params->calibration.current_offsets_valid = false;
+		return ret;
+	}
+
+	float32_t channel_delta_a = fabsf(params->Ia_offset - params->Ib_offset);
+	float32_t ia_abs_a = fabsf(params->Ia_offset);
+	float32_t ib_abs_a = fabsf(params->Ib_offset);
+
+	if (!isfinite(channel_delta_a) || !isfinite(ia_abs_a) || !isfinite(ib_abs_a) ||
+	    ia_abs_a < MOTOR_CURRENT_OFFSET_MIN_ABS_A ||
+	    ib_abs_a < MOTOR_CURRENT_OFFSET_MIN_ABS_A ||
+	    ia_abs_a > MOTOR_CURRENT_OFFSET_MAX_ABS_A ||
+	    ib_abs_a > MOTOR_CURRENT_OFFSET_MAX_ABS_A ||
+	    channel_delta_a > MOTOR_CURRENT_OFFSET_MAX_CHANNEL_DELTA_A) {
+		LOG_ERR("Invalid current offsets: Ia=%.4f Ib=%.4f delta=%.4f A abs_range=%.4f..%.4f A delta_limit=%.4f A",
+			(double)params->Ia_offset, (double)params->Ib_offset,
+			(double)channel_delta_a,
+			(double)MOTOR_CURRENT_OFFSET_MIN_ABS_A,
+			(double)MOTOR_CURRENT_OFFSET_MAX_ABS_A,
+			(double)MOTOR_CURRENT_OFFSET_MAX_CHANNEL_DELTA_A);
+		params->calibration.current_offsets_valid = false;
+		return -ERANGE;
+	}
+
+	params->calibration.current_offsets_valid = true;
+	LOG_INF("Offset measurement complete: Ia=%.4f, Ib=%.4f",
+		(double)params->Ia_offset, (double)params->Ib_offset);
+	return 0;
+}
+
 static inline enum smf_state_result
 motor_boot_calibration_complete(struct motor_parameters *params)
 {
@@ -189,6 +229,7 @@ void motor_state_calibration_entry(void *obj)
 		commissioning ? "Motor Commissioning" : "Motor Calibration");
 
 	params->calibration.running = true;
+	params->calibration.current_offsets_valid = false;
 
 	if (!commissioning) {
 		params->calibration.complete = false;
@@ -217,6 +258,7 @@ void motor_state_calibration_exit(void *obj)
 		LOG_WRN("=== %s Aborted (error) ===",
 			commissioning ? "Commissioning" : "Calibration");
 		params->calibration.complete = false;
+		params->calibration.current_offsets_valid = false;
 		params->calibration.commissioning_complete = false;
 	} else {
 		LOG_INF("=== %s Complete ===",
@@ -242,6 +284,7 @@ void motor_state_offset_meas_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering OFFSET_MEAS state");
+	params->calibration.current_offsets_valid = false;
 
 	int ret = motor_offset_measurement_start(&params->filter_Ia, &params->filter_Ib,
 						 &params->Ia_offset, &params->Ib_offset);
@@ -257,20 +300,9 @@ void motor_state_offset_meas_entry(void *obj)
 
 void motor_state_offset_meas_exit(void *obj)
 {
-	struct motor_parameters *params = (struct motor_parameters *)obj;
+	ARG_UNUSED(obj);
 
 	LOG_INF("Exiting OFFSET_MEAS state");
-
-	int ret = motor_offset_measurement_finalize(&params->filter_Ia, &params->filter_Ib,
-						    &params->Ia_offset, &params->Ib_offset);
-	if (ret != 0) {
-		LOG_ERR("Offset finalize failed: %d (forcing zero offsets)", ret);
-		params->Ia_offset = 0.0f;
-		params->Ib_offset = 0.0f;
-	}
-
-	LOG_INF("Offset measurement complete: Ia=%.4f, Ib=%.4f",
-		(double)params->Ia_offset, (double)params->Ib_offset);
 }
 
 enum smf_state_result motor_state_offset_meas_run(void *obj)
@@ -278,6 +310,11 @@ enum smf_state_result motor_state_offset_meas_run(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	if (motor_calibration_state_timeout_elapsed(params)) {
+		if (motor_calibration_finalize_current_offsets(params) != 0) {
+			motor_calibration_post_hardware_break(params);
+			return SMF_EVENT_HANDLED;
+		}
+
 		/* Offset measurement complete */
 		if (params->calibration.mode == MOTOR_CALIBRATION_MODE_COMMISSIONING) {
 			smf_set_state(SMF_CTX(params), &motor_states[MOTOR_STATE_ROVERL_MEAS]);
@@ -297,6 +334,11 @@ void motor_state_roverl_meas_entry(void *obj)
 	struct motor_parameters *params = (struct motor_parameters *)obj;
 
 	LOG_INF("Entering ROVERL_MEAS state");
+	if (!params->calibration.current_offsets_valid) {
+		LOG_ERR("RoverL refused: current offsets are not valid");
+		motor_calibration_post_hardware_break(params);
+		return;
+	}
 
 	/* Additional ROVERL_MEAS requirements (PWM output is provided by PREPARE_ONLINE). */
 	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |

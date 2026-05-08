@@ -100,7 +100,7 @@ static inline bool motor_velocity_dob_ready(const struct motor_parameters *param
 		motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER);
 	struct motor_dob_readiness_result readiness = {0};
 	const struct motor_dob_readiness_input input = {
-		.commissioning_complete = params->calibration.complete,
+		.commissioning_complete = params->calibration.commissioning_complete,
 		.encoder_mapping_complete = params->calibration.encoder_mapping_complete,
 		.feedback_trusted = !encoder_mode ||
 				    params->live.position_trust_state ==

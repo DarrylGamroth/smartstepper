@@ -63,6 +63,8 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 	}
 	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
 	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);
+	shell_print(sh, "  Offsets valid:  %s",
+		    g_motor_params->calibration.current_offsets_valid ? "YES" : "NO");
 	shell_print(sh, "  Commissioned:   %s", g_motor_params->calibration.commissioning_complete ? "YES" : "NO");
 	
 	return 0;

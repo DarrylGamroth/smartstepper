@@ -530,8 +530,8 @@ int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "Motor not initialized");
 		return -ENODEV;
 	}
-	if (!g_motor_params->calibration.complete) {
-		shell_error(sh, "Calibration is not complete; run calibration first");
+	if (!g_motor_params->calibration.current_offsets_valid) {
+		shell_error(sh, "Current offsets are not valid; run calibration first");
 		return -EACCES;
 	}
 	if (!motor_control_is_armed(g_motor_params)) {
