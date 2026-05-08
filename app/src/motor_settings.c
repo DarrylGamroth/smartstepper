@@ -41,14 +41,20 @@
 
 #define KEY_IDENTITY_POLE_PAIRS "motor/identity/pole_pairs"
 
-#define KEY_MODEL_RS "motor/model/rs_ohm"
-#define KEY_MODEL_LD "motor/model/ld_h"
-#define KEY_MODEL_LQ "motor/model/lq_h"
-#define KEY_MODEL_FLUX "motor/model/flux_linkage_wb"
-#define KEY_MODEL_KT "motor/model/kt_nm_per_a"
-#define KEY_MODEL_J "motor/model/inertia_kgm2"
-#define KEY_MODEL_B "motor/model/viscous_friction_nm_per_rad_s"
-#define KEY_MODEL_TC "motor/model/coulomb_friction_nm"
+#define KEY_MODEL_ELEC_RS "motor/model/electrical/rs_ohm"
+#define KEY_MODEL_ELEC_LD "motor/model/electrical/ld_h"
+#define KEY_MODEL_ELEC_LQ "motor/model/electrical/lq_h"
+#define KEY_MODEL_ELEC_FLUX "motor/model/electrical/flux_linkage_wb"
+#define KEY_MODEL_ELEC_KT "motor/model/electrical/kt_nm_per_a"
+
+#define OLD_KEY_MODEL_RS "motor/model/rs_ohm"
+#define OLD_KEY_MODEL_LD "motor/model/ld_h"
+#define OLD_KEY_MODEL_LQ "motor/model/lq_h"
+#define OLD_KEY_MODEL_FLUX "motor/model/flux_linkage_wb"
+#define OLD_KEY_MODEL_KT "motor/model/kt_nm_per_a"
+#define OLD_KEY_MODEL_J "motor/model/inertia_kgm2"
+#define OLD_KEY_MODEL_B "motor/model/viscous_friction_nm_per_rad_s"
+#define OLD_KEY_MODEL_TC "motor/model/coulomb_friction_nm"
 
 #define KEY_CTRL_OUTER_MODE "motor/controllers/outer_loop_mode"
 #define KEY_CTRL_VEL_BW "motor/controllers/velocity_bandwidth_hz"
@@ -120,11 +126,21 @@
 	(MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE | MOTOR_SETTINGS_LIMIT_FIELD_MAX_CURRENT | \
 	 MOTOR_SETTINGS_LIMIT_FIELD_BRAKE_CURRENT | MOTOR_SETTINGS_LIMIT_FIELD_MAX_VELOCITY | \
 	 MOTOR_SETTINGS_LIMIT_FIELD_MAX_ACCEL | MOTOR_SETTINGS_LIMIT_FIELD_COMMAND_TIMEOUT)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS BIT(0)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD BIT(1)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ BIT(2)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX BIT(3)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT BIT(4)
+#define MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL \
+	(MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS | MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD | \
+	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ | MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX | \
+	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT)
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
 	uint32_t present_groups;
 	uint32_t identity_fields;
+	uint32_t model_electrical_fields;
 	uint32_t controller_fields;
 	uint32_t limit_fields;
 	uint32_t present_meta;
@@ -203,6 +219,18 @@ static int read_exact(settings_read_cb read_cb, void *cb_arg, void *dst, size_t 
 		} \
 	} while (false)
 
+#define LOAD_MODEL_ELECTRICAL_FIELD(key_lit, field, field_bit) \
+	do { \
+		if (strcmp(key, (key_lit)) == 0) { \
+			ctx->error = read_exact(read_cb, cb_arg, &ctx->snapshot->field, sizeof(ctx->snapshot->field)); \
+			if (ctx->error == 0) { \
+				ctx->present_groups |= MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL; \
+				ctx->model_electrical_fields |= (field_bit); \
+			} \
+			return ctx->error == 0 ? 0 : 1; \
+		} \
+	} while (false)
+
 static int settings_read_cb_direct(const char *key, size_t len,
 				   settings_read_cb read_cb, void *cb_arg, void *param)
 {
@@ -223,14 +251,17 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_FIELD("encoder/mapping_residual_rad", encoder_mapping_residual_rad, MOTOR_SETTINGS_GROUP_ENCODER);
 	LOAD_IDENTITY_FIELD("identity/pole_pairs", identity_pole_pairs,
 			    MOTOR_SETTINGS_IDENTITY_FIELD_POLE_PAIRS);
-	LOAD_FIELD("model/rs_ohm", model_rs_ohm, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/ld_h", model_ld_h, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/lq_h", model_lq_h, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/flux_linkage_wb", model_flux_linkage_wb, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/kt_nm_per_a", model_kt_nm_per_a, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/inertia_kgm2", model_inertia_kgm2, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/viscous_friction_nm_per_rad_s", model_viscous_friction_nm_per_rad_s, MOTOR_SETTINGS_GROUP_MODEL);
-	LOAD_FIELD("model/coulomb_friction_nm", model_coulomb_friction_nm, MOTOR_SETTINGS_GROUP_MODEL);
+	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/rs_ohm", model_rs_ohm,
+				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS);
+	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/ld_h", model_ld_h,
+				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD);
+	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/lq_h", model_lq_h,
+				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ);
+	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/flux_linkage_wb",
+				    model_flux_linkage_wb,
+				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX);
+	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/kt_nm_per_a", model_kt_nm_per_a,
+				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT);
 	LOAD_CONTROLLER_FIELD("controllers/outer_loop_mode", ctrl_outer_loop_mode,
 			      MOTOR_SETTINGS_CTRL_FIELD_OUTER_MODE);
 	LOAD_CONTROLLER_FIELD("controllers/velocity_bandwidth_hz", ctrl_velocity_bandwidth_hz,
@@ -271,6 +302,7 @@ static int settings_read_cb_direct(const char *key, size_t len,
 #undef LOAD_CONTROLLER_FIELD
 #undef LOAD_IDENTITY_FIELD
 #undef LOAD_LIMIT_FIELD
+#undef LOAD_MODEL_ELECTRICAL_FIELD
 
 int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *present_groups)
 {
@@ -293,6 +325,10 @@ int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *pres
 	if ((ctx.identity_fields & MOTOR_SETTINGS_IDENTITY_FIELDS_ALL) !=
 	    MOTOR_SETTINGS_IDENTITY_FIELDS_ALL) {
 		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_IDENTITY;
+	}
+	if ((ctx.model_electrical_fields & MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL) !=
+	    MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL) {
+		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL;
 	}
 	if ((ctx.controller_fields & MOTOR_SETTINGS_CTRL_FIELDS_ALL) !=
 	    MOTOR_SETTINGS_CTRL_FIELDS_ALL) {
@@ -333,6 +369,8 @@ static int save_one(const char *key, const void *value, size_t len)
 {
 	return settings_save_one(key, value, len);
 }
+
+static int delete_key(const char *key);
 
 #define SAVE_SCALAR(key, value) \
 	do { \
@@ -381,29 +419,38 @@ static int save_identity_group(const struct motor_parameters *params)
 	return 0;
 }
 
-static int save_model_group(const struct motor_parameters *params)
+static int clear_legacy_model_keys(void)
+{
+	const char *keys[] = { OLD_KEY_MODEL_RS, OLD_KEY_MODEL_LD, OLD_KEY_MODEL_LQ,
+		OLD_KEY_MODEL_FLUX, OLD_KEY_MODEL_KT, OLD_KEY_MODEL_J, OLD_KEY_MODEL_B,
+		OLD_KEY_MODEL_TC };
+
+	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
+		int ret = delete_key(keys[i]);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int save_model_electrical_group(const struct motor_parameters *params)
 {
 	if (!finite_positive(params->Rs_measured_ohm) ||
 	    !finite_positive(params->Ld_measured_H) ||
 	    !finite_positive(params->Lq_measured_H) ||
 	    !finite_positive(params->flux_linkage_wb_active) ||
-	    !finite_positive(params->torque_gain_nm_per_a_active) ||
-	    !finite_positive(params->inertia_kgm2_active) ||
-	    !finite_nonnegative(params->viscous_friction_nm_per_rad_s_active) ||
-	    !finite_nonnegative(params->coulomb_friction_nm_active)) {
+	    !finite_positive(params->torque_gain_nm_per_a_active)) {
 		return -ERANGE;
 	}
 
 	int ret;
-	SAVE_SCALAR(KEY_MODEL_RS, params->Rs_measured_ohm);
-	SAVE_SCALAR(KEY_MODEL_LD, params->Ld_measured_H);
-	SAVE_SCALAR(KEY_MODEL_LQ, params->Lq_measured_H);
-	SAVE_SCALAR(KEY_MODEL_FLUX, params->flux_linkage_wb_active);
-	SAVE_SCALAR(KEY_MODEL_KT, params->torque_gain_nm_per_a_active);
-	SAVE_SCALAR(KEY_MODEL_J, params->inertia_kgm2_active);
-	SAVE_SCALAR(KEY_MODEL_B, params->viscous_friction_nm_per_rad_s_active);
-	SAVE_SCALAR(KEY_MODEL_TC, params->coulomb_friction_nm_active);
-	return 0;
+	SAVE_SCALAR(KEY_MODEL_ELEC_RS, params->Rs_measured_ohm);
+	SAVE_SCALAR(KEY_MODEL_ELEC_LD, params->Ld_measured_H);
+	SAVE_SCALAR(KEY_MODEL_ELEC_LQ, params->Lq_measured_H);
+	SAVE_SCALAR(KEY_MODEL_ELEC_FLUX, params->flux_linkage_wb_active);
+	SAVE_SCALAR(KEY_MODEL_ELEC_KT, params->torque_gain_nm_per_a_active);
+	return clear_legacy_model_keys();
 }
 
 static int save_limits_group(const struct motor_parameters *params)
@@ -635,12 +682,12 @@ int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 		}
 		written |= MOTOR_SETTINGS_GROUP_IDENTITY;
 	}
-	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL)) {
-		ret = save_model_group(params);
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)) {
+		ret = save_model_electrical_group(params);
 		if (ret != 0) {
 			return ret;
 		}
-		written |= MOTOR_SETTINGS_GROUP_MODEL;
+		written |= MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL;
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CONTROLLERS)) {
 		ret = save_controllers_group(params);
@@ -742,17 +789,14 @@ static int apply_encoder_group(struct motor_parameters *params,
 	return 0;
 }
 
-static int apply_model_group(struct motor_parameters *params,
-			     const struct motor_settings_snapshot *snapshot)
+static int apply_model_electrical_group(struct motor_parameters *params,
+					const struct motor_settings_snapshot *snapshot)
 {
 	if (!finite_positive(snapshot->model_rs_ohm) ||
 	    !finite_positive(snapshot->model_ld_h) ||
 	    !finite_positive(snapshot->model_lq_h) ||
 	    !finite_positive(snapshot->model_flux_linkage_wb) ||
-	    !finite_positive(snapshot->model_kt_nm_per_a) ||
-	    !finite_positive(snapshot->model_inertia_kgm2) ||
-	    !finite_nonnegative(snapshot->model_viscous_friction_nm_per_rad_s) ||
-	    !finite_nonnegative(snapshot->model_coulomb_friction_nm)) {
+	    !finite_positive(snapshot->model_kt_nm_per_a)) {
 		return -ERANGE;
 	}
 
@@ -764,12 +808,7 @@ static int apply_model_group(struct motor_parameters *params,
 	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS;
 	params->flux_linkage_wb_active = snapshot->model_flux_linkage_wb;
 	params->torque_gain_nm_per_a_active = snapshot->model_kt_nm_per_a;
-	params->inertia_kgm2_active = snapshot->model_inertia_kgm2;
-	params->viscous_friction_nm_per_rad_s_active =
-		snapshot->model_viscous_friction_nm_per_rad_s;
-	params->coulomb_friction_nm_active = snapshot->model_coulomb_friction_nm;
 	params->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
-	params->mech_model_source = MOTOR_MODEL_SOURCE_MEASURED;
 	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;
 	return 0;
 }
@@ -982,15 +1021,16 @@ int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 		}
 		loaded |= MOTOR_SETTINGS_GROUP_ENCODER;
 	}
-	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL)) {
-		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_MODEL)) {
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)) {
+		if (!snapshot_group_available(&snap, present,
+					      MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)) {
 			return -ENOENT;
 		}
-		ret = apply_model_group(params, &snap);
+		ret = apply_model_electrical_group(params, &snap);
 		if (ret != 0) {
 			return ret;
 		}
-		loaded |= MOTOR_SETTINGS_GROUP_MODEL;
+		loaded |= MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL;
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_LIMITS)) {
 		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_LIMITS)) {
@@ -1025,7 +1065,7 @@ int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 
 	config_init_runtime_adapters(params);
 	params->calibration.commissioning_complete =
-		group_enabled(loaded, MOTOR_SETTINGS_GROUP_MODEL) ||
+		group_enabled(loaded, MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL) ||
 		params->calibration.commissioning_complete;
 	if (loaded_groups != NULL) {
 		*loaded_groups = loaded;
@@ -1057,17 +1097,17 @@ static int clear_identity_keys(void)
 	return delete_key(KEY_IDENTITY_POLE_PAIRS);
 }
 
-static int clear_model_keys(void)
+static int clear_model_electrical_keys(void)
 {
-	const char *keys[] = { KEY_MODEL_RS, KEY_MODEL_LD, KEY_MODEL_LQ, KEY_MODEL_FLUX,
-		KEY_MODEL_KT, KEY_MODEL_J, KEY_MODEL_B, KEY_MODEL_TC };
+	const char *keys[] = { KEY_MODEL_ELEC_RS, KEY_MODEL_ELEC_LD, KEY_MODEL_ELEC_LQ,
+		KEY_MODEL_ELEC_FLUX, KEY_MODEL_ELEC_KT };
 	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
 		int ret = delete_key(keys[i]);
 		if (ret != 0) {
 			return ret;
 		}
 	}
-	return 0;
+	return clear_legacy_model_keys();
 }
 
 static int clear_limits_keys(void)
@@ -1147,8 +1187,8 @@ int motor_settings_clear(uint32_t groups)
 		ret = clear_identity_keys();
 		if (ret != 0) { return ret; }
 	}
-	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL)) {
-		ret = clear_model_keys();
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL)) {
+		ret = clear_model_electrical_keys();
 		if (ret != 0) { return ret; }
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_LIMITS)) {

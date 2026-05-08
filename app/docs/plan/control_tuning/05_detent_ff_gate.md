@@ -6,7 +6,7 @@ Treat detent feedforward as a commissioned map that reduces predictable position
 
 ## Order
 
-1. Commission baseline model.
+1. Commission baseline electrical model.
 2. Validate PI or MPR without detent.
 3. Capture detent map over multiple forward/reverse cycles.
 4. Validate detent off/on effect.

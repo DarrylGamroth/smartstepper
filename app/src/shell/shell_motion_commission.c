@@ -387,7 +387,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 	}
 	g_motor_params->calibration.commissioning_complete = true;
 	shell_print(sh,
-		    "  Baseline electrical model and encoder mapping are active; save trusted values explicitly with 'motor settings save baseline model'.");
+		    "  Baseline electrical model and encoder mapping are active; save trusted values explicitly with 'motor settings save model electrical' and 'motor settings save model encoder'.");
 	shell_print(sh,
 		    "  Flux, mechanical ID, auto tuning, MPR, DOB, and detent are separate advanced commissioning steps.");
 

@@ -17,38 +17,47 @@
 #include "shell_control.h"
 
 #define MOTOR_SETTINGS_GROUP_USAGE \
-	"[baseline|encoder|identity|model|limits|controllers|detent|all]"
+	"[model electrical|model encoder|identity|limits|controllers|detent|all]"
 
-static int parse_group(const char *arg, uint32_t *groups)
+static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups)
 {
-	if (arg == NULL || groups == NULL) {
+	if (argv == NULL || groups == NULL || first >= argc) {
 		return -EINVAL;
 	}
-	if (strcmp(arg, "baseline") == 0 || strcmp(arg, "encoder") == 0) {
-		*groups = MOTOR_SETTINGS_GROUP_ENCODER;
-		return 0;
+	if (strcmp(argv[first], "model") == 0) {
+		if ((first + 1U) >= argc) {
+			return -EINVAL;
+		}
+		if (strcmp(argv[first + 1U], "electrical") == 0) {
+			*groups = MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL;
+			return ((first + 2U) == argc) ? 0 : -EINVAL;
+		}
+		if (strcmp(argv[first + 1U], "encoder") == 0) {
+			*groups = MOTOR_SETTINGS_GROUP_ENCODER;
+			return ((first + 2U) == argc) ? 0 : -EINVAL;
+		}
+		return -EINVAL;
 	}
-	if (strcmp(arg, "identity") == 0) {
+	if ((first + 1U) != argc) {
+		return -EINVAL;
+	}
+	if (strcmp(argv[first], "identity") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_IDENTITY;
 		return 0;
 	}
-	if (strcmp(arg, "model") == 0) {
-		*groups = MOTOR_SETTINGS_GROUP_MODEL;
-		return 0;
-	}
-	if (strcmp(arg, "limits") == 0) {
+	if (strcmp(argv[first], "limits") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_LIMITS;
 		return 0;
 	}
-	if (strcmp(arg, "controllers") == 0) {
+	if (strcmp(argv[first], "controllers") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_CONTROLLERS;
 		return 0;
 	}
-	if (strcmp(arg, "detent") == 0) {
+	if (strcmp(argv[first], "detent") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_DETENT;
 		return 0;
 	}
-	if (strcmp(arg, "all") == 0) {
+	if (strcmp(argv[first], "all") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_ALL;
 		return 0;
 	}
@@ -63,11 +72,11 @@ static const char *yesno(bool value)
 static void print_groups(const struct shell *sh, const char *label, uint32_t groups)
 {
 	shell_print(sh,
-		    "%s: encoder=%s identity=%s model=%s limits=%s controllers=%s detent=%s",
+		    "%s: encoder=%s identity=%s model_electrical=%s limits=%s controllers=%s detent=%s",
 		    label,
 		    yesno((groups & MOTOR_SETTINGS_GROUP_ENCODER) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_IDENTITY) != 0U),
-		    yesno((groups & MOTOR_SETTINGS_GROUP_MODEL) != 0U),
+		    yesno((groups & MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_CONTROLLERS) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_DETENT) != 0U));
@@ -123,8 +132,8 @@ static void print_snapshot(const struct shell *sh,
 		shell_print(sh, "    pole_pairs:            %u", s->identity_pole_pairs);
 		shell_print(sh, "    Note: identity mismatches are rejected until all hot paths are runtime-configured.");
 	}
-	if ((present_groups & MOTOR_SETTINGS_GROUP_MODEL) != 0U) {
-		shell_print(sh, "  Model:");
+	if ((present_groups & MOTOR_SETTINGS_GROUP_MODEL_ELECTRICAL) != 0U) {
+		shell_print(sh, "  Electrical model:");
 		shell_print(sh, "    Rs=%.6f ohm Ld=%.9f H Lq=%.9f H",
 			    (double)s->model_rs_ohm,
 			    (double)s->model_ld_h,
@@ -132,10 +141,6 @@ static void print_snapshot(const struct shell *sh,
 		shell_print(sh, "    psi_f=%.8f Wb Kt=%.8f Nm/A",
 			    (double)s->model_flux_linkage_wb,
 			    (double)s->model_kt_nm_per_a);
-		shell_print(sh, "    J=%.9f kgm2 B=%.9f Nm/(rad/s) Tc=%.9f Nm",
-			    (double)s->model_inertia_kgm2,
-			    (double)s->model_viscous_friction_nm_per_rad_s,
-			    (double)s->model_coulomb_friction_nm);
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U) {
 		shell_print(sh, "  Limits:");
@@ -229,12 +234,13 @@ int cmd_motor_settings_preview(const struct shell *sh, size_t argc, char **argv)
 int cmd_motor_settings_save(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
-	if (argc > 2) {
+	if (argc > 3) {
 		shell_error(sh, "Usage: motor settings save " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
-	if (argc == 2 && parse_group(argv[1], &groups) != 0) {
-		shell_error(sh, "Unknown settings group '%s'", argv[1]);
+	if (argc >= 2 && parse_groups(argc, argv, 1U, &groups) != 0) {
+		shell_error(sh, "Unknown settings group. Usage: motor settings save "
+			    MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	int ret = require_mutation_safe(sh);
@@ -255,12 +261,13 @@ int cmd_motor_settings_save(const struct shell *sh, size_t argc, char **argv)
 int cmd_motor_settings_load(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
-	if (argc > 2) {
+	if (argc > 3) {
 		shell_error(sh, "Usage: motor settings load " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
-	if (argc == 2 && parse_group(argv[1], &groups) != 0) {
-		shell_error(sh, "Unknown settings group '%s'", argv[1]);
+	if (argc >= 2 && parse_groups(argc, argv, 1U, &groups) != 0) {
+		shell_error(sh, "Unknown settings group. Usage: motor settings load "
+			    MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	int ret = require_mutation_safe(sh);
@@ -290,12 +297,13 @@ int cmd_motor_settings_load(const struct shell *sh, size_t argc, char **argv)
 int cmd_motor_settings_clear(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
-	if (argc > 2) {
+	if (argc > 3) {
 		shell_error(sh, "Usage: motor settings clear " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
-	if (argc == 2 && parse_group(argv[1], &groups) != 0) {
-		shell_error(sh, "Unknown settings group '%s'", argv[1]);
+	if (argc >= 2 && parse_groups(argc, argv, 1U, &groups) != 0) {
+		shell_error(sh, "Unknown settings group. Usage: motor settings clear "
+			    MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	int ret = require_mutation_safe(sh);

@@ -158,7 +158,8 @@ After this sequence passes and the staged values are applied, save only the
 validated groups:
 
 ```text
-motor settings save baseline model
+motor settings save model electrical
+motor settings save model encoder
 ```
 
 Save controller settings separately only after velocity/position PI or MPR

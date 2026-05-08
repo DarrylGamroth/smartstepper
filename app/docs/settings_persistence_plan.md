@@ -44,7 +44,7 @@ motor/meta/generation
 motor/meta/valid_groups
 ```
 
-Encoder mapping group (`baseline` alias):
+Encoder mapping group:
 
 ```text
 motor/encoder/direction_sign
@@ -65,17 +65,14 @@ Identity values describe the motor/hardware assembly. In the current firmware
 loading this group validates that the persisted identity matches the active
 firmware image rather than partially applying an inconsistent identity.
 
-Motor model group:
+Electrical model group:
 
 ```text
-motor/model/rs_ohm
-motor/model/ld_h
-motor/model/lq_h
-motor/model/flux_linkage_wb
-motor/model/kt_nm_per_a
-motor/model/inertia_kgm2
-motor/model/viscous_friction_nm_per_rad_s
-motor/model/coulomb_friction_nm
+motor/model/electrical/rs_ohm
+motor/model/electrical/ld_h
+motor/model/electrical/lq_h
+motor/model/electrical/flux_linkage_wb
+motor/model/electrical/kt_nm_per_a
 ```
 
 Controller group:
@@ -133,14 +130,16 @@ image because those values are still used directly by several hot paths.
 ```text
 motor settings status
 motor settings preview
-motor settings save [baseline|encoder|identity|model|limits|controllers|detent|all]
-motor settings load [baseline|encoder|identity|model|limits|controllers|detent|all]
-motor settings clear [baseline|encoder|identity|model|limits|controllers|detent|all]
+motor settings save [model electrical|model encoder|identity|limits|controllers|detent|all]
+motor settings load [model electrical|model encoder|identity|limits|controllers|detent|all]
+motor settings clear [model electrical|model encoder|identity|limits|controllers|detent|all]
 motor settings autoload status
 ```
 
-`baseline` is an alias for the encoder mapping group. It intentionally does not
-include ADC current offsets.
+`model electrical` stores only the active electrical model (`Rs/Ld/Lq/psi_f/Kt`).
+`model encoder` stores the encoder mapping group. Mechanical ID values are not
+part of baseline persistence yet. ADC current offsets are intentionally excluded
+and must be measured on every boot.
 
 ## Guards
 
@@ -161,7 +160,8 @@ Load validates selected values before applying. After apply:
   trust state,
 - identity reload verifies the persisted motor identity matches this firmware
   image,
-- model reload updates active Rs/Ld/Lq/flux/Kt/J/B/Tc and model source markers,
+- electrical model reload updates active Rs/Ld/Lq/flux/Kt and electrical model
+  source markers,
 - limits reload applies runtime motion profile velocity/acceleration limits and
   command timeout, and validates compile-time electrical safety limits,
 - controller reload recomputes PI/MPR/DOB coefficients from stored tuning
@@ -180,9 +180,9 @@ runtime configuration.
 Recommended save points:
 
 - After production electrical ID passes and `motor commission electrical apply`
-  has updated the active current model: `motor settings save model`.
+  has updated the active current model: `motor settings save model electrical`.
 - After standard commissioning passes encoder mapping and applies it:
-  `motor settings save baseline model`.
+  `motor settings save model electrical` and `motor settings save model encoder`.
 - After velocity/position controller tuning has been validated:
   `motor settings save controllers`.
 - After runtime motion limits are intentionally changed and validated:

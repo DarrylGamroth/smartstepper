@@ -31,7 +31,7 @@ Recommended groups:
    - `motor settings save`,
    - `motor settings clear`.
 2. Keep autoload disabled until HIL validates rollback behavior.
-3. Store accepted baseline model values after commissioning only when commanded.
+3. Store accepted baseline electrical model values after commissioning only when commanded.
 4. Store controller bandwidth/config intent rather than derived MPR/DOB gains
    when the gains can be recomputed from model values.
 5. Never store fast current offsets as baseline persistence; run offset

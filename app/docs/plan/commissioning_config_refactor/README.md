@@ -42,7 +42,7 @@ baseline commissioning.
 | Motor safe-ID overlay | Motor identity, hard limits, conservative fallback model | pole pairs, max current, max speed, fallback Rs/Ld/Lq/flux/J |
 | Shared commissioning overlay | Generic commissioning recipe defaults | sample counts, settle times, demod cycles, confidence thresholds |
 | Runtime RAM | Active measured/tuned values | active Rs/Ld/Lq, active PI gains, encoder offset, flux, limits staged by commissioning |
-| Settings/ZMS | Per-unit accepted commissioned values | validated baseline model, encoder map/offset, user limits, controller bandwidths |
+| Settings/ZMS | Per-unit accepted commissioned values | validated baseline electrical model, encoder map/offset, user limits, controller bandwidths |
 
 ## Naming Policy
 
