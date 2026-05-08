@@ -12,7 +12,7 @@ Do not require mechanical ID to succeed.
 The position controller can move to angular targets, but the chopper wheel has real slot/tooth geometry. The application needs the actual centerpoints of the slots and teeth so each external tick can command the next calibrated index position. The existing `motor chopper calib` command captures optical edges, but geometry is passed manually, only slot midpoints are produced, and the map is not persisted.
 
 ## Design
-Store chopper wheel geometry as devicetree defaults and runtime settings. For an 8-slot blade, default `chopper-slot-count=8`; the tooth count is derived as 8 unless a nonstandard wheel overrides it, producing 16 slot/tooth centerpoints. Capture optical edges while running controlled velocity in either direction, average repeated edges over multiple revolutions, sort the edge angles, classify regions using timer rising/falling status, and calculate every region centerpoint between adjacent edges. Apply the resulting centerpoint table to the profile sequence as absolute position targets.
+Store chopper wheel geometry as devicetree defaults and runtime settings. For an 8-slot blade, default `chopper-slot-count=8`; the tooth count is derived as 8 unless a nonstandard wheel overrides it, producing 16 slot/tooth centerpoints. Capture optical edges while running controlled velocity in either direction, average repeated edges over multiple revolutions, sort the edge angles, classify equal slot/tooth wheels by alternating parity with timer edge-status used only to choose the starting polarity, and calculate every region centerpoint between adjacent edges. Apply the resulting centerpoint table to the profile sequence as absolute position targets.
 
 ## Implementation Phases
 Phase 1:
@@ -73,4 +73,48 @@ Devicetree evidence:
 
 ```text
 /workspace/build/chopper/smartstepper_v2_mt6835_067a/zephyr/zephyr.dts contains capture-gpios and chopper-slot-count = <8>.
+```
+
+HIL evidence:
+
+```text
+Build:
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2_mt6835_067a'
+Result: PASS
+
+Flash:
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2_mt6835_067a --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+Result: PASS
+
+Commands:
+motor settings status
+motor state calibrate
+motor safety timeout 0
+motor arm
+motor current iq 0.07
+motor chopper calib clear
+motor chopper calib start 2 0.25
+motor chopper calib status
+motor current iq 0
+motor velocity target 0
+motor chopper calib apply
+motor disarm
+motor settings save chopper
+motor settings status
+motor chopper calib clear
+motor chopper geometry
+motor settings load chopper
+motor chopper geometry
+
+Result:
+- Capture complete and valid.
+- Edges: 32 / 32.
+- Midpoints: 16.
+- Labels: alternating 8 slot / 8 tooth.
+- Spacing min/max/mean/error: 21.457 / 23.725 / 22.500 / 1.225 deg.
+- `motor chopper calib apply` loaded 16 midpoint targets.
+- `motor settings save chopper` saved the chopper settings group.
+- `motor settings status` reports `chopper=YES` present and valid.
+- After `motor chopper calib clear`, geometry reported `Map valid: NO`.
+- After `motor settings load chopper`, geometry reported `Map valid: YES`.
 ```

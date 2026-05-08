@@ -117,6 +117,49 @@ static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status)
 	return CHOPPER_REGION_KIND_UNKNOWN;
 }
 
+static void motor_chopper_assign_alternating_kinds(const struct chopper_edge_mean *edges,
+						   uint16_t edge_bins,
+						   uint8_t *midpoint_kind)
+{
+	uint16_t parity_slot_votes[2] = {0U, 0U};
+	uint16_t parity_tooth_votes[2] = {0U, 0U};
+
+	for (uint16_t i = 0U; i < edge_bins; i++) {
+		uint8_t kind = motor_chopper_region_kind_from_edge_status(edges[i].status);
+		uint16_t parity = (uint16_t)(i & 1U);
+
+		if (kind == CHOPPER_REGION_KIND_SLOT) {
+			parity_slot_votes[parity]++;
+		} else if (kind == CHOPPER_REGION_KIND_TOOTH) {
+			parity_tooth_votes[parity]++;
+		}
+	}
+
+	/*
+	 * Slot and tooth regions must alternate around a normal chopper wheel.
+	 * Per-edge GPIO level sampling can be noisy because it is inferred after
+	 * the timer capture event, so use it only to choose the starting parity.
+	 */
+	uint8_t even_kind = CHOPPER_REGION_KIND_SLOT;
+	int even_slot_score = (int)parity_slot_votes[0] - (int)parity_tooth_votes[0];
+	int odd_slot_score = (int)parity_slot_votes[1] - (int)parity_tooth_votes[1];
+
+	if (odd_slot_score > even_slot_score) {
+		even_kind = CHOPPER_REGION_KIND_TOOTH;
+	}
+
+	for (uint16_t i = 0U; i < edge_bins; i++) {
+		bool even = ((i & 1U) == 0U);
+		if (even) {
+			midpoint_kind[i] = even_kind;
+		} else {
+			midpoint_kind[i] = (even_kind == CHOPPER_REGION_KIND_SLOT) ?
+						   CHOPPER_REGION_KIND_TOOTH :
+						   CHOPPER_REGION_KIND_SLOT;
+		}
+	}
+}
+
 static const char *motor_chopper_region_kind_name(uint8_t kind)
 {
 	switch (kind) {
@@ -155,6 +198,15 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 		edges[i].status = params->chopper_cal.edge_status[i];
 	}
 	motor_chopper_sort_edges(edges, edge_bins);
+	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];
+	if (params->chopper_cal.slots == params->chopper_cal.teeth) {
+		motor_chopper_assign_alternating_kinds(edges, edge_bins, midpoint_kind);
+	} else {
+		for (uint16_t i = 0U; i < edge_bins; i++) {
+			midpoint_kind[i] =
+				motor_chopper_region_kind_from_edge_status(edges[i].status);
+		}
+	}
 
 	float32_t ideal_spacing = 2.0f * PI_F32 / (float32_t)edge_bins;
 	float32_t spacing_sum = 0.0f;
@@ -171,8 +223,7 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 		float32_t midpoint = a + (0.5f * spacing);
 
 		params->chopper_cal.blade_midpoints_rad[i] = wrap_rad_2pi(midpoint);
-		params->chopper_cal.midpoint_kind[i] =
-			motor_chopper_region_kind_from_edge_status(edges[i].status);
+		params->chopper_cal.midpoint_kind[i] = midpoint_kind[i];
 		spacing_sum += spacing;
 		spacing_min = fminf(spacing_min, spacing);
 		spacing_max = fmaxf(spacing_max, spacing);
