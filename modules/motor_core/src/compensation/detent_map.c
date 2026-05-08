@@ -85,6 +85,47 @@ int motor_detent_map_set_bin(const struct motor_detent_map_config *cfg,
 	return 0;
 }
 
+int motor_detent_map_mean(const struct motor_detent_map_config *cfg,
+			  float32_t *mean_iq_a)
+{
+	if (!motor_detent_map_config_valid(cfg) || mean_iq_a == NULL) {
+		return -EINVAL;
+	}
+
+	float32_t sum = 0.0f;
+	for (uint16_t i = 0U; i < cfg->table_len; i++) {
+		float32_t iq = cfg->table_iq_a[i];
+		if (!isfinite(iq)) {
+			return -EINVAL;
+		}
+		sum += iq;
+	}
+
+	*mean_iq_a = sum / (float32_t)cfg->table_len;
+	return 0;
+}
+
+int motor_detent_map_remove_mean(const struct motor_detent_map_config *cfg,
+				 float32_t *removed_mean_iq_a)
+{
+	float32_t mean = 0.0f;
+	int ret = motor_detent_map_mean(cfg, &mean);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	for (uint16_t i = 0U; i < cfg->table_len; i++) {
+		cfg->table_iq_a[i] -= mean;
+	}
+
+	if (removed_mean_iq_a != NULL) {
+		*removed_mean_iq_a = mean;
+	}
+
+	return 0;
+}
+
 int motor_detent_map_learn_sample(const struct motor_detent_map_config *cfg,
 				  float32_t mech_angle_rad,
 				  float32_t iq_sample_a,

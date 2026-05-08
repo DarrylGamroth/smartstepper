@@ -31,7 +31,7 @@
 #define MOTOR_COMMISSION_DETENT_DEFAULT_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MIN_DECIMATION 1U
 #define MOTOR_COMMISSION_DETENT_MAX_DECIMATION 128U
-#define MOTOR_COMMISSION_DETENT_MIN_APPLY_BINS 250U
+#define MOTOR_COMMISSION_DETENT_MIN_APPLY_BINS MOTOR_DETENT_MAP_BINS
 #define MOTOR_COMMISSION_DETENT_MIN_RAW_BINS 192U
 #define MOTOR_COMMISSION_DETENT_MAX_FILL_GAP_BINS 4U
 #define MOTOR_COMMISSION_DETENT_MIN_SAMPLES_PER_BIN 4U
@@ -82,6 +82,7 @@ struct motor_commission_detent_result {
 	float32_t forward_reverse_rms_a;
 	float32_t min_iq_ff_a;
 	float32_t max_iq_ff_a;
+	float32_t dc_bias_iq_a;
 	float32_t mean_abs_iq_ff_a;
 	float32_t rms_iq_ff_a;
 	float32_t recommended_limit_a;
@@ -339,6 +340,17 @@ static void motor_commission_detent_smooth_table(void)
 	memcpy(detent_result.table_iq_a, smoothed, sizeof(smoothed));
 }
 
+static bool motor_commission_detent_all_bins_present(void)
+{
+	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
+		if (detent_result.bin_flags[i] == 0U) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 static int motor_commission_detent_finalize(void)
 {
 	struct motor_detent_capture_ctx *cap = &g_motor_params->detent_capture;
@@ -416,6 +428,20 @@ static int motor_commission_detent_finalize(void)
 
 	motor_commission_detent_fill_short_holes();
 	motor_commission_detent_smooth_table();
+
+	if (motor_commission_detent_all_bins_present()) {
+		struct motor_detent_map_config staged_cfg = {
+			.enabled = true,
+			.table_iq_a = detent_result.table_iq_a,
+			.table_len = MOTOR_DETENT_MAP_BINS,
+			.phase_advance_bins = 0,
+			.gain = 1.0f,
+			.iq_ff_limit_a = MOTOR_MAX_CURRENT_A,
+		};
+
+		(void)motor_detent_map_remove_mean(&staged_cfg,
+						   &detent_result.dc_bias_iq_a);
+	}
 
 	for (uint16_t i = 0U; i < MOTOR_DETENT_MAP_BINS; i++) {
 		if (detent_result.bin_flags[i] == 0U) {
@@ -681,9 +707,10 @@ restore_runtime:
 		    detent_result.raw_populated_bins, detent_result.filled_bins,
 		    detent_result.min_bin_count, detent_result.max_bin_count);
 	shell_print(sh,
-		    "  iq_ff: min=%.5f max=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
+		    "  iq_ff: min=%.5f max=%.5f bias_removed=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
 		    (double)detent_result.min_iq_ff_a,
 		    (double)detent_result.max_iq_ff_a,
+		    (double)detent_result.dc_bias_iq_a,
 		    (double)detent_result.mean_abs_iq_ff_a,
 		    (double)detent_result.rms_iq_ff_a,
 		    (double)detent_result.recommended_limit_a);
@@ -767,9 +794,10 @@ int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char
 		    detent_result.rejected_velocity,
 		    detent_result.rejected_accel,
 		    detent_result.rejected_saturation);
-	shell_print(sh, "  Iq FF:     min=%.5f max=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
+	shell_print(sh, "  Iq FF:     min=%.5f max=%.5f bias_removed=%.5f mean_abs=%.5f rms=%.5f rec_limit=%.5f A",
 		    (double)detent_result.min_iq_ff_a,
 		    (double)detent_result.max_iq_ff_a,
+		    (double)detent_result.dc_bias_iq_a,
 		    (double)detent_result.mean_abs_iq_ff_a,
 		    (double)detent_result.rms_iq_ff_a,
 		    (double)detent_result.recommended_limit_a);

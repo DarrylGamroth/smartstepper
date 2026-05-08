@@ -66,6 +66,18 @@ Phase 3: Validation before apply.
   - `DO_NOT_APPLY`,
   - `INCONCLUSIVE`.
 
+Phase 3A: Map hardening before baseline integration.
+
+- Require complete post-fill table coverage before enabled apply. Sparse maps
+  can interpolate through unobserved regions and inject incorrect current.
+- Remove the full-table DC bias before staging. Detent torque is position-
+  periodic over one mechanical revolution; non-zero mean current is usually
+  friction, load, velocity-loop bias, or capture error and should not be stored
+  in the detent map.
+- Report the removed bias in shell status so bad captures remain visible.
+- Keep detent feedforward out of the normal commissioning flow until this path
+  passes HIL validation.
+
 Phase 4: Optional TI-style online learner.
 
 - Consider adding a runtime learner similar to TI `vib_comp`:
@@ -136,6 +148,10 @@ Code changes:
 - Enabled apply is blocked unless validation recommends apply. Operators can
   still apply the staged table disabled with `motor commission detent apply 0`
   for inspection/debugging.
+- Apply now requires full post-fill coverage and removes DC bias from the
+  staged map before validation/apply. This reduces dependence on velocity-loop
+  bias and prevents friction/load offsets from becoming position-periodic
+  feedforward.
 
 Validation:
 

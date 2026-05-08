@@ -137,6 +137,31 @@ ZTEST(motor_detent_map, test_learning_updates_selected_bin)
 	zassert_within(table[1], 0.0f, 1e-6f, NULL);
 }
 
+ZTEST(motor_detent_map, test_mean_and_remove_mean)
+{
+	clear_table();
+	table[0] = 0.30f;
+	table[1] = 0.10f;
+	table[2] = -0.10f;
+	table[3] = -0.30f;
+	table[4] = 0.50f;
+	table[5] = 0.50f;
+	table[6] = 0.50f;
+	table[7] = 0.50f;
+	struct motor_detent_map_config cfg = base_cfg();
+	float32_t mean = 0.0f;
+	float32_t removed = 0.0f;
+
+	zassert_equal(motor_detent_map_mean(&cfg, &mean), 0, NULL);
+	zassert_within(mean, 0.25f, 1e-6f, NULL);
+	zassert_equal(motor_detent_map_remove_mean(&cfg, &removed), 0, NULL);
+	zassert_within(removed, 0.25f, 1e-6f, NULL);
+	zassert_equal(motor_detent_map_mean(&cfg, &mean), 0, NULL);
+	zassert_within(mean, 0.0f, 1e-6f, NULL);
+	zassert_within(table[0], 0.05f, 1e-6f, NULL);
+	zassert_within(table[3], -0.55f, 1e-6f, NULL);
+}
+
 ZTEST(motor_detent_map, test_invalid_config_rejected)
 {
 	struct motor_detent_map_config cfg = base_cfg();
@@ -146,6 +171,8 @@ ZTEST(motor_detent_map, test_invalid_config_rejected)
 	cfg.table_len = 1U;
 	zassert_equal(motor_detent_map_init(&cfg, &state), -EINVAL, NULL);
 	zassert_equal(motor_detent_map_step_fast(&cfg, &state, 0.0f, &iq), -EINVAL, NULL);
+	zassert_equal(motor_detent_map_mean(&cfg, &iq), -EINVAL, NULL);
+	zassert_equal(motor_detent_map_remove_mean(&cfg, &iq), -EINVAL, NULL);
 }
 
 ZTEST_SUITE(motor_detent_map, NULL, NULL, NULL, NULL, NULL);

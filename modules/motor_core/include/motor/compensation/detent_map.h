@@ -38,6 +38,12 @@ int motor_detent_map_set_bin(const struct motor_detent_map_config *cfg,
 			     uint16_t index,
 			     float32_t iq_ff_a);
 
+int motor_detent_map_mean(const struct motor_detent_map_config *cfg,
+			  float32_t *mean_iq_a);
+
+int motor_detent_map_remove_mean(const struct motor_detent_map_config *cfg,
+				 float32_t *removed_mean_iq_a);
+
 int motor_detent_map_learn_sample(const struct motor_detent_map_config *cfg,
 				  float32_t mech_angle_rad,
 				  float32_t iq_sample_a,
