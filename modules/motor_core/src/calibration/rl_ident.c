@@ -14,7 +14,6 @@
 
 #define MOTOR_RL_IDENT_MIN_ID_SQ_SUM 1.0e-9f
 #define MOTOR_RL_IDENT_MIN_ABS_EST 1.0e-9f
-#define MOTOR_RS_EST_MIN_ABS_CURRENT 1.0e-6f
 #define MOTOR_MIN_TRAJ_DELTA_PER_TICK 1.0e-6f
 
 static inline bool finite_positive(float32_t x)
@@ -144,120 +143,5 @@ int motor_roverl_finalize(const struct motor_roverl_accumulator *accum,
 	out->ls_h = l_est;
 	out->r_over_l = r_est / l_est;
 	out->tau_s = l_est / r_est;
-	return 0;
-}
-
-int motor_rs_est_plan(struct traj_f32 *traj,
-		      struct filter_fo_f32 *filter_v,
-		      struct filter_fo_f32 *filter_i,
-		      const struct motor_rs_est_config *cfg)
-{
-	if (traj == NULL || filter_v == NULL || filter_i == NULL || cfg == NULL) {
-		return -EINVAL;
-	}
-	if (!finite_positive(cfg->rampup_s) ||
-	    !finite_positive(cfg->filter_bw_hz) ||
-	    !finite_positive(cfg->control_hz) ||
-	    !isfinite(cfg->target_current_a)) {
-		return -EINVAL;
-	}
-
-	const float32_t steps = cfg->rampup_s * cfg->control_hz;
-	if (!finite_positive(steps)) {
-		return -EINVAL;
-	}
-
-	const float32_t max_delta_a = fmaxf(fabsf(cfg->target_current_a) / steps,
-					    MOTOR_MIN_TRAJ_DELTA_PER_TICK);
-	traj_set_target_value(traj, cfg->target_current_a);
-	traj_set_max_delta(traj, max_delta_a);
-
-	const float32_t a1 = expf(-2.0f * PI_F32 * cfg->filter_bw_hz / cfg->control_hz);
-	if (!isfinite(a1)) {
-		return -ERANGE;
-	}
-	const float32_t b0 = 1.0f - a1;
-
-	filter_fo_init(filter_v);
-	filter_fo_set_den_coeffs(filter_v, a1);
-	filter_fo_set_num_coeffs(filter_v, b0, 0.0f);
-	filter_fo_set_initial_conditions(filter_v, 0.0f, 0.0f);
-
-	filter_fo_init(filter_i);
-	filter_fo_set_den_coeffs(filter_i, a1);
-	filter_fo_set_num_coeffs(filter_i, b0, 0.0f);
-	filter_fo_set_initial_conditions(filter_i, 0.0f, 0.0f);
-
-	return 0;
-}
-
-int motor_rs_est_prepare(struct traj_f32 *traj,
-			 angle_gen_t *angle_gen,
-			 struct filter_fo_f32 *filter_v,
-			 struct filter_fo_f32 *filter_i,
-			 const struct motor_rs_est_config *cfg)
-{
-	if (angle_gen == NULL || cfg == NULL || !finite_positive(cfg->control_hz)) {
-		return -EINVAL;
-	}
-
-	angle_gen_init(angle_gen, 1.0f / cfg->control_hz);
-	angle_gen_set_velocity(angle_gen, 0.0f);
-	angle_gen_set_angle(angle_gen, 0.0f);
-
-	return motor_rs_est_plan(traj, filter_v, filter_i, cfg);
-}
-
-void motor_rs_est_accumulate(struct filter_fo_f32 *filter_v,
-			     struct filter_fo_f32 *filter_i,
-			     float32_t vd_v,
-			     float32_t id_a)
-{
-	if (filter_v == NULL || filter_i == NULL) {
-		return;
-	}
-	if (!isfinite(vd_v) || !isfinite(id_a)) {
-		return;
-	}
-
-	filter_fo_run(filter_v, vd_v);
-	filter_fo_run(filter_i, id_a);
-}
-
-int motor_rs_est_finalize(const struct filter_fo_f32 *filter_v,
-			  const struct filter_fo_f32 *filter_i,
-			  float32_t inductance_h,
-			  struct motor_rs_est_result *out)
-{
-	if (filter_v == NULL || filter_i == NULL || out == NULL) {
-		return -EINVAL;
-	}
-
-	return motor_rs_est_finalize_from_scalars(filter_fo_get_y1(filter_v),
-						 filter_fo_get_y1(filter_i),
-						 inductance_h, out);
-}
-
-int motor_rs_est_finalize_from_scalars(float32_t v_est,
-				       float32_t i_est,
-				       float32_t inductance_h,
-				       struct motor_rs_est_result *out)
-{
-	if (out == NULL) {
-		return -EINVAL;
-	}
-	if (!isfinite(v_est) || !isfinite(i_est) || fabsf(i_est) <= MOTOR_RS_EST_MIN_ABS_CURRENT) {
-		return -ERANGE;
-	}
-
-	const float32_t rs_est = v_est / i_est;
-	if (!isfinite(rs_est)) {
-		return -ERANGE;
-	}
-
-	out->rs_ohm = rs_est;
-	out->v_est_v = v_est;
-	out->i_est_a = i_est;
-	out->r_over_l = (finite_positive(inductance_h)) ? (rs_est / inductance_h) : 0.0f;
 	return 0;
 }

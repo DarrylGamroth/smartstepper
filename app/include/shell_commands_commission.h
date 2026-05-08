@@ -15,7 +15,6 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_abort(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_apply(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_commission_boot(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_motion_threshold(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_flux_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_mech_run(const struct shell *sh, size_t argc, char **argv);
@@ -24,6 +23,9 @@ int cmd_motor_commission_encoder_robust(const struct shell *sh, size_t argc, cha
 int cmd_motor_commission_encoder_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_apply(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_encoder_clear(const struct shell *sh, size_t argc, char **argv);
+int motor_commission_encoder_default_map_apply(const struct shell *sh,
+					       bool run_current_offsets,
+					       bool leave_online);
 int cmd_motor_commission_detent_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_detent_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_detent_apply(const struct shell *sh, size_t argc, char **argv);
@@ -38,8 +40,6 @@ int cmd_motor_commission_ripple_dump(const struct shell *sh, size_t argc, char *
 int cmd_motor_commission_ripple_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_plan(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t argc, char **argv);
-int cmd_motor_commission_electrical_measure_inductance(const struct shell *sh, size_t argc,
-						       char **argv);
 int cmd_motor_commission_electrical_measure_demod(const struct shell *sh, size_t argc,
 						  char **argv);
 int cmd_motor_commission_electrical_demod_sweep(const struct shell *sh, size_t argc,
@@ -48,7 +48,6 @@ int cmd_motor_commission_electrical_saliency_sweep(const struct shell *sh, size_
 						   char **argv);
 int cmd_motor_commission_electrical_saliency_apply(const struct shell *sh, size_t argc,
 						   char **argv);
-int cmd_motor_commission_electrical_sweep(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_run(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_status(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_apply(const struct shell *sh, size_t argc, char **argv);

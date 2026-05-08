@@ -13,7 +13,7 @@ python3 scripts/hil/hil_telnet.py recovery-status --host 10.0.0.44
 Motion-producing scenarios require an explicit safety acknowledgement:
 
 ```bash
-python3 scripts/hil/hil_telnet.py boot-commission --yes-live-motion
+python3 scripts/hil/hil_telnet.py standard-commission --yes-live-motion
 python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion
 python3 scripts/hil/hil_telnet.py position-validate --yes-live-motion
@@ -31,24 +31,19 @@ Useful options:
 ```bash
 python3 scripts/hil/hil_telnet.py encoder-validate \
   --yes-live-motion \
-  --boot-current 0.15 \
-  --boot-hz 0.10 \
-  --cycles 1 \
   --current-iq 0.03 \
   --velocity-hz 0.50
 ```
 
-Use the split scenarios while bringing up encoder control. They run the same
-boot mapping gate but isolate the failing layer and still send stop commands at
-script exit:
+Use the split scenarios while bringing up encoder control. They run the
+standard commissioning workflow first, isolate the failing layer, and still send
+stop commands at script exit:
 
 ```bash
 python3 scripts/hil/hil_telnet.py current-validate --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
   --current-iq 0.03 --current-hold-ms 160
 
 python3 scripts/hil/hil_telnet.py velocity-validate --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
   --velocity-pi-kp 0.100 --velocity-pi-ki 0.250 --velocity-pi-iq-limit 0.120 \
   --velocity-hz 0.50 --velocity-hold-ms 1000
 ```
@@ -58,7 +53,7 @@ and apply, without running current/velocity/position validation afterward:
 
 ```bash
 python3 scripts/hil/hil_telnet.py encoder-robust --yes-live-motion \
-  --boot-current 0.15 --boot-hz 0.10 --cycles 1 --bidirectional
+  --map-current 0.15 --map-hz 0.10 --cycles 1 --bidirectional
 ```
 
 Use the mechanical identification v2 scenario to run the staged
@@ -177,7 +172,7 @@ scripts/hil/run_hil_gate.sh --host 10.0.0.44 --live
 Live baseline scenarios:
 
 - `status`
-- `boot-commission`
+- `standard-commission`
 - `encoder-trace-open-loop`
 - `current-validate`
 

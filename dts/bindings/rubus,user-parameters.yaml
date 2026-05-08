@@ -85,26 +85,6 @@ properties:
     required: true
     description: RoverL estimation duration in milliseconds (default 5000 ms)
 
-  rs-est-current-ma:
-    type: int
-    description: >
-      Legacy diagnostic DC Rs estimation current in milliamps. Baseline
-      commissioning uses RoverL as the electrical bootstrap, then production
-      bidirectional Rs. If omitted, firmware mirrors roverl-est-current-ma for
-      the retained diagnostic state.
-
-  rs-est-rampup-ms:
-    type: int
-    description: >
-      Legacy diagnostic DC Rs current ramp-up time in milliseconds. If omitted,
-      firmware uses current-command-ramp-ms for the retained diagnostic state.
-
-  rs-est-duration-ms:
-    type: int
-    description: >
-      Legacy diagnostic DC Rs measurement duration in milliseconds. If omitted,
-      firmware mirrors roverl-est-duration-ms for the retained diagnostic state.
-
   rls-decimation:
     type: int
     default: 16
@@ -288,21 +268,11 @@ properties:
       Current ramp time used by production electrical ID in milliseconds. If
       omitted, firmware falls back to current-command-ramp-ms.
 
-  commission-electrical-l-pulse-mv:
-    type: int
-    default: 250
-    description: Default direct-voltage pulse amplitude for integral inductance ID.
-
-  commission-electrical-l-pulse-ms:
-    type: int
-    default: 5
-    description: Default direct-voltage pulse width for integral inductance ID.
-
   commission-electrical-demod-pulse-mv:
     type: int
     description: >
       Default direct-voltage pulse amplitude for VESC-style inverse-L demod ID.
-      If omitted, firmware falls back to commission-electrical-l-pulse-mv.
+      If omitted, firmware falls back to commission-electrical-min-pulse-mv.
 
   commission-electrical-demod-pulse-ms:
     type: int
@@ -333,16 +303,6 @@ properties:
     type: int
     default: 1
     description: Minimum allowed direct-voltage pulse width in milliseconds.
-
-  commission-electrical-sweep-max-spread-mpu:
-    type: int
-    default: 350
-    description: Maximum qualified inductance sweep spread in milli-per-unit.
-
-  commission-electrical-sweep-min-qualified-mv:
-    type: int
-    default: 200
-    description: Minimum voltage pulse considered high-SNR for inductance sweep qualification.
 
   commission-electrical-demod-scale-mpu:
     type: int

@@ -12,7 +12,6 @@
 
 #include <zephyr/dsp/types.h>
 
-#include "motor/filters/filter_fo.h"
 #include "motor/motion/angle_gen.h"
 #include "motor/motion/traj.h"
 
@@ -35,20 +34,6 @@ struct motor_roverl_result {
 	float32_t ls_h;
 	float32_t r_over_l;
 	float32_t tau_s;
-};
-
-struct motor_rs_est_config {
-	float32_t target_current_a;
-	float32_t rampup_s;
-	float32_t filter_bw_hz;
-	float32_t control_hz;
-};
-
-struct motor_rs_est_result {
-	float32_t rs_ohm;
-	float32_t r_over_l;
-	float32_t v_est_v;
-	float32_t i_est_a;
 };
 
 int motor_roverl_plan(struct traj_f32 *traj,
@@ -127,31 +112,5 @@ int motor_roverl_finalize_from_scalars(float32_t vd_id_sum,
 int motor_roverl_finalize(const struct motor_roverl_accumulator *accum,
 			  float32_t excitation_hz,
 			  struct motor_roverl_result *out);
-
-int motor_rs_est_plan(struct traj_f32 *traj,
-		      struct filter_fo_f32 *filter_v,
-		      struct filter_fo_f32 *filter_i,
-		      const struct motor_rs_est_config *cfg);
-
-int motor_rs_est_prepare(struct traj_f32 *traj,
-			 angle_gen_t *angle_gen,
-			 struct filter_fo_f32 *filter_v,
-			 struct filter_fo_f32 *filter_i,
-			 const struct motor_rs_est_config *cfg);
-
-void motor_rs_est_accumulate(struct filter_fo_f32 *filter_v,
-			     struct filter_fo_f32 *filter_i,
-			     float32_t vd_v,
-			     float32_t id_a);
-
-int motor_rs_est_finalize_from_scalars(float32_t v_est_v,
-				       float32_t i_est_a,
-				       float32_t inductance_h,
-				       struct motor_rs_est_result *out);
-
-int motor_rs_est_finalize(const struct filter_fo_f32 *filter_v,
-			  const struct filter_fo_f32 *filter_i,
-			  float32_t inductance_h,
-			  struct motor_rs_est_result *out);
 
 #endif /* MOTOR_CALIBRATION_RL_IDENT_H_ */

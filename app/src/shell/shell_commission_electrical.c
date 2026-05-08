@@ -371,36 +371,6 @@ static int electrical_id_end_l_segment_sample(struct electrical_id_l_segment_sam
 	return 0;
 }
 
-static int electrical_id_end_l_segment(void)
-{
-	struct motor_electrical_id_capture_ctx *cap = &g_motor_params->electrical_id_capture;
-	struct electrical_id_l_segment_sample sample;
-
-	int ret = electrical_id_end_l_segment_sample(&sample);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = motor_electrical_id_l_add_integral(&cap->l_accum,
-						 &cap->l_cfg,
-						 sample.flux_vs,
-						 sample.delta_current_a);
-	if (ret == 0) {
-		cap->sample_count++;
-		if (cap->sample_count >= cap->target_samples) {
-			cap->active = false;
-			cap->done = true;
-			cap->valid = true;
-		}
-	} else if (ret > 0) {
-		cap->rejected_samples++;
-	} else {
-		cap->rejected_samples++;
-	}
-
-	return ret;
-}
-
 static void electrical_id_stop_direct_voltage(void)
 {
 	struct motor_electrical_id_capture_ctx *cap = &g_motor_params->electrical_id_capture;
@@ -502,60 +472,6 @@ static int electrical_id_collect_rs(float32_t current_a, uint32_t samples,
 	struct motor_electrical_id_capture_ctx *cap = &g_motor_params->electrical_id_capture;
 
 	return motor_electrical_id_rs_finalize(&cap->rs_accum, &cap->rs_cfg, &limits, out);
-}
-
-static int electrical_id_collect_l_axis(bool q_axis, float32_t pulse_v,
-					uint32_t pulse_ms,
-					uint32_t repeats,
-					struct motor_electrical_id_l_result *out)
-{
-	struct motor_electrical_id_limits limits = electrical_id_limits();
-	uint8_t mode = q_axis ? MOTOR_ELECTRICAL_ID_CAPTURE_LQ : MOTOR_ELECTRICAL_ID_CAPTURE_LD;
-	uint32_t max_pulses = MAX(16U, repeats * 2U);
-	float32_t voltage_limit_v = electrical_id_voltage_pulse_limit();
-	float32_t limited_pulse_v = clampf(pulse_v, -voltage_limit_v, voltage_limit_v);
-
-	electrical_id_force_current(0.0f, 0.0f);
-	int ret = motor_commission_wait_ms_or_fault(COMMISSION_ELECTRICAL_SETTLE_MS);
-	if (ret != 0) {
-		return ret;
-	}
-
-	electrical_id_start_l_capture(mode, staged.rs.rs_ohm, voltage_limit_v, repeats);
-	for (uint32_t i = 0U; i < max_pulses; ++i) {
-		float32_t sign = (i & 1U) ? -1.0f : 1.0f;
-		float32_t vd_v = q_axis ? 0.0f : sign * limited_pulse_v;
-		float32_t vq_v = q_axis ? sign * limited_pulse_v : 0.0f;
-
-		electrical_id_set_direct_voltage(vd_v, vq_v);
-		electrical_id_begin_l_segment();
-		int ret = motor_commission_wait_ms_or_fault(pulse_ms);
-		if (ret != 0) {
-			electrical_id_stop_direct_voltage();
-			g_motor_params->electrical_id_capture.active = false;
-			return ret;
-		}
-		(void)electrical_id_end_l_segment();
-		electrical_id_set_direct_voltage(0.0f, 0.0f);
-		ret = motor_commission_wait_ms_or_fault(1U);
-		if (ret != 0) {
-			electrical_id_stop_direct_voltage();
-			g_motor_params->electrical_id_capture.active = false;
-			return ret;
-		}
-		if (g_motor_params->electrical_id_capture.done) {
-			break;
-		}
-	}
-	electrical_id_stop_direct_voltage();
-	if (!g_motor_params->electrical_id_capture.done) {
-		g_motor_params->electrical_id_capture.active = false;
-		return -ETIMEDOUT;
-	}
-
-	struct motor_electrical_id_capture_ctx *cap = &g_motor_params->electrical_id_capture;
-
-	return motor_electrical_id_l_finalize(&cap->l_accum, &cap->l_cfg, &limits, out);
 }
 
 static int electrical_id_collect_l_axis_demod_cycles(
@@ -888,58 +804,6 @@ static int electrical_id_stage_fallback_inductance(void)
 	return staged.result_valid && staged.pi_valid ? 0 : -ERANGE;
 }
 
-static int electrical_id_stage_roverl_inductance(void)
-{
-	if (g_motor_params == NULL || !staged.rs_valid ||
-	    g_motor_params->R_over_L_measured <= 0.0f) {
-		return -EINVAL;
-	}
-
-	float32_t l_h = staged.rs.rs_ohm / g_motor_params->R_over_L_measured;
-	struct motor_electrical_id_limits limits = electrical_id_limits();
-	if (l_h < limits.l_min_h || l_h > limits.l_max_h) {
-		return -ERANGE;
-	}
-
-	staged.ld = (struct motor_electrical_id_l_result){
-		.inductance_h = l_h,
-		.confidence = 0.50f,
-		.valid = true,
-	};
-	staged.lq = staged.ld;
-	staged.ld_valid = true;
-	staged.lq_valid = true;
-	staged.inductance_fallback = true;
-	staged.inductance_roverl = true;
-	staged.inductance_demod = false;
-	staged.inductance_saliency = false;
-	electrical_id_update_combined();
-
-	return staged.result_valid && staged.pi_valid ? 0 : -ERANGE;
-}
-
-static void electrical_id_stage_scalar_inductance(float32_t l_h,
-						  uint32_t samples,
-						  float32_t confidence,
-						  float32_t residual_ratio)
-{
-	staged.ld = (struct motor_electrical_id_l_result){
-		.inductance_h = l_h,
-		.residual_ratio = residual_ratio,
-		.confidence = confidence,
-		.samples = samples,
-		.valid = true,
-	};
-	staged.lq = staged.ld;
-	staged.ld_valid = true;
-	staged.lq_valid = true;
-	staged.inductance_fallback = false;
-	staged.inductance_roverl = false;
-	staged.inductance_demod = false;
-	staged.inductance_saliency = false;
-	electrical_id_update_combined();
-}
-
 static void electrical_id_stage_demod_inductance(void)
 {
 	staged.ld = (struct motor_electrical_id_l_result){
@@ -1014,9 +878,7 @@ int cmd_motor_commission_electrical_plan(const struct shell *sh, size_t argc, ch
 	shell_print(sh, "  Safe current limit: %.4f A (profile max %.4f A)",
 		    (double)electrical_id_current_limit(),
 		    (double)MOTOR_MAX_CURRENT_A);
-	shell_print(sh, "  Default pulses: integral %.3f V/%u ms, demod %.3f V/%u ms",
-		    (double)COMMISSION_ELECTRICAL_L_PULSE_V,
-		    COMMISSION_ELECTRICAL_L_PULSE_MS,
+	shell_print(sh, "  Default demod pulse: %.3f V/%u ms",
 		    (double)COMMISSION_ELECTRICAL_DEMOD_PULSE_V,
 		    COMMISSION_ELECTRICAL_DEMOD_PULSE_MS);
 	shell_print(sh, "  Default demod half-period: %u control ticks (%.1f Hz)",
@@ -1032,12 +894,10 @@ int cmd_motor_commission_electrical_plan(const struct shell *sh, size_t argc, ch
 		    (double)lim.l_min_h, (double)lim.l_max_h);
 	shell_print(sh, "  Commands:");
 	shell_print(sh, "    motor commission electrical run [rs_current_a] [demod_pulse_v] [samples]");
-	shell_print(sh, "    motor commission electrical measure inductance [pulse_v] [samples] [pulse_ms]");
 	shell_print(sh, "    motor commission electrical measure demod [pulse_v] [samples] [half_cycles]");
 	shell_print(sh, "    motor commission electrical demod_sweep [pulse_v] [samples]");
 	shell_print(sh, "    motor commission electrical saliency_sweep [pulse_v] [vectors] [pairs] [revs] [half_cycles] [settle_ticks]");
 	shell_print(sh, "    motor commission electrical saliency_apply");
-	shell_print(sh, "    motor commission electrical sweep [samples]");
 	shell_print(sh, "    motor commission electrical status");
 	shell_print(sh, "    motor commission electrical apply");
 	shell_print(sh, "    motor commission electrical validate [current_a] [hold_ms] [max_error_a]");
@@ -1077,7 +937,7 @@ int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t ar
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh, true);
+	ret = electrical_id_enter_generated_current_mode(sh, false);
 	if (ret != 0) {
 		return ret;
 	}
@@ -1094,80 +954,6 @@ int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t ar
 	shell_print(sh, "Production Rs staged: Rs=%.6f ohm samples=%u confidence=%.3f residual=%.4f",
 		    (double)staged.rs.rs_ohm, staged.rs.samples,
 		    (double)staged.rs.confidence, (double)staged.rs.residual_ratio);
-	return 0;
-}
-
-int cmd_motor_commission_electrical_measure_inductance(const struct shell *sh, size_t argc,
-							char **argv)
-{
-	float32_t pulse_v;
-	uint32_t repeats;
-	uint32_t pulse_ms;
-	int ret = parse_optional_float(argv, argc, 1U, COMMISSION_ELECTRICAL_L_PULSE_V, &pulse_v);
-	if (ret != 0 ||
-	    parse_optional_u32(argv, argc, 2U, COMMISSION_ELECTRICAL_SAMPLES, &repeats) != 0 ||
-	    parse_optional_u32(argv, argc, 3U, COMMISSION_ELECTRICAL_L_PULSE_MS, &pulse_ms) != 0) {
-		shell_error(sh, "Usage: motor commission electrical measure inductance [pulse_v] [samples] [pulse_ms]");
-		return -EINVAL;
-	}
-	if (g_motor_params == NULL) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-	if (!staged.rs_valid) {
-		shell_error(sh, "Measure/stage Rs before inductance.");
-		return -EACCES;
-	}
-	if (pulse_v <= 0.0f || pulse_v > electrical_id_voltage_pulse_limit() ||
-	    repeats < COMMISSION_ELECTRICAL_MIN_SAMPLES || repeats > COMMISSION_ELECTRICAL_MAX_SAMPLES ||
-	    pulse_ms < COMMISSION_ELECTRICAL_MIN_PULSE_MS) {
-		shell_error(sh,
-			    "Invalid pulse/samples; pulse in (0, %.4f] V, samples %u..%u, pulse_ms >= %u",
-			    (double)electrical_id_voltage_pulse_limit(),
-			    COMMISSION_ELECTRICAL_MIN_SAMPLES, COMMISSION_ELECTRICAL_MAX_SAMPLES,
-			    COMMISSION_ELECTRICAL_MIN_PULSE_MS);
-		return -EINVAL;
-	}
-
-	ret = electrical_id_enter_generated_current_mode(sh, false);
-	if (ret != 0) {
-		return ret;
-	}
-	staged.ld_valid = false;
-	staged.lq_valid = false;
-	staged.result_valid = false;
-	staged.pi_valid = false;
-	staged.inductance_fallback = false;
-	staged.inductance_roverl = false;
-	staged.inductance_demod = false;
-	staged.inductance_saliency = false;
-	ret = electrical_id_collect_l_axis(false, pulse_v, pulse_ms, repeats, &staged.ld);
-	if (ret == 0) {
-		staged.ld_valid = staged.ld.valid;
-		ret = electrical_id_collect_l_axis(true, pulse_v, pulse_ms, repeats, &staged.lq);
-		staged.lq_valid = (ret == 0 && staged.lq.valid);
-		staged.inductance_fallback = false;
-		if (!staged.lq_valid && staged.ld_valid) {
-			shell_warn(sh,
-				   "Q-axis inductance pulse rejected (err %d); using D-axis scalar L for Q",
-				   ret);
-			electrical_id_stage_scalar_inductance(staged.ld.inductance_h,
-							      staged.ld.samples,
-							      staged.ld.confidence,
-							      staged.ld.residual_ratio);
-			ret = 0;
-		}
-	}
-	electrical_id_stop();
-	if (ret != 0 || !staged.ld_valid || !staged.lq_valid) {
-		shell_error(sh, "Production inductance measurement rejected (err %d)", ret);
-		return ret;
-	}
-
-	electrical_id_update_combined();
-	shell_print(sh, "Production inductance staged: Ld=%.9f H Lq=%.9f H Lavg=%.9f H diff=%.9f H",
-		    (double)staged.ld.inductance_h, (double)staged.lq.inductance_h,
-		    (double)staged.result.l_avg_h, (double)staged.result.lq_minus_ld_h);
 	return 0;
 }
 
@@ -1570,165 +1356,6 @@ int cmd_motor_commission_electrical_saliency_apply(const struct shell *sh, size_
 	return 0;
 }
 
-int cmd_motor_commission_electrical_sweep(const struct shell *sh, size_t argc, char **argv)
-{
-	uint32_t samples;
-	if (parse_optional_u32(argv, argc, 1U, COMMISSION_ELECTRICAL_SAMPLES, &samples) != 0) {
-		shell_error(sh, "Usage: motor commission electrical sweep [samples]");
-		return -EINVAL;
-	}
-	if (g_motor_params == NULL) {
-		shell_error(sh, "Motor not initialized");
-		return -ENODEV;
-	}
-	if (!staged.rs_valid) {
-		shell_error(sh, "Measure/stage Rs before inductance sweep.");
-		return -EACCES;
-	}
-	if (samples < COMMISSION_ELECTRICAL_MIN_SAMPLES || samples > COMMISSION_ELECTRICAL_MAX_SAMPLES) {
-		shell_error(sh, "Invalid samples; samples %u..%u",
-			    COMMISSION_ELECTRICAL_MIN_SAMPLES, COMMISSION_ELECTRICAL_MAX_SAMPLES);
-		return -EINVAL;
-	}
-
-	float32_t pulse_limit_v = electrical_id_voltage_pulse_limit();
-	float32_t pulse_v[] = {
-		fminf(0.150f, pulse_limit_v * 0.45f),
-		fminf(0.250f, pulse_limit_v * 0.65f),
-		fminf(0.350f, pulse_limit_v * 0.85f),
-		fminf(0.440f, pulse_limit_v * 0.98f),
-	};
-	uint32_t pulse_ms[] = { 5U, 10U, 20U };
-	float32_t sum_l_h = 0.0f;
-	float32_t min_l_h = INFINITY;
-	float32_t max_l_h = 0.0f;
-	uint32_t accepted = 0U;
-	float32_t qualified_sum_l_h = 0.0f;
-	float32_t qualified_min_l_h = INFINITY;
-	float32_t qualified_max_l_h = 0.0f;
-	float32_t qualified_min_confidence = 1.0f;
-	float32_t qualified_max_residual = 0.0f;
-	uint32_t qualified = 0U;
-	uint32_t qualified_samples = 0U;
-	float32_t qualified_min_v = fmaxf(COMMISSION_ELECTRICAL_SWEEP_MIN_QUALIFIED_V,
-					  pulse_limit_v * 0.55f);
-
-	int ret = electrical_id_enter_generated_current_mode(sh, false);
-	if (ret != 0) {
-		return ret;
-	}
-
-	shell_print(sh, "Production D-axis inductance sweep:");
-	shell_print(sh, "  Rs=%.6f ohm pulse_limit=%.4f V samples/point=%u",
-		    (double)staged.rs.rs_ohm, (double)pulse_limit_v, samples);
-	shell_print(sh, "  Qualified staging requires V >= %.3f V", (double)qualified_min_v);
-	for (size_t t = 0U; t < ARRAY_SIZE(pulse_ms); ++t) {
-		for (size_t p = 0U; p < ARRAY_SIZE(pulse_v); ++p) {
-			if (p > 0U && fabsf(pulse_v[p] - pulse_v[p - 1U]) < 0.005f) {
-				continue;
-			}
-			struct motor_electrical_id_l_result result = {0};
-
-			ret = electrical_id_collect_l_axis(false, pulse_v[p], pulse_ms[t],
-							   samples, &result);
-			if (ret == 0 && result.valid) {
-				shell_print(sh,
-					    "  PASS V=%.3f ms=%u L=%.9f H conf=%.3f residual=%.4f samples=%u",
-					    (double)pulse_v[p], pulse_ms[t],
-					    (double)result.inductance_h,
-					    (double)result.confidence,
-					    (double)result.residual_ratio,
-					    result.samples);
-				sum_l_h += result.inductance_h;
-				min_l_h = fminf(min_l_h, result.inductance_h);
-				max_l_h = fmaxf(max_l_h, result.inductance_h);
-				accepted++;
-				if (pulse_v[p] >= qualified_min_v) {
-					qualified_sum_l_h += result.inductance_h;
-					qualified_min_l_h = fminf(qualified_min_l_h,
-								  result.inductance_h);
-					qualified_max_l_h = fmaxf(qualified_max_l_h,
-								  result.inductance_h);
-					qualified_min_confidence =
-						fminf(qualified_min_confidence,
-						      result.confidence);
-					qualified_max_residual =
-						fmaxf(qualified_max_residual,
-						      result.residual_ratio);
-					qualified_samples += result.samples;
-					qualified++;
-				}
-			} else {
-				shell_print(sh,
-					    "  FAIL V=%.3f ms=%u err=%d L=%.9f H conf=%.3f residual=%.4f samples=%u",
-					    (double)pulse_v[p], pulse_ms[t], ret,
-					    (double)result.inductance_h,
-					    (double)result.confidence,
-					    (double)result.residual_ratio,
-					    result.samples);
-			}
-		}
-	}
-	electrical_id_stop();
-
-	if (accepted == 0U) {
-		shell_error(sh, "Production inductance sweep rejected: no valid points");
-		return -ERANGE;
-	}
-
-	float32_t avg_l_h = sum_l_h / (float32_t)accepted;
-	float32_t spread_ratio = (avg_l_h > 0.0f) ? (max_l_h - min_l_h) / avg_l_h : INFINITY;
-	shell_print(sh,
-		    "  Summary: accepted=%u avg=%.9f H min=%.9f H max=%.9f H spread=%.3f",
-		    accepted, (double)avg_l_h, (double)min_l_h, (double)max_l_h,
-		    (double)spread_ratio);
-	if (g_motor_params->R_over_L_measured > 0.0f) {
-		float32_t implied_l_h = staged.rs.rs_ohm / g_motor_params->R_over_L_measured;
-
-		shell_print(sh, "  R/L implied L: %.9f H from Rs/R_over_L", (double)implied_l_h);
-	}
-
-	if (qualified == 0U) {
-		shell_error(sh, "Production inductance sweep rejected: no qualified high-SNR points");
-		ret = electrical_id_stage_roverl_inductance();
-		if (ret == 0) {
-			shell_warn(sh, "Staged R/L-implied scalar L after sweep rejection");
-			return 0;
-		}
-		return -ERANGE;
-	}
-
-	float32_t qualified_avg_l_h = qualified_sum_l_h / (float32_t)qualified;
-	float32_t qualified_spread_ratio = (qualified_avg_l_h > 0.0f) ?
-		(qualified_max_l_h - qualified_min_l_h) / qualified_avg_l_h : INFINITY;
-	shell_print(sh,
-		    "  Qualified: accepted=%u avg=%.9f H min=%.9f H max=%.9f H spread=%.3f",
-		    qualified, (double)qualified_avg_l_h, (double)qualified_min_l_h,
-		    (double)qualified_max_l_h, (double)qualified_spread_ratio);
-	if (qualified_spread_ratio > COMMISSION_ELECTRICAL_SWEEP_MAX_SPREAD_RATIO) {
-		shell_error(sh,
-			    "Production inductance sweep unstable: qualified spread %.3f > %.3f",
-			    (double)qualified_spread_ratio,
-			    (double)COMMISSION_ELECTRICAL_SWEEP_MAX_SPREAD_RATIO);
-		ret = electrical_id_stage_roverl_inductance();
-		if (ret == 0) {
-			shell_warn(sh, "Staged R/L-implied scalar L after sweep instability");
-			return 0;
-		}
-		return -ERANGE;
-	}
-
-	electrical_id_stage_scalar_inductance(qualified_avg_l_h, qualified_samples,
-					      qualified_min_confidence,
-					      qualified_max_residual);
-	shell_print(sh,
-		    "Production scalar inductance staged from sweep: Ld=Lq=%.9f H points=%u confidence=%.3f residual=%.4f",
-		    (double)qualified_avg_l_h, qualified,
-		    (double)qualified_min_confidence,
-		    (double)qualified_max_residual);
-	return staged.result_valid ? 0 : -ERANGE;
-}
-
 int cmd_motor_commission_electrical_run(const struct shell *sh, size_t argc, char **argv)
 {
 	float32_t current_a;
@@ -1805,7 +1432,7 @@ int cmd_motor_commission_electrical_status(const struct shell *sh, size_t argc, 
 		    staged.inductance_roverl ? "roverL" :
 		    (staged.inductance_fallback ? "fallback" :
 		     (staged.inductance_demod ? "demod" :
-		      (staged.inductance_saliency ? "saliency" : "pulse"))));
+		      (staged.inductance_saliency ? "saliency" : "not-staged"))));
 	if (staged.inductance_demod) {
 		shell_print(sh, "  Demod:  D inv=%.3f spread=%.3f, Q inv=%.3f spread=%.3f",
 			    (double)staged.ld_demod.inv_l_mean,

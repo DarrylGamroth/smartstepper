@@ -396,10 +396,9 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		    (double)g_motor_params->R_over_L_measured);
 
 	shell_print(sh, "[2/4] Encoder commutation mapping");
-	char *boot_argv[] = { "boot" };
-	ret = cmd_motor_commission_boot(sh, ARRAY_SIZE(boot_argv), boot_argv);
+	ret = motor_commission_encoder_default_map_apply(sh, false, false);
 	if (ret != 0) {
-		shell_error(sh, "Encoder boot commissioning failed (err %d)", ret);
+		shell_error(sh, "Encoder commutation mapping failed (err %d)", ret);
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}

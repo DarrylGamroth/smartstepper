@@ -16,10 +16,6 @@
 		commission-electrical-settle-ms = <1000>;
 		commission-electrical-current-ramp-ms = <1000>;
 
-		/* Legacy scalar/pulse inductance diagnostics; not the baseline L path. */
-		commission-electrical-l-pulse-mv = <450>;
-		commission-electrical-l-pulse-ms = <5>;
-
 		/* Baseline demodulated Ld/Lq recipe. Pulse amplitude remains profile-specific. */
 		commission-electrical-demod-pulse-ms = <2>;
 		commission-electrical-demod-half-cycles = <40>;

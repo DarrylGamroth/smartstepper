@@ -35,11 +35,11 @@ static int motor_commission_prepare_pi_encoder_validation(const struct shell *sh
 		return -ENODEV;
 	}
 	if (!g_motor_params->calibration.complete) {
-		shell_error(sh, "Calibration is not complete; run 'motor commission boot ...' first");
+		shell_error(sh, "Current offsets are not complete; run 'motor commission run confirm apply' first");
 		return -EACCES;
 	}
 	if (!g_motor_params->calibration.encoder_mapping_complete) {
-		shell_error(sh, "Encoder mapping is not applied; run 'motor commission boot ...' first");
+		shell_error(sh, "Encoder mapping is not applied; run 'motor commission run confirm apply' first");
 		return -EACCES;
 	}
 	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
@@ -179,7 +179,7 @@ int cmd_motor_commission_validate_current(const struct shell *sh, size_t argc, c
 	}
 
 	shell_print(sh,
-		    "Validate current_encoder: requires 'motor commission boot'; does not tune gains.");
+		    "Validate current_encoder: requires standard commissioning; does not tune gains.");
 	int ret = motor_commission_prepare_pi_encoder_validation(sh);
 	if (ret != 0) {
 		return ret;

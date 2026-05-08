@@ -87,7 +87,7 @@ echo "[hil] logs: $LOG_DIR"
 run_hil status
 
 if [[ "$LIVE" -eq 1 ]]; then
-  run_hil boot-commission --yes-live-motion --boot-current 0.15 --boot-hz 0.10 --cycles 1
+  run_hil standard-commission --yes-live-motion
 
   if [[ "$OPEN_LOOP_TRACE" -eq 1 ]]; then
     run_hil encoder-trace-open-loop --yes-live-motion \
@@ -96,18 +96,16 @@ if [[ "$LIVE" -eq 1 ]]; then
   fi
 
   if [[ "$CURRENT_VALIDATE" -eq 1 ]]; then
-    run_hil current-validate --yes-live-motion --boot-current 0.15 --boot-hz 0.10 --cycles 1 --current-iq 0.03 --current-hold-ms 160
+    run_hil current-validate --yes-live-motion --current-iq 0.03 --current-hold-ms 160
   fi
 
   if [[ "$INCLUDE_VELOCITY" -eq 1 ]]; then
     run_hil velocity-validate --yes-live-motion \
-      --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
       --velocity-hz 0.50 --velocity-hold-ms 1000
   fi
 
   if [[ "$INCLUDE_POSITION" -eq 1 ]]; then
     run_hil position-validate --yes-live-motion \
-      --boot-current 0.15 --boot-hz 0.10 --cycles 1 \
       --velocity-hz 0.50 --velocity-hold-ms 1000 \
       --position-delta-deg 5 --position-hold-ms 2000
   fi

@@ -249,8 +249,7 @@ def scenario_status(args: argparse.Namespace) -> list[ShellCommand]:
     ]
 
 
-def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
-    duration_s = max(10.0, (float(args.cycles) / max(float(args.boot_hz), 0.001)) + 12.0)
+def scenario_standard_commission(args: argparse.Namespace) -> list[ShellCommand]:
     return [
         ShellCommand("motor state status"),
         ShellCommand("motor state clear_error", timeout_s=2.0),
@@ -262,15 +261,16 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor safety timeout 0"),
         ShellCommand("motor encoder acquisition reset"),
         ShellCommand(
-            f"motor commission boot {args.boot_current:.3f} {args.boot_hz:.3f} {args.cycles:.3f}",
-            timeout_s=duration_s,
+            f"motor commission run {args.commission_profile} apply",
+            timeout_s=args.standard_commission_timeout_s,
             note=(
-                f"Boot commissioning: offset calibration has no rotation; encoder mapping "
-                f"then rotates {args.cycles:.2f} rev at {args.boot_hz:.3f} Hz; "
-                "+Iq validation should move briefly."
+                "Standard commissioning: current offsets, R/L bootstrap, production "
+                "Rs/Ld/Lq, encoder mapping, flux ID, and mechanical ID."
             ),
             require_success=True,
         ),
+        ShellCommand("motor commission status", timeout_s=5.0),
+        ShellCommand("motor info measured", timeout_s=5.0),
         ShellCommand("motor encoder control_status"),
         ShellCommand("motor encoder acquisition status"),
         ShellCommand("motor state status"),
@@ -286,7 +286,7 @@ def scenario_boot_commission(args: argparse.Namespace) -> list[ShellCommand]:
 
 
 def scenario_encoder_validate(args: argparse.Namespace) -> list[ShellCommand]:
-    cmds = scenario_boot_commission(args)
+    cmds = scenario_standard_commission(args)
     cmds.extend([
         *scenario_current_validate_commands(args),
         *scenario_velocity_validate_commands(args),
@@ -299,7 +299,7 @@ def scenario_encoder_validate(args: argparse.Namespace) -> list[ShellCommand]:
 def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
     duration_s = max(
         10.0,
-        (float(args.cycles) / max(abs(float(args.boot_hz)), 0.001)) *
+        (float(args.cycles) / max(abs(float(args.map_hz)), 0.001)) *
         (2.0 if args.bidirectional else 1.0) + 15.0,
     )
     suffix = " bidirectional" if args.bidirectional else ""
@@ -315,11 +315,11 @@ def scenario_encoder_robust(args: argparse.Namespace) -> list[ShellCommand]:
         ShellCommand("motor encoder acquisition reset", timeout_s=2.0),
         ShellCommand("motor arm", timeout_s=2.0),
         ShellCommand(
-            f"motor commission encoder robust {args.boot_current:.3f} "
-            f"{args.boot_hz:.3f} {args.cycles:.3f}{suffix}",
+            f"motor commission encoder robust {args.map_current:.3f} "
+            f"{args.map_hz:.3f} {args.cycles:.3f}{suffix}",
             timeout_s=duration_s,
             note=(
-                f"Encoder mapping: generated-angle Id sweep at {args.boot_hz:.3f} Hz; "
+                f"Encoder mapping: generated-angle Id sweep at {args.map_hz:.3f} Hz; "
                 "slow visible rotation is expected."
             ),
             require_success=True,
@@ -406,21 +406,21 @@ def scenario_position_validate_commands(args: argparse.Namespace) -> list[ShellC
 
 def scenario_current_validate(args: argparse.Namespace) -> list[ShellCommand]:
     return [
-        *scenario_boot_commission(args),
+        *scenario_standard_commission(args),
         *scenario_current_validate_commands(args),
     ]
 
 
 def scenario_velocity_validate(args: argparse.Namespace) -> list[ShellCommand]:
     return [
-        *scenario_boot_commission(args),
+        *scenario_standard_commission(args),
         *scenario_velocity_validate_commands(args),
     ]
 
 
 def scenario_position_validate(args: argparse.Namespace) -> list[ShellCommand]:
     return [
-        *scenario_boot_commission(args),
+        *scenario_standard_commission(args),
         *scenario_velocity_validate_commands(args),
         *scenario_position_validate_commands(args),
     ]
@@ -541,24 +541,7 @@ def _velocity_sweep_regulator_setup(args: argparse.Namespace,
 def scenario_velocity_sweep(args: argparse.Namespace) -> list[ShellCommand]:
     targets = _velocity_sweep_targets(args)
     commission_timeout_s = args.standard_commission_timeout_s
-    if args.velocity_sweep_commission == "boot":
-        commission_duration_s = max(
-            10.0,
-            (float(args.cycles) / max(float(args.boot_hz), 0.001)) + 12.0,
-        )
-        commission_commands = [
-            ShellCommand(
-                f"motor commission boot {args.boot_current:.3f} "
-                f"{args.boot_hz:.3f} {args.cycles:.3f}",
-                timeout_s=commission_duration_s,
-                note=(
-                    f"Boot commissioning before sweep: offset calibration has no rotation; "
-                    f"mapping rotates {args.cycles:.2f} rev at {args.boot_hz:.3f} Hz."
-                ),
-                require_success=True,
-            ),
-        ]
-    elif args.velocity_sweep_commission == "standard":
+    if args.velocity_sweep_commission == "standard":
         commission_commands = []
         if not args.skip_production_electrical:
             commission_commands.extend(production_electrical_id_commands(args, validate=True))
@@ -777,9 +760,7 @@ def scenario_custom(args: argparse.Namespace) -> list[ShellCommand]:
     commands: list[ShellCommand] = []
     for cmd in args.command:
         timeout_s = args.command_timeout
-        if cmd.strip().startswith("motor commission boot"):
-            timeout_s = max(timeout_s, args.boot_commission_timeout_s)
-        elif cmd.strip().startswith("motor commission run"):
+        if cmd.strip().startswith("motor commission run"):
             timeout_s = max(timeout_s, args.standard_commission_timeout_s)
         commands.append(ShellCommand(cmd, timeout_s=timeout_s))
     return commands
@@ -813,7 +794,7 @@ def scenario_production_electrical_id(args: argparse.Namespace) -> list[ShellCom
 
 SCENARIOS = {
     "status": (scenario_status, False),
-    "boot-commission": (scenario_boot_commission, True),
+    "standard-commission": (scenario_standard_commission, True),
     "current-validate": (scenario_current_validate, True),
     "encoder-robust": (scenario_encoder_robust, True),
     "encoder-validate": (scenario_encoder_validate, True),
@@ -842,11 +823,6 @@ def _command_success_failure_reason(cmd: ShellCommand, response: str) -> str | N
 
     lower = response.lower()
     command = cmd.command
-    if command.startswith("motor commission boot"):
-        if "boot commissioning complete" in lower:
-            return None
-        return "boot commissioning did not complete"
-
     if command.startswith("motor commission run"):
         if ("standard commissioning workflow complete" in lower or
             "auto commission complete" in lower or
@@ -1674,7 +1650,7 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
         ready = _parse_yes_no_field(control_response, "Ready")
         mapping = _parse_yes_no_field(control_response, "Mapping applied")
         protocol = _parse_yes_no_field(control_response, "Protocol ok")
-        if args.scenario == "boot-commission":
+        if args.scenario == "standard-commission":
             _check(checks, "encoder_ready", ready is True,
                    "Encoder control ready" if ready else "Encoder control not ready",
                    {"ready": bool(ready)})
@@ -1708,15 +1684,16 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
                   })
 
     if args.scenario in (
-        "boot-commission",
+        "standard-commission",
         "current-validate",
         "encoder-validate",
         "velocity-validate",
         "position-validate",
     ):
-        complete = "Boot commissioning complete" in text
-        _check(checks, "boot_commission_complete", complete,
-               "Boot commissioning completed" if complete else "Boot commissioning completion text not found")
+        complete = "Standard commissioning workflow complete" in text
+        _check(checks, "standard_commission_complete", complete,
+               "Standard commissioning completed" if complete
+               else "Standard commissioning completion text not found")
 
     if args.scenario == "encoder-robust":
         _evaluate_encoder_robust(checks, results)
@@ -1771,11 +1748,6 @@ def evaluate_results(args: argparse.Namespace, results: Sequence[ShellResult],
             _check(checks, "commission_estimates_applied", applied,
                    "Commissioning estimates applied to active model" if applied
                    else "Commissioning estimates were not applied to active model")
-        elif args.velocity_sweep_commission == "boot":
-            complete = "Boot commissioning complete" in text
-            _check(checks, "boot_commission_complete", complete,
-                   "Boot commissioning completed" if complete
-                   else "Boot commissioning completion text not found")
         _evaluate_velocity_sweep(args, checks, results)
 
     if args.scenario in ("current-validate", "encoder-validate"):
@@ -1849,8 +1821,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--min-velocity-tracking-samples", type=int, default=1,
                         help="Minimum number of nonzero velocity samples that must move enough.")
 
-    parser.add_argument("--boot-current", type=float, default=0.15)
-    parser.add_argument("--boot-hz", type=float, default=0.10)
+    parser.add_argument("--map-current", type=float, default=0.15)
+    parser.add_argument("--map-hz", type=float, default=0.10)
     parser.add_argument("--cycles", type=float, default=1.0)
     parser.add_argument("--bidirectional", action="store_true",
                         help="Use forward+reverse generated sweeps for encoder-robust.")
@@ -1867,7 +1839,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--velocity-sweep-regulator", choices=("pi", "mpr"), default="pi",
                         help="Outer regulator under test for velocity-sweep.")
     parser.add_argument("--velocity-sweep-commission",
-                        choices=("standard", "boot", "none"), default="standard",
+                        choices=("standard", "none"), default="standard",
                         help="Commissioning sequence to run before velocity-sweep.")
     parser.add_argument("--velocity-sweep-target-hz", type=float, action="append",
                         help="Exact velocity target for velocity-sweep. Can be repeated.")
@@ -1898,8 +1870,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--position-hold-ms", type=int, default=2000)
     parser.add_argument("--standard-commission-timeout-s", type=float, default=120.0,
                         help="Timeout for 'motor commission run <profile> apply'.")
-    parser.add_argument("--boot-commission-timeout-s", type=float, default=30.0,
-                        help="Timeout for a custom 'motor commission boot ...' command.")
     parser.add_argument("--commission-profile", choices=("slow", "confirm"), default="confirm",
                         help="Auto-commissioning motion profile used by mpr-dob-detent.")
     parser.add_argument("--mechanical-id-profile", choices=("slow", "confirm"), default="confirm",

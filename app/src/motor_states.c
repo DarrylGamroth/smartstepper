@@ -27,7 +27,6 @@
 #include "config.h"
 #include "motor_current_slew.h"
 #include "motor/filters/pi.h"
-#include "motor/filters/filter_fo.h"
 #include "motor/motion/traj.h"
 #include "motor/observers/angle_observer.h"
 #include "motor/calibration/align.h"
@@ -80,9 +79,6 @@ static uint32_t motor_publish_isr_mode_flags(const struct motor_parameters *para
 	if (state == &motor_states[MOTOR_STATE_OFFSET_MEAS]) {
 		mode_flags |= MOTOR_RT_MODE_OFFSET_MEAS;
 	}
-	if (state == &motor_states[MOTOR_STATE_RS_EST]) {
-		mode_flags |= MOTOR_RT_MODE_RS_EST;
-	}
 	if (state == &motor_states[MOTOR_STATE_ROVERL_MEAS]) {
 		mode_flags |= MOTOR_RT_MODE_ROVERL_MEAS;
 	}
@@ -130,7 +126,6 @@ motor_publish_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 		}
 	}
 	if ((mode_flags & (MOTOR_RT_MODE_OFFSET_MEAS |
-			   MOTOR_RT_MODE_RS_EST |
 			   MOTOR_RT_MODE_ROVERL_MEAS |
 			   MOTOR_RT_MODE_ALIGN_POS_INJECT |
 			   MOTOR_RT_MODE_ALIGN_POS_SAMPLE)) != 0U) {
@@ -349,20 +344,15 @@ const struct smf_state motor_states[] = {
 						      &motor_states[MOTOR_STATE_PREPARE_ONLINE],
 						      &motor_states[MOTOR_STATE_OFFSET_MEAS]),
 	[MOTOR_STATE_OFFSET_MEAS] = SMF_CREATE_STATE(motor_state_offset_meas_entry,
-				       motor_state_offset_meas_run,
-				       motor_state_offset_meas_exit,
-				       &motor_states[MOTOR_STATE_CALIBRATION],
-				       NULL),
-	[MOTOR_STATE_RS_EST] = SMF_CREATE_STATE(motor_state_rs_est_entry,
-				  motor_state_rs_est_run,
-				  motor_state_rs_est_exit,
-				  &motor_states[MOTOR_STATE_CALIBRATION],
-				  NULL),
+						      motor_state_offset_meas_run,
+						      motor_state_offset_meas_exit,
+						      &motor_states[MOTOR_STATE_CALIBRATION],
+						      NULL),
 	[MOTOR_STATE_ROVERL_MEAS] = SMF_CREATE_STATE(motor_state_roverl_meas_entry,
-				  motor_state_roverl_meas_run,
-				  motor_state_roverl_meas_exit,
-				  &motor_states[MOTOR_STATE_CALIBRATION],
-				  NULL),
+						      motor_state_roverl_meas_run,
+						      motor_state_roverl_meas_exit,
+						      &motor_states[MOTOR_STATE_CALIBRATION],
+						      NULL),
 	[MOTOR_STATE_ALIGN] = SMF_CREATE_STATE(motor_state_align_entry,
 					motor_state_align_run,
 					motor_state_align_exit,
@@ -444,7 +434,6 @@ const char *motor_state_to_string(int state)
 	case MOTOR_STATE_CTRL_INIT:    return "CTRL_INIT";
 	case MOTOR_STATE_CALIBRATION:  return "CALIBRATION";
 	case MOTOR_STATE_OFFSET_MEAS:  return "OFFSET_MEAS";
-	case MOTOR_STATE_RS_EST:       return "RS_EST";
 	case MOTOR_STATE_ROVERL_MEAS:  return "ROVERL_MEAS";
 	case MOTOR_STATE_ALIGN:        return "ALIGN";
 	case MOTOR_STATE_ALIGN_POS_INJECT: return "ALIGN_POS_INJECT";

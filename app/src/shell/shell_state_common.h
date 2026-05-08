@@ -130,7 +130,6 @@ static inline enum motor_control_policy_mode motor_shell_policy_mode_from_state(
 		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
 	case MOTOR_STATE_CALIBRATION:
 	case MOTOR_STATE_OFFSET_MEAS:
-	case MOTOR_STATE_RS_EST:
 	case MOTOR_STATE_ROVERL_MEAS:
 	case MOTOR_STATE_ALIGN:
 	case MOTOR_STATE_ALIGN_POS_INJECT:

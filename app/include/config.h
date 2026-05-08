@@ -472,12 +472,8 @@ struct motor_parameters {
 	float32_t Ia_offset;
 	float32_t Ib_offset;
 
-	/* Rs estimation filters */
-	struct filter_fo_f32 filter_rs_est_V;
-	struct filter_fo_f32 filter_rs_est_I;
-
-	/* Current setpoints */
-	float32_t Id_setpoint_A;
+		/* Current setpoints */
+		float32_t Id_setpoint_A;
 	float32_t Iq_setpoint_A;
 
 	/* Safety interlock and command-timeout state */
@@ -638,22 +634,8 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 #define ROVERL_EST_FREQ_HZ ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_freq_hz))
 #define ROVERL_EST_SETTLING_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_settling_ms) / 1000.0f)
 #define ROVERL_EST_DURATION_S ((float32_t)DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms) / 1000.0f)
-/* Legacy diagnostic DC Rs state. Baseline commissioning uses RoverL first, then
- * production bidirectional Rs. If rs-est-* is absent, mirror RoverL/current
- * command defaults so old diagnostic builds still compile.
- */
-#define RS_EST_CURRENT_A \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_current_ma, \
-			       DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma)) / 1000.0f)
-#define RS_EST_RAMPUP_S \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_rampup_ms, \
-			       CURRENT_COMMAND_RAMP_MS) / 1000.0f)
-#define RS_EST_DURATION_S \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, rs_est_duration_ms, \
-			       DT_PROP(USER_PARAMS_NODE, roverl_est_duration_ms)) / 1000.0f)
-#define RS_EST_FILTER_BW_HZ 5.0f      /* Heavy filtering for legacy diagnostic measurement */
-#define COMMISSION_ELECTRICAL_RS_CURRENT_A \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
+	#define COMMISSION_ELECTRICAL_RS_CURRENT_A \
+		((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_rs_current_ma, \
 			       DT_PROP(USER_PARAMS_NODE, roverl_est_current_ma)) / 1000.0f)
 #define COMMISSION_ELECTRICAL_CURRENT_LIMIT_A \
 	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_limit_ma, \
@@ -671,13 +653,9 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 #define COMMISSION_ELECTRICAL_CURRENT_RAMP_MS \
 	DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_current_ramp_ms, \
 		   CURRENT_COMMAND_RAMP_MS)
-#define COMMISSION_ELECTRICAL_L_PULSE_V \
-	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_mv) / 1000.0f)
-#define COMMISSION_ELECTRICAL_L_PULSE_MS \
-	DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_ms)
-#define COMMISSION_ELECTRICAL_DEMOD_PULSE_V \
-	((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_demod_pulse_mv, \
-			       DT_PROP(USER_PARAMS_NODE, commission_electrical_l_pulse_mv)) / 1000.0f)
+	#define COMMISSION_ELECTRICAL_DEMOD_PULSE_V \
+		((float32_t)DT_PROP_OR(USER_PARAMS_NODE, commission_electrical_demod_pulse_mv, \
+				       DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_mv)) / 1000.0f)
 #define COMMISSION_ELECTRICAL_DEMOD_PULSE_MS \
 	DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_pulse_ms)
 #define COMMISSION_ELECTRICAL_DEMOD_HALF_CYCLES \
@@ -688,11 +666,7 @@ BUILD_ASSERT(DT_PROP(USER_PARAMS_NODE, max_modulation_index_mpu) > 0 &&
 	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_max_pulse_mv) / 1000.0f)
 #define COMMISSION_ELECTRICAL_MIN_PULSE_MS \
 	DT_PROP(USER_PARAMS_NODE, commission_electrical_min_pulse_ms)
-#define COMMISSION_ELECTRICAL_SWEEP_MAX_SPREAD_RATIO \
-	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_sweep_max_spread_mpu) / 1000.0f)
-#define COMMISSION_ELECTRICAL_SWEEP_MIN_QUALIFIED_V \
-	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_sweep_min_qualified_mv) / 1000.0f)
-#define COMMISSION_ELECTRICAL_DEMOD_SCALE_FACTOR \
+	#define COMMISSION_ELECTRICAL_DEMOD_SCALE_FACTOR \
 	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_scale_mpu) / 1000.0f)
 #define COMMISSION_ELECTRICAL_DEMOD_MAX_SPREAD_RATIO \
 	((float32_t)DT_PROP(USER_PARAMS_NODE, commission_electrical_demod_max_spread_mpu) / 1000.0f)

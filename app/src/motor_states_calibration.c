@@ -15,7 +15,6 @@
 #include "motor_control_api.h"
 #include "config.h"
 #include "motor/filters/pi.h"
-#include "motor/filters/filter_fo.h"
 #include "motor/motion/traj.h"
 #include "motor/calibration/align.h"
 #include "motor/calibration/offset.h"
@@ -389,101 +388,6 @@ void motor_state_roverl_meas_exit(void *obj)
 	/* Reset angle generator */
 	angle_gen_set_velocity(&params->angle_gen, 0.0f);
 	angle_gen_set_angle(&params->angle_gen, 0.0f);
-
-	/* Clear this state's additional requirements. */
-	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				      BIT(MOTOR_FEATURE_PI_CONTROL));
-}
-
-/* State: RS_EST - legacy diagnostic DC stator resistance measurement.
- * Baseline commissioning does not enter this state; it uses RoverL as the
- * bootstrap and production bidirectional Rs for the accepted model.
- */
-void motor_state_rs_est_entry(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Entering diagnostic RS_EST state");
-
-	/* Additional RS_EST requirements (PWM output is provided by PREPARE_ONLINE). */
-	motor_enable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |
-				     BIT(MOTOR_FEATURE_PI_CONTROL));
-
-	/* Rs EST uses DC current injection on d-axis
-	 * Two phases:
-	 *   1. RampUp: Gradually ramp current to avoid transients
-	 *   2. Measurement: Filter voltage and current for accurate Rs
-	 *
-	 * PI controller automatically generates voltage needed: V = I*R
-	 */
-
-	const struct motor_rs_est_config cfg = {
-		.target_current_a = RS_EST_CURRENT_A,
-		.rampup_s = RS_EST_RAMPUP_S,
-		.filter_bw_hz = RS_EST_FILTER_BW_HZ,
-		.control_hz = CONTROL_LOOP_FREQUENCY_HZ,
-	};
-	int ret = motor_rs_est_prepare(&params->traj_Id, &params->angle_gen,
-				       &params->filter_rs_est_V,
-				       &params->filter_rs_est_I, &cfg);
-	if (ret != 0) {
-		LOG_ERR("Rs EST plan failed: %d", ret);
-		motor_calibration_post_hardware_break(params);
-		return;
-	}
-
-	params->Rs_measured_ohm = 0.0f;
-
-	LOG_INF("Rs EST: I_target=%.3fA, rampup=%.1fs, measurement=%.1fs",
-		(double)RS_EST_CURRENT_A,
-		(double)RS_EST_RAMPUP_S, (double)RS_EST_DURATION_S);
-
-	/* Start timer for total Rs estimation duration (rampup + measurement) */
-	float32_t total_duration_s = RS_EST_RAMPUP_S + RS_EST_DURATION_S;
-	(void)motor_calibration_start_timer_or_fault(params, total_duration_s, "RS_EST");
-}
-
-static int motor_calibration_finalize_rs(struct motor_parameters *params)
-{
-	struct motor_rs_est_result result = {0};
-	const float32_t v_est_v = filter_fo_get_y1(&params->filter_rs_est_V);
-	const float32_t i_est_a = filter_fo_get_y1(&params->filter_rs_est_I);
-	int ret = motor_rs_est_finalize_from_scalars(v_est_v, i_est_a,
-						      params->Ls_measured_H, &result);
-	if (ret != 0) {
-		LOG_ERR("Rs EST failed: ret=%d (I=%.4e)",
-			ret, (double)i_est_a);
-		return ret;
-	}
-
-	LOG_INF("Rs EST complete: Rs=%.4f Ω (V=%.3fV, I=%.3fA)",
-		(double)result.rs_ohm, (double)result.v_est_v, (double)result.i_est_a);
-
-	params->Rs_measured_ohm = result.rs_ohm;
-	params->R_over_L_measured = result.r_over_l;
-	return motor_calibration_apply_current_pi_from_rl(params);
-}
-
-enum smf_state_result motor_state_rs_est_run(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-	if (!motor_calibration_state_timeout_elapsed(params)) {
-		return SMF_EVENT_PROPAGATE;
-	}
-
-	if (motor_calibration_finalize_rs(params) != 0) {
-		motor_calibration_post_hardware_break(params);
-		return SMF_EVENT_HANDLED;
-	}
-
-	return motor_commissioning_identification_complete(params);
-}
-
-void motor_state_rs_est_exit(void *obj)
-{
-	struct motor_parameters *params = (struct motor_parameters *)obj;
-
-	LOG_INF("Exiting diagnostic RS_EST state");
 
 	/* Clear this state's additional requirements. */
 	motor_disable_isr_feature_flags(params, BIT(MOTOR_FEATURE_ANGLE_GEN) |

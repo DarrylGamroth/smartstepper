@@ -120,16 +120,13 @@ promote valid staged results into active runtime parameters; no commissioning
 command persists values yet.
 
 ```text
-motor commission boot <current_a> <mech_hz> <cycles>
 motor commission run <slow|confirm> [apply]
 motor commission status
 motor commission apply
 
 motor commission electrical plan
 motor commission electrical measure rs [current_a] [samples] [settle_ms]
-motor commission electrical measure inductance [pulse_v] [samples] [pulse_ms]
 motor commission electrical measure demod [pulse_v] [samples] [half_cycles]
-motor commission electrical sweep [samples]
 motor commission electrical demod_sweep [pulse_v] [samples]
 motor commission electrical saliency_sweep [pulse_v] [vectors] [pairs] [revs] [half_cycles] [settle_ticks]
 motor commission electrical saliency_apply

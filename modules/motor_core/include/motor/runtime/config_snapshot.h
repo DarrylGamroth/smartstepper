@@ -37,7 +37,6 @@ struct motor_rt_config_snapshot {
 
 enum motor_rt_mode_flag {
 	MOTOR_RT_MODE_OFFSET_MEAS = BIT(0),
-	MOTOR_RT_MODE_RS_EST = BIT(1),
 	MOTOR_RT_MODE_ROVERL_MEAS = BIT(2),
 	MOTOR_RT_MODE_ALIGN_POS_INJECT = BIT(3),
 	MOTOR_RT_MODE_ALIGN_POS_SAMPLE = BIT(4),

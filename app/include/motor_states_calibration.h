@@ -17,10 +17,6 @@ void motor_state_offset_meas_entry(void *obj);
 enum smf_state_result motor_state_offset_meas_run(void *obj);
 void motor_state_offset_meas_exit(void *obj);
 
-void motor_state_rs_est_entry(void *obj);
-enum smf_state_result motor_state_rs_est_run(void *obj);
-void motor_state_rs_est_exit(void *obj);
-
 void motor_state_roverl_meas_entry(void *obj);
 enum smf_state_result motor_state_roverl_meas_run(void *obj);
 void motor_state_roverl_meas_exit(void *obj);

@@ -133,7 +133,7 @@ Recovery Status:
         self.assertTrue(recovery.values["gate_required"])
         self.assertFalse(recovery.values["gate_done"])
 
-    def test_boot_commission_fails_without_completion_text(self) -> None:
+    def test_standard_commission_fails_without_completion_text(self) -> None:
         results = [
             hil_telnet.ShellResult(
                 "motor state status",
@@ -155,16 +155,16 @@ Encoder Control Readiness:
             ),
         ]
 
-        report = hil_telnet.evaluate_results(_args("boot-commission"), results, None)
+        report = hil_telnet.evaluate_results(_args("standard-commission"), results, None)
 
         self.assertEqual(report.verdict, "FAIL")
-        self.assertTrue(any(check.name == "boot_commission_complete" for check in report.checks))
+        self.assertTrue(any(check.name == "standard_commission_complete" for check in report.checks))
 
-    def test_boot_commission_passes_with_ready_mapping_and_completion_text(self) -> None:
+    def test_standard_commission_passes_with_ready_mapping_and_completion_text(self) -> None:
         results = [
             hil_telnet.ShellResult(
-                "motor commission boot 0.150 0.050 1.000",
-                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+                "motor commission run confirm apply",
+                "Standard commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor encoder control_status",
@@ -186,7 +186,7 @@ Encoder Control Readiness:
             ),
         ]
 
-        report = hil_telnet.evaluate_results(_args("boot-commission"), results, None)
+        report = hil_telnet.evaluate_results(_args("standard-commission"), results, None)
 
         self.assertEqual(report.verdict, "PASS")
 
@@ -230,7 +230,7 @@ Encoder Control Readiness:
             "custom",
             "--no-log",
             "--command",
-            "motor commission boot",
+            "motor commission run confirm apply",
             "--command",
             "motor state status",
             "--command-timeout",
@@ -239,7 +239,7 @@ Encoder Control Readiness:
 
         commands = hil_telnet.scenario_custom(args)
 
-        self.assertGreaterEqual(commands[0].timeout_s, args.boot_commission_timeout_s)
+        self.assertGreaterEqual(commands[0].timeout_s, args.standard_commission_timeout_s)
         self.assertEqual(commands[1].timeout_s, 3.0)
 
     def test_encoder_validate_fails_wrong_velocity_sign(self) -> None:
@@ -289,8 +289,8 @@ Encoder Control Readiness:
     def test_current_validate_passes_clean_opposite_motion(self) -> None:
         results = [
             hil_telnet.ShellResult(
-                "motor commission boot 0.150 0.050 1.000",
-                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+                "motor commission run confirm apply",
+                "Standard commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate current 0.030 160",
@@ -328,8 +328,8 @@ Encoder Control Readiness:
     def test_velocity_validate_fails_excessive_overshoot(self) -> None:
         results = [
             hil_telnet.ShellResult(
-                "motor commission boot 0.150 0.050 1.000",
-                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+                "motor commission run confirm apply",
+                "Standard commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.050 1000",
@@ -366,8 +366,8 @@ Encoder Control Readiness:
     def test_velocity_validate_fails_when_reference_does_not_follow_target(self) -> None:
         results = [
             hil_telnet.ShellResult(
-                "motor commission boot 0.150 0.050 1.000",
-                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+                "motor commission run confirm apply",
+                "Standard commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.050 1000",
@@ -589,8 +589,8 @@ Encoder Control Readiness:
     def test_position_validate_does_not_require_current_validation_output(self) -> None:
         results = [
             hil_telnet.ShellResult(
-                "motor commission boot 0.150 0.050 1.000",
-                "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+                "motor commission run confirm apply",
+                "Standard commissioning workflow complete\n",
             ),
             hil_telnet.ShellResult(
                 "motor commission validate velocity 0.500 1000",
@@ -746,9 +746,9 @@ Encoder raw trace summary:
         point = next(check for check in report.checks if check.name == "velocity_sweep_0")
         self.assertEqual(point.status, "FAIL")
 
-    def test_required_boot_commission_rejects_failed_response(self) -> None:
+    def test_required_standard_commission_rejects_failed_response(self) -> None:
         cmd = hil_telnet.ShellCommand(
-            "motor commission boot 0.150 0.100 1.000",
+            "motor commission run confirm apply",
             require_success=True,
         )
 
@@ -759,15 +759,15 @@ Encoder raw trace summary:
 
         self.assertIsNotNone(reason)
 
-    def test_required_boot_commission_accepts_completion_response(self) -> None:
+    def test_required_standard_commission_accepts_completion_response(self) -> None:
         cmd = hil_telnet.ShellCommand(
-            "motor commission boot 0.150 0.100 1.000",
+            "motor commission run confirm apply",
             require_success=True,
         )
 
         reason = hil_telnet._command_success_failure_reason(
             cmd,
-            "Boot commissioning complete: sign=-1 commutation_offset=1.0000 deg mechanical outer=PI\n",
+            "Standard commissioning workflow complete\n",
         )
 
         self.assertIsNone(reason)

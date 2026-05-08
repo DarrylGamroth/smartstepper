@@ -107,14 +107,12 @@ static inline bool motor_is_align_active_state(uint32_t mode_flags)
 static inline bool motor_calibration_owns_angle_generator(uint32_t mode_flags)
 {
 	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	       motor_is_align_active_state(mode_flags);
 }
 
 static inline bool motor_current_slew_calibration_target_active(uint32_t mode_flags)
 {
 	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	       motor_is_align_active_state(mode_flags);
 }
 
@@ -168,11 +166,6 @@ static inline void motor_current_slew_accumulate_calibration(
 						params->Vd_V, params->Vq_V, meas->id_a);
 	}
 
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST)) {
-		motor_rs_est_accumulate(&params->filter_rs_est_V,
-					&params->filter_rs_est_I,
-					params->Vd_V, meas->id_a);
-	}
 }
 
 static inline void motor_control_step_current_slew_stage(struct motor_parameters *params,
@@ -198,7 +191,6 @@ static inline bool motor_vbus_fault_required(uint32_t mode_flags)
 {
 	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL) ||
 	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
 	       motor_is_align_active_state(mode_flags);
 }
@@ -206,7 +198,6 @@ static inline bool motor_vbus_fault_required(uint32_t mode_flags)
 static inline bool motor_current_fault_required(uint32_t mode_flags)
 {
 	return motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ONLINE_CONTROL) ||
-	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	       motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
 	       motor_is_align_active_state(mode_flags);
 }
@@ -230,7 +221,6 @@ motor_control_policy_mode_from_rt_flags(uint32_t mode_flags)
 		return MOTOR_CONTROL_POLICY_MODE_POSITION_ENCODER;
 	}
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_OFFSET_MEAS) ||
-	    motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST) ||
 	    motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS) ||
 	    motor_is_align_active_state(mode_flags)) {
 		return MOTOR_CONTROL_POLICY_MODE_CALIBRATION;
@@ -1144,11 +1134,6 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 	uint32_t mode_flags = ctx->mode_flags;
 
 	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_ROVERL_MEAS)) {
-		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
-		current_ref->iq_ref_a = 0.0f;
-	}
-
-	if (motor_rt_mode_active(mode_flags, MOTOR_RT_MODE_RS_EST)) {
 		current_ref->id_ref_a = traj_get_target_value(&params->traj_Id);
 		current_ref->iq_ref_a = 0.0f;
 	}

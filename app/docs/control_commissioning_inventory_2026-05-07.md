@@ -14,7 +14,7 @@ The project now has enough overlapping mechanisms that the default workflow shou
 4. Generated Id-axis encoder mapping.
 5. Use generated-angle modes and PI-based encoder velocity as the baseline control paths.
 
-Mechanical ID, detent feedforward, MPR, DOB, saliency sweep, RLS/online estimators, and legacy R/L/RS_EST should remain available for diagnostics or development, but they should not block commissioning until they have repeatable HIL evidence.
+Mechanical ID, detent feedforward, MPR, DOB, saliency sweep, and RLS/online estimators should remain available for diagnostics or development, but they should not block commissioning until they have repeatable HIL evidence. The legacy RS_EST and scalar pulse inductance paths have been removed from the supported code path.
 
 ## Known Good
 
@@ -48,8 +48,8 @@ Mechanical ID, detent feedforward, MPR, DOB, saliency sweep, RLS/online estimato
 | Area | Current Role | Reason |
 | --- | --- | --- |
 | State-machine `ROVERL_MEAS` | Bootstrap/fallback only | Fast and useful historically, but production demodulated Ld/Lq is currently the preferred current-PI source. |
-| Legacy `RS_EST` | Fallback/diagnostic only | Production bidirectional Rs is cleaner and should replace legacy Rs for normal commissioning. |
-| Pulse/integrated scalar inductance | Remove user-facing path | Has shown disagreement with R/L and demodulated methods. Remove shell/HIL production use; keep only private dependency-justified helpers if demod/saliency/tests still need them. |
+| Legacy `RS_EST` | Removed | Production bidirectional Rs replaces legacy Rs for normal commissioning. |
+| Pulse/integrated scalar inductance | Removed from user-facing path | Has shown disagreement with R/L and demodulated methods. Demodulated D/Q inductance is the production path. |
 | RLS parameter estimator / PRBS | Experimental | Not currently part of the working commissioning flow; possible future online Rs/temperature tracking, not inductance production ID. |
 | Online Rs / thermal model | Experimental/observer | Potential future temperature compensation; not required for commissioning baseline. |
 | Sensor-subsystem encoder drivers | Debug/legacy only | This project should use `encoder_rt` over `rt_spi` for control. Sensor shell compatibility is not a control requirement. |
@@ -63,20 +63,20 @@ Mechanical ID, detent feedforward, MPR, DOB, saliency sweep, RLS/online estimato
 Current overlapping paths:
 
 1. State-machine `ROVERL_MEAS` for R/L.
-2. State-machine `RS_EST`.
+2. Production bidirectional Rs measurement.
 3. Production `motor commission electrical measure rs`.
 4. Production `motor commission electrical measure demod`.
-5. User-facing `motor commission electrical measure inductance` / `sweep` scalar pulse paths.
+5. Demodulated D/Q inductance measurement.
 6. `saliency_sweep` diagnostic path.
 7. RLS/PRBS estimator.
 
 Decision:
 
 - Default: production bidirectional Rs + demodulated D/Q Ld/Lq.
-- Fallback: ROVERL/legacy values only if production electrical ID fails or has not been run.
+- Fallback: ROVERL/default values only if production electrical ID fails or has not been run.
 - Diagnostic only: saliency sweep, RLS/PRBS.
-- Remove user-facing scalar pulse/integrated inductance; keep private helpers only if dependency checking requires them.
-- Cleanup target: remove legacy `RS_EST` from normal `motor commission run` once production electrical ID is fully integrated into the standard flow.
+- Removed user-facing scalar pulse/integrated inductance.
+- Removed legacy `RS_EST`; `motor commission run` should use the standard production electrical + encoder-mapping flow.
 
 ### Encoder Handling
 
@@ -136,9 +136,7 @@ motor state clear_error
 motor disarm
 motor state idle
 motor safety timeout 0
-motor commission electrical run 0.300 0.500 128
-motor commission electrical apply
-motor commission boot 0.150 0.100 1
+motor commission run confirm apply
 motor velocity pi bandwidth 20 0.7 0.225
 motor outer mode pi
 ```
