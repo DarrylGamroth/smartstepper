@@ -11,6 +11,10 @@ must explicitly run `motor settings load ...`.
 - Runtime commissioning remains explicit.
 - Boot does not autoload persisted motor parameters.
 - Devicetree motor parameters remain safe fallback defaults.
+- Devicetree identity and safety limits should be conservative values that are
+  safe enough for identification/commissioning to run on a fresh controller.
+  Persisted settings may narrow runtime motion limits after commissioning, but
+  they must not be required for a safe initial boot.
 - ADC current offsets are **not persisted**. They are fast, board/runtime analog
   calibrations and must be measured on every boot.
 - Persisted settings are opt-in, shell-visible, typed, versioned, and guarded
@@ -49,6 +53,17 @@ motor/encoder/trim_elec_rad
 motor/encoder/mapping_correlation
 motor/encoder/mapping_residual_rad
 ```
+
+Motor identity group:
+
+```text
+motor/identity/pole_pairs
+```
+
+Identity values describe the motor/hardware assembly. In the current firmware
+`pole_pairs` is still consumed from devicetree in several ISR/control paths, so
+loading this group validates that the persisted identity matches the active
+firmware image rather than partially applying an inconsistent identity.
 
 Motor model group:
 
@@ -96,14 +111,31 @@ The detent table itself is not persisted in this version. Loading detent metadat
 will only enable detent feedforward if the volatile table CRC matches the stored
 CRC.
 
+Runtime limits group:
+
+```text
+motor/limits/nominal_voltage_v
+motor/limits/max_current_a
+motor/limits/brake_current_a
+motor/limits/max_velocity_hz
+motor/limits/max_accel_hz_s
+motor/limits/command_timeout_ms
+```
+
+`max_velocity_hz`, `max_accel_hz_s`, and `command_timeout_ms` are runtime-owned
+and are applied on load. `nominal_voltage_v`, `max_current_a`, and
+`brake_current_a` are persisted for visibility and future runtime-limit
+refactoring; today they are validated against the devicetree-backed firmware
+image because those values are still used directly by several hot paths.
+
 ## Shell Interface
 
 ```text
 motor settings status
 motor settings preview
-motor settings save [baseline|encoder|model|controllers|detent|all]
-motor settings load [baseline|encoder|model|controllers|detent|all]
-motor settings clear [baseline|encoder|model|controllers|detent|all]
+motor settings save [baseline|encoder|identity|model|limits|controllers|detent|all]
+motor settings load [baseline|encoder|identity|model|limits|controllers|detent|all]
+motor settings clear [baseline|encoder|identity|model|limits|controllers|detent|all]
 motor settings autoload status
 ```
 
@@ -127,7 +159,11 @@ Load validates selected values before applying. After apply:
 
 - encoder mapping reload updates the angle observer offset and resets feedback
   trust state,
+- identity reload verifies the persisted motor identity matches this firmware
+  image,
 - model reload updates active Rs/Ld/Lq/flux/Kt/J/B/Tc and model source markers,
+- limits reload applies runtime motion profile velocity/acceleration limits and
+  command timeout, and validates compile-time electrical safety limits,
 - controller reload recomputes PI/MPR/DOB coefficients from stored tuning
   intent, then resets PI integrators, velocity/position regulator state, MPR
   state, and DOB state,

@@ -39,6 +39,8 @@
 #define KEY_ENCODER_CORRELATION "motor/encoder/mapping_correlation"
 #define KEY_ENCODER_RESIDUAL "motor/encoder/mapping_residual_rad"
 
+#define KEY_IDENTITY_POLE_PAIRS "motor/identity/pole_pairs"
+
 #define KEY_MODEL_RS "motor/model/rs_ohm"
 #define KEY_MODEL_LD "motor/model/ld_h"
 #define KEY_MODEL_LQ "motor/model/lq_h"
@@ -81,6 +83,13 @@
 #define KEY_DETENT_LIMIT "motor/detent/iq_ff_limit_a"
 #define KEY_DETENT_TABLE_CRC "motor/detent/table_crc32"
 
+#define KEY_LIMITS_NOMINAL_VOLTAGE "motor/limits/nominal_voltage_v"
+#define KEY_LIMITS_MAX_CURRENT "motor/limits/max_current_a"
+#define KEY_LIMITS_BRAKE_CURRENT "motor/limits/brake_current_a"
+#define KEY_LIMITS_MAX_VELOCITY "motor/limits/max_velocity_hz"
+#define KEY_LIMITS_MAX_ACCEL "motor/limits/max_accel_hz_s"
+#define KEY_LIMITS_COMMAND_TIMEOUT "motor/limits/command_timeout_ms"
+
 #define MOTOR_SETTINGS_ZETA_MIN 0.2f
 #define MOTOR_SETTINGS_ZETA_MAX 2.0f
 #define MOTOR_SETTINGS_POSITION_TO_VELOCITY_BW_RATIO_MAX 0.20f
@@ -99,11 +108,25 @@
 	 MOTOR_SETTINGS_CTRL_FIELD_POS_BW | MOTOR_SETTINGS_CTRL_FIELD_DAMPING | \
 	 MOTOR_SETTINGS_CTRL_FIELD_VEL_LIMIT | MOTOR_SETTINGS_CTRL_FIELD_DOB_ENABLE | \
 	 MOTOR_SETTINGS_CTRL_FIELD_DOB_GAIN_SCALE)
+#define MOTOR_SETTINGS_IDENTITY_FIELD_POLE_PAIRS BIT(0)
+#define MOTOR_SETTINGS_IDENTITY_FIELDS_ALL MOTOR_SETTINGS_IDENTITY_FIELD_POLE_PAIRS
+#define MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE BIT(0)
+#define MOTOR_SETTINGS_LIMIT_FIELD_MAX_CURRENT BIT(1)
+#define MOTOR_SETTINGS_LIMIT_FIELD_BRAKE_CURRENT BIT(2)
+#define MOTOR_SETTINGS_LIMIT_FIELD_MAX_VELOCITY BIT(3)
+#define MOTOR_SETTINGS_LIMIT_FIELD_MAX_ACCEL BIT(4)
+#define MOTOR_SETTINGS_LIMIT_FIELD_COMMAND_TIMEOUT BIT(5)
+#define MOTOR_SETTINGS_LIMIT_FIELDS_ALL \
+	(MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE | MOTOR_SETTINGS_LIMIT_FIELD_MAX_CURRENT | \
+	 MOTOR_SETTINGS_LIMIT_FIELD_BRAKE_CURRENT | MOTOR_SETTINGS_LIMIT_FIELD_MAX_VELOCITY | \
+	 MOTOR_SETTINGS_LIMIT_FIELD_MAX_ACCEL | MOTOR_SETTINGS_LIMIT_FIELD_COMMAND_TIMEOUT)
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
 	uint32_t present_groups;
+	uint32_t identity_fields;
 	uint32_t controller_fields;
+	uint32_t limit_fields;
 	uint32_t present_meta;
 	int error;
 };
@@ -156,6 +179,30 @@ static int read_exact(settings_read_cb read_cb, void *cb_arg, void *dst, size_t 
 		} \
 	} while (false)
 
+#define LOAD_IDENTITY_FIELD(key_lit, field, field_bit) \
+	do { \
+		if (strcmp(key, (key_lit)) == 0) { \
+			ctx->error = read_exact(read_cb, cb_arg, &ctx->snapshot->field, sizeof(ctx->snapshot->field)); \
+			if (ctx->error == 0) { \
+				ctx->present_groups |= MOTOR_SETTINGS_GROUP_IDENTITY; \
+				ctx->identity_fields |= (field_bit); \
+			} \
+			return ctx->error == 0 ? 0 : 1; \
+		} \
+	} while (false)
+
+#define LOAD_LIMIT_FIELD(key_lit, field, field_bit) \
+	do { \
+		if (strcmp(key, (key_lit)) == 0) { \
+			ctx->error = read_exact(read_cb, cb_arg, &ctx->snapshot->field, sizeof(ctx->snapshot->field)); \
+			if (ctx->error == 0) { \
+				ctx->present_groups |= MOTOR_SETTINGS_GROUP_LIMITS; \
+				ctx->limit_fields |= (field_bit); \
+			} \
+			return ctx->error == 0 ? 0 : 1; \
+		} \
+	} while (false)
+
 static int settings_read_cb_direct(const char *key, size_t len,
 				   settings_read_cb read_cb, void *cb_arg, void *param)
 {
@@ -174,6 +221,8 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_FIELD("encoder/trim_elec_rad", encoder_trim_elec_rad, MOTOR_SETTINGS_GROUP_ENCODER);
 	LOAD_FIELD("encoder/mapping_correlation", encoder_mapping_correlation, MOTOR_SETTINGS_GROUP_ENCODER);
 	LOAD_FIELD("encoder/mapping_residual_rad", encoder_mapping_residual_rad, MOTOR_SETTINGS_GROUP_ENCODER);
+	LOAD_IDENTITY_FIELD("identity/pole_pairs", identity_pole_pairs,
+			    MOTOR_SETTINGS_IDENTITY_FIELD_POLE_PAIRS);
 	LOAD_FIELD("model/rs_ohm", model_rs_ohm, MOTOR_SETTINGS_GROUP_MODEL);
 	LOAD_FIELD("model/ld_h", model_ld_h, MOTOR_SETTINGS_GROUP_MODEL);
 	LOAD_FIELD("model/lq_h", model_lq_h, MOTOR_SETTINGS_GROUP_MODEL);
@@ -202,12 +251,26 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_FIELD("detent/gain", detent_gain, MOTOR_SETTINGS_GROUP_DETENT);
 	LOAD_FIELD("detent/iq_ff_limit_a", detent_iq_ff_limit_a, MOTOR_SETTINGS_GROUP_DETENT);
 	LOAD_FIELD("detent/table_crc32", detent_table_crc32, MOTOR_SETTINGS_GROUP_DETENT);
+	LOAD_LIMIT_FIELD("limits/nominal_voltage_v", limits_nominal_voltage_v,
+			 MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE);
+	LOAD_LIMIT_FIELD("limits/max_current_a", limits_max_current_a,
+			 MOTOR_SETTINGS_LIMIT_FIELD_MAX_CURRENT);
+	LOAD_LIMIT_FIELD("limits/brake_current_a", limits_brake_current_a,
+			 MOTOR_SETTINGS_LIMIT_FIELD_BRAKE_CURRENT);
+	LOAD_LIMIT_FIELD("limits/max_velocity_hz", limits_max_velocity_hz,
+			 MOTOR_SETTINGS_LIMIT_FIELD_MAX_VELOCITY);
+	LOAD_LIMIT_FIELD("limits/max_accel_hz_s", limits_max_accel_hz_s,
+			 MOTOR_SETTINGS_LIMIT_FIELD_MAX_ACCEL);
+	LOAD_LIMIT_FIELD("limits/command_timeout_ms", limits_command_timeout_ms,
+			 MOTOR_SETTINGS_LIMIT_FIELD_COMMAND_TIMEOUT);
 
 	return 0;
 }
 
 #undef LOAD_FIELD
 #undef LOAD_CONTROLLER_FIELD
+#undef LOAD_IDENTITY_FIELD
+#undef LOAD_LIMIT_FIELD
 
 int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *present_groups)
 {
@@ -227,9 +290,17 @@ int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *pres
 	if (ctx.error != 0) {
 		return ctx.error;
 	}
+	if ((ctx.identity_fields & MOTOR_SETTINGS_IDENTITY_FIELDS_ALL) !=
+	    MOTOR_SETTINGS_IDENTITY_FIELDS_ALL) {
+		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_IDENTITY;
+	}
 	if ((ctx.controller_fields & MOTOR_SETTINGS_CTRL_FIELDS_ALL) !=
 	    MOTOR_SETTINGS_CTRL_FIELDS_ALL) {
 		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_CONTROLLERS;
+	}
+	if ((ctx.limit_fields & MOTOR_SETTINGS_LIMIT_FIELDS_ALL) !=
+	    MOTOR_SETTINGS_LIMIT_FIELDS_ALL) {
+		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_LIMITS;
 	}
 
 	if (present_groups != NULL) {
@@ -296,6 +367,20 @@ static int save_encoder_group(const struct motor_parameters *params)
 	return 0;
 }
 
+static int save_identity_group(const struct motor_parameters *params)
+{
+	ARG_UNUSED(params);
+
+	if (MOTOR_POLE_PAIRS <= 0) {
+		return -ERANGE;
+	}
+
+	int ret;
+	uint16_t pole_pairs = (uint16_t)MOTOR_POLE_PAIRS;
+	SAVE_SCALAR(KEY_IDENTITY_POLE_PAIRS, pole_pairs);
+	return 0;
+}
+
 static int save_model_group(const struct motor_parameters *params)
 {
 	if (!finite_positive(params->Rs_measured_ohm) ||
@@ -318,6 +403,32 @@ static int save_model_group(const struct motor_parameters *params)
 	SAVE_SCALAR(KEY_MODEL_J, params->inertia_kgm2_active);
 	SAVE_SCALAR(KEY_MODEL_B, params->viscous_friction_nm_per_rad_s_active);
 	SAVE_SCALAR(KEY_MODEL_TC, params->coulomb_friction_nm_active);
+	return 0;
+}
+
+static int save_limits_group(const struct motor_parameters *params)
+{
+	if (!finite_positive(NOMINAL_VOLTAGE_V) ||
+	    !finite_positive(MOTOR_MAX_CURRENT_A) ||
+	    !finite_nonnegative(BRAKE_CURRENT_A) ||
+	    !finite_positive(params->profile_max_velocity_rad_s) ||
+	    !finite_positive(params->profile_max_accel_rad_s2)) {
+		return -ERANGE;
+	}
+
+	int ret;
+	float32_t nominal_voltage_v = NOMINAL_VOLTAGE_V;
+	float32_t max_current_a = MOTOR_MAX_CURRENT_A;
+	float32_t brake_current_a = BRAKE_CURRENT_A;
+	float32_t max_velocity_hz = params->profile_max_velocity_rad_s / (2.0f * PI_F32);
+	float32_t max_accel_hz_s = params->profile_max_accel_rad_s2 / (2.0f * PI_F32);
+	uint32_t command_timeout_ms = params->command_timeout_ms;
+	SAVE_SCALAR(KEY_LIMITS_NOMINAL_VOLTAGE, nominal_voltage_v);
+	SAVE_SCALAR(KEY_LIMITS_MAX_CURRENT, max_current_a);
+	SAVE_SCALAR(KEY_LIMITS_BRAKE_CURRENT, brake_current_a);
+	SAVE_SCALAR(KEY_LIMITS_MAX_VELOCITY, max_velocity_hz);
+	SAVE_SCALAR(KEY_LIMITS_MAX_ACCEL, max_accel_hz_s);
+	SAVE_SCALAR(KEY_LIMITS_COMMAND_TIMEOUT, command_timeout_ms);
 	return 0;
 }
 
@@ -517,6 +628,13 @@ int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 		}
 		written |= MOTOR_SETTINGS_GROUP_ENCODER;
 	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_IDENTITY)) {
+		ret = save_identity_group(params);
+		if (ret != 0) {
+			return ret;
+		}
+		written |= MOTOR_SETTINGS_GROUP_IDENTITY;
+	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL)) {
 		ret = save_model_group(params);
 		if (ret != 0) {
@@ -530,6 +648,13 @@ int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
 			return ret;
 		}
 		written |= MOTOR_SETTINGS_GROUP_CONTROLLERS;
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_LIMITS)) {
+		ret = save_limits_group(params);
+		if (ret != 0) {
+			return ret;
+		}
+		written |= MOTOR_SETTINGS_GROUP_LIMITS;
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_DETENT)) {
 		ret = save_detent_group(params);
@@ -568,6 +693,24 @@ static bool snapshot_group_available(const struct motor_settings_snapshot *snaps
 	       snapshot->schema_version == MOTOR_SETTINGS_SCHEMA_VERSION &&
 	       group_enabled(snapshot->valid_groups, group) &&
 	       group_enabled(present_groups, group);
+}
+
+static int apply_identity_group(struct motor_parameters *params,
+				const struct motor_settings_snapshot *snapshot)
+{
+	ARG_UNUSED(params);
+
+	if (snapshot->identity_pole_pairs == 0U) {
+		return -ERANGE;
+	}
+
+	/*
+	 * Pole pairs are persisted so a stored record describes the motor identity,
+	 * but this firmware still uses MOTOR_POLE_PAIRS in several ISR/control
+	 * paths. Reject mismatches instead of partially applying an inconsistent
+	 * identity.
+	 */
+	return snapshot->identity_pole_pairs == (uint16_t)MOTOR_POLE_PAIRS ? 0 : -ENOTSUP;
 }
 
 static int apply_encoder_group(struct motor_parameters *params,
@@ -627,6 +770,45 @@ static int apply_model_group(struct motor_parameters *params,
 	params->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
 	params->mech_model_source = MOTOR_MODEL_SOURCE_MEASURED;
 	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;
+	return 0;
+}
+
+static int apply_limits_group(struct motor_parameters *params,
+			      const struct motor_settings_snapshot *snapshot)
+{
+	if (!finite_positive(snapshot->limits_nominal_voltage_v) ||
+	    !finite_positive(snapshot->limits_max_current_a) ||
+	    !finite_nonnegative(snapshot->limits_brake_current_a) ||
+	    !finite_positive(snapshot->limits_max_velocity_hz) ||
+	    !finite_positive(snapshot->limits_max_accel_hz_s)) {
+		return -ERANGE;
+	}
+
+	/*
+	 * These board/motor safety limits are currently devicetree defaults in
+	 * multiple hot paths. Accept only values compatible with the image until
+	 * those paths are converted to runtime limit fields.
+	 */
+	if (fabsf(snapshot->limits_nominal_voltage_v - NOMINAL_VOLTAGE_V) > 0.001f ||
+	    snapshot->limits_max_current_a > (MOTOR_MAX_CURRENT_A + 0.001f) ||
+	    snapshot->limits_brake_current_a > (MOTOR_MAX_CURRENT_A + 0.001f)) {
+		return -ENOTSUP;
+	}
+
+	params->profile_max_velocity_rad_s = snapshot->limits_max_velocity_hz * 2.0f * PI_F32;
+	params->profile_max_accel_rad_s2 = snapshot->limits_max_accel_hz_s * 2.0f * PI_F32;
+	params->command_timeout_ms = snapshot->limits_command_timeout_ms;
+
+	params->position_mpr_cfg.velocity_limit_rad_s = params->profile_max_velocity_rad_s;
+	params->position_mpr_cfg.max_delta_velocity_rad_s =
+		params->profile_max_accel_rad_s2 * params->position_mpr_cfg.dt_s;
+
+	float32_t iq_limit = fminf(params->velocity_cl_iq_limit_A,
+				  snapshot->limits_max_current_a);
+	if (finite_positive(iq_limit)) {
+		params->velocity_cl_iq_limit_A = iq_limit;
+		params->velocity_mpr_cfg.iq_limit_a = iq_limit;
+	}
 	return 0;
 }
 
@@ -779,6 +961,16 @@ int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 
 	groups &= MOTOR_SETTINGS_GROUP_ALL;
 	uint32_t loaded = 0U;
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_IDENTITY)) {
+		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_IDENTITY)) {
+			return -ENOENT;
+		}
+		ret = apply_identity_group(params, &snap);
+		if (ret != 0) {
+			return ret;
+		}
+		loaded |= MOTOR_SETTINGS_GROUP_IDENTITY;
+	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_ENCODER)) {
 		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_ENCODER)) {
 			return -ENOENT;
@@ -798,6 +990,16 @@ int motor_settings_load(struct motor_parameters *params, uint32_t groups,
 			return ret;
 		}
 		loaded |= MOTOR_SETTINGS_GROUP_MODEL;
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_LIMITS)) {
+		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_LIMITS)) {
+			return -ENOENT;
+		}
+		ret = apply_limits_group(params, &snap);
+		if (ret != 0) {
+			return ret;
+		}
+		loaded |= MOTOR_SETTINGS_GROUP_LIMITS;
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CONTROLLERS)) {
 		if (!snapshot_group_available(&snap, present, MOTOR_SETTINGS_GROUP_CONTROLLERS)) {
@@ -849,10 +1051,32 @@ static int clear_encoder_keys(void)
 	return delete_key(KEY_ENCODER_RESIDUAL);
 }
 
+static int clear_identity_keys(void)
+{
+	return delete_key(KEY_IDENTITY_POLE_PAIRS);
+}
+
 static int clear_model_keys(void)
 {
 	const char *keys[] = { KEY_MODEL_RS, KEY_MODEL_LD, KEY_MODEL_LQ, KEY_MODEL_FLUX,
 		KEY_MODEL_KT, KEY_MODEL_J, KEY_MODEL_B, KEY_MODEL_TC };
+	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
+		int ret = delete_key(keys[i]);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int clear_limits_keys(void)
+{
+	const char *keys[] = {
+		KEY_LIMITS_NOMINAL_VOLTAGE, KEY_LIMITS_MAX_CURRENT,
+		KEY_LIMITS_BRAKE_CURRENT, KEY_LIMITS_MAX_VELOCITY,
+		KEY_LIMITS_MAX_ACCEL, KEY_LIMITS_COMMAND_TIMEOUT,
+	};
+
 	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
 		int ret = delete_key(keys[i]);
 		if (ret != 0) {
@@ -918,8 +1142,16 @@ int motor_settings_clear(uint32_t groups)
 		ret = clear_encoder_keys();
 		if (ret != 0) { return ret; }
 	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_IDENTITY)) {
+		ret = clear_identity_keys();
+		if (ret != 0) { return ret; }
+	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_MODEL)) {
 		ret = clear_model_keys();
+		if (ret != 0) { return ret; }
+	}
+	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_LIMITS)) {
+		ret = clear_limits_keys();
 		if (ret != 0) { return ret; }
 	}
 	if (group_enabled(groups, MOTOR_SETTINGS_GROUP_CONTROLLERS)) {

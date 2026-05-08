@@ -17,11 +17,14 @@ struct motor_parameters;
 #define MOTOR_SETTINGS_GROUP_MODEL       (1U << 1)
 #define MOTOR_SETTINGS_GROUP_CONTROLLERS (1U << 2)
 #define MOTOR_SETTINGS_GROUP_DETENT      (1U << 3)
+#define MOTOR_SETTINGS_GROUP_IDENTITY    (1U << 4)
+#define MOTOR_SETTINGS_GROUP_LIMITS      (1U << 5)
 #define MOTOR_SETTINGS_GROUP_ALL \
 	(MOTOR_SETTINGS_GROUP_ENCODER | MOTOR_SETTINGS_GROUP_MODEL | \
-	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT)
+	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT | \
+	 MOTOR_SETTINGS_GROUP_IDENTITY | MOTOR_SETTINGS_GROUP_LIMITS)
 
-#define MOTOR_SETTINGS_SCHEMA_VERSION 2U
+#define MOTOR_SETTINGS_SCHEMA_VERSION 3U
 
 struct motor_settings_snapshot {
 	uint32_t schema_version;
@@ -33,6 +36,8 @@ struct motor_settings_snapshot {
 	float32_t encoder_trim_elec_rad;
 	float32_t encoder_mapping_correlation;
 	float32_t encoder_mapping_residual_rad;
+
+	uint16_t identity_pole_pairs;
 
 	float32_t model_rs_ohm;
 	float32_t model_ld_h;
@@ -50,6 +55,13 @@ struct motor_settings_snapshot {
 	float32_t ctrl_velocity_iq_limit_a;
 	bool ctrl_velocity_dob_enabled;
 	float32_t ctrl_velocity_dob_gain_scale;
+
+	float32_t limits_nominal_voltage_v;
+	float32_t limits_max_current_a;
+	float32_t limits_brake_current_a;
+	float32_t limits_max_velocity_hz;
+	float32_t limits_max_accel_hz_s;
+	uint32_t limits_command_timeout_ms;
 
 	bool detent_enabled;
 	uint16_t detent_bins;

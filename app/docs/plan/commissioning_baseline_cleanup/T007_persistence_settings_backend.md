@@ -28,7 +28,8 @@ filesystem failures and should not depend on external-flash initialization.
 
 ## Work
 
-- Define typed settings namespaces under `motor/meta`, `motor/encoder`, `motor/model`, `motor/controllers`, and `motor/detent`.
+- Define typed settings namespaces under `motor/meta`, `motor/encoder`, `motor/identity`,
+  `motor/model`, `motor/limits`, `motor/controllers`, and `motor/detent`.
 - Add build configuration for:
   - `CONFIG_SETTINGS=y`
   - `CONFIG_ZMS=y`
@@ -39,7 +40,25 @@ filesystem failures and should not depend on external-flash initialization.
   partition plan before final sizing. The current `smartstepper_v2` flash
   partition map is provisional and under-allocates the STM32H743 internal flash;
   fix that layout before finalizing the settings partition.
-- Store individual typed keys under `motor/encoder`, `motor/model`, `motor/controllers`, and `motor/detent`, plus `motor/meta/schema_version`, `motor/meta/generation`, and `motor/meta/valid_groups`.
+- Store individual typed keys under `motor/encoder`, `motor/identity`, `motor/model`,
+  `motor/limits`, `motor/controllers`, and `motor/detent`, plus
+  `motor/meta/schema_version`, `motor/meta/generation`, and `motor/meta/valid_groups`.
+- Treat devicetree identity and safety limits as conservative fallback values
+  that are safe enough for identification/commissioning to run before any
+  persisted settings are applied.
+- Store motor identity separately from measured model data:
+  - `motor/identity/pole_pairs`
+- Store runtime/safety limits separately from controller tuning intent:
+  - `motor/limits/nominal_voltage_v`
+  - `motor/limits/max_current_a`
+  - `motor/limits/brake_current_a`
+  - `motor/limits/max_velocity_hz`
+  - `motor/limits/max_accel_hz_s`
+  - `motor/limits/command_timeout_ms`
+- Apply runtime-owned limits (`max_velocity_hz`, `max_accel_hz_s`, and
+  `command_timeout_ms`) on load. Validate but do not partially apply
+  compile-time-coupled identity/electrical safety values until those hot paths
+  are fully runtime-configured.
 - Store controller tuning intent, not raw generated coefficients:
   - `motor/controllers/outer_loop_mode`
   - `motor/controllers/velocity_bandwidth_hz`
@@ -55,9 +74,9 @@ filesystem failures and should not depend on external-flash initialization.
 - Add shell commands:
   - `motor settings status`
   - `motor settings preview`
-  - `motor settings save [baseline|encoder|model|controllers|detent|all]`
-  - `motor settings load [baseline|encoder|model|controllers|detent|all]`
-  - `motor settings clear [baseline|encoder|model|controllers|detent|all]`
+  - `motor settings save [baseline|encoder|identity|model|limits|controllers|detent|all]`
+  - `motor settings load [baseline|encoder|identity|model|limits|controllers|detent|all]`
+  - `motor settings clear [baseline|encoder|identity|model|limits|controllers|detent|all]`
   - `motor settings autoload status`
 - Keep autoload disabled in this plan.
 - Refuse save/load while armed or online unless command is read-only preview.

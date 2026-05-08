@@ -16,6 +16,9 @@
 #include "shell_commands_motion.h"
 #include "shell_control.h"
 
+#define MOTOR_SETTINGS_GROUP_USAGE \
+	"[baseline|encoder|identity|model|limits|controllers|detent|all]"
+
 static int parse_group(const char *arg, uint32_t *groups)
 {
 	if (arg == NULL || groups == NULL) {
@@ -25,8 +28,16 @@ static int parse_group(const char *arg, uint32_t *groups)
 		*groups = MOTOR_SETTINGS_GROUP_ENCODER;
 		return 0;
 	}
+	if (strcmp(arg, "identity") == 0) {
+		*groups = MOTOR_SETTINGS_GROUP_IDENTITY;
+		return 0;
+	}
 	if (strcmp(arg, "model") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_MODEL;
+		return 0;
+	}
+	if (strcmp(arg, "limits") == 0) {
+		*groups = MOTOR_SETTINGS_GROUP_LIMITS;
 		return 0;
 	}
 	if (strcmp(arg, "controllers") == 0) {
@@ -51,10 +62,13 @@ static const char *yesno(bool value)
 
 static void print_groups(const struct shell *sh, const char *label, uint32_t groups)
 {
-	shell_print(sh, "%s: encoder=%s model=%s controllers=%s detent=%s",
+	shell_print(sh,
+		    "%s: encoder=%s identity=%s model=%s limits=%s controllers=%s detent=%s",
 		    label,
 		    yesno((groups & MOTOR_SETTINGS_GROUP_ENCODER) != 0U),
+		    yesno((groups & MOTOR_SETTINGS_GROUP_IDENTITY) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_MODEL) != 0U),
+		    yesno((groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_CONTROLLERS) != 0U),
 		    yesno((groups & MOTOR_SETTINGS_GROUP_DETENT) != 0U));
 }
@@ -104,6 +118,11 @@ static void print_snapshot(const struct shell *sh,
 			    (double)s->encoder_mapping_correlation,
 			    (double)s->encoder_mapping_residual_rad);
 	}
+	if ((present_groups & MOTOR_SETTINGS_GROUP_IDENTITY) != 0U) {
+		shell_print(sh, "  Identity:");
+		shell_print(sh, "    pole_pairs:            %u", s->identity_pole_pairs);
+		shell_print(sh, "    Note: identity mismatches are rejected until all hot paths are runtime-configured.");
+	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_MODEL) != 0U) {
 		shell_print(sh, "  Model:");
 		shell_print(sh, "    Rs=%.6f ohm Ld=%.9f H Lq=%.9f H",
@@ -117,6 +136,20 @@ static void print_snapshot(const struct shell *sh,
 			    (double)s->model_inertia_kgm2,
 			    (double)s->model_viscous_friction_nm_per_rad_s,
 			    (double)s->model_coulomb_friction_nm);
+	}
+	if ((present_groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U) {
+		shell_print(sh, "  Limits:");
+		shell_print(sh, "    nominal_voltage:       %.3f V",
+			    (double)s->limits_nominal_voltage_v);
+		shell_print(sh, "    max_current/brake:     %.6f A / %.6f A",
+			    (double)s->limits_max_current_a,
+			    (double)s->limits_brake_current_a);
+		shell_print(sh, "    profile vel/accel:     %.6f Hz / %.6f Hz/s",
+			    (double)s->limits_max_velocity_hz,
+			    (double)s->limits_max_accel_hz_s);
+		shell_print(sh, "    command_timeout:       %u ms",
+			    s->limits_command_timeout_ms);
+		shell_print(sh, "    Note: profile limits and timeout apply now; electrical safety limits must match this firmware image.");
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_CONTROLLERS) != 0U) {
 		shell_print(sh, "  Controllers:");
@@ -197,7 +230,7 @@ int cmd_motor_settings_save(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
 	if (argc > 2) {
-		shell_error(sh, "Usage: motor settings save [baseline|encoder|model|controllers|detent|all]");
+		shell_error(sh, "Usage: motor settings save " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	if (argc == 2 && parse_group(argv[1], &groups) != 0) {
@@ -223,7 +256,7 @@ int cmd_motor_settings_load(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
 	if (argc > 2) {
-		shell_error(sh, "Usage: motor settings load [baseline|encoder|model|controllers|detent|all]");
+		shell_error(sh, "Usage: motor settings load " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	if (argc == 2 && parse_group(argv[1], &groups) != 0) {
@@ -258,7 +291,7 @@ int cmd_motor_settings_clear(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_ALL;
 	if (argc > 2) {
-		shell_error(sh, "Usage: motor settings clear [baseline|encoder|model|controllers|detent|all]");
+		shell_error(sh, "Usage: motor settings clear " MOTOR_SETTINGS_GROUP_USAGE);
 		return -EINVAL;
 	}
 	if (argc == 2 && parse_group(argv[1], &groups) != 0) {

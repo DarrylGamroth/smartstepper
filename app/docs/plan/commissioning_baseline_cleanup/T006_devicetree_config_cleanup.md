@@ -180,9 +180,9 @@ should remain dedicated motor commands, as planned in T007:
 
 - `motor settings status`
 - `motor settings preview`
-- `motor settings save [baseline|model|controllers|all]`
-- `motor settings load [baseline|model|controllers|all]`
-- `motor settings clear`
+- `motor settings save [baseline|encoder|identity|model|limits|controllers|detent|all]`
+- `motor settings load [baseline|encoder|identity|model|limits|controllers|detent|all]`
+- `motor settings clear [baseline|encoder|identity|model|limits|controllers|detent|all]`
 - `motor settings autoload status`
 
 ## Work
