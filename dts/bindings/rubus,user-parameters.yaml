@@ -406,7 +406,7 @@ properties:
 
   commission-auto-mech-min-confidence-mpu:
     type: int
-    default: 450
+    default: 500
     description: >
       Minimum mechanical-fit confidence in milli-per-unit. This gate is applied
       to each mechanical capture and to the aggregate model. Keep this as a

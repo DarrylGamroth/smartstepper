@@ -40,7 +40,7 @@ Validation:
 
 ## Stage 2 - Configurable Quality Policy
 
-Status: done
+Status: partial
 
 - Move the mechanical confidence threshold and plausibility warning limits into
   the commissioning config path rather than hard-coding them in runtime code.
@@ -48,13 +48,14 @@ Status: done
   commissioning profile to set the threshold without recompiling motor_core.
 - Ensure output clearly differentiates `hard invalid`, `plausibility warning`,
   and `confidence rejected`.
-- Set the default profile gate to `0.45` because HIL shows repeated clean,
-  low-residual hybrid-stepper captures in the `0.48..0.50` range; hard physical
-  validity, residual, and plausibility checks remain active.
+- Keep the default profile gate at `0.50`. HIL showed repeated low-residual
+  captures in the `0.48..0.50` range, but accepting those by lowering the bar is
+  only useful as a diagnostic experiment, not as proof that mechanical ID is
+  baseline-ready.
 
 ## Stage 3 - Fit Robustness
 
-Status: done
+Status: partial
 
 - Review the friction and inertia estimators for sensitivity to low-speed
   hybrid-stepper detent torque.
@@ -68,6 +69,22 @@ Status: done
   estimate. Per-capture confidence already gates each accepted run; aggregate
   confidence should not fail solely because viscous friction is weakly
   observable and one valid run selects the zero-B fallback.
+- The aggregate acceptance change is retained because it addresses a separate
+  modeling issue, but it does not by itself solve the original confidence
+  shortfall at the `0.50` per-capture gate.
+
+## Stage 3A - Baseline Confidence Recovery
+
+Status: pending
+
+- Improve the mechanical fit so per-capture confidence clears `0.50` without
+  relaxing the gate.
+- Candidate work:
+  - add detent-map compensation before mechanical ID,
+  - improve excitation to separate inertia from detent ripple,
+  - review confidence math so low residual and physical plausibility contribute
+    explicitly instead of relying mostly on R2,
+  - run repeatability tests before marking the baseline complete.
 
 ## Stage 4 - HIL Repeatability Gate
 
