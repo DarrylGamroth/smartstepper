@@ -51,7 +51,7 @@ motor settings save chopper
 Repeat in reverse with `velocity_hz=-0.5` and compare the center table.
 
 ## Risks
-Missed optical edges will corrupt bin-to-edge association. The first implementation assumes no missed edges during a capture pass and reports discarded edges but does not yet cross-correlate forward/reverse captures.
+Missed optical edges will corrupt bin-to-edge association. The current implementation assumes no missed accepted edges during a capture pass and reports discarded edges but does not yet cross-correlate forward/reverse captures into one averaged map.
 
 ## Done State
 Code, docs, build evidence, and HIL evidence are committed. Timer/capture-triggered index playback is tracked as follow-up work.
@@ -117,4 +117,66 @@ Result:
 - `motor settings status` reports `chopper=YES` present and valid.
 - After `motor chopper calib clear`, geometry reported `Map valid: NO`.
 - After `motor settings load chopper`, geometry reported `Map valid: YES`.
+```
+
+Bidirectional HIL evidence:
+
+```text
+Fixes validated:
+- Chopper capture now uses fresh raw encoder angle in controller coordinates.
+- Generated-angle control remains the commutation source in `velocity_generated`.
+- Raw encoder sample freshness is published separately from selected control
+  feedback freshness, so generated modes can still use encoder diagnostics.
+- Reverse captures invert rising/falling meaning when assigning the region after
+  each sorted edge, keeping slot/tooth labels stable across direction.
+
+Build:
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2_mt6835_067a'
+Result: PASS
+
+Flash:
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west flash -d /workspace/build/chopper/smartstepper_v2_mt6835_067a --runner jlink --dev-id 10.0.0.70 --dev-id-type ip'
+Result: PASS
+
+Forward capture:
+motor state calibrate
+motor safety timeout 0
+motor arm
+motor current iq 0.07
+motor chopper calib clear
+motor chopper calib start 4 0.25
+motor chopper calib status
+
+Forward result:
+- Edges: 64 / 64.
+- Discarded: 142.
+- Midpoints: 16.
+- Labels: alternating 8 slot / 8 tooth.
+- Spacing min/max/mean/error: 21.261 / 23.867 / 22.500 / 1.367 deg.
+
+Reverse capture:
+motor chopper calib clear
+motor chopper calib start 4 -0.25
+motor chopper calib status
+
+Reverse result:
+- Edges: 64 / 64.
+- Discarded: 115.
+- Midpoints: 16.
+- Labels: alternating 8 slot / 8 tooth.
+- Spacing min/max/mean/error: 21.197 / 23.790 / 22.500 / 1.303 deg.
+- Midpoint table agrees with forward capture within roughly 0.5 deg.
+
+Save:
+motor current iq 0
+motor velocity target 0
+motor chopper calib apply
+motor disarm
+motor settings save chopper
+motor settings status
+motor chopper geometry
+
+Save result:
+- `motor settings status` reports `chopper=YES` present and valid.
+- `motor chopper geometry` reports `Map valid: YES`.
 ```

@@ -477,6 +477,10 @@ static inline void motor_control_publish_encoder_live(
 
 	params->live.encoder_raw_deg = control_fb->angle_sensor_deg;
 	params->live.encoder_raw_rad = control_fb->angle_sensor_deg * (PI_F32 / 180.0f);
+	params->live.encoder_sample_fresh = control_fb->fresh ? 1U : 0U;
+	params->live.encoder_sample_warning = control_fb->warning ? 1U : 0U;
+	params->live.encoder_sample_error = control_fb->error ? 1U : 0U;
+	params->live.encoder_last_status = control_fb->status;
 	params->live.encoder_observer_input_rad = control_fb->observer_input_rad;
 	params->live.observer_mech_rad = control_fb->observer_mech_rad;
 	params->live.observer_elec_rad = control_fb->observer_elec_rad;

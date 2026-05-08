@@ -106,12 +106,18 @@ static void motor_chopper_sort_edges(struct chopper_edge_mean *edges, uint16_t c
 	}
 }
 
-static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status)
+static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status, bool reverse_motion)
 {
 	if ((status & TIMER_IC_STATUS_EDGE_RISING) != 0U) {
+		if (reverse_motion) {
+			return CHOPPER_REGION_KIND_TOOTH;
+		}
 		return CHOPPER_REGION_KIND_SLOT;
 	}
 	if ((status & TIMER_IC_STATUS_EDGE_FALLING) != 0U) {
+		if (reverse_motion) {
+			return CHOPPER_REGION_KIND_SLOT;
+		}
 		return CHOPPER_REGION_KIND_TOOTH;
 	}
 	return CHOPPER_REGION_KIND_UNKNOWN;
@@ -119,13 +125,16 @@ static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status)
 
 static void motor_chopper_assign_alternating_kinds(const struct chopper_edge_mean *edges,
 						   uint16_t edge_bins,
+						   bool reverse_motion,
 						   uint8_t *midpoint_kind)
 {
 	uint16_t parity_slot_votes[2] = {0U, 0U};
 	uint16_t parity_tooth_votes[2] = {0U, 0U};
 
 	for (uint16_t i = 0U; i < edge_bins; i++) {
-		uint8_t kind = motor_chopper_region_kind_from_edge_status(edges[i].status);
+		uint8_t kind =
+			motor_chopper_region_kind_from_edge_status(edges[i].status,
+								   reverse_motion);
 		uint16_t parity = (uint16_t)(i & 1U);
 
 		if (kind == CHOPPER_REGION_KIND_SLOT) {
@@ -172,6 +181,20 @@ static const char *motor_chopper_region_kind_name(uint8_t kind)
 	}
 }
 
+static bool motor_chopper_cal_sample_encoder_angle(const struct motor_parameters *params,
+						   float32_t *angle_rad)
+{
+	if (!params || !angle_rad ||
+	    params->live.encoder_sample_fresh == 0U ||
+	    params->live.encoder_sample_error != 0U) {
+		return false;
+	}
+
+	float32_t sign = (params->encoder_direction_sign >= 0) ? 1.0f : -1.0f;
+	*angle_rad = wrap_rad_2pi(params->live.encoder_raw_deg * sign * (PI_F32 / 180.0f));
+	return true;
+}
+
 static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 {
 	if (!params) {
@@ -200,11 +223,16 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 	motor_chopper_sort_edges(edges, edge_bins);
 	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];
 	if (params->chopper_cal.slots == params->chopper_cal.teeth) {
-		motor_chopper_assign_alternating_kinds(edges, edge_bins, midpoint_kind);
+		motor_chopper_assign_alternating_kinds(
+			edges, edge_bins,
+			params->chopper_cal.speed_target_rad_s < 0.0f,
+			midpoint_kind);
 	} else {
 		for (uint16_t i = 0U; i < edge_bins; i++) {
 			midpoint_kind[i] =
-				motor_chopper_region_kind_from_edge_status(edges[i].status);
+				motor_chopper_region_kind_from_edge_status(
+					edges[i].status,
+					params->chopper_cal.speed_target_rad_s < 0.0f);
 		}
 	}
 
@@ -291,7 +319,11 @@ static void motor_chopper_capture_callback(const struct device *dev, uint32_t ch
 	}
 
 	uint32_t captured = params->chopper_cal.total_edges_captured;
-	float32_t wrapped_rad = wrap_rad_2pi(params->live.position_rad);
+	float32_t wrapped_rad;
+	if (!motor_chopper_cal_sample_encoder_angle(params, &wrapped_rad)) {
+		params->chopper_cal.discarded_edges++;
+		return;
+	}
 	float32_t unwrapped_rad = wrapped_rad;
 
 	if (captured == 0U) {
