@@ -779,8 +779,7 @@ int cmd_motor_commission_auto_status(const struct shell *sh, size_t argc, char *
 		    (double)ctx->auto_tune_staged.velocity_dob_torque_limit_nm,
 		    (double)ctx->auto_tune_staged.velocity_dob_iq_ff_limit_a);
 	shell_print(sh, "  Model source:  flux=%s mech=%s",
-		    g_motor_params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
-			    "MEASURED" : "FALLBACK",
+		    motor_shell_flux_source_name(g_motor_params),
 		    g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
 			    "MEASURED" : "FALLBACK");
 	motor_commission_print_tune_reject_flags(sh, ctx->auto_tune_staged.reject_flags);

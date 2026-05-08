@@ -318,6 +318,24 @@ ZTEST(control_ref_path, test_voltage_speed_limit_decreases_with_lower_bus)
 	zassert_true(low.max_mech_hz < high.max_mech_hz, NULL);
 }
 
+ZTEST(control_ref_path, test_voltage_speed_limit_rejects_unknown_flux)
+{
+	const struct motor_voltage_speed_limit_input in = {
+		.vbus_v = 23.3f,
+		.max_modulation_index = 0.95f,
+		.resistance_ohm = 2.26f,
+		.inductance_h = 0.002756f,
+		.flux_linkage_wb = 0.0f,
+		.current_limit_a = 0.225f,
+		.pole_pairs = 50U,
+		.safety_factor = 0.75f,
+	};
+	struct motor_voltage_speed_limit_result out = {0};
+
+	zassert_not_ok(motor_voltage_speed_limit_compute(&in, &out), NULL);
+	zassert_false(out.valid, NULL);
+}
+
 ZTEST(control_ref_path, test_feedback_sanity_allows_direct_current_motion_above_profile_limit)
 {
 	struct motor_control_policy policy = {

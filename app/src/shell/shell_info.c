@@ -53,9 +53,13 @@ int cmd_motor_info_measured(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "  Speed limit:    %.2f Hz command, %.2f Hz voltage model",
 			    (double)motor_shell_velocity_command_limit_hz(g_motor_params),
 			    (double)voltage_limit.max_mech_hz);
-		shell_print(sh, "  Voltage limit:  %.2f V usable, BEMF %.2f V at limit",
+		shell_print(sh, "  Voltage limit:  %.2f V usable, BEMF %.2f V at limit (%s flux)",
 			    (double)voltage_limit.voltage_limit_v,
-			    (double)voltage_limit.bemf_at_limit_v);
+			    (double)voltage_limit.bemf_at_limit_v,
+			    motor_shell_flux_source_name(g_motor_params));
+	} else {
+		shell_print(sh, "  Speed limit:    %.2f Hz command, profile only (flux unknown)",
+			    (double)motor_shell_velocity_command_limit_hz(g_motor_params));
 	}
 	shell_print(sh, "  Ia offset:      %.6f A", (double)g_motor_params->Ia_offset);
 	shell_print(sh, "  Ib offset:      %.6f A", (double)g_motor_params->Ib_offset);

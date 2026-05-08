@@ -226,11 +226,15 @@ int cmd_motor_velocity_status(const struct shell *sh, size_t argc, char **argv)
 					    g_motor_params->velocity_cl_iq_limit_A,
 					    &voltage_limit) == 0 && voltage_limit.valid) {
 		float command_limit_hz = motor_shell_velocity_command_limit_hz(g_motor_params);
-		shell_print(sh, "  Speed limit: %.2f Hz cmd, %.2f Hz voltage (Vlim=%.2f V, bemf=%.2f V)",
+		shell_print(sh, "  Speed limit: %.2f Hz cmd, %.2f Hz voltage (Vlim=%.2f V, bemf=%.2f V, flux=%s)",
 			    (double)command_limit_hz,
 			    (double)voltage_limit.max_mech_hz,
 			    (double)voltage_limit.voltage_limit_v,
-			    (double)voltage_limit.bemf_at_limit_v);
+			    (double)voltage_limit.bemf_at_limit_v,
+			    motor_shell_flux_source_name(g_motor_params));
+	} else {
+		shell_print(sh, "  Speed limit: %.2f Hz cmd, profile only (flux unknown)",
+			    (double)motor_shell_velocity_command_limit_hz(g_motor_params));
 	}
 
 	return 0;

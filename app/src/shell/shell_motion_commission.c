@@ -30,6 +30,7 @@
 #include "motor/observers/angle_observer.h"
 #include "motor_torque.h"
 #include "motor_encoder_acquisition.h"
+#include "shell_motor_limits.h"
 
 #define MOTOR_COMMISSION_AUTO_POLL_MS 10U
 #define MOTOR_COMMISSION_AUTO_MODE_TIMEOUT_MS 8000U
@@ -919,8 +920,7 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)g_motor_params->coulomb_friction_nm_active);
 	shell_print(sh, "  Model source:   electrical=%s flux=%s mech=%s",
 		    motor_commission_electrical_source_name(g_motor_params->electrical_model_source),
-		    g_motor_params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
-			    "MEASURED" : "FALLBACK",
+		    motor_shell_flux_source_name(g_motor_params),
 		    g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
 			    "MEASURED" : "FALLBACK");
 

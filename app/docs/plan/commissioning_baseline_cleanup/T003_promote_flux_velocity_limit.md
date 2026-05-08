@@ -12,10 +12,11 @@ quality gates, but should not block baseline if it fails.
   safe/currently bounded.
 - Promote valid flux into active runtime model and torque constant.
 - Use active flux/Kt in velocity limit calculation and shell reporting.
-- If flux is invalid, use devicetree fallback and mark velocity limit as
-  fallback-confidence.
+- If flux is invalid, use an optional devicetree fallback only when one is
+  explicitly provided; otherwise skip BEMF limiting and use profile-only speed
+  limits.
 - Add status output showing:
-  - flux source: measured/fallback,
+  - flux source: measured/fallback/unknown,
   - BEMF-limited max speed,
   - configured profile max speed,
   - active command speed limit.

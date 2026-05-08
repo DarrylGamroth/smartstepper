@@ -12,6 +12,20 @@
 #define MOTOR_VOLTAGE_SPEED_LIMIT_SAFETY 0.75f
 #define MOTOR_SHELL_VBUS_MIN_VALID_V 0.1f
 
+static inline const char *motor_shell_flux_source_name(const struct motor_parameters *params)
+{
+	if (params != NULL && params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED &&
+	    isfinite(params->flux_linkage_wb_active) && params->flux_linkage_wb_active > 0.0f) {
+		return "measured";
+	}
+
+	if (isfinite(MOTOR_FLUX_LINKAGE_WB) && MOTOR_FLUX_LINKAGE_WB > 0.0f) {
+		return "fallback";
+	}
+
+	return "unknown";
+}
+
 static inline float motor_shell_live_or_nominal_vbus(const struct motor_parameters *params)
 {
 	float vbus = (params != NULL) ? params->live.dc_bus_voltage_V : 0.0f;
@@ -21,6 +35,29 @@ static inline float motor_shell_live_or_nominal_vbus(const struct motor_paramete
 	}
 
 	return vbus;
+}
+
+static inline int motor_shell_flux_for_voltage_speed_limit(
+	const struct motor_parameters *params,
+	float *flux_linkage_wb)
+{
+	if (params == NULL || flux_linkage_wb == NULL) {
+		return -EINVAL;
+	}
+
+	if (params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED &&
+	    isfinite(params->flux_linkage_wb_active) && params->flux_linkage_wb_active > 0.0f) {
+		*flux_linkage_wb = fabsf(params->flux_linkage_wb_active);
+		return 0;
+	}
+
+	if (isfinite(MOTOR_FLUX_LINKAGE_WB) && MOTOR_FLUX_LINKAGE_WB > 0.0f) {
+		*flux_linkage_wb = MOTOR_FLUX_LINKAGE_WB;
+		return 0;
+	}
+
+	*flux_linkage_wb = 0.0f;
+	return -ENODATA;
 }
 
 static inline int motor_shell_voltage_speed_limit(
@@ -42,9 +79,11 @@ static inline int motor_shell_voltage_speed_limit(
 		ls = MOTOR_INDUCTANCE_Q_H;
 	}
 
-	float psi = fabsf(params->flux_linkage_wb_active);
-	if (!isfinite(psi) || psi <= 0.0f) {
-		psi = MOTOR_FLUX_LINKAGE_WB;
+	float psi = 0.0f;
+	int ret = motor_shell_flux_for_voltage_speed_limit(params, &psi);
+	if (ret != 0) {
+		*result = (struct motor_voltage_speed_limit_result){0};
+		return ret;
 	}
 
 	const struct motor_voltage_speed_limit_input input = {
