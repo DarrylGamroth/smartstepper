@@ -396,6 +396,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_flux,
 	SHELL_CMD_ARG(run, NULL,
 		      "Run flux capture <min_hz> <max_hz> <steps> <settle_ms> <sample_ms> <iq_limit_a>",
 		      cmd_motor_commission_flux_run, 7, 0),
+	SHELL_CMD_ARG(auto, NULL,
+		      "Run bounded flux sweep only <slow|confirm> [apply]",
+		      cmd_motor_commission_flux_auto, 2, 1),
 	SHELL_SUBCMD_SET_END
 );
 

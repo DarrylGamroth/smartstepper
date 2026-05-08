@@ -923,6 +923,146 @@ static void motor_commission_auto_print_usage(const struct shell *sh)
 		    "Usage: motor commission auto run [slow|confirm] [apply]");
 }
 
+int cmd_motor_commission_flux_auto(const struct shell *sh, size_t argc, char **argv)
+{
+	bool slow_profile = false;
+	bool apply_on_success = false;
+
+	if (argc < 2 || argc > 3) {
+		shell_error(sh, "Usage: motor commission flux auto <slow|confirm> [apply]");
+		return -EINVAL;
+	}
+	if (strcmp(argv[1], "slow") == 0) {
+		slow_profile = true;
+	} else if (strcmp(argv[1], "confirm") == 0) {
+		slow_profile = false;
+	} else {
+		shell_error(sh, "Profile must be 'slow' or 'confirm'");
+		return -EINVAL;
+	}
+	if (argc == 3) {
+		if (strcmp(argv[2], "apply") == 0 || strcmp(argv[2], "1") == 0 ||
+		    strcmp(argv[2], "true") == 0) {
+			apply_on_success = true;
+		} else {
+			shell_error(sh, "Usage: motor commission flux auto <slow|confirm> [apply]");
+			return -EINVAL;
+		}
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+	if (!g_motor_params->calibration.current_offsets_valid) {
+		shell_error(sh, "Current offsets are not valid; run calibration first");
+		return -EACCES;
+	}
+	if (!g_motor_params->calibration.encoder_mapping_complete) {
+		shell_error(sh, "Encoder mapping is not applied; run baseline commissioning first");
+		return -EACCES;
+	}
+	if (!motor_control_is_armed(g_motor_params)) {
+		shell_error(sh, "Control is disarmed; run 'motor arm' before flux auto");
+		return -EACCES;
+	}
+	if (motor_api_get_state() == MOTOR_STATE_ERROR) {
+		shell_error(sh, "Motor is in ERROR state; clear error first");
+		return -EFAULT;
+	}
+
+	float32_t max_velocity_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
+	if (!isfinite(max_velocity_hz) || max_velocity_hz < 0.10f) {
+		max_velocity_hz = MOTOR_MAX_SPEED_HZ;
+	}
+	float32_t flux_cap_hz = slow_profile ?
+					COMMISSION_AUTO_SLOW_FLUX_MAX_HZ :
+					COMMISSION_AUTO_NORMAL_FLUX_MAX_HZ;
+	float32_t flux_min_req_hz = slow_profile ?
+					    COMMISSION_AUTO_SLOW_FLUX_MIN_HZ :
+					    COMMISSION_AUTO_NORMAL_FLUX_MIN_HZ;
+	float32_t planned_flux_max_hz = fminf(max_velocity_hz, flux_cap_hz);
+	float32_t planned_flux_min_hz =
+		fminf(flux_min_req_hz, fmaxf(0.05f, 0.50f * planned_flux_max_hz));
+	if (planned_flux_max_hz < 0.10f) {
+		shell_error(sh, "Profile max velocity is too low for flux commissioning");
+		return -ERANGE;
+	}
+
+	struct motor_commission_runtime_ctx commission_ctx;
+	motor_commission_ctx_from_global(&commission_ctx);
+	if (motor_commission_is_active(&commission_ctx)) {
+		shell_error(sh, "Commission capture is already active");
+		return -EBUSY;
+	}
+	motor_commission_reset(&commission_ctx);
+
+	struct motor_commission_flux_config flux_cfg = {
+		.max_speed_hz = planned_flux_max_hz,
+		.min_speed_hz = planned_flux_min_hz,
+		.steps = slow_profile ? 4U : 5U,
+		.settle_ms = slow_profile ? 500U : 400U,
+		.sample_ms = slow_profile ? 500U : 400U,
+		.iq_limit_a = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
+				     0.10f, MOTOR_MAX_CURRENT_A),
+	};
+	struct motor_commission_velocity_gain_restore velocity_restore = {0};
+	int ret = motor_commission_stage_velocity_capture_gains(sh, flux_cfg.iq_limit_a,
+							       &velocity_restore);
+	if (ret != 0) {
+		shell_error(sh, "Failed to stage flux velocity PI gains (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Flux auto start (%s profile): min=%.3f Hz max=%.3f Hz steps=%u settle=%u sample=%u iq=%.3f A",
+		    slow_profile ? "slow" : "confirm",
+		    (double)flux_cfg.min_speed_hz,
+		    (double)flux_cfg.max_speed_hz,
+		    flux_cfg.steps,
+		    flux_cfg.settle_ms,
+		    flux_cfg.sample_ms,
+		    (double)flux_cfg.iq_limit_a);
+
+	ret = motor_commission_auto_run_flux(sh, &flux_cfg);
+	motor_commission_velocity_gains_restore(&velocity_restore);
+	if (ret != 0) {
+		motor_current_slew_params_zero(g_motor_params);
+		if (g_motor_params->commission.active) {
+			motor_commission_abort(&commission_ctx, "flux auto failed");
+		}
+		shell_error(sh, "Flux auto failed (err %d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Flux auto result: psi_f=%.8f Wb R2=%.4f rms=%.4fV N=%u",
+		    (double)g_motor_params->commission.results.psi_f_wb,
+		    (double)g_motor_params->commission.results.psi_f_r2,
+		    (double)g_motor_params->commission.results.psi_f_residual_rms_v,
+		    g_motor_params->commission.results.psi_f_sample_count);
+	if (g_motor_params->commission.results.mapping_offset_valid ||
+	    g_motor_params->commission.results.mapping_pole_pairs_valid) {
+		shell_print(sh, "  Flux mapping: offset=%s pole_pairs=%s",
+			    g_motor_params->commission.results.mapping_offset_pass ?
+				    "PASS" : "FAIL",
+			    g_motor_params->commission.results.mapping_pole_pairs_pass ?
+				    "PASS" : "FAIL");
+	}
+
+	if (!apply_on_success) {
+		shell_print(sh, "Flux auto complete. Run 'motor commission apply' to apply.");
+		return 0;
+	}
+
+	ret = motor_commission_apply_results(&commission_ctx);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply flux result (err %d)", ret);
+		return ret;
+	}
+	shell_print(sh, "Flux result applied: psi_f=%.8f Wb Kt=%.8f Nm/A",
+		    (double)g_motor_params->flux_linkage_wb_active,
+		    (double)motor_torque_gain_resolve_active(g_motor_params));
+	return 0;
+}
+
 int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **argv)
 {
 	bool apply_on_success = false;

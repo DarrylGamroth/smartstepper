@@ -430,6 +430,17 @@ motor settings autoload enable baseline
   allowed.
 - Mechanical/flux/tune workflow remains under `motor commission auto run
   <slow|confirm> [apply]` and should be run separately from the baseline gate.
+- Flux/Kt can be promoted independently after the encoder path is validated:
+
+```text
+motor arm
+motor commission flux auto <slow|confirm> apply
+motor settings save model electrical
+```
+
+- `motor commission flux auto ...` runs only the closed-loop velocity flux
+  sweep and stops before mechanical ID. Use it when Rs/Ld/Lq and encoder mapping
+  are trusted but mechanical ID is not yet reliable enough for automatic tuning.
 
 ## Encoder Direction Mapping
 
