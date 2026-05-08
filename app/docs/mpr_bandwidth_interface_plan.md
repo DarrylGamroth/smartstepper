@@ -164,9 +164,45 @@ Result:
 zephyr/zephyr.elf linked successfully
 ```
 
-HIL note:
+HIL update, 2026-05-08:
 
-- Live MPR sweep was not run in this step because the preceding HIL regression
-  work exposed a baseline boot/current-validation issue unrelated to the MPR
-  bandwidth mapping. Run the sweep once the commissioning/current validation
-  baseline is stable.
+- The MT6835 PI baseline is now validated at `10 Hz`, `zeta=1.0`,
+  `Iq=0.225 A`.
+- The first MPR bandwidth mapping produced identical effective parameters over
+  the useful range because the real motor model clamped `q_speed` to
+  `MOTOR_MPR_VELOCITY_BW_Q_MIN`.
+- The mapper was updated so requested bandwidth produces distinct `q_speed`,
+  `r_delta_iq`, and `dIq` values on the MT6835 model.
+- Focused unit validation passed:
+
+```text
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_mpr.unit
+20 of 20 executed test cases passed
+```
+
+- Firmware build passed:
+
+```text
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2_mt6835_id'
+```
+
+- HIL did not pass the PI reference. Representative logs:
+  - `hil_logs/20260508_125647_velocity-sweep.log`: MPR `5 Hz` with lower
+    `r_delta_iq` still failed `+/-0.5` and `+/-1 Hz`.
+  - `hil_logs/20260508_130505_velocity-sweep.log`: MPR `10 Hz` still failed
+    the same points.
+  - `hil_logs/20260508_131013_velocity-sweep.log`: extending the horizon to
+    `32` ISR ticks made behavior worse, so the default horizon was restored to
+    `8`.
+  - `hil_logs/20260508_131405_custom.log`: raw aggressive tuning
+    `q=0.500`, `r=0.010`, `horizon=8`, `dIq=0.010 A/sample` still averaged
+    only about `0.325 Hz` at a `0.5 Hz` command.
+
+Current conclusion:
+
+- The bandwidth interface is now more meaningful than before, but MPR is not
+  validated for control use.
+- The remaining issue is likely algorithm-level: missing disturbance/feedforward
+  authority, static-friction/detent handling, or an outer-loop contract mismatch.
+- Keep PI as the validated baseline and do not persist or recommend MPR until a
+  new MPR design pass passes HIL.

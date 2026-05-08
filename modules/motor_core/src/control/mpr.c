@@ -60,20 +60,32 @@ int motor_mpr_velocity_config_from_bandwidth(
 	bool model_used =
 		motor_mpr_bandwidth_model_valid(in->inertia_kgm2,
 						in->torque_constant_nm_per_a);
-	float32_t q_speed = MOTOR_MPR_VELOCITY_BW_Q_MIN;
+	const float32_t bandwidth_hz =
+		fmaxf(in->bandwidth_hz, MOTOR_MPR_VELOCITY_BW_Q_REF_HZ);
+	float32_t q_speed =
+		MOTOR_MPR_VELOCITY_BW_Q_MIN *
+		((bandwidth_hz * bandwidth_hz) /
+		 (MOTOR_MPR_VELOCITY_BW_Q_REF_HZ * MOTOR_MPR_VELOCITY_BW_Q_REF_HZ));
 	if (model_used) {
 		const float32_t omega = 2.0f * PI_F32 * in->bandwidth_hz;
-		q_speed = (omega * in->inertia_kgm2) / in->torque_constant_nm_per_a;
+		const float32_t model_iq_per_rad_s =
+			(omega * in->inertia_kgm2) /
+			(in->torque_constant_nm_per_a * in->iq_limit_a);
+		q_speed = model_iq_per_rad_s * MOTOR_MPR_VELOCITY_BW_MODEL_SCALE;
 	}
 
 	const float32_t q_unclamped = q_speed;
 	q_speed = clampf(q_speed, MOTOR_MPR_VELOCITY_BW_Q_MIN,
 			 MOTOR_MPR_VELOCITY_BW_Q_MAX);
 	const float32_t r_delta_iq =
-		clampf(1.0f / (4.0f * q_speed), MOTOR_MPR_VELOCITY_BW_R_MIN,
+		clampf(1.0f / (16.0f * q_speed), MOTOR_MPR_VELOCITY_BW_R_MIN,
 		       MOTOR_MPR_VELOCITY_BW_R_MAX);
+	const float32_t di_frac =
+		MOTOR_MPR_VELOCITY_BW_DI_BASE_FRAC +
+		(MOTOR_MPR_VELOCITY_BW_DI_BW_FRAC *
+		 fminf(bandwidth_hz / MOTOR_MPR_VELOCITY_BW_DI_REF_HZ, 1.0f));
 	const float32_t max_delta_iq =
-		clampf(in->iq_limit_a * 0.003f, MOTOR_MPR_VELOCITY_BW_DI_MIN_A,
+		clampf(in->iq_limit_a * di_frac, MOTOR_MPR_VELOCITY_BW_DI_MIN_A,
 		       fminf(in->iq_limit_a, MOTOR_MPR_VELOCITY_BW_DI_MAX_A));
 
 	cfg->dt_s = in->dt_s;

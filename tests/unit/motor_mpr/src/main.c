@@ -101,11 +101,11 @@ ZTEST(motor_mpr, test_velocity_validate_rejects_invalid_inputs)
 ZTEST(motor_mpr, test_velocity_bandwidth_config_uses_model)
 {
 	const struct motor_mpr_velocity_bandwidth_input input = {
-		.bandwidth_hz = 0.5f,
-		.inertia_kgm2 = 0.001f,
-		.torque_constant_nm_per_a = 0.1f,
-		.iq_limit_a = 1.0f,
-		.dt_s = 0.001f,
+		.bandwidth_hz = 5.0f,
+		.inertia_kgm2 = 0.0000057f,
+		.torque_constant_nm_per_a = 0.338f,
+		.iq_limit_a = 0.225f,
+		.dt_s = 0.00005f,
 	};
 	struct motor_mpr_velocity_config cfg = {0};
 	struct motor_mpr_bandwidth_result result = {0};
@@ -153,9 +153,31 @@ ZTEST(motor_mpr, test_velocity_bandwidth_config_falls_back_without_model)
 	struct motor_mpr_bandwidth_result result = {0};
 
 	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result), NULL);
-	zassert_true(fabsf(cfg.q_speed - MOTOR_MPR_VELOCITY_BW_Q_MIN) < EPS, NULL);
+	zassert_true(cfg.q_speed > MOTOR_MPR_VELOCITY_BW_Q_MIN, NULL);
+	zassert_true(cfg.q_speed < MOTOR_MPR_VELOCITY_BW_Q_MAX, NULL);
 	zassert_false(result.model_used, NULL);
 	zassert_false(result.clamped, NULL);
+}
+
+ZTEST(motor_mpr, test_velocity_bandwidth_config_scales_with_bandwidth)
+{
+	struct motor_mpr_velocity_bandwidth_input input = {
+		.bandwidth_hz = 1.0f,
+		.inertia_kgm2 = 0.0000057f,
+		.torque_constant_nm_per_a = 0.338f,
+		.iq_limit_a = 0.225f,
+		.dt_s = 0.00005f,
+	};
+	struct motor_mpr_velocity_config low = {0};
+	struct motor_mpr_velocity_config high = {0};
+
+	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &low, NULL), NULL);
+	input.bandwidth_hz = 10.0f;
+	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &high, NULL), NULL);
+
+	zassert_true(high.q_speed > low.q_speed, NULL);
+	zassert_true(high.r_delta_iq <= low.r_delta_iq, NULL);
+	zassert_true(high.max_delta_iq_a >= low.max_delta_iq_a, NULL);
 }
 
 ZTEST(motor_mpr, test_velocity_bandwidth_config_rejects_invalid_inputs)
