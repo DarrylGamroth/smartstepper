@@ -393,7 +393,6 @@ int motor_api_request_calibrate(void)
 	if (g_motor_params != NULL) {
 		g_motor_params->calibration.complete = false;
 		g_motor_params->calibration.current_offsets_valid = false;
-		g_motor_params->calibration.commissioning_complete = false;
 	}
 
 	/* Calibration establishes current offsets and must not sit behind stale

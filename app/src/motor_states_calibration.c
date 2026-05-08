@@ -235,7 +235,9 @@ void motor_state_calibration_entry(void *obj)
 		params->calibration.complete = false;
 	}
 
-	params->calibration.commissioning_complete = false;
+	if (commissioning) {
+		params->calibration.commissioning_complete = false;
+	}
 }
 
 enum smf_state_result motor_state_calibration_run(void *obj)
@@ -259,7 +261,9 @@ void motor_state_calibration_exit(void *obj)
 			commissioning ? "Commissioning" : "Calibration");
 		params->calibration.complete = false;
 		params->calibration.current_offsets_valid = false;
-		params->calibration.commissioning_complete = false;
+		if (commissioning) {
+			params->calibration.commissioning_complete = false;
+		}
 	} else {
 		LOG_INF("=== %s Complete ===",
 			commissioning ? "Commissioning" : "Calibration");
