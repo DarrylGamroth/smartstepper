@@ -70,6 +70,22 @@ struct electrical_id_l_segment_sample {
 	uint32_t samples;
 };
 
+static const char *electrical_model_source_name(uint8_t source)
+{
+	switch (source) {
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_FALLBACK:
+		return "fallback_dt";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_ROVERL:
+		return "roverl_provisional";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_PRODUCTION:
+		return "production_electrical";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS:
+		return "settings_loaded";
+	default:
+		return "unknown";
+	}
+}
+
 static struct motor_electrical_id_limits electrical_id_limits(void)
 {
 	float32_t rs = MOTOR_RESISTANCE_OHM;
@@ -1816,7 +1832,8 @@ int cmd_motor_commission_electrical_status(const struct shell *sh, size_t argc, 
 		    (double)staged.pi.kp_q, (double)staged.pi.ki_q);
 	if (g_motor_params != NULL) {
 		shell_print(sh,
-			    "  Active fallback/current: Rs=%.6f ohm Ld=%.9f H Lq=%.9f H Lavg=%.9f H R/L=%.3f rad/s",
+			    "  Active model: source=%s Rs=%.6f ohm Ld=%.9f H Lq=%.9f H Lavg=%.9f H R/L=%.3f rad/s",
+			    electrical_model_source_name(g_motor_params->electrical_model_source),
 			    (double)g_motor_params->Rs_measured_ohm,
 			    (double)g_motor_params->Ld_measured_H,
 			    (double)g_motor_params->Lq_measured_H,
@@ -1854,6 +1871,7 @@ int cmd_motor_commission_electrical_apply(const struct shell *sh, size_t argc, c
 	g_motor_params->Ld_measured_H = staged.result.ld_h;
 	g_motor_params->Lq_measured_H = staged.result.lq_h;
 	g_motor_params->R_over_L_measured = staged.result.rs_ohm / staged.result.l_avg_h;
+	g_motor_params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_PRODUCTION;
 	g_motor_params->rls.ld_est_h = staged.result.ld_h;
 	g_motor_params->rls.lq_est_h = staged.result.lq_h;
 	pi_set_gains(&g_motor_params->pi_Id, staged.pi.kp_d, staged.pi.ki_d);

@@ -257,6 +257,22 @@ static void motor_commission_apply_auto_iq_floor(void)
 	}
 }
 
+static const char *motor_commission_electrical_source_name(uint8_t source)
+{
+	switch (source) {
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_FALLBACK:
+		return "fallback_dt";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_ROVERL:
+		return "roverl_provisional";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_PRODUCTION:
+		return "production_electrical";
+	case MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS:
+		return "settings_loaded";
+	default:
+		return "unknown";
+	}
+}
+
 static void motor_commission_standard_cleanup(uint32_t saved_timeout_ms)
 {
 	if (g_motor_params != NULL) {
@@ -333,7 +349,7 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		}
 	}
 
-	shell_print(sh, "[1/4] Electrical identification: current offsets, R/L, Rs");
+	shell_print(sh, "[1/4] Electrical identification: current offsets, RoverL bootstrap, production Rs/Ld/Lq");
 	ret = motor_api_request_commission();
 	if (ret != 0) {
 		shell_error(sh, "Failed to request state commissioning (err %d)", ret);
@@ -347,27 +363,37 @@ int cmd_motor_commission_run(const struct shell *sh, size_t argc, char **argv)
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}
-	shell_print(sh, "  Rs=%.4f ohm Ld=%.6f H Lq=%.6f H Lavg=%.6f H R/L=%.1f rad/s",
+	shell_print(sh, "  RoverL provisional: source=%s Rs=%.4f ohm Ld=%.6f H Lq=%.6f H Lavg=%.6f H R/L=%.1f rad/s",
+		    motor_commission_electrical_source_name(g_motor_params->electrical_model_source),
 		    (double)g_motor_params->Rs_measured_ohm,
 		    (double)g_motor_params->Ld_measured_H,
 		    (double)g_motor_params->Lq_measured_H,
 		    (double)g_motor_params->Ls_measured_H,
 		    (double)g_motor_params->R_over_L_measured);
-	bool production_electrical_reapplied = false;
 
-	ret = motor_commission_electrical_reapply_if_staged(sh, &production_electrical_reapplied);
+	char *electrical_run_argv[] = { "run" };
+	ret = cmd_motor_commission_electrical_run(sh, ARRAY_SIZE(electrical_run_argv),
+						  electrical_run_argv);
 	if (ret != 0) {
-		shell_error(sh, "Failed to reapply staged production electrical ID (err %d)", ret);
+		shell_error(sh, "Production electrical ID failed (err %d); RoverL provisional PI remains active",
+			    ret);
 		motor_commission_standard_cleanup(saved_timeout_ms);
 		return ret;
 	}
-	if (production_electrical_reapplied) {
-		shell_print(sh,
-			    "  Reapplied production electrical ID for remaining commissioning: Ld=%.6f H Lq=%.6f H Lavg=%.6f H",
-			    (double)g_motor_params->Ld_measured_H,
-			    (double)g_motor_params->Lq_measured_H,
-			    (double)g_motor_params->Ls_measured_H);
+	ret = cmd_motor_commission_electrical_apply(sh, 0, NULL);
+	if (ret != 0) {
+		shell_error(sh, "Failed to apply production electrical ID (err %d)", ret);
+		motor_commission_standard_cleanup(saved_timeout_ms);
+		return ret;
 	}
+	shell_print(sh,
+		    "  Production electrical active: source=%s Rs=%.4f ohm Ld=%.6f H Lq=%.6f H Lavg=%.6f H R/L=%.1f rad/s",
+		    motor_commission_electrical_source_name(g_motor_params->electrical_model_source),
+		    (double)g_motor_params->Rs_measured_ohm,
+		    (double)g_motor_params->Ld_measured_H,
+		    (double)g_motor_params->Lq_measured_H,
+		    (double)g_motor_params->Ls_measured_H,
+		    (double)g_motor_params->R_over_L_measured);
 
 	shell_print(sh, "[2/4] Encoder commutation mapping");
 	char *boot_argv[] = { "boot" };
@@ -926,7 +952,8 @@ int cmd_motor_commission_status(const struct shell *sh, size_t argc, char **argv
 		    (double)g_motor_params->inertia_kgm2_active,
 		    (double)g_motor_params->viscous_friction_nm_per_rad_s_active,
 		    (double)g_motor_params->coulomb_friction_nm_active);
-	shell_print(sh, "  Model source:   flux=%s mech=%s",
+	shell_print(sh, "  Model source:   electrical=%s flux=%s mech=%s",
+		    motor_commission_electrical_source_name(g_motor_params->electrical_model_source),
 		    g_motor_params->flux_model_source == MOTOR_MODEL_SOURCE_MEASURED ?
 			    "MEASURED" : "FALLBACK",
 		    g_motor_params->mech_model_source == MOTOR_MODEL_SOURCE_MEASURED ?

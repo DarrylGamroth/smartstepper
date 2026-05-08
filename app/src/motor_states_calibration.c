@@ -367,19 +367,16 @@ static int motor_calibration_finalize_roverl(struct motor_parameters *params)
 	params->Ld_measured_H = result.ls_h;
 	params->Lq_measured_H = result.ls_h;
 	params->R_over_L_measured = result.r_over_l;
-	return 0;
+	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_ROVERL;
+
+	return motor_calibration_apply_current_pi_from_rl(params);
 }
 
 enum smf_state_result motor_state_roverl_meas_run(void *obj)
 {
 	struct motor_parameters *params = (struct motor_parameters *)obj;
-	/* TODO: Use R/L to calculate initial PI current controller gains:
-	 * Kp = bandwidth * L
-	 * Ki = R/L * Ts
-	 * This will be done when PI controllers are reconfigured
-	 */
 	return motor_calibration_timeout_finalize_or_fault(params,
-							  MOTOR_STATE_RS_EST,
+							  MOTOR_STATE_IDLE,
 							  motor_calibration_finalize_roverl);
 }
 

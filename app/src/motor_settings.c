@@ -761,6 +761,7 @@ static int apply_model_group(struct motor_parameters *params,
 	params->Lq_measured_H = snapshot->model_lq_h;
 	params->Ls_measured_H = 0.5f * (params->Ld_measured_H + params->Lq_measured_H);
 	params->R_over_L_measured = params->Rs_measured_ohm / params->Ls_measured_H;
+	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS;
 	params->flux_linkage_wb_active = snapshot->model_flux_linkage_wb;
 	params->torque_gain_nm_per_a_active = snapshot->model_kt_nm_per_a;
 	params->inertia_kgm2_active = snapshot->model_inertia_kgm2;

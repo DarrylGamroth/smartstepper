@@ -715,6 +715,7 @@ static void motor_state_ctrl_init_entry(void *obj)
 	params->Lq_measured_H = MOTOR_INDUCTANCE_Q_H;
 	params->R_over_L_measured =
 		(params->Ls_measured_H > 0.0f) ? (params->Rs_measured_ohm / params->Ls_measured_H) : 0.0f;
+	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_FALLBACK;
 	params->inertia_kgm2_active = MOTOR_INERTIA_KGM2;
 	params->viscous_friction_nm_per_rad_s_active = 0.0f;
 	params->coulomb_friction_nm_active = 0.0f;

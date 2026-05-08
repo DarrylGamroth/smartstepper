@@ -137,6 +137,19 @@ struct motor_electrical_id_capture_ctx {
 #define MOTOR_MODEL_SOURCE_MEASURED 1U
 #endif
 
+#ifndef MOTOR_ELECTRICAL_MODEL_SOURCE_FALLBACK
+#define MOTOR_ELECTRICAL_MODEL_SOURCE_FALLBACK 0U
+#endif
+#ifndef MOTOR_ELECTRICAL_MODEL_SOURCE_ROVERL
+#define MOTOR_ELECTRICAL_MODEL_SOURCE_ROVERL 1U
+#endif
+#ifndef MOTOR_ELECTRICAL_MODEL_SOURCE_PRODUCTION
+#define MOTOR_ELECTRICAL_MODEL_SOURCE_PRODUCTION 2U
+#endif
+#ifndef MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS
+#define MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS 3U
+#endif
+
 struct motor_encoder_capture_sample {
 	uint32_t control_loop_count;
 	float32_t angle_deg;
@@ -511,6 +524,7 @@ struct motor_parameters {
 	float32_t coulomb_friction_nm_active;         /* Active Coulomb friction */
 	uint8_t flux_model_source;                    /* MOTOR_MODEL_SOURCE_* for psi_f/Kt */
 	uint8_t mech_model_source;                    /* MOTOR_MODEL_SOURCE_* for J/B/Tc */
+	uint8_t electrical_model_source;              /* MOTOR_ELECTRICAL_MODEL_SOURCE_* for Rs/Ld/Lq */
 
 	/* R/L estimation accumulators and angle generator */
 	float32_t roverl_accumulator_Vd_Id;
