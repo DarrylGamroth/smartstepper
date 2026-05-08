@@ -55,13 +55,18 @@ The initial implementation uses a compact table indexed by electrical angle:
 Add shell commands:
 
 ```text
-motor commission ripple run <mech_hz> <cycles> [decimation] [iq_limit_a]
+motor commission ripple run <velocity_hz> <duration_ms> [decimation] [iq_limit_a]
 motor commission ripple status
-motor commission ripple validate <mech_hz> <duration_ms>
+motor commission ripple validate <velocity_hz> <duration_ms>
 motor commission ripple apply [enable] [gain] [limit_a]
 motor commission ripple dump [start_bin] [count]
 motor commission ripple clear
 ```
+
+`velocity_hz` is the commanded mechanical velocity used to move through the electrical
+angle table. The table itself is indexed only by electrical angle. During capture, the
+measured velocity is used to qualify samples so acceleration, stall, saturation, or poor
+tracking does not contaminate the staged feedforward table.
 
 ### Phase 4 - Validation
 

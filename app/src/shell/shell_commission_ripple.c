@@ -21,11 +21,11 @@
 #include "motor/control/velocity_regulator.h"
 #include "motor/compensation/electrical_ripple_ff.h"
 
-#define MOTOR_COMMISSION_RIPPLE_MAX_SPEED_HZ 1.0f
-#define MOTOR_COMMISSION_RIPPLE_RECOMMENDED_SPEED_HZ 0.20f
-#define MOTOR_COMMISSION_RIPPLE_RECOMMENDED_CYCLES 2.0f
+#define MOTOR_COMMISSION_RIPPLE_MAX_VELOCITY_HZ 1.0f
+#define MOTOR_COMMISSION_RIPPLE_RECOMMENDED_VELOCITY_HZ 0.20f
+#define MOTOR_COMMISSION_RIPPLE_RECOMMENDED_DURATION_MS 5000U
 #define MOTOR_COMMISSION_RIPPLE_SAFE_IQ_LIMIT_A 0.12f
-#define MOTOR_COMMISSION_RIPPLE_SAFE_GAIN_SPEED_HZ 1.0f
+#define MOTOR_COMMISSION_RIPPLE_SAFE_GAIN_VELOCITY_HZ 1.0f
 #define MOTOR_COMMISSION_RIPPLE_DEFAULT_DECIMATION 1U
 #define MOTOR_COMMISSION_RIPPLE_MIN_DECIMATION 1U
 #define MOTOR_COMMISSION_RIPPLE_MAX_DECIMATION 128U
@@ -75,8 +75,8 @@ struct motor_commission_ripple_result {
 	uint16_t max_bin_count;
 	uint32_t run_ms;
 	uint32_t decimation;
-	float32_t speed_hz;
-	float32_t cycles;
+	float32_t velocity_hz;
+	uint32_t duration_ms;
 	float32_t confidence;
 	float32_t reject_ratio;
 	float32_t max_adjacent_step_a;
@@ -123,7 +123,7 @@ static const char *motor_commission_ripple_recommendation_str(
 }
 
 static int motor_commission_ripple_apply_velocity_gains(
-	float32_t speed_hz,
+	float32_t velocity_hz,
 	float32_t iq_limit_a,
 	struct motor_commission_ripple_velocity_restore *restore)
 {
@@ -133,7 +133,7 @@ static int motor_commission_ripple_apply_velocity_gains(
 
 	iq_limit_a = clampf(iq_limit_a, 0.02f, MOTOR_MAX_CURRENT_A);
 	float32_t gain_speed_rad_s =
-		2.0f * PI_F32 * fmaxf(speed_hz, MOTOR_COMMISSION_RIPPLE_SAFE_GAIN_SPEED_HZ);
+		2.0f * PI_F32 * fmaxf(velocity_hz, MOTOR_COMMISSION_RIPPLE_SAFE_GAIN_VELOCITY_HZ);
 	float32_t kp = iq_limit_a / gain_speed_rad_s;
 	float32_t ki = 2.0f * kp;
 
@@ -471,10 +471,10 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 {
 	if (argc < 3 || argc > 5) {
 		shell_error(sh,
-			    "Usage: motor commission ripple run <mech_hz> <cycles> [decimation] [iq_limit_a]");
+			    "Usage: motor commission ripple run <velocity_hz> <duration_ms> [decimation] [iq_limit_a]");
 		shell_error(sh, "Recommended start: motor commission ripple run %.2f %.0f 1 %.2f",
-			    (double)MOTOR_COMMISSION_RIPPLE_RECOMMENDED_SPEED_HZ,
-			    (double)MOTOR_COMMISSION_RIPPLE_RECOMMENDED_CYCLES,
+			    (double)MOTOR_COMMISSION_RIPPLE_RECOMMENDED_VELOCITY_HZ,
+			    (double)MOTOR_COMMISSION_RIPPLE_RECOMMENDED_DURATION_MS,
 			    (double)MOTOR_COMMISSION_RIPPLE_SAFE_IQ_LIMIT_A);
 		return -EINVAL;
 	}
@@ -490,24 +490,24 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 		return -EACCES;
 	}
 
-	float32_t speed_hz;
-	float32_t cycles;
+	float32_t velocity_hz;
+	uint32_t duration_ms;
 	uint32_t decimation = MOTOR_COMMISSION_RIPPLE_DEFAULT_DECIMATION;
 	float32_t capture_iq_limit_a = MOTOR_COMMISSION_RIPPLE_SAFE_IQ_LIMIT_A;
-	if (!shell_parse_finite_float(argv[1], &speed_hz) ||
-	    !shell_parse_finite_float(argv[2], &cycles) ||
+	if (!shell_parse_finite_float(argv[1], &velocity_hz) ||
+	    !shell_parse_u32(argv[2], &duration_ms) ||
 	    (argc >= 4 && !shell_parse_u32(argv[3], &decimation)) ||
 	    (argc >= 5 && !shell_parse_finite_float(argv[4], &capture_iq_limit_a))) {
 		shell_error(sh, "Invalid numeric argument");
 		return -EINVAL;
 	}
-	if (speed_hz <= 0.0f || cycles <= 0.0f) {
-		shell_error(sh, "mech_hz and cycles must be positive");
+	if (velocity_hz <= 0.0f || duration_ms == 0U) {
+		shell_error(sh, "velocity_hz and duration_ms must be positive");
 		return -EINVAL;
 	}
-	if (speed_hz > MOTOR_COMMISSION_RIPPLE_MAX_SPEED_HZ) {
-		shell_error(sh, "ripple capture speed is limited to %.3f Hz",
-			    (double)MOTOR_COMMISSION_RIPPLE_MAX_SPEED_HZ);
+	if (velocity_hz > MOTOR_COMMISSION_RIPPLE_MAX_VELOCITY_HZ) {
+		shell_error(sh, "ripple capture velocity is limited to %.3f Hz",
+			    (double)MOTOR_COMMISSION_RIPPLE_MAX_VELOCITY_HZ);
 		return -ERANGE;
 	}
 	if (capture_iq_limit_a <= 0.0f || capture_iq_limit_a > MOTOR_MAX_CURRENT_A) {
@@ -516,26 +516,24 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 		return -ERANGE;
 	}
 	float32_t max_hz = g_motor_params->profile_max_velocity_rad_s / (2.0f * PI_F32);
-	if (speed_hz > max_hz) {
-		shell_error(sh, "mech_hz exceeds profile max %.3f Hz", (double)max_hz);
+	if (velocity_hz > max_hz) {
+		shell_error(sh, "velocity_hz exceeds profile max %.3f Hz", (double)max_hz);
 		return -ERANGE;
 	}
 	decimation = CLAMP(decimation,
 			    MOTOR_COMMISSION_RIPPLE_MIN_DECIMATION,
 			    MOTOR_COMMISSION_RIPPLE_MAX_DECIMATION);
 
-	float32_t collect_ms_f = (cycles / speed_hz) * 1000.0f;
-	if (!isfinite(collect_ms_f) || collect_ms_f < 1.0f ||
-	    collect_ms_f > (float32_t)MOTOR_COMMISSION_RIPPLE_MAX_RUN_MS) {
+	if (duration_ms > MOTOR_COMMISSION_RIPPLE_MAX_RUN_MS) {
 		shell_error(sh, "Capture duration per direction invalid or above %u ms",
 			    MOTOR_COMMISSION_RIPPLE_MAX_RUN_MS);
 		return -ERANGE;
 	}
-	uint32_t collect_ms = (uint32_t)(collect_ms_f + 0.5f);
+	uint32_t collect_ms = duration_ms;
 	float32_t accel_hz_s = g_motor_params->profile_max_accel_rad_s2 / (2.0f * PI_F32);
 	uint32_t settle_ms = 500U;
 	if (isfinite(accel_hz_s) && accel_hz_s > 0.0f) {
-		settle_ms += (uint32_t)(((speed_hz / accel_hz_s) * 1000.0f) + 0.5f);
+		settle_ms += (uint32_t)(((velocity_hz / accel_hz_s) * 1000.0f) + 0.5f);
 	}
 	settle_ms = CLAMP(settle_ms, 500U, 10000U);
 
@@ -553,7 +551,7 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 
 	motor_commission_ripple_clear_staged();
 	motor_commission_ripple_capture_reset(kt, decimation);
-	int ret = motor_commission_ripple_apply_velocity_gains(speed_hz, capture_iq_limit_a,
+	int ret = motor_commission_ripple_apply_velocity_gains(velocity_hz, capture_iq_limit_a,
 							       &velocity_restore);
 	if (ret != 0) {
 		motor_commission_ripple_restore_velocity_gains(&velocity_restore);
@@ -580,20 +578,20 @@ int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **
 	}
 
 	shell_print(sh,
-		    "Electrical ripple capture: speed=%.3f Hz cycles=%.2f decimation=%u settle=%u ms",
-		    (double)speed_hz, (double)cycles, decimation, settle_ms);
+		    "Electrical ripple capture: velocity=%.3f Hz duration=%u ms/dir decimation=%u settle=%u ms",
+		    (double)velocity_hz, duration_ms, decimation, settle_ms);
 
-	ret = motor_commission_ripple_collect_pass(speed_hz, settle_ms, collect_ms);
+	ret = motor_commission_ripple_collect_pass(velocity_hz, settle_ms, collect_ms);
 	if (ret == 0) {
-		ret = motor_commission_ripple_collect_pass(-speed_hz, settle_ms, collect_ms);
+		ret = motor_commission_ripple_collect_pass(-velocity_hz, settle_ms, collect_ms);
 	}
 
 	motor_commission_set_velocity_target_hz(0.0f);
 	(void)motor_commission_wait_ms_or_fault(settle_ms);
 
 	if (ret == 0) {
-		ripple_result.speed_hz = speed_hz;
-		ripple_result.cycles = cycles;
+		ripple_result.velocity_hz = velocity_hz;
+		ripple_result.duration_ms = duration_ms;
 		ripple_result.decimation = decimation;
 		ripple_result.run_ms = 2U * collect_ms;
 		ret = motor_commission_ripple_finalize();
@@ -825,7 +823,7 @@ static int motor_commission_ripple_measure_velocity_error(float32_t target_hz,
 int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc != 3) {
-		shell_error(sh, "Usage: motor commission ripple validate <mech_hz> <duration_ms>");
+		shell_error(sh, "Usage: motor commission ripple validate <velocity_hz> <duration_ms>");
 		return -EINVAL;
 	}
 	if (g_motor_params == NULL) {
@@ -844,15 +842,15 @@ int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, ch
 		return -EACCES;
 	}
 
-	float32_t speed_hz;
+	float32_t velocity_hz;
 	uint32_t duration_ms;
-	if (!shell_parse_finite_float(argv[1], &speed_hz) ||
+	if (!shell_parse_finite_float(argv[1], &velocity_hz) ||
 	    !shell_parse_u32(argv[2], &duration_ms)) {
 		shell_error(sh, "Invalid numeric argument");
 		return -EINVAL;
 	}
-	if (speed_hz <= 0.0f || duration_ms < 500U || duration_ms > 10000U) {
-		shell_error(sh, "speed must be positive and duration must be 500..10000 ms");
+	if (velocity_hz <= 0.0f || duration_ms < 500U || duration_ms > 10000U) {
+		shell_error(sh, "velocity must be positive and duration must be 500..10000 ms");
 		return -ERANGE;
 	}
 
@@ -883,7 +881,7 @@ int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, ch
 	g_motor_params->electrical_ripple_ff_cfg.enabled = false;
 	motor_electrical_ripple_ff_reset(&g_motor_params->electrical_ripple_ff_state);
 	struct motor_commission_ripple_validation_metrics off = {0};
-	ret = motor_commission_ripple_measure_velocity_error(speed_hz, duration_ms, &off);
+	ret = motor_commission_ripple_measure_velocity_error(velocity_hz, duration_ms, &off);
 	if (ret != 0) {
 		goto restore_runtime;
 	}
@@ -901,7 +899,7 @@ int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, ch
 	g_motor_params->electrical_ripple_ff_cfg.enabled = true;
 	motor_electrical_ripple_ff_reset(&g_motor_params->electrical_ripple_ff_state);
 	struct motor_commission_ripple_validation_metrics on = {0};
-	ret = motor_commission_ripple_measure_velocity_error(speed_hz, duration_ms, &on);
+	ret = motor_commission_ripple_measure_velocity_error(velocity_hz, duration_ms, &on);
 	if (ret != 0) {
 		goto restore_runtime;
 	}
