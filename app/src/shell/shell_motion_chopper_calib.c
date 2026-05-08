@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "shell_commands_motion.h"
@@ -90,6 +91,18 @@ static bool motor_chopper_cal_geometry_valid(uint16_t slots, uint16_t teeth)
 struct chopper_edge_mean {
 	float32_t angle_rad;
 	uint8_t status;
+};
+
+struct chopper_cal_map_snapshot {
+	uint16_t count;
+	float32_t midpoints_rad[CHOPPER_CAL_MAX_SLOTS];
+	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];
+	float32_t spacing_min_rad;
+	float32_t spacing_max_rad;
+	float32_t spacing_mean_rad;
+	float32_t spacing_max_error_rad;
+	uint32_t captured_edges;
+	uint32_t discarded_edges;
 };
 
 static void motor_chopper_sort_edges(struct chopper_edge_mean *edges, uint16_t count)
@@ -264,6 +277,116 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 	params->chopper_cal.spacing_mean_rad = spacing_sum / (float32_t)edge_bins;
 	params->chopper_cal.spacing_max_error_rad = spacing_max_error;
 	params->chopper_cal.valid = true;
+	return 0;
+}
+
+static void motor_chopper_cal_compute_spacing(float32_t *midpoints_rad,
+					      uint16_t count,
+					      float32_t *spacing_min_rad,
+					      float32_t *spacing_max_rad,
+					      float32_t *spacing_mean_rad,
+					      float32_t *spacing_max_error_rad)
+{
+	float32_t ideal_spacing = 2.0f * PI_F32 / (float32_t)count;
+	float32_t spacing_sum = 0.0f;
+	float32_t spacing_min = 2.0f * PI_F32;
+	float32_t spacing_max = 0.0f;
+	float32_t spacing_max_error = 0.0f;
+
+	for (uint16_t i = 0U; i < count; i++) {
+		float32_t a = midpoints_rad[i];
+		float32_t b = midpoints_rad[(uint16_t)((i + 1U) % count)];
+		if ((i + 1U) == count) {
+			b += 2.0f * PI_F32;
+		}
+		float32_t spacing = b - a;
+
+		spacing_sum += spacing;
+		spacing_min = fminf(spacing_min, spacing);
+		spacing_max = fmaxf(spacing_max, spacing);
+		spacing_max_error = fmaxf(spacing_max_error, fabsf(spacing - ideal_spacing));
+	}
+
+	*spacing_min_rad = spacing_min;
+	*spacing_max_rad = spacing_max;
+	*spacing_mean_rad = spacing_sum / (float32_t)count;
+	*spacing_max_error_rad = spacing_max_error;
+}
+
+static void motor_chopper_cal_snapshot(const struct motor_parameters *params,
+				       struct chopper_cal_map_snapshot *snapshot)
+{
+	snapshot->count = params->chopper_cal.midpoint_count;
+	snapshot->spacing_min_rad = params->chopper_cal.spacing_min_rad;
+	snapshot->spacing_max_rad = params->chopper_cal.spacing_max_rad;
+	snapshot->spacing_mean_rad = params->chopper_cal.spacing_mean_rad;
+	snapshot->spacing_max_error_rad = params->chopper_cal.spacing_max_error_rad;
+	snapshot->captured_edges = params->chopper_cal.total_edges_captured;
+	snapshot->discarded_edges = params->chopper_cal.discarded_edges;
+
+	for (uint16_t i = 0U; i < snapshot->count; i++) {
+		snapshot->midpoints_rad[i] = params->chopper_cal.blade_midpoints_rad[i];
+		snapshot->midpoint_kind[i] = params->chopper_cal.midpoint_kind[i];
+	}
+}
+
+static float32_t motor_chopper_cal_average_angle(float32_t a_rad, float32_t b_rad)
+{
+	float32_t s = sinf(a_rad) + sinf(b_rad);
+	float32_t c = cosf(a_rad) + cosf(b_rad);
+
+	return wrap_rad_2pi(atan2f(s, c));
+}
+
+static int motor_chopper_cal_stage_average(struct motor_parameters *params,
+					   const struct chopper_cal_map_snapshot *forward,
+					   const struct chopper_cal_map_snapshot *reverse,
+					   float32_t max_delta_rad,
+					   float32_t *max_delta_out_rad,
+					   float32_t *mean_delta_out_rad)
+{
+	if (!params || !forward || !reverse ||
+	    forward->count == 0U ||
+	    forward->count != reverse->count ||
+	    forward->count > CHOPPER_CAL_MAX_SLOTS) {
+		return -EINVAL;
+	}
+
+	float32_t max_delta = 0.0f;
+	float32_t delta_sum = 0.0f;
+
+	for (uint16_t i = 0U; i < forward->count; i++) {
+		if (forward->midpoint_kind[i] != reverse->midpoint_kind[i]) {
+			return -EINVAL;
+		}
+		float32_t delta = fabsf(wrap_rad_pi(reverse->midpoints_rad[i] -
+						    forward->midpoints_rad[i]));
+		max_delta = fmaxf(max_delta, delta);
+		delta_sum += delta;
+	}
+
+	*max_delta_out_rad = max_delta;
+	*mean_delta_out_rad = delta_sum / (float32_t)forward->count;
+	if (max_delta > max_delta_rad) {
+		return -ERANGE;
+	}
+
+	params->chopper_cal.midpoint_count = forward->count;
+	for (uint16_t i = 0U; i < forward->count; i++) {
+		params->chopper_cal.blade_midpoints_rad[i] =
+			motor_chopper_cal_average_angle(forward->midpoints_rad[i],
+							reverse->midpoints_rad[i]);
+		params->chopper_cal.midpoint_kind[i] = forward->midpoint_kind[i];
+	}
+
+	motor_chopper_cal_compute_spacing(params->chopper_cal.blade_midpoints_rad,
+					  params->chopper_cal.midpoint_count,
+					  &params->chopper_cal.spacing_min_rad,
+					  &params->chopper_cal.spacing_max_rad,
+					  &params->chopper_cal.spacing_mean_rad,
+					  &params->chopper_cal.spacing_max_error_rad);
+	params->chopper_cal.valid = true;
+	params->chopper_cal.complete = true;
 	return 0;
 }
 
@@ -610,6 +733,159 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 		    revs, g_motor_params->chopper_cal.total_edges_target,
 		    (double)(speed_target_rad_s / (2.0f * PI_F32)),
 		    CHOPPER_CAL_CAPTURE_CHANNEL);
+	return 0;
+}
+
+static int motor_chopper_cal_wait_complete(struct motor_parameters *params, uint32_t timeout_ms)
+{
+	int64_t deadline_ms = k_uptime_get() + (int64_t)timeout_ms;
+
+	while (params->chopper_cal.active && !params->chopper_cal.complete) {
+		if (k_uptime_get() > deadline_ms) {
+#if CHOPPER_CAL_CAPTURE_AVAILABLE
+			(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
+#endif
+			params->chopper_cal.active = false;
+			params->chopper_cal.complete = false;
+			params->chopper_cal.valid = false;
+			motor_chopper_cal_restore_timeout(params);
+			(void)motor_hardware_set_photo_interruptor_enable(false);
+			return -ETIMEDOUT;
+		}
+		motor_command_feed_watchdog(params);
+		k_sleep(K_MSEC(50));
+	}
+
+	if (!params->chopper_cal.complete) {
+		return -EIO;
+	}
+
+	int ret = motor_chopper_cal_compute_midpoints(params);
+#if CHOPPER_CAL_CAPTURE_AVAILABLE
+	(void)timer_ic_disable_capture(chopper_capture_dev, CHOPPER_CAL_CAPTURE_CHANNEL);
+#endif
+	(void)motor_hardware_set_photo_interruptor_enable(false);
+	return ret;
+}
+
+static int motor_chopper_cal_run_blocking(const struct shell *sh,
+					  struct motor_parameters *params,
+					  uint16_t revs,
+					  float32_t velocity_hz,
+					  struct chopper_cal_map_snapshot *snapshot)
+{
+	char revs_buf[12];
+	char velocity_buf[24];
+	char *start_argv[] = {
+		"start",
+		revs_buf,
+		velocity_buf,
+	};
+
+	snprintf(revs_buf, sizeof(revs_buf), "%u", revs);
+	snprintf(velocity_buf, sizeof(velocity_buf), "%.6f", (double)velocity_hz);
+
+	int ret = cmd_motor_chopper_calib_start(sh, 3U, start_argv);
+	if (ret < 0) {
+		return ret;
+	}
+
+	uint32_t motion_time_ms =
+		(uint32_t)ceilf((float32_t)revs / fabsf(velocity_hz) * 1000.0f);
+	uint32_t timeout_ms = motion_time_ms + 10000U;
+
+	ret = motor_chopper_cal_wait_complete(params, timeout_ms);
+	if (ret < 0) {
+		return ret;
+	}
+	if (!params->chopper_cal.valid) {
+		return -EIO;
+	}
+
+	motor_chopper_cal_snapshot(params, snapshot);
+	return 0;
+}
+
+/* motor chopper calib bidir <revs> <velocity_hz> [max_delta_deg] */
+int cmd_motor_chopper_calib_bidir(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc != 3U && argc != 4U) {
+		shell_error(sh,
+			    "Usage: motor chopper calib bidir <revs> <velocity_hz> [max_delta_deg]");
+		return -EINVAL;
+	}
+	if (!g_motor_params) {
+		shell_error(sh, "Motor not initialized");
+		return -ENODEV;
+	}
+
+	uint32_t revs_u32 = 0U;
+	if (!shell_parse_u32(argv[1], &revs_u32) || revs_u32 == 0U || revs_u32 > UINT16_MAX) {
+		shell_error(sh, "revs must be 1..%u", UINT16_MAX);
+		return -EINVAL;
+	}
+
+	float32_t velocity_hz = 0.0f;
+	if (!shell_parse_finite_float(argv[2], &velocity_hz) || fabsf(velocity_hz) <= 1e-5f) {
+		shell_error(sh, "velocity_hz must be a non-zero finite value");
+		return -EINVAL;
+	}
+	velocity_hz = fabsf(velocity_hz);
+
+	float32_t max_delta_deg = 2.0f;
+	if (argc == 4U &&
+	    (!shell_parse_finite_float(argv[3], &max_delta_deg) || max_delta_deg <= 0.0f)) {
+		shell_error(sh, "max_delta_deg must be positive");
+		return -EINVAL;
+	}
+
+	struct chopper_cal_map_snapshot forward = {0};
+	struct chopper_cal_map_snapshot reverse = {0};
+	struct motor_parameters *params = g_motor_params;
+	uint16_t revs = (uint16_t)revs_u32;
+
+	shell_print(sh, "Bidirectional chopper capture: forward %.3f Hz", (double)velocity_hz);
+	int ret = motor_chopper_cal_run_blocking(sh, params, revs, velocity_hz, &forward);
+	if (ret < 0) {
+		shell_error(sh, "Forward capture failed (%d)", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Bidirectional chopper capture: reverse %.3f Hz", (double)-velocity_hz);
+	ret = motor_chopper_cal_run_blocking(sh, params, revs, -velocity_hz, &reverse);
+	if (ret < 0) {
+		shell_error(sh, "Reverse capture failed (%d)", ret);
+		return ret;
+	}
+
+	float32_t max_delta_rad = 0.0f;
+	float32_t mean_delta_rad = 0.0f;
+	ret = motor_chopper_cal_stage_average(params, &forward, &reverse,
+					      max_delta_deg * PI_F32 / 180.0f,
+					      &max_delta_rad, &mean_delta_rad);
+	if (ret < 0) {
+		shell_error(sh,
+			    "Forward/reverse mismatch: max=%.3f deg mean=%.3f deg limit=%.3f deg",
+			    (double)(max_delta_rad * 180.0f / PI_F32),
+			    (double)(mean_delta_rad * 180.0f / PI_F32),
+			    (double)max_delta_deg);
+		return ret;
+	}
+
+	shell_print(sh, "Bidirectional chopper map staged:");
+	shell_print(sh, "  Forward edges/discarded: %u / %u",
+		    forward.captured_edges, forward.discarded_edges);
+	shell_print(sh, "  Reverse edges/discarded: %u / %u",
+		    reverse.captured_edges, reverse.discarded_edges);
+	shell_print(sh, "  F/R delta max/mean: %.3f / %.3f deg",
+		    (double)(max_delta_rad * 180.0f / PI_F32),
+		    (double)(mean_delta_rad * 180.0f / PI_F32));
+	shell_print(sh, "  Averaged spacing min/max/mean/error: %.3f / %.3f / %.3f / %.3f deg",
+		    (double)(params->chopper_cal.spacing_min_rad * 180.0f / PI_F32),
+		    (double)(params->chopper_cal.spacing_max_rad * 180.0f / PI_F32),
+		    (double)(params->chopper_cal.spacing_mean_rad * 180.0f / PI_F32),
+		    (double)(params->chopper_cal.spacing_max_error_rad * 180.0f / PI_F32));
+	shell_print(sh, "Run 'motor chopper calib apply' then 'motor settings save chopper' to use it.");
 	return 0;
 }
 

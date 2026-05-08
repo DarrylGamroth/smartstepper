@@ -235,6 +235,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile,
 /* motor chopper calib subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_chopper_calib,
 	SHELL_CMD_ARG(start, NULL, "Capture slot/tooth edges <revs> <velocity_hz>", cmd_motor_chopper_calib_start, 3, 0),
+	SHELL_CMD_ARG(bidir, NULL, "Capture and average forward/reverse maps <revs> <velocity_hz> [max_delta_deg]", cmd_motor_chopper_calib_bidir, 3, 1),
 	SHELL_CMD(stop, NULL, "Stop active calibration capture", cmd_motor_chopper_calib_stop),
 	SHELL_CMD(status, NULL, "Show calibration capture and slot/tooth midpoint status", cmd_motor_chopper_calib_status),
 	SHELL_CMD(apply, NULL, "Apply slot/tooth midpoint table to profile sequence points", cmd_motor_chopper_calib_apply),

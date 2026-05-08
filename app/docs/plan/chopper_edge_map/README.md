@@ -35,20 +35,23 @@ Build and run HIL capture on the MT6835 target after baseline electrical/encoder
 `motor settings save chopper` and `motor settings load chopper` preserve the geometry and table.
 
 ## HIL Evidence
-Use the MT6835 HIL build. After baseline settings are loaded and velocity PI is stable:
+Use the MT6835 HIL build. After baseline settings are loaded and generated-angle
+motion works:
 
 ```text
-motor state mode velocity_encoder
+motor state calibrate
+motor safety timeout 0
 motor arm
-motor velocity target 0
 motor chopper geometry 8
-motor chopper calib start 4 0.5
+motor current iq 0.07
+motor chopper calib bidir 4 0.25 2.0
 motor chopper calib status
+motor current iq 0
+motor velocity target 0
 motor chopper calib apply
+motor disarm
 motor settings save chopper
 ```
-
-Repeat in reverse with `velocity_hz=-0.5` and compare the center table.
 
 ## Risks
 Missed optical edges will corrupt bin-to-edge association. The current implementation assumes no missed accepted edges during a capture pass and reports discarded edges but does not yet cross-correlate forward/reverse captures into one averaged map.
@@ -179,4 +182,21 @@ motor chopper geometry
 Save result:
 - `motor settings status` reports `chopper=YES` present and valid.
 - `motor chopper geometry` reports `Map valid: YES`.
+```
+
+Bidirectional averaging command evidence:
+
+```text
+Command:
+motor chopper calib bidir 4 0.25 2.0
+
+Result:
+- Forward edges/discarded: 64 / 150.
+- Reverse edges/discarded: 64 / 248.
+- F/R delta max/mean: 0.518 / 0.478 deg.
+- Averaged spacing min/max/mean/error: 22.317 / 22.737 / 22.500 / 0.237 deg.
+- The averaged map was staged by the command, applied with
+  `motor chopper calib apply`, and saved with `motor settings save chopper`.
+- `motor settings status` reports generation 7 with `chopper=YES` present and
+  valid.
 ```
