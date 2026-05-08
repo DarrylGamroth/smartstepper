@@ -74,7 +74,9 @@
 	status = "okay";
 };
 
-// Timer 2 is used for input capture of clock generator and photo-interrupter
+// Timer 2 capture wiring:
+// - CH1 / PA0: external index pulse for profile sequence triggering.
+// - CH2 / PB3: photo-interrupter edge capture for chopper slot/tooth mapping.
 &timers2 {
 	compatible = "rubus,stm32-timers";
 	st,prescaler = <0>;

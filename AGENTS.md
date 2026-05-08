@@ -522,6 +522,19 @@ motor commission encoder clear
   and rejects jumps above the ISR plausibility threshold before the observer uses
   them.
 
+## Chopper Wheel Capture
+
+- TIM2 input-capture channels are zero-based in shell/API code:
+  - `profile_seq.trigger_channel = 0` maps to TIM2 CH1 / PA0 and is reserved
+    for the external index pulse that advances calibrated position targets.
+  - `CHOPPER_CAL_CAPTURE_CHANNEL = 1` maps to TIM2 CH2 / PB3 and is used for
+    photo-interrupter slot/tooth edge capture.
+- `app/boards/smartstepper_v2.overlay` provides matching `capture-gpios` so the
+  STM32 timer capture driver can report rising/falling edge status for
+  slot/tooth midpoint classification.
+- Use `motor chopper sensor [0|1]` to inspect or manually control the
+  photo-interrupter emitter enable GPIO during bring-up.
+
 ## AEAT-9955 Telemetry-Only Use
 
 - The AEAT-9955 may be usable for coarse before/after motion telemetry even
