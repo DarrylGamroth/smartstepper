@@ -178,12 +178,16 @@ Overlay note:
   - `/motor_parameters`,
   - `/fault_detection`.
 - Preferred bring-up composition is board + encoder + safe motor-ID overlay:
-  - MT6835: `boards/smartstepper_v2.overlay;configs/encoder_mt6835_rtspi.overlay;configs/motor_id_safe_2a.overlay`
-  - AEAT-9955: `boards/smartstepper_v2.overlay;configs/encoder_aeat9955_rtspi.overlay;configs/motor_id_safe_067a.overlay`
+  - MT6835: `boards/smartstepper_v2.overlay;configs/encoder_mt6835_rtspi.overlay;configs/commissioning_default.overlay;configs/motor_id_safe_2a.overlay`
+  - AEAT-9955: `boards/smartstepper_v2.overlay;configs/encoder_aeat9955_rtspi.overlay;configs/commissioning_default.overlay;configs/motor_id_safe_067a.overlay`
 - The safe motor-ID overlays are conservative boot/identification defaults.
   They should be adequate for current-offset calibration, PI current control,
   bidirectional Rs, R/L bootstrap, and demodulated Ld/Lq identification before
   commissioned values are saved to Settings/ZMS.
+- `configs/commissioning_default.overlay` owns generic commissioning recipe
+  defaults such as sample counts, timing, demod cadence, and auto-commissioning
+  confidence gates. Motor safe-ID overlays should only override current-class or
+  motor-specific safety values.
 - Full convenience profiles still exist:
   - `configs/motor_mt6835_2a.overlay`
   - `configs/motor_aeat9955_067a.overlay`

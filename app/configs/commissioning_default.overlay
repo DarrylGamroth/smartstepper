@@ -1,0 +1,50 @@
+/*
+ * Shared commissioning recipe defaults.
+ *
+ * Compose this between the selected encoder overlay and the selected motor
+ * safe-ID overlay. Motor overlays can override these values by appearing later
+ * in DTC_OVERLAY_FILE.
+ *
+ * Keep motor identity, current limits, and encoder protocol details out of this
+ * file. Those belong in motor/encoder overlays or board DTS.
+ */
+
+/ {
+	user_parameters {
+		/* Production electrical ID recipe. */
+		commission-electrical-samples = <128>;
+		commission-electrical-settle-ms = <1000>;
+		commission-electrical-current-ramp-ms = <1000>;
+
+		/* Legacy scalar/pulse inductance diagnostics; not the baseline L path. */
+		commission-electrical-l-pulse-mv = <450>;
+		commission-electrical-l-pulse-ms = <5>;
+
+		/* Baseline demodulated Ld/Lq recipe. Pulse amplitude remains profile-specific. */
+		commission-electrical-demod-pulse-ms = <2>;
+		commission-electrical-demod-half-cycles = <40>;
+
+		/* One-command commissioning recipe. */
+		commission-auto-velocity-bandwidth-mhz = <20000>;
+		commission-auto-post-wait-ms = <2500>;
+		commission-auto-mech-runs = <3>;
+		commission-auto-mech-max-attempts = <5>;
+		commission-auto-mech-cycles-per-capture = <1>;
+		commission-auto-mech-accel-margin-mpu = <1250>;
+		commission-auto-mech-validate-rms-unm = <5000>;
+		commission-auto-mech-validate-rms-gain-mpu = <5000>;
+		commission-auto-mech-min-confidence-mpu = <500>;
+
+		commission-auto-slow-flux-min-mhz = <250>;
+		commission-auto-slow-flux-max-mhz = <750>;
+		commission-auto-slow-mech-max-mhz = <1000>;
+		commission-auto-slow-mech-base-mhz = <500>;
+		commission-auto-slow-mech-dither-mhz = <150>;
+
+		commission-auto-normal-flux-min-mhz = <500>;
+		commission-auto-normal-flux-max-mhz = <3000>;
+		commission-auto-normal-mech-max-mhz = <3000>;
+		commission-auto-normal-mech-base-mhz = <1500>;
+		commission-auto-normal-mech-dither-mhz = <500>;
+	};
+};
