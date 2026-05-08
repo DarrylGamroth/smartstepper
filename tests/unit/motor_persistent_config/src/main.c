@@ -26,7 +26,7 @@ ZTEST(motor_persistent_config, test_prepare_populates_header_and_valid_crc)
 			MOTOR_PERSISTENT_CONFIG_FLAG_ENCODER_MAPPING_VALID);
 
 	zassert_equal(record.header.magic, MOTOR_PERSISTENT_CONFIG_MAGIC, NULL);
-	zassert_equal(record.header.schema_version, MOTOR_PERSISTENT_CONFIG_SCHEMA_V1, NULL);
+	zassert_equal(record.header.schema_version, MOTOR_PERSISTENT_CONFIG_SCHEMA_VERSION, NULL);
 	zassert_equal(record.header.header_size, sizeof(record.header), NULL);
 	zassert_equal(record.header.payload_size, sizeof(record.payload), NULL);
 	zassert_equal(record.header.record_size, sizeof(record), NULL);

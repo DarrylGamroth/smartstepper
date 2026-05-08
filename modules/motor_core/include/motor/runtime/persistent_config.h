@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 #define MOTOR_PERSISTENT_CONFIG_MAGIC 0x4D504331U /* "MPC1" */
-#define MOTOR_PERSISTENT_CONFIG_SCHEMA_V1 1U
+#define MOTOR_PERSISTENT_CONFIG_SCHEMA_VERSION 2U
 
 enum motor_persistent_config_flags {
 	MOTOR_PERSISTENT_CONFIG_FLAG_CURRENT_OFFSETS_VALID = (1U << 0),
@@ -57,7 +57,6 @@ struct motor_persistent_motor_model_v1 {
 	float32_t ld_h;
 	float32_t lq_h;
 	float32_t flux_linkage_wb;
-	float32_t kt_nm_per_a;
 	float32_t inertia_kgm2;
 	float32_t viscous_friction_nm_per_rad_s;
 	float32_t coulomb_friction_nm;

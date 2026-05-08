@@ -45,7 +45,6 @@
 #define KEY_MODEL_ELEC_LD "motor/model/electrical/ld_h"
 #define KEY_MODEL_ELEC_LQ "motor/model/electrical/lq_h"
 #define KEY_MODEL_ELEC_FLUX "motor/model/electrical/flux_linkage_wb"
-#define KEY_MODEL_ELEC_KT "motor/model/electrical/kt_nm_per_a"
 
 #define OLD_KEY_MODEL_RS "motor/model/rs_ohm"
 #define OLD_KEY_MODEL_LD "motor/model/ld_h"
@@ -55,6 +54,7 @@
 #define OLD_KEY_MODEL_J "motor/model/inertia_kgm2"
 #define OLD_KEY_MODEL_B "motor/model/viscous_friction_nm_per_rad_s"
 #define OLD_KEY_MODEL_TC "motor/model/coulomb_friction_nm"
+#define OLD_KEY_MODEL_ELEC_KT "motor/model/electrical/kt_nm_per_a"
 
 #define KEY_CTRL_OUTER_MODE "motor/controllers/outer_loop_mode"
 #define KEY_CTRL_VEL_BW "motor/controllers/velocity_bandwidth_hz"
@@ -130,11 +130,9 @@
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD BIT(1)
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ BIT(2)
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX BIT(3)
-#define MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT BIT(4)
 #define MOTOR_SETTINGS_MODEL_ELEC_FIELDS_ALL \
 	(MOTOR_SETTINGS_MODEL_ELEC_FIELD_RS | MOTOR_SETTINGS_MODEL_ELEC_FIELD_LD | \
-	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ | MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX | \
-	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT)
+	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ | MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX)
 
 struct motor_settings_read_ctx {
 	struct motor_settings_snapshot *snapshot;
@@ -260,8 +258,6 @@ static int settings_read_cb_direct(const char *key, size_t len,
 	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/flux_linkage_wb",
 				    model_flux_linkage_wb,
 				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_FLUX);
-	LOAD_MODEL_ELECTRICAL_FIELD("model/electrical/kt_nm_per_a", model_kt_nm_per_a,
-				    MOTOR_SETTINGS_MODEL_ELEC_FIELD_KT);
 	LOAD_CONTROLLER_FIELD("controllers/outer_loop_mode", ctrl_outer_loop_mode,
 			      MOTOR_SETTINGS_CTRL_FIELD_OUTER_MODE);
 	LOAD_CONTROLLER_FIELD("controllers/velocity_bandwidth_hz", ctrl_velocity_bandwidth_hz,
@@ -423,7 +419,7 @@ static int clear_legacy_model_keys(void)
 {
 	const char *keys[] = { OLD_KEY_MODEL_RS, OLD_KEY_MODEL_LD, OLD_KEY_MODEL_LQ,
 		OLD_KEY_MODEL_FLUX, OLD_KEY_MODEL_KT, OLD_KEY_MODEL_J, OLD_KEY_MODEL_B,
-		OLD_KEY_MODEL_TC };
+		OLD_KEY_MODEL_TC, OLD_KEY_MODEL_ELEC_KT };
 
 	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
 		int ret = delete_key(keys[i]);
@@ -439,8 +435,7 @@ static int save_model_electrical_group(const struct motor_parameters *params)
 	if (!finite_positive(params->Rs_measured_ohm) ||
 	    !finite_positive(params->Ld_measured_H) ||
 	    !finite_positive(params->Lq_measured_H) ||
-	    !finite_positive(params->flux_linkage_wb_active) ||
-	    !finite_positive(params->torque_gain_nm_per_a_active)) {
+	    !finite_positive(params->flux_linkage_wb_active)) {
 		return -ERANGE;
 	}
 
@@ -449,7 +444,6 @@ static int save_model_electrical_group(const struct motor_parameters *params)
 	SAVE_SCALAR(KEY_MODEL_ELEC_LD, params->Ld_measured_H);
 	SAVE_SCALAR(KEY_MODEL_ELEC_LQ, params->Lq_measured_H);
 	SAVE_SCALAR(KEY_MODEL_ELEC_FLUX, params->flux_linkage_wb_active);
-	SAVE_SCALAR(KEY_MODEL_ELEC_KT, params->torque_gain_nm_per_a_active);
 	return clear_legacy_model_keys();
 }
 
@@ -795,8 +789,7 @@ static int apply_model_electrical_group(struct motor_parameters *params,
 	if (!finite_positive(snapshot->model_rs_ohm) ||
 	    !finite_positive(snapshot->model_ld_h) ||
 	    !finite_positive(snapshot->model_lq_h) ||
-	    !finite_positive(snapshot->model_flux_linkage_wb) ||
-	    !finite_positive(snapshot->model_kt_nm_per_a)) {
+	    !finite_positive(snapshot->model_flux_linkage_wb)) {
 		return -ERANGE;
 	}
 
@@ -807,7 +800,8 @@ static int apply_model_electrical_group(struct motor_parameters *params,
 	params->R_over_L_measured = params->Rs_measured_ohm / params->Ls_measured_H;
 	params->electrical_model_source = MOTOR_ELECTRICAL_MODEL_SOURCE_SETTINGS;
 	params->flux_linkage_wb_active = snapshot->model_flux_linkage_wb;
-	params->torque_gain_nm_per_a_active = snapshot->model_kt_nm_per_a;
+	params->torque_gain_nm_per_a_active =
+		motor_torque_gain_from_flux(snapshot->model_flux_linkage_wb);
 	params->flux_model_source = MOTOR_MODEL_SOURCE_MEASURED;
 	params->thermal.rs_ref_ohm = params->Rs_measured_ohm;
 	return 0;
@@ -1100,7 +1094,7 @@ static int clear_identity_keys(void)
 static int clear_model_electrical_keys(void)
 {
 	const char *keys[] = { KEY_MODEL_ELEC_RS, KEY_MODEL_ELEC_LD, KEY_MODEL_ELEC_LQ,
-		KEY_MODEL_ELEC_FLUX, KEY_MODEL_ELEC_KT };
+		KEY_MODEL_ELEC_FLUX };
 	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
 		int ret = delete_key(keys[i]);
 		if (ret != 0) {

@@ -24,7 +24,7 @@ struct motor_parameters;
 	 MOTOR_SETTINGS_GROUP_CONTROLLERS | MOTOR_SETTINGS_GROUP_DETENT | \
 	 MOTOR_SETTINGS_GROUP_IDENTITY | MOTOR_SETTINGS_GROUP_LIMITS)
 
-#define MOTOR_SETTINGS_SCHEMA_VERSION 4U
+#define MOTOR_SETTINGS_SCHEMA_VERSION 5U
 
 struct motor_settings_snapshot {
 	uint32_t schema_version;
@@ -43,7 +43,6 @@ struct motor_settings_snapshot {
 	float32_t model_ld_h;
 	float32_t model_lq_h;
 	float32_t model_flux_linkage_wb;
-	float32_t model_kt_nm_per_a;
 	float32_t model_inertia_kgm2;
 	float32_t model_viscous_friction_nm_per_rad_s;
 	float32_t model_coulomb_friction_nm;

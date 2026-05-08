@@ -47,7 +47,7 @@ void motor_persistent_config_v1_prepare(struct motor_persistent_config_v1 *recor
 	}
 
 	record->header.magic = MOTOR_PERSISTENT_CONFIG_MAGIC;
-	record->header.schema_version = MOTOR_PERSISTENT_CONFIG_SCHEMA_V1;
+	record->header.schema_version = MOTOR_PERSISTENT_CONFIG_SCHEMA_VERSION;
 	record->header.header_size = sizeof(record->header);
 	record->header.payload_size = sizeof(record->payload);
 	record->header.record_size = sizeof(*record);
@@ -64,7 +64,7 @@ bool motor_persistent_config_v1_validate(const struct motor_persistent_config_v1
 	}
 
 	if (record->header.magic != MOTOR_PERSISTENT_CONFIG_MAGIC ||
-	    record->header.schema_version != MOTOR_PERSISTENT_CONFIG_SCHEMA_V1 ||
+	    record->header.schema_version != MOTOR_PERSISTENT_CONFIG_SCHEMA_VERSION ||
 	    record->header.header_size != sizeof(record->header) ||
 	    record->header.payload_size != sizeof(record->payload) ||
 	    record->header.record_size != sizeof(*record)) {

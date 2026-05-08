@@ -11,6 +11,7 @@
 
 #include "config.h"
 #include "motor_settings.h"
+#include "motor_torque.h"
 #include "motor_control_api.h"
 #include "motor_state_utils.h"
 #include "shell_commands_motion.h"
@@ -138,9 +139,9 @@ static void print_snapshot(const struct shell *sh,
 			    (double)s->model_rs_ohm,
 			    (double)s->model_ld_h,
 			    (double)s->model_lq_h);
-		shell_print(sh, "    psi_f=%.8f Wb Kt=%.8f Nm/A",
+		shell_print(sh, "    psi_f=%.8f Wb Kt=%.8f Nm/A (derived)",
 			    (double)s->model_flux_linkage_wb,
-			    (double)s->model_kt_nm_per_a);
+			    (double)motor_torque_gain_from_flux(s->model_flux_linkage_wb));
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_LIMITS) != 0U) {
 		shell_print(sh, "  Limits:");

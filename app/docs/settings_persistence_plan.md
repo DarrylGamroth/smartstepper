@@ -72,8 +72,10 @@ motor/model/electrical/rs_ohm
 motor/model/electrical/ld_h
 motor/model/electrical/lq_h
 motor/model/electrical/flux_linkage_wb
-motor/model/electrical/kt_nm_per_a
 ```
+
+`Kt` is not persisted. It is derived on load/apply as
+`Kt = 1.5 * pole_pairs * psi_f` and cached in RAM.
 
 Controller group:
 
@@ -136,7 +138,7 @@ motor settings clear [model electrical|model encoder|identity|limits|controllers
 motor settings autoload status
 ```
 
-`model electrical` stores only the active electrical model (`Rs/Ld/Lq/psi_f/Kt`).
+`model electrical` stores only the active electrical model (`Rs/Ld/Lq/psi_f`).
 `model encoder` stores the encoder mapping group. Mechanical ID values are not
 part of baseline persistence yet. ADC current offsets are intentionally excluded
 and must be measured on every boot.
@@ -160,8 +162,8 @@ Load validates selected values before applying. After apply:
   trust state,
 - identity reload verifies the persisted motor identity matches this firmware
   image,
-- electrical model reload updates active Rs/Ld/Lq/flux/Kt and electrical model
-  source markers,
+- electrical model reload updates active Rs/Ld/Lq/flux, derives cached Kt, and
+  updates electrical model source markers,
 - limits reload applies runtime motion profile velocity/acceleration limits and
   command timeout, and validates compile-time electrical safety limits,
 - controller reload recomputes PI/MPR/DOB coefficients from stored tuning
