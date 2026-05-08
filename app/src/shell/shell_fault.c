@@ -2,6 +2,11 @@
 
 /* Domain implementation split from shell_commands_state.c. */
 
+static inline double rad_s_to_hz(float32_t rad_s)
+{
+	return (double)(rad_s / (2.0f * PI_F32));
+}
+
 /* motor fault snapshot start [decimation] */
 int cmd_motor_fault_snapshot_start(const struct shell *sh, size_t argc, char **argv)
 {
@@ -100,11 +105,14 @@ int cmd_motor_fault_snapshot_status(const struct shell *sh, size_t argc, char **
 		const struct motor_fault_snapshot_sample *newest =
 			&g_motor_params->fault_snapshot.samples[newest_idx];
 		shell_print(sh,
-			    "  Latest:     loop=%u reason=%s src=%s enc=%.3fdeg iq_ref=%.3fA iq=%.3fA ia=%.3fA ib=%.3fA fresh=%u warn=%u err=%u status=0x%02X",
+			    "  Latest:     loop=%u reason=%s src=%s enc=%.3fdeg v_tgt=%.3fHz v_ref=%.3fHz v_meas=%.3fHz iq_ref=%.3fA iq=%.3fA ia=%.3fA ib=%.3fA fresh=%u warn=%u err=%u status=0x%02X",
 			    newest->control_loop_count,
 			    motor_encoder_fault_reason_to_string(newest->encoder_fault_reason),
 			    motor_encoder_input_source_to_string(newest->input_source),
 			    (double)newest->encoder_angle_deg,
+			    rad_s_to_hz(newest->velocity_target_rad_s),
+			    rad_s_to_hz(newest->velocity_ref_rad_s),
+			    rad_s_to_hz(newest->velocity_mech_rad_s),
 			    (double)newest->Iq_ref_A,
 			    (double)newest->Iq_A,
 			    (double)newest->Ia_A,
@@ -157,13 +165,13 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 	}
 
 	shell_print(sh,
-		    "idx loop reason src fresh warn err status pqual enc_deg obs_in elec obs_we id_ref iq_ref id iq ia ib vd vq");
+		    "idx loop reason src fresh warn err status pqual enc_deg obs_in elec obs_we v_tgt_hz v_ref_hz v_meas_hz v_filt_hz id_ref iq_ref id iq ia ib vd vq");
 	for (uint16_t i = 0U; i < count; i++) {
 		uint16_t idx = (uint16_t)((start + i) % MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES);
 		const struct motor_fault_snapshot_sample *sample =
 			&g_motor_params->fault_snapshot.samples[idx];
 		shell_print(sh,
-			    "%u %u %s %s %u %u %u 0x%02X 0x%02X %.3f %.6f %.6f %.6f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
+			    "%u %u %s %s %u %u %u 0x%02X 0x%02X %.3f %.6f %.6f %.6f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
 			    i,
 			    sample->control_loop_count,
 			    motor_encoder_fault_reason_to_string(sample->encoder_fault_reason),
@@ -177,6 +185,10 @@ int cmd_motor_fault_snapshot_dump(const struct shell *sh, size_t argc, char **ar
 			    (double)sample->observer_input_rad,
 			    (double)sample->elec_angle_rad,
 			    (double)sample->observer_elec_speed_rad_s,
+			    rad_s_to_hz(sample->velocity_target_rad_s),
+			    rad_s_to_hz(sample->velocity_ref_rad_s),
+			    rad_s_to_hz(sample->velocity_mech_rad_s),
+			    rad_s_to_hz(sample->velocity_filtered_rad_s),
 			    (double)sample->Id_ref_A,
 			    (double)sample->Iq_ref_A,
 			    (double)sample->Id_A,

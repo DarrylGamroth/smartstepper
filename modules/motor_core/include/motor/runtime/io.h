@@ -40,6 +40,10 @@ struct motor_control_fault_snapshot {
 	float32_t observer_input_rad;
 	float32_t elec_angle_rad;
 	float32_t observer_elec_speed_rad_s;
+	float32_t velocity_target_rad_s;
+	float32_t velocity_ref_rad_s;
+	float32_t velocity_mech_rad_s;
+	float32_t velocity_filtered_rad_s;
 	float32_t id_ref_a;
 	float32_t iq_ref_a;
 	float32_t id_a;

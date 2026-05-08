@@ -258,6 +258,10 @@ static inline void motor_fault_snapshot_prepare(struct motor_control_step_report
 						float32_t observer_input_rad,
 						float32_t elec_angle_rad,
 						float32_t observer_elec_speed_rad_s,
+						float32_t velocity_target_rad_s,
+						float32_t velocity_ref_rad_s,
+						float32_t velocity_mech_rad_s,
+						float32_t velocity_filtered_rad_s,
 						float32_t id_ref_a,
 						float32_t iq_ref_a,
 						float32_t id_a,
@@ -283,6 +287,10 @@ static inline void motor_fault_snapshot_prepare(struct motor_control_step_report
 	report->fault_snapshot.observer_input_rad = observer_input_rad;
 	report->fault_snapshot.elec_angle_rad = elec_angle_rad;
 	report->fault_snapshot.observer_elec_speed_rad_s = observer_elec_speed_rad_s;
+	report->fault_snapshot.velocity_target_rad_s = velocity_target_rad_s;
+	report->fault_snapshot.velocity_ref_rad_s = velocity_ref_rad_s;
+	report->fault_snapshot.velocity_mech_rad_s = velocity_mech_rad_s;
+	report->fault_snapshot.velocity_filtered_rad_s = velocity_filtered_rad_s;
 	report->fault_snapshot.id_ref_a = id_ref_a;
 	report->fault_snapshot.iq_ref_a = iq_ref_a;
 	report->fault_snapshot.id_a = id_a;
@@ -297,6 +305,33 @@ static inline void motor_fault_snapshot_prepare(struct motor_control_step_report
 	report->fault_snapshot.sample_error = sample_error ? 1U : 0U;
 	report->fault_snapshot.status = status;
 	report->fault_snapshot.position_quality_flags = position_quality_flags;
+}
+
+static inline void motor_fault_snapshot_update_refs(
+	struct motor_control_step_report *report,
+	const struct motor_motion_ref *motion_ref,
+	const struct motor_feedback_ref *feedback_ref,
+	const struct motor_current_ref *current_ref)
+{
+	if (report == NULL || !report->fault_snapshot.valid) {
+		return;
+	}
+
+	if (motion_ref != NULL) {
+		report->fault_snapshot.velocity_target_rad_s = motion_ref->velocity_target_rad_s;
+		report->fault_snapshot.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;
+	}
+	if (feedback_ref != NULL) {
+		report->fault_snapshot.velocity_mech_rad_s = feedback_ref->velocity_rad_s;
+		report->fault_snapshot.velocity_filtered_rad_s =
+			feedback_ref->velocity_filtered_rad_s;
+	}
+	if (current_ref != NULL) {
+		report->fault_snapshot.id_ref_a = current_ref->id_ref_a;
+		report->fault_snapshot.iq_ref_a = current_ref->iq_ref_a;
+		report->fault_snapshot.id_a = current_ref->id_meas_a;
+		report->fault_snapshot.iq_a = current_ref->iq_meas_a;
+	}
 }
 
 static inline void motor_step_report_post_error_with_encoder_reason(
@@ -1058,6 +1093,10 @@ static MOTOR_ISR_STAGE_NOINLINE bool motor_control_step_measure_stage(struct mot
 					     meas->observer_input_rad,
 					     meas->park_angle_rad,
 					     meas->electrical_speed_rad_s,
+					     params->live.velocity_target_rad_s,
+					     params->live.velocity_ref_rad_s,
+					     meas->speed_mech_rad_s,
+					     meas->speed_mech_filtered_rad_s,
 					     current_ref->id_ref_a,
 					     current_ref->iq_ref_a,
 					     meas->id_a,
@@ -1735,6 +1774,31 @@ void motor_control_loop_step(struct motor_parameters *params,
 	motor_control_step_prepare_encoder_reports(params, encoder_sample, enc_stage, report);
 	motor_control_measurements_from_encoder(meas, enc_stage);
 	motor_feedback_ref_from_measurements(feedback_ref, meas);
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) && params->fault_snapshot.enabled) {
+		motor_fault_snapshot_prepare(report,
+					     meas->angle_control_degrees,
+					     meas->observer_input_rad,
+					     meas->electrical_angle_rad,
+					     meas->electrical_speed_rad_s,
+					     motion_ref->velocity_target_rad_s,
+					     motion_ref->velocity_ref_rad_s,
+					     feedback_ref->velocity_rad_s,
+					     feedback_ref->velocity_filtered_rad_s,
+					     current_ref->id_ref_a,
+					     current_ref->iq_ref_a,
+					     current_ref->id_meas_a,
+					     current_ref->iq_meas_a,
+					     meas->ia_a,
+					     meas->ib_a,
+					     params->Vd_V,
+					     params->Vq_V,
+					     meas->encoder_input_source,
+					     meas->fresh_encoder_sample,
+					     meas->encoder_frame_warning,
+					     meas->encoder_frame_error,
+					     meas->encoder_frame_status,
+					     params->live.position_quality_flags);
+	}
 	if (!motor_control_kernel_feedback_valid(&ctx->policy, feedback_ref,
 						 params->live.position_stale_count,
 						 ENCODER_FAULT_THRESHOLD)) {
@@ -1770,6 +1834,9 @@ void motor_control_loop_step(struct motor_parameters *params,
 
 	motor_control_step_reference_stage(params, ctx, meas, motion_ref, feedback_ref,
 					   current_ref, rls_runtime);
+	if (IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) && params->fault_snapshot.enabled) {
+		motor_fault_snapshot_update_refs(report, motion_ref, feedback_ref, current_ref);
+	}
 	ctx->kernel_input = (struct motor_control_kernel_input){
 		.policy = &ctx->policy,
 		.motion_ref = motion_ref,

@@ -181,6 +181,10 @@ void motor_control_telemetry_store_fault_snapshot(
 	sample->observer_input_rad = snapshot->observer_input_rad;
 	sample->elec_angle_rad = snapshot->elec_angle_rad;
 	sample->observer_elec_speed_rad_s = snapshot->observer_elec_speed_rad_s;
+	sample->velocity_target_rad_s = snapshot->velocity_target_rad_s;
+	sample->velocity_ref_rad_s = snapshot->velocity_ref_rad_s;
+	sample->velocity_mech_rad_s = snapshot->velocity_mech_rad_s;
+	sample->velocity_filtered_rad_s = snapshot->velocity_filtered_rad_s;
 	sample->Id_ref_A = snapshot->id_ref_a;
 	sample->Iq_ref_A = snapshot->iq_ref_a;
 	sample->Id_A = snapshot->id_a;
