@@ -26,10 +26,15 @@ LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 int main(void)
 {
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		int rc = settings_load();
+		int rc = settings_subsys_init();
 
 		if (rc != 0) {
-			LOG_WRN("Settings load failed: %d", rc);
+			LOG_WRN("Settings init failed: %d", rc);
+		} else {
+			rc = settings_load();
+			if (rc != 0) {
+				LOG_WRN("Settings load failed: %d", rc);
+			}
 		}
 	}
 
