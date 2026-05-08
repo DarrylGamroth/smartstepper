@@ -30,6 +30,12 @@ int cmd_motor_commission_detent_apply(const struct shell *sh, size_t argc, char 
 int cmd_motor_commission_detent_validate(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_detent_dump(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_detent_clear(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_run(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_status(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_apply(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_validate(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_dump(const struct shell *sh, size_t argc, char **argv);
+int cmd_motor_commission_ripple_clear(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_plan(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t argc, char **argv);
 int cmd_motor_commission_electrical_measure_inductance(const struct shell *sh, size_t argc,

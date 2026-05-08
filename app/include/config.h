@@ -32,6 +32,7 @@
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
 #include "motor/compensation/detent_map.h"
+#include "motor/compensation/electrical_ripple_ff.h"
 #include "motor/observers/encoder_feedback.h"
 #include "motor/observers/feedback_quality.h"
 #include "motor/math/prbs.h"
@@ -48,6 +49,7 @@
 #define MOTOR_ENCODER_RAW_TRACE_MAX_SAMPLES 512U
 #define MOTOR_FAULT_SNAPSHOT_MAX_SAMPLES 256U
 #define MOTOR_DETENT_MAP_BINS 256U
+#define MOTOR_ELECTRICAL_RIPPLE_FF_BINS 64U
 
 struct motor_detent_capture_ctx {
 	bool active;
@@ -75,6 +77,34 @@ struct motor_detent_capture_ctx {
 	uint16_t bin_counts[MOTOR_DETENT_MAP_BINS];
 	uint16_t bin_counts_forward[MOTOR_DETENT_MAP_BINS];
 	uint16_t bin_counts_reverse[MOTOR_DETENT_MAP_BINS];
+};
+
+struct motor_electrical_ripple_capture_ctx {
+	bool active;
+	uint32_t decimation;
+	uint32_t decimation_counter;
+	uint32_t sample_count;
+	uint32_t rejected_samples;
+	uint32_t rejected_quality;
+	uint32_t rejected_velocity;
+	uint32_t rejected_accel;
+	uint32_t rejected_saturation;
+	uint32_t accepted_forward;
+	uint32_t accepted_reverse;
+	float32_t kt_nm_per_a;
+	float32_t inertia_kgm2;
+	float32_t viscous_friction_nm_per_rad_s;
+	float32_t coulomb_friction_nm;
+	float32_t target_speed_rad_s;
+	float32_t velocity_band_rad_s;
+	float32_t accel_limit_rad_s2;
+	float32_t iq_saturation_limit_a;
+	float32_t sum_iq_a[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	float32_t sum_iq_forward_a[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	float32_t sum_iq_reverse_a[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	uint16_t bin_counts[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	uint16_t bin_counts_forward[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	uint16_t bin_counts_reverse[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
 };
 
 #define MOTOR_ELECTRICAL_ID_CAPTURE_NONE 0U
@@ -364,6 +394,7 @@ struct motor_live_telemetry_ctx {
 	float32_t velocity_dob_iq_ff_a;  /* DOB feedforward current term */
 	float32_t velocity_dob_disturbance_nm; /* Estimated lumped disturbance torque */
 	float32_t velocity_dob_residual_rad_s; /* Observer speed residual */
+	float32_t electrical_ripple_iq_ff_a; /* Electrical-angle periodic feedforward current */
 	float32_t detent_iq_ff_a;        /* Position-periodic detent feedforward current */
 	float32_t Id_ref_A;
 	float32_t Iq_ref_A;
@@ -505,6 +536,10 @@ struct motor_parameters {
 	struct motor_mpr_position_state position_mpr_state; /* Position MPR runtime */
 	struct motor_dob_config velocity_dob_cfg;  /* Velocity disturbance observer tuning */
 	struct motor_dob_state velocity_dob_state; /* Velocity disturbance observer runtime */
+	struct motor_electrical_ripple_ff_config electrical_ripple_ff_cfg; /* Electrical-periodic Iq FF */
+	struct motor_electrical_ripple_ff_state electrical_ripple_ff_state; /* Electrical ripple FF runtime */
+	float32_t electrical_ripple_iq_table_a[MOTOR_ELECTRICAL_RIPPLE_FF_BINS];
+	struct motor_electrical_ripple_capture_ctx electrical_ripple_capture; /* ISR-rate ripple accumulator */
 	struct motor_detent_map_config detent_map_cfg; /* Position-periodic Iq feedforward */
 	struct motor_detent_map_state detent_map_state; /* Detent map runtime */
 	float32_t detent_map_iq_table_a[MOTOR_DETENT_MAP_BINS]; /* One mechanical revolution */

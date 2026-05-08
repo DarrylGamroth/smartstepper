@@ -215,6 +215,9 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_hold_on_bad_feedback(stru
 				 out->speed_mech_filtered_rad_s,
 				 out->iq_ref_a);
 	motor_outer_loop_dob_clear(ctx, out->speed_mech_filtered_rad_s);
+	if (ctx->live_electrical_ripple_iq_ff_a != NULL) {
+		*ctx->live_electrical_ripple_iq_ff_a = 0.0f;
+	}
 	if (ctx->live_detent_iq_ff_a != NULL) {
 		*ctx->live_detent_iq_ff_a = 0.0f;
 	}
@@ -446,12 +449,53 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_detent_ff_step(
 			       ctx->velocity_cl_iq_limit_a);
 }
 
+static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_electrical_ripple_ff_step(
+	struct motor_outer_loop_runtime_ctx *ctx,
+	const struct motor_outer_loop_inputs *in,
+	struct motor_outer_loop_outputs *out)
+{
+	if (ctx->electrical_ripple_ff_cfg == NULL ||
+	    ctx->electrical_ripple_ff_state == NULL ||
+	    ctx->live_electrical_ripple_iq_ff_a == NULL ||
+	    !ctx->electrical_ripple_ff_cfg->enabled) {
+		if (ctx->live_electrical_ripple_iq_ff_a != NULL) {
+			*ctx->live_electrical_ripple_iq_ff_a = 0.0f;
+		}
+		return;
+	}
+
+	if (!ctx->electrical_ripple_ff_state->initialized &&
+	    motor_electrical_ripple_ff_init(ctx->electrical_ripple_ff_cfg,
+					    ctx->electrical_ripple_ff_state) != 0) {
+		*ctx->live_electrical_ripple_iq_ff_a = 0.0f;
+		return;
+	}
+
+	float32_t iq_ff_a = 0.0f;
+	int ret = motor_electrical_ripple_ff_step_fast(ctx->electrical_ripple_ff_cfg,
+						       ctx->electrical_ripple_ff_state,
+						       in->electrical_angle_rad,
+						       &iq_ff_a);
+	if (ret != 0) {
+		motor_electrical_ripple_ff_reset(ctx->electrical_ripple_ff_state);
+		iq_ff_a = 0.0f;
+	}
+
+	*ctx->live_electrical_ripple_iq_ff_a = iq_ff_a;
+	out->iq_ref_a = clampf(out->iq_ref_a + iq_ff_a,
+			       -ctx->velocity_cl_iq_limit_a,
+			       ctx->velocity_cl_iq_limit_a);
+}
+
 static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct motor_outer_loop_runtime_ctx *ctx,
 					   const struct motor_outer_loop_inputs *in,
 					   struct motor_outer_loop_outputs *out,
 					   bool velocity_loop_update)
 {
 	if (!in->velocity_active) {
+		if (ctx->live_electrical_ripple_iq_ff_a != NULL) {
+			*ctx->live_electrical_ripple_iq_ff_a = 0.0f;
+		}
 		if (ctx->live_detent_iq_ff_a != NULL) {
 			*ctx->live_detent_iq_ff_a = 0.0f;
 		}
@@ -494,6 +538,7 @@ static MOTOR_OUTER_LOOP_NOINLINE void motor_outer_loop_velocity_step(struct moto
 	motor_outer_loop_velocity_dob_step(ctx, in, out,
 					   torque_gain_nm_per_a,
 					   iq_cmd_pre_dob_a);
+	motor_outer_loop_electrical_ripple_ff_step(ctx, in, out);
 	motor_outer_loop_detent_ff_step(ctx, in, out);
 }
 

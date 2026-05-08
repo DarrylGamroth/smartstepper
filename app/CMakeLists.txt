@@ -41,6 +41,7 @@ target_sources(app PRIVATE
 	src/shell/shell_motion_commission.c
 	src/shell/shell_commission_auto.c
 	src/shell/shell_commission_detent.c
+	src/shell/shell_commission_ripple.c
 	src/shell/shell_commission_electrical.c
 	src/shell/shell_commission_encoder.c
 	src/shell/shell_commission_validate.c

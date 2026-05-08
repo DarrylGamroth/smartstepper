@@ -461,6 +461,27 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_detent,
 	SHELL_SUBCMD_SET_END
 );
 
+/* motor commission ripple subcommands */
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_ripple,
+	SHELL_CMD_ARG(run, NULL,
+		      "Run electrical-angle ripple capture <mech_hz> <cycles> [decimation] [iq_limit_a]",
+		      cmd_motor_commission_ripple_run, 3, 2),
+	SHELL_CMD(status, NULL, "Show staged electrical ripple feedforward table",
+		  cmd_motor_commission_ripple_status),
+	SHELL_CMD_ARG(apply, NULL,
+		      "Apply staged electrical ripple table [enable] [gain] [limit_a]",
+		      cmd_motor_commission_ripple_apply, 1, 3),
+	SHELL_CMD_ARG(validate, NULL,
+		      "Compare low-speed velocity ripple with electrical ripple off/on <mech_hz> <duration_ms>",
+		      cmd_motor_commission_ripple_validate, 3, 0),
+	SHELL_CMD_ARG(dump, NULL,
+		      "Dump staged electrical ripple bins [start_bin] [count]",
+		      cmd_motor_commission_ripple_dump, 1, 2),
+	SHELL_CMD(clear, NULL, "Clear staged and runtime electrical ripple feedforward table",
+		  cmd_motor_commission_ripple_clear),
+	SHELL_SUBCMD_SET_END
+);
+
 /* motor commission electrical subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission_electrical_measure,
 	SHELL_CMD_ARG(rs, NULL,
@@ -550,6 +571,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 	SHELL_CMD(mech, &sub_motor_commission_mech, "Mechanical commissioning", NULL),
 	SHELL_CMD(encoder, &sub_motor_commission_encoder, "Encoder commutation mapping", NULL),
 	SHELL_CMD(detent, &sub_motor_commission_detent, "Detent feedforward commissioning", NULL),
+	SHELL_CMD(ripple, &sub_motor_commission_ripple, "Electrical-angle ripple feedforward commissioning", NULL),
 	SHELL_CMD(electrical, &sub_motor_commission_electrical,
 		  "Production electrical identification", NULL),
 	SHELL_CMD(auto, &sub_motor_commission_auto, "One-command identify+tune workflow", NULL),

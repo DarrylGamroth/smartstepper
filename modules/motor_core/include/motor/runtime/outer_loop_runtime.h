@@ -20,6 +20,7 @@
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
 #include "motor/compensation/detent_map.h"
+#include "motor/compensation/electrical_ripple_ff.h"
 
 struct motor_outer_loop_runtime_ctx {
 	uint8_t outer_loop_mode;
@@ -61,6 +62,9 @@ struct motor_outer_loop_runtime_ctx {
 	float32_t *live_velocity_dob_iq_ff_a;
 	float32_t *live_velocity_dob_disturbance_nm;
 	float32_t *live_velocity_dob_residual_rad_s;
+	struct motor_electrical_ripple_ff_config *electrical_ripple_ff_cfg;
+	struct motor_electrical_ripple_ff_state *electrical_ripple_ff_state;
+	float32_t *live_electrical_ripple_iq_ff_a;
 	struct motor_detent_map_config *detent_map_cfg;
 	struct motor_detent_map_state *detent_map_state;
 	float32_t *live_detent_iq_ff_a;
@@ -75,6 +79,7 @@ struct motor_outer_loop_inputs {
 	float32_t velocity_loop_dt_s;
 	float32_t position_loop_dt_s;
 	float32_t position_mech_rad;
+	float32_t electrical_angle_rad;
 	float32_t speed_mech_rad_s;
 	float32_t id_meas_a;
 	float32_t iq_meas_a;

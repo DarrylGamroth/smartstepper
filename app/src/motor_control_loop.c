@@ -490,6 +490,9 @@ static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_
 	ctx->viscous_friction_nm_per_rad_s_active =
 		params->viscous_friction_nm_per_rad_s_active;
 	ctx->coulomb_friction_nm_active = params->coulomb_friction_nm_active;
+	ctx->electrical_ripple_ff_cfg = &params->electrical_ripple_ff_cfg;
+	ctx->electrical_ripple_ff_state = &params->electrical_ripple_ff_state;
+	ctx->live_electrical_ripple_iq_ff_a = &params->live.electrical_ripple_iq_ff_a;
 	ctx->live_detent_iq_ff_a = &params->live.detent_iq_ff_a;
 }
 
@@ -769,6 +772,17 @@ static inline uint16_t motor_detent_capture_bin_from_angle(float32_t mech_angle_
 	return (bin >= MOTOR_DETENT_MAP_BINS) ? 0U : bin;
 }
 
+static inline uint16_t motor_electrical_ripple_capture_bin_from_angle(
+	float32_t electrical_angle_rad)
+{
+	float32_t wrapped = wrap_rad_2pi(electrical_angle_rad);
+	float32_t scaled = wrapped * ((float32_t)MOTOR_ELECTRICAL_RIPPLE_FF_BINS /
+				      (2.0f * PI_F32));
+	uint16_t bin = (uint16_t)floorf(scaled);
+
+	return (bin >= MOTOR_ELECTRICAL_RIPPLE_FF_BINS) ? 0U : bin;
+}
+
 static inline void motor_control_step_detent_capture(
 	struct motor_parameters *params,
 	const struct motor_feedback_ref *feedback_ref,
@@ -833,6 +847,89 @@ static inline void motor_control_step_detent_capture(
 	}
 
 	uint16_t bin = motor_detent_capture_bin_from_angle(feedback_ref->position_rad);
+	if (cap->bin_counts[bin] != UINT16_MAX) {
+		cap->sum_iq_a[bin] += residual_iq_a;
+		cap->bin_counts[bin]++;
+		cap->sample_count++;
+	}
+	if (omega >= 0.0f) {
+		if (cap->bin_counts_forward[bin] != UINT16_MAX) {
+			cap->sum_iq_forward_a[bin] += residual_iq_a;
+			cap->bin_counts_forward[bin]++;
+			cap->accepted_forward++;
+		}
+	} else if (cap->bin_counts_reverse[bin] != UINT16_MAX) {
+		cap->sum_iq_reverse_a[bin] += residual_iq_a;
+		cap->bin_counts_reverse[bin]++;
+		cap->accepted_reverse++;
+	}
+}
+
+static inline void motor_control_step_electrical_ripple_capture(
+	struct motor_parameters *params,
+	const struct motor_feedback_ref *feedback_ref,
+	const struct motor_current_ref *current_ref)
+{
+	struct motor_electrical_ripple_capture_ctx *cap = &params->electrical_ripple_capture;
+
+	if (!cap->active) {
+		return;
+	}
+
+	uint32_t decimation = (cap->decimation == 0U) ? 1U : cap->decimation;
+	cap->decimation_counter++;
+	if (cap->decimation_counter < decimation) {
+		return;
+	}
+	cap->decimation_counter = 0U;
+
+	float32_t omega = feedback_ref->velocity_filtered_rad_s;
+	if (!motor_feedback_quality_is_trusted(feedback_ref->quality_flags) ||
+	    feedback_ref->error ||
+	    !isfinite(feedback_ref->predicted_electrical_angle_rad) ||
+	    !isfinite(omega) ||
+	    !isfinite(feedback_ref->acceleration_rad_s2) ||
+	    !isfinite(current_ref->iq_ref_a) ||
+	    !isfinite(cap->kt_nm_per_a) ||
+	    cap->kt_nm_per_a <= 0.0f) {
+		cap->rejected_quality++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (fabsf(omega) < 0.1f ||
+	    (cap->target_speed_rad_s != 0.0f &&
+	     fabsf(omega - cap->target_speed_rad_s) > cap->velocity_band_rad_s)) {
+		cap->rejected_velocity++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (cap->accel_limit_rad_s2 > 0.0f &&
+	    fabsf(feedback_ref->acceleration_rad_s2) > cap->accel_limit_rad_s2) {
+		cap->rejected_accel++;
+		cap->rejected_samples++;
+		return;
+	}
+	if (cap->iq_saturation_limit_a > 0.0f &&
+	    fabsf(current_ref->iq_ref_a) > cap->iq_saturation_limit_a) {
+		cap->rejected_saturation++;
+		cap->rejected_samples++;
+		return;
+	}
+
+	float32_t sign_term = (omega >= 0.0f) ? 1.0f : -1.0f;
+	float32_t model_torque_nm =
+		(cap->inertia_kgm2 * feedback_ref->acceleration_rad_s2) +
+		(cap->viscous_friction_nm_per_rad_s * omega) +
+		(cap->coulomb_friction_nm * sign_term);
+	float32_t residual_iq_a = current_ref->iq_ref_a - (model_torque_nm / cap->kt_nm_per_a);
+
+	if (!isfinite(residual_iq_a)) {
+		cap->rejected_samples++;
+		return;
+	}
+
+	uint16_t bin = motor_electrical_ripple_capture_bin_from_angle(
+		feedback_ref->predicted_electrical_angle_rad);
 	if (cap->bin_counts[bin] != UINT16_MAX) {
 		cap->sum_iq_a[bin] += residual_iq_a;
 		cap->bin_counts[bin]++;
@@ -1094,6 +1191,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_reference_stage(struct m
 		.velocity_loop_dt_s = ctx->velocity_loop_dt_s,
 		.position_loop_dt_s = ctx->position_loop_dt_s,
 		.position_mech_rad = feedback_ref->position_rad,
+		.electrical_angle_rad = feedback_ref->predicted_electrical_angle_rad,
 		.speed_mech_rad_s = feedback_ref->velocity_rad_s,
 		.id_meas_a = current_ref->id_meas_a,
 		.iq_meas_a = current_ref->iq_meas_a,
@@ -1479,6 +1577,7 @@ static MOTOR_ISR_STAGE_NOINLINE void motor_control_step_publish_stage(
 	params->live.velocity_target_rad_s = motion_ref->velocity_target_rad_s;
 	params->live.velocity_ref_rad_s = motion_ref->velocity_ref_rad_s;
 
+	motor_control_step_electrical_ripple_capture(params, feedback_ref, current_ref);
 	motor_control_step_detent_capture(params, feedback_ref, current_ref);
 
 	params->live.Id_ref_A = current_ref->id_ref_a;
