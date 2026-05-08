@@ -206,3 +206,31 @@ Current conclusion:
   authority, static-friction/detent handling, or an outer-loop contract mismatch.
 - Keep PI as the validated baseline and do not persist or recommend MPR until a
   new MPR design pass passes HIL.
+
+Follow-up, 2026-05-08:
+
+- The primary low-speed gap was the disabled MPR disturbance estimator plus an
+  unrealistically fast outer-loop update for MPR. With `motor velocity
+  decimation 20`, MPR has a 1 kHz update and an 8 ms prediction horizon instead
+  of `0.4 ms`.
+- `motor_mpr_velocity_config_from_bandwidth()` now derives a bounded
+  disturbance estimator gain from `Kt * Iq_limit`, and zero-target hold clears
+  learned MPR bias.
+- The shell/settings bandwidth estimate now inverts the scaled model mapping,
+  so a `5 Hz` MPR command reports `5.000 Hz` instead of a misleading raw
+  `q_speed` estimate.
+- Validation:
+  - `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_mpr.unit`
+    passed `21/21`.
+  - MT6835 west build passed.
+  - `hil_logs/20260508_133349_mpr_bandwidth_distki_hil.log` passed the
+    `0.5 Hz` MPR case with clean encoder counters and zero-target Iq reset.
+  - `hil_logs/20260508_133436_mpr_bandwidth_bidirectional_hil.log` passed
+    `+0.5 Hz` and `-0.5 Hz`, but `+1.0 Hz` faulted with
+    `ENCODER_FAULT/velocity_spike`.
+
+Updated conclusion:
+
+- MPR is improved and useful for controlled low-speed experiments, but it is
+  still not the production baseline. PI remains the validated velocity
+  controller until the `1 Hz` MPR transition/spike behavior is resolved.

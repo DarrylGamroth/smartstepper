@@ -524,7 +524,12 @@ static int estimate_velocity_bandwidth_hz(const struct motor_parameters *params,
 
 	if (params->outer_loop_mode == MOTOR_OUTER_LOOP_MODE_MPR &&
 	    finite_positive(params->velocity_mpr_cfg.q_speed)) {
-		*bw_hz_out = (params->velocity_mpr_cfg.q_speed * kt) / (2.0f * PI_F32 * j);
+		float32_t iq_limit = params->velocity_mpr_cfg.iq_limit_a;
+		if (!finite_positive(iq_limit)) {
+			return -ERANGE;
+		}
+		*bw_hz_out = (params->velocity_mpr_cfg.q_speed * kt * iq_limit) /
+			     (2.0f * PI_F32 * j * MOTOR_MPR_VELOCITY_BW_MODEL_SCALE);
 		return finite_positive(*bw_hz_out) ? 0 : -ERANGE;
 	}
 

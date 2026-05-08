@@ -465,10 +465,12 @@ int cmd_motor_velocity_mpr(const struct shell *sh, size_t argc, char **argv)
 			    (double)g_motor_params->velocity_mpr_cfg.iq_limit_a);
 		const float j = g_motor_params->inertia_kgm2_active;
 		const float kt = motor_torque_gain_resolve_active(g_motor_params);
-		if (isfinite(j) && j > 0.0f && isfinite(kt) && kt > 0.0f) {
+		const float iq_limit = g_motor_params->velocity_mpr_cfg.iq_limit_a;
+		if (isfinite(j) && j > 0.0f && isfinite(kt) && kt > 0.0f &&
+		    isfinite(iq_limit) && iq_limit > 0.0f) {
 			const float bw_hz =
-				(g_motor_params->velocity_mpr_cfg.q_speed * kt) /
-				(2.0f * PI_F32 * j);
+				(g_motor_params->velocity_mpr_cfg.q_speed * kt * iq_limit) /
+				(2.0f * PI_F32 * j * MOTOR_MPR_VELOCITY_BW_MODEL_SCALE);
 
 			shell_print(sh, "  Bandwidth est: %.3f Hz", (double)bw_hz);
 		} else {

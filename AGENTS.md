@@ -430,6 +430,23 @@ motor settings autoload enable baseline
   allowed.
 - Mechanical/flux/tune workflow remains under `motor commission auto run
   <slow|confirm> [apply]` and should be run separately from the baseline gate.
+- PI velocity control is the current validated baseline for MT6835 closed-loop
+  velocity work.
+- MPR velocity control is experimental. Before MPR HIL motion tests, load the
+  controller group, set a mechanically meaningful outer-loop period, and derive
+  MPR from bandwidth:
+
+```text
+motor settings load controllers
+motor velocity decimation 20
+motor outer mode mpr
+motor velocity mpr bandwidth 5
+```
+
+- Current MT6835 MPR evidence: `+/-0.5 Hz` passes with clean encoder counters
+  at `velocity decimation 20`; `+1.0 Hz` can still trip
+  `ENCODER_FAULT/velocity_spike`. Do not save or treat MPR as production
+  baseline until that transition/spike issue is resolved.
 - Flux/Kt can be promoted independently after the encoder path is validated:
 
 ```text

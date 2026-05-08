@@ -14,6 +14,7 @@
 
 #define MOTOR_MPR_EPSILON 1e-9f
 #define MOTOR_MPR_FRICTION_DEADBAND_RAD_S 1e-3f
+#define MOTOR_MPR_ZERO_HOLD_EPS_RAD_S (0.02f * 2.0f * PI_F32)
 
 static bool motor_mpr_is_finite_positive(float32_t value)
 {
@@ -87,6 +88,15 @@ int motor_mpr_velocity_config_from_bandwidth(
 	const float32_t max_delta_iq =
 		clampf(in->iq_limit_a * di_frac, MOTOR_MPR_VELOCITY_BW_DI_MIN_A,
 		       fminf(in->iq_limit_a, MOTOR_MPR_VELOCITY_BW_DI_MAX_A));
+	float32_t disturbance_ki = 0.0f;
+	if (model_used) {
+		const float32_t torque_limit_nm =
+			in->torque_constant_nm_per_a * in->iq_limit_a;
+		disturbance_ki = clampf(torque_limit_nm *
+					MOTOR_MPR_VELOCITY_BW_DIST_KI_FRAC,
+					MOTOR_MPR_VELOCITY_BW_DIST_KI_MIN,
+					MOTOR_MPR_VELOCITY_BW_DIST_KI_MAX);
+	}
 
 	cfg->dt_s = in->dt_s;
 	cfg->horizon = MOTOR_MPR_VELOCITY_BW_HORIZON;
@@ -94,7 +104,7 @@ int motor_mpr_velocity_config_from_bandwidth(
 	cfg->r_delta_iq = r_delta_iq;
 	cfg->iq_limit_a = in->iq_limit_a;
 	cfg->max_delta_iq_a = max_delta_iq;
-	cfg->disturbance_ki_nm_per_rad_s = MOTOR_MPR_VELOCITY_BW_DIST_KI_MIN;
+	cfg->disturbance_ki_nm_per_rad_s = disturbance_ki;
 
 	if (result != NULL) {
 		result->requested_bandwidth_hz = in->bandwidth_hz;
@@ -237,6 +247,13 @@ int motor_mpr_velocity_step_fast(const struct motor_mpr_velocity_config *cfg,
 	float32_t a = state->a;
 	float32_t b_u = state->b_u;
 	float32_t b_d = state->b_d;
+
+	if (fabsf(omega_ref_rad_s) <= MOTOR_MPR_ZERO_HOLD_EPS_RAD_S &&
+	    fabsf(omega_meas_rad_s) <= MOTOR_MPR_ZERO_HOLD_EPS_RAD_S) {
+		motor_mpr_velocity_reset(state, omega_meas_rad_s, 0.0f);
+		*iq_cmd_a_out = 0.0f;
+		return 0;
+	}
 
 	float32_t sign_speed = motor_mpr_sign_with_deadband(omega_meas_rad_s,
 							    MOTOR_MPR_FRICTION_DEADBAND_RAD_S);

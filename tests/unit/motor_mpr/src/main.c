@@ -116,6 +116,9 @@ ZTEST(motor_mpr, test_velocity_bandwidth_config_uses_model)
 	zassert_true(cfg.q_speed < MOTOR_MPR_VELOCITY_BW_Q_MAX, NULL);
 	zassert_true(cfg.r_delta_iq >= MOTOR_MPR_VELOCITY_BW_R_MIN, NULL);
 	zassert_true(cfg.r_delta_iq <= MOTOR_MPR_VELOCITY_BW_R_MAX, NULL);
+	zassert_true(cfg.disturbance_ki_nm_per_rad_s > 0.0f, NULL);
+	zassert_true(cfg.disturbance_ki_nm_per_rad_s <= MOTOR_MPR_VELOCITY_BW_DIST_KI_MAX,
+		     NULL);
 	zassert_equal(cfg.iq_limit_a, input.iq_limit_a, NULL);
 	zassert_equal(cfg.dt_s, input.dt_s, NULL);
 	zassert_true(result.model_used, NULL);
@@ -155,6 +158,7 @@ ZTEST(motor_mpr, test_velocity_bandwidth_config_falls_back_without_model)
 	zassert_ok(motor_mpr_velocity_config_from_bandwidth(&input, &cfg, &result), NULL);
 	zassert_true(cfg.q_speed > MOTOR_MPR_VELOCITY_BW_Q_MIN, NULL);
 	zassert_true(cfg.q_speed < MOTOR_MPR_VELOCITY_BW_Q_MAX, NULL);
+	zassert_equal(cfg.disturbance_ki_nm_per_rad_s, 0.0f, NULL);
 	zassert_false(result.model_used, NULL);
 	zassert_false(result.clamped, NULL);
 }
@@ -233,6 +237,39 @@ ZTEST(motor_mpr, test_velocity_step_rejects_bad_inputs)
 		      -EINVAL, NULL);
 	zassert_equal(motor_mpr_velocity_step(&cfg, &model, &state, 0.0f, 0.0f, NULL),
 		      -EINVAL, NULL);
+}
+
+ZTEST(motor_mpr, test_velocity_zero_hold_resets_dynamic_bias)
+{
+	struct motor_mpr_velocity_config cfg = {
+		.dt_s = 0.001f,
+		.horizon = 8U,
+		.q_speed = 0.05f,
+		.r_delta_iq = 1.0f,
+		.iq_limit_a = 0.5f,
+		.max_delta_iq_a = 0.01f,
+		.disturbance_ki_nm_per_rad_s = 0.0005f,
+	};
+	struct motor_mpr_velocity_model model = {
+		.inertia_kgm2 = 5.7e-6f,
+		.viscous_friction_nm_per_rad_s = 0.0f,
+		.coulomb_friction_nm = 0.0f,
+		.torque_constant_nm_per_a = 0.338f,
+	};
+	struct motor_mpr_velocity_state state = {0};
+	float32_t iq_cmd = 0.0f;
+
+	zassert_ok(motor_mpr_velocity_init(&cfg, &model, &state, 0.0f, 0.0f), NULL);
+	state.iq_cmd_a = 0.08f;
+	state.disturbance_nm = -0.02f;
+	state.omega_model_rad_s = 0.01f;
+
+	zassert_ok(motor_mpr_velocity_step_fast(&cfg, &model, &state,
+						0.0f, 0.0f, &iq_cmd),
+		   NULL);
+	zassert_equal(iq_cmd, 0.0f, NULL);
+	zassert_equal(state.iq_cmd_a, 0.0f, NULL);
+	zassert_equal(state.disturbance_nm, 0.0f, NULL);
 }
 
 ZTEST(motor_mpr, test_velocity_step_respects_iq_and_delta_limits)
