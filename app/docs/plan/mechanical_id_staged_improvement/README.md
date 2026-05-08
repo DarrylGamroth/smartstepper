@@ -107,6 +107,26 @@ Status: pending
 - Only promote mechanical-ID settings to baseline when repeatability is better
   than accepting a single marginal run.
 
+## Stage 5 - PI Tuning Handoff
+
+Status: in progress
+
+- Treat inertia `J` as the required mechanical-ID output for controller tuning.
+- Treat viscous friction `B` as useful but secondary; `B` must be non-negative,
+  but run-to-run B spread should not reject an otherwise repeatable inertia fit.
+- Reject aggregate mechanical ID when `J` coefficient of variation exceeds
+  `0.50`; this keeps the gate focused on whether acceleration authority produced
+  a repeatable inertia estimate.
+- Print `J_cv`, `B_cv`, and `Tc_cv` so HIL output explains whether a pass is a
+  strong model or merely an acceptable tuning seed.
+- Use model equations for PI handoff:
+  - `Kp = max(((2*zeta*omega*J) - B) / Kt, 0.25*omega*J/Kt)`
+  - `Ki = min(omega^2*J/Kt, 2*Kp)`
+- Use the motor current limit for commissioned velocity-loop authority; do not
+  tune against small artificial limits such as `0.1..0.2 A`.
+- Default outer-loop rates after boot are velocity at 2 kHz and position at
+  200 Hz for a 20 kHz current loop.
+
 ## Non-Goals
 
 - Do not persist mechanical parameters yet.

@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <math.h>
 
 #include <zephyr/ztest.h>
 
@@ -51,8 +52,8 @@ ZTEST(motor_commission_tune, test_default_config_is_valid)
 	zassert_true(cfg.velocity_bw_hz > 0.0f, NULL);
 	zassert_true(cfg.position_bw_ratio > 0.0f, NULL);
 	zassert_true(cfg.position_bw_ratio <= 0.2f, NULL);
-	zassert_true(cfg.iq_limit_a > 0.0f, NULL);
-	zassert_true(cfg.iq_limit_a <= cfg.max_current_a, NULL);
+	zassert_within(cfg.iq_limit_a, cfg.max_current_a, 1.0e-6f,
+		       "Default tune Iq limit should use the motor current limit");
 }
 
 ZTEST(motor_commission_tune, test_validate_config_rejects_invalid_values)
@@ -135,7 +136,7 @@ ZTEST(motor_commission_tune, test_accepts_and_produces_positive_gains)
 	zassert_true(out.velocity_dob_torque_limit_nm > 0.0f, NULL);
 }
 
-ZTEST(motor_commission_tune, test_mt6835_like_model_uses_low_speed_authority_floor)
+ZTEST(motor_commission_tune, test_mt6835_like_model_uses_second_order_gain)
 {
 	struct motor_commission_tune_config cfg;
 	struct motor_commission_fit_summary fit = {
@@ -165,11 +166,20 @@ ZTEST(motor_commission_tune, test_mt6835_like_model_uses_low_speed_authority_flo
 	zassert_ok(motor_commission_tune_compute(&fit, &cfg, &out), NULL);
 	zassert_true(out.accepted, NULL);
 	zassert_within(out.kt_nm_per_a, 0.34125f, 1.0e-5f, NULL);
-	zassert_within(out.velocity_kp_a_per_rad_s, 0.07958f, 1.0e-4f,
-		       "Kp should provide roughly full Iq authority at 0.5 Hz");
-	zassert_within(out.velocity_ki_a_per_rad,
-		       2.0f * out.velocity_kp_a_per_rad_s, 1.0e-5f,
-		       "Ki should be capped relative to Kp for low-speed hybrid stepper startup");
+
+	float omega = 2.0f * 3.14159265f * cfg.velocity_bw_hz;
+	float kp_model =
+		((2.0f * cfg.velocity_zeta * omega * fit.inertia_kgm2) -
+		 fit.viscous_friction_nm_per_rad_s) / out.kt_nm_per_a;
+	float kp_floor = (0.25f * omega * fit.inertia_kgm2) / out.kt_nm_per_a;
+	float kp_expected = fmaxf(kp_model, kp_floor);
+	float ki_model = (omega * omega * fit.inertia_kgm2) / out.kt_nm_per_a;
+	float ki_expected = fminf(ki_model, 2.0f * kp_expected);
+
+	zassert_within(out.velocity_kp_a_per_rad_s, kp_expected, 1.0e-5f,
+		       "Kp should follow the second-order model with only a nonnegative floor");
+	zassert_within(out.velocity_ki_a_per_rad, ki_expected, 1.0e-5f,
+		       "Ki should follow the model and existing Ki/Kp guardrail");
 }
 
 ZTEST_SUITE(motor_commission_tune, NULL, NULL, NULL, NULL, NULL);

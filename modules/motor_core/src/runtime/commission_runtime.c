@@ -956,11 +956,12 @@ static void motor_commission_estimate_mech(struct motor_commission_runtime_ctx *
 		MOTOR_COMMISSION_DETENT_CORRECTION_NONE;
 	res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_NONE;
 
-	if (best_inertia.plausibility_ratio < MOTOR_COMMISSION_MECH_PLAUSIBILITY_MIN ||
-	    best_inertia.plausibility_ratio > MOTOR_COMMISSION_MECH_PLAUSIBILITY_MAX) {
-		res->mech_reject_reason = MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE;
-		return;
-	}
+	/*
+	 * The fallback inertia is a safe seed from devicetree/settings, not a
+	 * calibrated truth. Keep the ratio visible and penalize confidence above,
+	 * but do not reject a low-residual, repeatable inertia fit solely because
+	 * the attached load is much larger than the fallback rotor estimate.
+	 */
 	float32_t min_confidence = commission->mech_cfg.min_confidence;
 	if (!isfinite(min_confidence) || min_confidence <= 0.0f) {
 		min_confidence = MOTOR_COMMISSION_MECH_MIN_CONFIDENCE;

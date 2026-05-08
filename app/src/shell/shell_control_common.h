@@ -47,8 +47,6 @@ enum motor_gains_profile {
 #define VELOCITY_DEFAULT_GAIN_SPEED_HZ 0.50f
 #define VELOCITY_MODEL_SAFE_BW_HZ 0.25f
 #define VELOCITY_MODEL_NOMINAL_BW_HZ 0.50f
-#define VELOCITY_MODEL_LOW_SPEED_GAIN_HZ 0.50f
-#define VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION 1.0f
 #define VELOCITY_MODEL_KI_TO_KP_MAX 2.0f
 #define POSITION_MODEL_SAFE_BW_RATIO 0.10f
 #define POSITION_MODEL_NOMINAL_BW_RATIO 0.15f
@@ -219,11 +217,7 @@ static inline int motor_compute_model_outer_gains(const struct motor_parameters 
 	float omega = 2.0f * PI_F32 * velocity_bw_hz;
 	float kp_num = (2.0f * zeta * omega * j) - b;
 	float kp_floor = (0.25f * omega * j) / kt;
-	float low_speed_gain_rad_s = 2.0f * PI_F32 * VELOCITY_MODEL_LOW_SPEED_GAIN_HZ;
-	float kp_authority =
-		(VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION * iq_limit) /
-		low_speed_gain_rad_s;
-	float kp = fmaxf(fmaxf(kp_num / kt, kp_floor), kp_authority);
+	float kp = fmaxf(kp_num / kt, kp_floor);
 	float ki_model = (omega * omega * j) / kt;
 	float ki = fminf(ki_model, VELOCITY_MODEL_KI_TO_KP_MAX * kp);
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {
@@ -349,11 +343,7 @@ static inline int motor_compute_velocity_bandwidth_gains(const struct motor_para
 	if (!isfinite(iq_limit) || iq_limit <= 0.0f) {
 		return -ERANGE;
 	}
-	float low_speed_gain_rad_s = 2.0f * PI_F32 * VELOCITY_MODEL_LOW_SPEED_GAIN_HZ;
-	float kp_authority =
-		(VELOCITY_MODEL_LOW_SPEED_KP_CURRENT_FRACTION * iq_limit) /
-		low_speed_gain_rad_s;
-	float kp = fmaxf(fmaxf(kp_num / kt, kp_floor), kp_authority);
+	float kp = fmaxf(kp_num / kt, kp_floor);
 	float ki_model = (omega * omega * j) / kt;
 	float ki = fminf(ki_model, VELOCITY_MODEL_KI_TO_KP_MAX * kp);
 	if (!isfinite(kp) || !isfinite(ki) || kp <= 0.0f || ki <= 0.0f) {

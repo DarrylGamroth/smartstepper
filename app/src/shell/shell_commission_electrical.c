@@ -475,6 +475,52 @@ static int electrical_id_collect_rs(float32_t current_a, uint32_t samples,
 	return motor_electrical_id_rs_finalize(&cap->rs_accum, &cap->rs_cfg, &limits, out);
 }
 
+static bool electrical_id_rs_result_valid(int ret,
+					  const struct motor_electrical_id_rs_result *rs)
+{
+	return ret == 0 && rs != NULL && rs->valid;
+}
+
+static void electrical_id_print_rs_rejection(const struct shell *sh, const char *prefix,
+					     int ret,
+					     const struct motor_electrical_id_rs_result *rs)
+{
+	if (rs == NULL || rs->samples == 0U) {
+		shell_error(sh, "%s rejected (err %d): no usable samples", prefix, ret);
+		return;
+	}
+
+	shell_error(sh,
+		    "%s rejected (err %d): Rs=%.6f ohm samples=%u rejected_low_i=%u avg_i=%.5f A avg_v=%.5f V residual=%.5f V ratio=%.4f confidence=%.3f",
+		    prefix,
+		    ret,
+		    (double)rs->rs_ohm,
+		    rs->samples,
+		    rs->rejected_low_current,
+		    (double)rs->avg_current_a,
+		    (double)rs->avg_voltage_v,
+		    (double)rs->residual_rms_v,
+		    (double)rs->residual_ratio,
+		    (double)rs->confidence);
+}
+
+static int electrical_id_measure_rs_once(const struct shell *sh,
+					 float32_t current_a,
+					 uint32_t samples,
+					 uint32_t settle_ms,
+					 bool force_current_offsets,
+					 struct motor_electrical_id_rs_result *out)
+{
+	int ret = electrical_id_enter_generated_current_mode(sh, force_current_offsets);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = electrical_id_collect_rs(current_a, samples, settle_ms, out);
+	electrical_id_stop();
+	return ret;
+}
+
 static int electrical_id_collect_l_axis_demod_cycles(
 	bool q_axis,
 	float32_t pulse_v,
@@ -938,16 +984,22 @@ int cmd_motor_commission_electrical_measure_rs(const struct shell *sh, size_t ar
 		return -EINVAL;
 	}
 
-	ret = electrical_id_enter_generated_current_mode(sh, false);
-	if (ret != 0) {
-		return ret;
+	struct motor_electrical_id_rs_result first_rs = { 0 };
+	bool offsets_were_valid = g_motor_params->calibration.current_offsets_valid;
+	ret = electrical_id_measure_rs_once(sh, current_a, samples, settle_ms, false, &first_rs);
+	staged.rs = first_rs;
+	staged.rs_valid = electrical_id_rs_result_valid(ret, &staged.rs);
+	if (!staged.rs_valid && offsets_were_valid) {
+		electrical_id_print_rs_rejection(sh, "Production Rs measurement", ret, &staged.rs);
+		shell_warn(sh,
+			   "Retrying production Rs once after forced current offset calibration.");
+		ret = electrical_id_measure_rs_once(sh, current_a, samples, settle_ms, true,
+						    &staged.rs);
+		staged.rs_valid = electrical_id_rs_result_valid(ret, &staged.rs);
 	}
-	ret = electrical_id_collect_rs(current_a, samples, settle_ms, &staged.rs);
-	electrical_id_stop();
-	staged.rs_valid = (ret == 0 && staged.rs.valid);
 	if (!staged.rs_valid) {
-		shell_error(sh, "Production Rs measurement rejected (err %d)", ret);
-		return ret;
+		electrical_id_print_rs_rejection(sh, "Production Rs measurement", ret, &staged.rs);
+		return ret == 0 ? -ERANGE : ret;
 	}
 
 	g_motor_params->Rs_measured_ohm = staged.rs.rs_ohm;

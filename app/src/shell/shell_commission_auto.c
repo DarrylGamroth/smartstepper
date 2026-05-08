@@ -25,6 +25,7 @@
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_MAX_HZ 5.0f
 #define MOTOR_COMMISSION_AUTO_VALIDATE_MAX_HZ_CAP 20.0f
 #define MOTOR_COMMISSION_AUTO_VALIDATE_DEFAULT_HOLD_MS 2000U
+#define MOTOR_COMMISSION_MECH_MAX_J_CV 0.50f
 
 static const float32_t motor_commission_mech_step_pattern[] = {
 	-1.0f, 1.0f, -0.5f, 0.5f, 0.0f, -1.0f,
@@ -665,7 +666,7 @@ static int motor_commission_mech_aggregate_finalize(
 			  isfinite(res->mech_r2) && res->mech_r2 >= 0.20f &&
 			  isfinite(res->mech_confidence) &&
 			  res->mech_confidence >= COMMISSION_AUTO_MECH_MIN_CONFIDENCE;
-	if (res->mech_valid && j_cv > 1.0f) {
+	if (res->mech_valid && j_cv > MOTOR_COMMISSION_MECH_MAX_J_CV) {
 		res->mech_valid = false;
 	}
 	res->mech_v2_valid = res->mech_valid;
@@ -673,6 +674,8 @@ static int motor_commission_mech_aggregate_finalize(
 	res->mech_inertia_valid = res->mech_valid;
 	if (!res->mech_valid) {
 		res->mech_reject_reason =
+			(!isfinite(j_cv) || j_cv > MOTOR_COMMISSION_MECH_MAX_J_CV) ?
+				MOTOR_COMMISSION_MECH_REJECT_IMPLAUSIBLE :
 			(res->mech_confidence < COMMISSION_AUTO_MECH_MIN_CONFIDENCE) ?
 				MOTOR_COMMISSION_MECH_REJECT_CONFIDENCE :
 				MOTOR_COMMISSION_MECH_REJECT_FIT_INVALID;
@@ -1125,8 +1128,7 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 	float32_t planned_mech_dither_hz =
 		fminf(mech_dither_req_hz,
 		       fmaxf(0.0f, planned_mech_upper_hz - planned_mech_base_hz));
-	float32_t planned_iq_limit_a = clampf(0.60f * g_motor_params->velocity_cl_iq_limit_A,
-					      0.10f, MOTOR_MAX_CURRENT_A);
+	float32_t planned_iq_limit_a = MOTOR_MAX_CURRENT_A;
 
 	if (planned_flux_max_hz < 0.10f || planned_mech_upper_hz < 0.10f) {
 		shell_error(sh, "Profile max velocity is too low for auto commissioning");
@@ -1243,7 +1245,8 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 
 	(void)motor_commission_tune_config_default(&tune_cfg,
 						   (float32_t)MOTOR_POLE_PAIRS,
-						   1.0f / CONTROL_LOOP_FREQUENCY_HZ,
+						   ((float32_t)VELOCITY_LOOP_DECIMATION_DEFAULT /
+						    CONTROL_LOOP_FREQUENCY_HZ),
 						   fmaxf(MOTOR_MAX_CURRENT_A, 0.1f),
 						   fmaxf(g_motor_params->profile_max_velocity_rad_s,
 							  1.0f),
@@ -1440,6 +1443,15 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		return g_motor_params->commission.auto_tune_last_error;
 	}
 
+	float32_t j_cv = g_motor_params->commission.results.inertia_stddev_kgm2 /
+			 fmaxf(fabsf(g_motor_params->commission.results.inertia_kgm2),
+			       1.0e-9f);
+	float32_t b_cv = g_motor_params->commission.results.viscous_friction_stddev_nm_per_rad_s /
+			 fmaxf(fabsf(g_motor_params->commission.results.viscous_friction_nm_per_rad_s),
+			       1.0e-9f);
+	float32_t tc_cv = g_motor_params->commission.results.coulomb_friction_stddev_nm /
+			  fmaxf(fabsf(g_motor_params->commission.results.coulomb_friction_nm),
+				1.0e-9f);
 	shell_print(sh, "  Mech aggregate: runs=%u J=%.8f+/-%.8f B=%.8f+/-%.8f Tc=%.8f+/-%.8f R2=%.4f conf=%.2f",
 		    g_motor_params->commission.results.mech_capture_count,
 		    (double)g_motor_params->commission.results.inertia_kgm2,
@@ -1450,6 +1462,11 @@ int cmd_motor_commission_auto_run(const struct shell *sh, size_t argc, char **ar
 		    (double)g_motor_params->commission.results.coulomb_friction_stddev_nm,
 		    (double)g_motor_params->commission.results.mech_r2,
 		    (double)g_motor_params->commission.results.mech_confidence);
+	shell_print(sh, "  Mech repeatability: J_cv=%.3f max=%.3f B_cv=%.3f Tc_cv=%.3f",
+		    (double)j_cv,
+		    (double)MOTOR_COMMISSION_MECH_MAX_J_CV,
+		    (double)b_cv,
+		    (double)tc_cv);
 	if (ret == -ENODATA) {
 		shell_warn(sh,
 			   "  Mech validation: independent capture had no usable samples; accepted aggregate confidence %.2f >= %.2f",

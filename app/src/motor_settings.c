@@ -102,8 +102,6 @@
 #define MOTOR_SETTINGS_ZETA_MAX 2.0f
 #define MOTOR_SETTINGS_POSITION_TO_VELOCITY_BW_RATIO_MAX 0.20f
 #define MOTOR_SETTINGS_VELOCITY_KI_TO_KP_MAX 2.0f
-#define MOTOR_SETTINGS_LOW_SPEED_GAIN_HZ 0.50f
-#define MOTOR_SETTINGS_LOW_SPEED_KP_CURRENT_FRACTION 1.0f
 #define MOTOR_SETTINGS_CTRL_FIELD_OUTER_MODE BIT(0)
 #define MOTOR_SETTINGS_CTRL_FIELD_VEL_BW BIT(1)
 #define MOTOR_SETTINGS_CTRL_FIELD_POS_BW BIT(2)
@@ -922,11 +920,7 @@ static int apply_controllers_group(struct motor_parameters *params,
 	float32_t velocity_omega = 2.0f * PI_F32 * snapshot->ctrl_velocity_bandwidth_hz;
 	float32_t kp_num = (2.0f * snapshot->ctrl_damping_ratio * velocity_omega * j) - b;
 	float32_t kp_floor = (0.25f * velocity_omega * j) / kt;
-	float32_t low_speed_gain_rad_s = 2.0f * PI_F32 * MOTOR_SETTINGS_LOW_SPEED_GAIN_HZ;
-	float32_t kp_authority =
-		(MOTOR_SETTINGS_LOW_SPEED_KP_CURRENT_FRACTION *
-		 snapshot->ctrl_velocity_iq_limit_a) / low_speed_gain_rad_s;
-	float32_t velocity_kp = fmaxf(fmaxf(kp_num / kt, kp_floor), kp_authority);
+	float32_t velocity_kp = fmaxf(kp_num / kt, kp_floor);
 	float32_t velocity_ki_model = (velocity_omega * velocity_omega * j) / kt;
 	float32_t velocity_ki =
 		fminf(velocity_ki_model, MOTOR_SETTINGS_VELOCITY_KI_TO_KP_MAX * velocity_kp);
