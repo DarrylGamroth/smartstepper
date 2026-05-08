@@ -1,0 +1,6 @@
+tests:
+  chopper.motor_electrical_ripple_ff.unit:
+    platform_allow: native_sim
+    tags:
+      - motor
+      - unit

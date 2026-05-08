@@ -78,6 +78,7 @@ add_library(motor_core_rt STATIC
 	control/velocity_regulator.c
 	control/current_ref_policy_core.c
 	compensation/detent_map.c
+	compensation/electrical_ripple_ff.c
 )
 motor_core_configure_target(motor_core_rt)
 
