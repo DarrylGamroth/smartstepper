@@ -182,6 +182,9 @@ motor chopper geometry
 Save result:
 - `motor settings status` reports `chopper=YES` present and valid.
 - `motor chopper geometry` reports `Map valid: YES`.
+- Chopper settings are persistent in Settings/ZMS. Enable boot restore with
+  `motor settings autoload enable chopper` or by saving an autoload group set
+  that includes `chopper`.
 ```
 
 Bidirectional averaging command evidence:
@@ -199,4 +202,23 @@ Result:
   `motor chopper calib apply`, and saved with `motor settings save chopper`.
 - `motor settings status` reports generation 7 with `chopper=YES` present and
   valid.
+```
+
+Autoload evidence:
+
+```text
+Commands:
+motor settings autoload enable baseline chopper
+motor settings autoload status
+kernel reboot cold
+motor settings autoload status
+motor chopper geometry
+motor settings status
+
+Result:
+- Boot log reported `Motor settings autoloaded groups: 0x00000043`.
+- `0x43` is encoder + model_electrical + chopper.
+- `motor settings autoload status` reports chopper enabled with baseline.
+- `motor chopper geometry` reports `Map valid: YES` immediately after reboot.
+- `motor settings status` reports `chopper=YES` present and valid.
 ```

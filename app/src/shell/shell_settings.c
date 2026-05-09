@@ -19,7 +19,7 @@
 
 #define MOTOR_SETTINGS_GROUP_USAGE \
 	"[model electrical|model encoder|identity|limits|controllers|detent|chopper|all]"
-#define MOTOR_SETTINGS_AUTOLOAD_USAGE "[baseline|model electrical|model encoder]"
+#define MOTOR_SETTINGS_AUTOLOAD_USAGE "[baseline|model electrical|model encoder|chopper] [chopper]"
 
 static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups)
 {
@@ -69,6 +69,35 @@ static int parse_groups(size_t argc, char **argv, size_t first, uint32_t *groups
 	}
 	if (strcmp(argv[first], "all") == 0) {
 		*groups = MOTOR_SETTINGS_GROUP_ALL;
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static int parse_autoload_groups(size_t argc, char **argv, uint32_t *groups)
+{
+	if (groups == NULL) {
+		return -EINVAL;
+	}
+	if (argc == 1U) {
+		*groups = MOTOR_SETTINGS_GROUP_BASELINE;
+		return 0;
+	}
+	if (argc == 2U) {
+		return parse_groups(argc, argv, 1U, groups);
+	}
+	if (argc == 3U) {
+		uint32_t first_groups = 0U;
+		uint32_t second_groups = 0U;
+
+		if (parse_groups(argc, argv, 1U, groups) == 0) {
+			return 0;
+		}
+		if (parse_groups(2U, argv, 1U, &first_groups) != 0 ||
+		    parse_groups(2U, &argv[1], 1U, &second_groups) != 0) {
+			return -EINVAL;
+		}
+		*groups = first_groups | second_groups;
 		return 0;
 	}
 	return -EINVAL;
@@ -377,12 +406,7 @@ int cmd_motor_settings_autoload_enable(const struct shell *sh, size_t argc, char
 {
 	uint32_t groups = MOTOR_SETTINGS_GROUP_BASELINE;
 
-	if (argc > 3) {
-		shell_error(sh, "Usage: motor settings autoload enable "
-			    MOTOR_SETTINGS_AUTOLOAD_USAGE);
-		return -EINVAL;
-	}
-	if (argc >= 2 && parse_groups(argc, argv, 1U, &groups) != 0) {
+	if (parse_autoload_groups(argc, argv, &groups) != 0) {
 		shell_error(sh, "Unknown autoload group. Usage: motor settings autoload enable "
 			    MOTOR_SETTINGS_AUTOLOAD_USAGE);
 		return -EINVAL;

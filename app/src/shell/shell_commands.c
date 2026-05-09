@@ -580,7 +580,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_commission,
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_settings_autoload,
 	SHELL_CMD(status, NULL, "Show settings autoload status", cmd_motor_settings_autoload_status),
 	SHELL_CMD_ARG(enable, NULL,
-		      "Enable settings autoload [baseline|model electrical|model encoder]",
+		      "Enable settings autoload [baseline|model electrical|model encoder|chopper] [chopper]",
 		      cmd_motor_settings_autoload_enable, 1, 2),
 	SHELL_CMD(disable, NULL, "Disable settings autoload", cmd_motor_settings_autoload_disable),
 	SHELL_SUBCMD_SET_END
