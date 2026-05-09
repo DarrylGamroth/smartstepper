@@ -186,37 +186,6 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 {
 	motor_adc_apply_keepalive_and_timeout(params);
 
-	/* Hardware-timer-driven position-sequence tick source. Keep event
-	 * posting in the ADC ISR path rather than a direct timer callback.
-	 */
-	if (params->profile_seq.running &&
-	    atomic_get(&params->control_armed) != 0 &&
-	    params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL &&
-	    (motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_ENCODER) ||
-	     motor_state_ptr_is_mode(params->state_for_isr, MOTOR_STATE_ONLINE_POSITION_GENERATED))) {
-		uint32_t period_ticks = params->profile_seq.period_ticks;
-		if (period_ticks == 0U) {
-			period_ticks = 1U;
-		}
-
-		uint32_t tick_counter = params->profile_seq.tick_counter + 1U;
-		if (tick_counter >= period_ticks) {
-			struct motor_event evt = {
-				.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
-			};
-
-			params->profile_seq.tick_counter = 0U;
-			int ret = motor_api_enqueue_event_from_isr(&evt);
-			if (ret != 0) {
-				params->profile_seq.event_drop_count++;
-			}
-		} else {
-			params->profile_seq.tick_counter = tick_counter;
-		}
-	} else {
-		params->profile_seq.tick_counter = 0U;
-	}
-
 	motor_control_loop_step(params,
 				values,
 				count,

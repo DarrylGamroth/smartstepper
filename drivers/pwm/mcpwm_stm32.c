@@ -452,6 +452,80 @@ static int mcpwm_stm32_set_duty_cycle(const struct device *dev, uint32_t channel
 	return 0;
 }
 
+static int mcpwm_stm32_period_ns_to_cycles(const struct device *dev, uint64_t period_ns,
+					   uint32_t *period_cycles_out)
+{
+	const struct mcpwm_stm32_config *cfg = dev->config;
+	struct mcpwm_stm32_data *data = dev->data;
+	TIM_TypeDef *timer = cfg->timer;
+	uint64_t period_ns_calc;
+	uint64_t period_cycles_calc;
+	uint32_t period_cycles;
+
+	if (period_cycles_out == NULL || period_ns == 0U) {
+		return -EINVAL;
+	}
+	if (period_ns > (UINT64_MAX / data->tim_clk)) {
+		LOG_ERR("Period too large, would cause overflow");
+		return -EINVAL;
+	}
+
+	period_ns_calc = (uint64_t)data->tim_clk * period_ns;
+	period_cycles_calc = DIV_ROUND_UP(period_ns_calc, NSEC_PER_SEC);
+	if (period_cycles_calc > UINT32_MAX) {
+		LOG_ERR("Period too large for 32-bit timer: %llu cycles",
+			(unsigned long long)period_cycles_calc);
+		return -EINVAL;
+	}
+	period_cycles = (uint32_t)period_cycles_calc;
+	if (period_cycles == 0U) {
+		return -EINVAL;
+	}
+
+	if (is_center_aligned(cfg->countermode)) {
+		period_cycles /= 2U;
+		if (period_cycles == 0U) {
+			period_cycles = 1U;
+		}
+	} else {
+		period_cycles -= 1U;
+	}
+
+	if (!IS_TIM_32B_COUNTER_INSTANCE(timer) && period_cycles > UINT16_MAX) {
+		LOG_ERR("Period too large for 16-bit timer: %u", period_cycles);
+		return -EINVAL;
+	}
+
+	*period_cycles_out = period_cycles;
+	return 0;
+}
+
+static void mcpwm_stm32_apply_period_cycles(const struct device *dev, uint32_t period_cycles)
+{
+	const struct mcpwm_stm32_config *cfg = dev->config;
+	struct mcpwm_stm32_data *data = dev->data;
+
+	data->period_cycles = period_cycles;
+	data->period_cycles_x2 = period_cycles * 2U;
+	LL_TIM_SetAutoReload(cfg->timer, period_cycles);
+	LL_TIM_GenerateEvent_UPDATE(cfg->timer);
+}
+
+static int mcpwm_stm32_set_period_ns(const struct device *dev, uint64_t period_ns)
+{
+	uint32_t period_cycles;
+	int ret = mcpwm_stm32_period_ns_to_cycles(dev, period_ns, &period_cycles);
+	if (ret != 0) {
+		return ret;
+	}
+
+	unsigned int key = irq_lock();
+	mcpwm_stm32_apply_period_cycles(dev, period_cycles);
+	irq_unlock(key);
+
+	return 0;
+}
+
 static int mcpwm_stm32_set_compare_callback(const struct device *dev, uint32_t channel,
 					    mcpwm_compare_cb_t callback, void *user_data)
 {
@@ -567,6 +641,7 @@ static DEVICE_API(mcpwm, mcpwm_stm32_driver_api) = {
 	.start = mcpwm_stm32_start,
 	.stop = mcpwm_stm32_stop,
 	.set_duty_cycle = mcpwm_stm32_set_duty_cycle,
+	.set_period_ns = mcpwm_stm32_set_period_ns,
 	.set_compare_callback = mcpwm_stm32_set_compare_callback,
 	.set_break_callback = mcpwm_stm32_set_break_callback,
 };
@@ -627,37 +702,15 @@ static int mcpwm_stm32_init(const struct device *dev)
 		LOG_DBG("No pinctrl configured for timer %s (timer-only mode)", dev->name);
 	}
 
-	/* Protect against overflow */
-	if (cfg->period_ns > (UINT64_MAX / data->tim_clk)) {
-		LOG_ERR("Period too large, would cause overflow");
-		return -EINVAL;
+	uint32_t period_cycles;
+	r = mcpwm_stm32_period_ns_to_cycles(dev, cfg->period_ns, &period_cycles);
+	if (r != 0) {
+		return r;
 	}
-
-	uint64_t period_ns_calc = (uint64_t)data->tim_clk * cfg->period_ns;
-	uint32_t period_cycles = (uint32_t)DIV_ROUND_UP(period_ns_calc, NSEC_PER_SEC);
-
-	/* Adjust period based on counter mode */
-	if (is_center_aligned(cfg->countermode)) {
-		/* For center-aligned mode, period is divided by 2 */
-		period_cycles /= 2U;
-	} else {
-		/* For up/down-counting modes, ARR = period - 1 */
-		period_cycles -= 1U;
-	}
-
-	/* Validate period fits in timer */
-	if (!IS_TIM_32B_COUNTER_INSTANCE(timer) && period_cycles > UINT16_MAX) {
-		LOG_ERR("Period too large for 16-bit timer: %u", period_cycles);
-		return -EINVAL;
-	}
-
-	/* Store the calculated period for later use */
-	data->period_cycles = period_cycles;
-	data->period_cycles_x2 = data->period_cycles * 2;
 
 	/* initialize timer */
 	LL_TIM_SetPrescaler(timer, cfg->prescaler);
-	LL_TIM_SetAutoReload(timer, period_cycles);
+	mcpwm_stm32_apply_period_cycles(dev, period_cycles);
 
 	if (IS_TIM_COUNTER_MODE_SELECT_INSTANCE(timer)) {
 		LL_TIM_SetCounterMode(timer, cfg->countermode);

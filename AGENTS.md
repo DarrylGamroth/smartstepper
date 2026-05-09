@@ -529,6 +529,17 @@ motor commission encoder clear
     for the external index pulse that advances calibrated position targets.
   - `CHOPPER_CAL_CAPTURE_CHANNEL = 1` maps to TIM2 CH2 / PB3 and is used for
     photo-interrupter slot/tooth edge capture.
+- Profile sequence trigger source is shell-selectable:
+  - `motor profile seq trigger source internal` uses TIM5 CH1 compare events
+    through the `mcpwm` driver. `motor profile seq period_ms <ms>` updates the
+    TIM5 period at runtime.
+  - `motor profile seq trigger source external` uses TIM2 CH1 / PA0 input
+    capture for the external index pulse.
+  - `motor profile seq trigger source software` waits for
+    `motor profile seq trigger fire` and is useful for one-shot position tuning.
+  - Devicetree aliases in `app/boards/smartstepper_v2.overlay` bind these roles:
+    `profile-seq-internal = &profile_seq_timer` and
+    `profile-seq-external = &triggers`.
 - `app/boards/smartstepper_v2.overlay` provides matching `capture-gpios` so the
   STM32 timer capture driver can report rising/falling edge status for
   slot/tooth midpoint classification.

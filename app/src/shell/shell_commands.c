@@ -187,7 +187,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_position,
 
 /* motor profile seq subcommands */
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq_trigger,
-	SHELL_CMD_ARG(source, NULL, "Set trigger source <timer|external> (alias: internal)",
+	SHELL_CMD_ARG(source, NULL, "Set trigger source <internal|external|software> (aliases: timer/tim5, tim2/index, manual)",
 		      cmd_motor_profile_seq_trigger_source, 2, 0),
 	SHELL_CMD_ARG(edge, NULL, "Set external edge <rising|falling|both>",
 		      cmd_motor_profile_seq_trigger_edge, 2, 0),
@@ -197,7 +197,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor_profile_seq_trigger,
 		      cmd_motor_profile_seq_trigger_min_interval, 2, 0),
 	SHELL_CMD(status, NULL, "Show trigger source/edge/filter status",
 		  cmd_motor_profile_seq_trigger_status),
-	SHELL_CMD(fire, NULL, "Inject one software external trigger", cmd_motor_profile_seq_trigger_fire),
+	SHELL_CMD(fire, NULL, "Inject one software/external sequence trigger", cmd_motor_profile_seq_trigger_fire),
 	SHELL_SUBCMD_SET_END
 );
 

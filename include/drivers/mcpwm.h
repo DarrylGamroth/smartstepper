@@ -398,6 +398,8 @@ typedef int (*mcpwm_stop_t)(const struct device *dev);
 typedef int (*mcpwm_set_duty_cycle_t)(const struct device *dev,
 					uint32_t channel, q31_t duty_cycle);
 
+typedef int (*mcpwm_set_period_ns_t)(const struct device *dev, uint64_t period_ns);
+
 typedef int (*mcpwm_set_compare_callback_t)(const struct device *dev, uint32_t channel,
 					mcpwm_compare_cb_t cb, void *user_data);
 
@@ -412,6 +414,7 @@ __subsystem struct mcpwm_driver_api {
 	mcpwm_start_t start;
 	mcpwm_stop_t stop;
 	mcpwm_set_duty_cycle_t set_duty_cycle;
+	mcpwm_set_period_ns_t set_period_ns;
 	mcpwm_set_compare_callback_t set_compare_callback;
 	mcpwm_set_break_callback_t set_break_callback;
 };
@@ -500,6 +503,33 @@ static inline int z_impl_mcpwm_set_duty_cycle(const struct device *dev,
 					uint32_t channel, q31_t duty_cycle)
 {
 	return DEVICE_API_GET(mcpwm, dev)->set_duty_cycle(dev, channel, duty_cycle);
+}
+
+/**
+ * @brief Set the timer period at runtime.
+ *
+ * This updates the timer auto-reload value and the driver's cached period used
+ * by duty-cycle conversion. Existing channel compare values should be updated
+ * by the caller after changing the period.
+ *
+ * @param[in] dev PWM device instance.
+ * @param period_ns Timer period in nanoseconds.
+ *
+ * @retval 0 If successful.
+ * @retval -ENOTSUP If the driver does not support runtime period changes.
+ * @retval -errno Negative errno code on failure.
+ */
+__syscall int mcpwm_set_period_ns(const struct device *dev, uint64_t period_ns);
+
+static inline int z_impl_mcpwm_set_period_ns(const struct device *dev, uint64_t period_ns)
+{
+	const struct mcpwm_driver_api *api = DEVICE_API_GET(mcpwm, dev);
+
+	if (api->set_period_ns == NULL) {
+		return -ENOTSUP;
+	}
+
+	return api->set_period_ns(dev, period_ns);
 }
 
 /**

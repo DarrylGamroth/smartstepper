@@ -36,6 +36,11 @@
 	model = "Smart Stepper Controller V2";
 	compatible = "rubus,smartstepper_v2";
 
+	aliases {
+		profile-seq-external = &triggers;
+		profile-seq-internal = &profile_seq_timer;
+	};
+
 	chosen {
 		zephyr,console = &usart1;
 		zephyr,shell-uart = &usart1;
@@ -57,6 +62,24 @@
 		compatible = "rubus,app-gpio";
 		gpios = <&gpiob 4 GPIO_ACTIVE_HIGH>;
 		status = "okay";
+	};
+};
+
+// TIM5 CH1 is the internal hardware trigger source for profile sequence
+// playback. It is timer-only: no pin is routed, but CH1 compare interrupt
+// advances the sequence through the same state-machine event path as external
+// triggers.
+&timers5 {
+	compatible = "rubus,stm32-timers";
+	st,prescaler = <0>;
+	status = "okay";
+	st,countermode = <STM32_TIM_COUNTERMODE_UP>;
+
+	profile_seq_timer: mcpwm {
+		compatible = "st,stm32-mcpwm";
+		period = <PWM_MSEC(1000)>;
+		status = "okay";
+		#pwm-cells = <2>;
 	};
 };
 

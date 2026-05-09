@@ -7,6 +7,9 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/devicetree.h>
 #include <drivers/timer_ic.h>
+#include <drivers/mcpwm.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <dt-bindings/pwm/stm32-mcpwm.h>
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
@@ -25,12 +28,23 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(shell_commands, CONFIG_APP_LOG_LEVEL);
 
-#if defined(CONFIG_TIMER_IC) && DT_HAS_COMPAT_STATUS_OKAY(st_stm32_timer_ic)
+#if defined(CONFIG_TIMER_IC) && DT_NODE_HAS_STATUS(DT_ALIAS(profile_seq_external), okay)
 #define PROFILE_SEQ_CAPTURE_AVAILABLE 1
-static const struct device *const profile_seq_capture_dev = DEVICE_DT_GET_ANY(st_stm32_timer_ic);
+static const struct device *const profile_seq_capture_dev =
+	DEVICE_DT_GET(DT_ALIAS(profile_seq_external));
 #else
 #define PROFILE_SEQ_CAPTURE_AVAILABLE 0
 #endif
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(profile_seq_internal), okay)
+#define PROFILE_SEQ_INTERNAL_TIMER_AVAILABLE 1
+static const struct device *const profile_seq_internal_dev =
+	DEVICE_DT_GET(DT_ALIAS(profile_seq_internal));
+#else
+#define PROFILE_SEQ_INTERNAL_TIMER_AVAILABLE 0
+#endif
+
+#define PROFILE_SEQ_INTERNAL_CHANNEL 1U
 
 static inline uint32_t motor_profile_period_ms_to_ticks(uint32_t period_ms)
 {
@@ -51,9 +65,11 @@ static const char *motor_profile_seq_trigger_source_to_string(uint8_t source)
 {
 	switch (source) {
 	case PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL:
-		return "TIMER";
+		return "INTERNAL";
 	case PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL:
 		return "EXTERNAL";
+	case PROFILE_SEQUENCE_TRIGGER_SRC_SOFTWARE:
+		return "SOFTWARE";
 	default:
 		return "UNKNOWN";
 	}
@@ -79,12 +95,18 @@ static bool motor_profile_seq_parse_trigger_source(const char *text, uint8_t *so
 		return false;
 	}
 
-	if (strcmp(text, "timer") == 0 || strcmp(text, "internal") == 0) {
+	if (strcmp(text, "internal") == 0 || strcmp(text, "timer") == 0 ||
+	    strcmp(text, "tim5") == 0) {
 		*source_out = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
 		return true;
 	}
-	if (strcmp(text, "external") == 0) {
+	if (strcmp(text, "external") == 0 || strcmp(text, "tim2") == 0 ||
+	    strcmp(text, "index") == 0) {
 		*source_out = PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL;
+		return true;
+	}
+	if (strcmp(text, "software") == 0 || strcmp(text, "manual") == 0) {
+		*source_out = PROFILE_SEQUENCE_TRIGGER_SRC_SOFTWARE;
 		return true;
 	}
 
@@ -144,7 +166,8 @@ static int motor_profile_seq_post_tick_event(struct motor_parameters *params, bo
 	struct motor_event evt = {
 		.type = MOTOR_EVENT_PROFILE_SEQ_TICK,
 	};
-	int ret = motor_api_post_event(&evt);
+	int ret = k_is_in_isr() ? motor_api_enqueue_event_from_isr(&evt) :
+				  motor_api_post_event(&evt);
 	if (ret != 0) {
 		if (params) {
 			params->profile_seq.event_drop_count++;
@@ -157,6 +180,147 @@ static int motor_profile_seq_post_tick_event(struct motor_parameters *params, bo
 	}
 
 	return 0;
+}
+
+static int motor_profile_seq_period_ms_to_ns(uint32_t period_ms, uint64_t *period_ns_out)
+{
+	if (period_ms == 0U || period_ns_out == NULL) {
+		return -EINVAL;
+	}
+
+	*period_ns_out = (uint64_t)period_ms * 1000000ULL;
+	return 0;
+}
+
+static void motor_profile_seq_internal_timer_callback(const struct device *dev, uint32_t channel,
+						      void *user_data)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+
+	struct motor_parameters *params = g_motor_params;
+	if (channel != PROFILE_SEQ_INTERNAL_CHANNEL ||
+	    params == NULL ||
+	    params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL) {
+		return;
+	}
+
+	if (!params->profile_seq.running ||
+	    atomic_get(&params->control_armed) == 0 ||
+	    !motor_profile_seq_mode_active(params)) {
+		return;
+	}
+
+	(void)motor_profile_seq_post_tick_event(params, false);
+}
+
+static int motor_profile_seq_internal_timer_apply_period(struct motor_parameters *params)
+{
+	if (params == NULL) {
+		return -ENODEV;
+	}
+
+#if PROFILE_SEQ_INTERNAL_TIMER_AVAILABLE
+	if (!device_is_ready(profile_seq_internal_dev)) {
+		return -ENODEV;
+	}
+
+	uint64_t period_ns = 0U;
+	int ret = motor_profile_seq_period_ms_to_ns(params->profile_seq.period_ms, &period_ns);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = mcpwm_set_period_ns(profile_seq_internal_dev, period_ns);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return mcpwm_set_duty_cycle(profile_seq_internal_dev,
+				    PROFILE_SEQ_INTERNAL_CHANNEL,
+				    0x40000000);
+#else
+	return -ENOTSUP;
+#endif
+}
+
+static int motor_profile_seq_internal_timer_disable(struct motor_parameters *params)
+{
+	ARG_UNUSED(params);
+
+#if PROFILE_SEQ_INTERNAL_TIMER_AVAILABLE
+	if (!device_is_ready(profile_seq_internal_dev)) {
+		return -ENODEV;
+	}
+
+	int first_ret = 0;
+	int ret = mcpwm_set_compare_callback(profile_seq_internal_dev,
+					     PROFILE_SEQ_INTERNAL_CHANNEL,
+					     NULL, NULL);
+	if (ret != 0) {
+		first_ret = ret;
+	}
+	ret = mcpwm_disable(profile_seq_internal_dev, PROFILE_SEQ_INTERNAL_CHANNEL);
+	if (ret != 0 && first_ret == 0) {
+		first_ret = ret;
+	}
+	ret = mcpwm_stop(profile_seq_internal_dev);
+	if (ret != 0 && first_ret == 0) {
+		first_ret = ret;
+	}
+
+	return first_ret;
+#else
+	return -ENOTSUP;
+#endif
+}
+
+static int motor_profile_seq_internal_timer_enable(struct motor_parameters *params)
+{
+	if (params == NULL) {
+		return -ENODEV;
+	}
+
+#if PROFILE_SEQ_INTERNAL_TIMER_AVAILABLE
+	if (!device_is_ready(profile_seq_internal_dev)) {
+		return -ENODEV;
+	}
+
+	(void)motor_profile_seq_internal_timer_disable(params);
+
+	int ret = mcpwm_configure(profile_seq_internal_dev,
+				  PROFILE_SEQ_INTERNAL_CHANNEL,
+				  PWM_POLARITY_NORMAL | STM32_PWM_OC_MODE_PWM1);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = motor_profile_seq_internal_timer_apply_period(params);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = mcpwm_enable(profile_seq_internal_dev, PROFILE_SEQ_INTERNAL_CHANNEL);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = mcpwm_set_compare_callback(profile_seq_internal_dev,
+					 PROFILE_SEQ_INTERNAL_CHANNEL,
+					 motor_profile_seq_internal_timer_callback,
+					 NULL);
+	if (ret != 0) {
+		(void)mcpwm_disable(profile_seq_internal_dev, PROFILE_SEQ_INTERNAL_CHANNEL);
+		return ret;
+	}
+
+	ret = mcpwm_start(profile_seq_internal_dev);
+	if (ret != 0) {
+		(void)motor_profile_seq_internal_timer_disable(params);
+		return ret;
+	}
+
+	return 0;
+#else
+	return -ENOTSUP;
+#endif
 }
 
 #if PROFILE_SEQ_CAPTURE_AVAILABLE
@@ -329,6 +493,7 @@ int cmd_motor_profile_seq_clear(const struct shell *sh, size_t argc, char **argv
 
 	g_motor_params->profile_seq.running = false;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
+	(void)motor_profile_seq_internal_timer_disable(g_motor_params);
 	g_motor_params->profile_seq.count = 0U;
 	g_motor_params->profile_seq.next_idx = 0U;
 	g_motor_params->profile_seq.tick_counter = 0U;
@@ -399,6 +564,13 @@ int cmd_motor_profile_seq_period_ms(const struct shell *sh, size_t argc, char **
 	if (ret != 0) {
 		shell_error(sh, "Failed to set period_ms (err %d)", ret);
 		return ret;
+	}
+	if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL) {
+		ret = motor_profile_seq_internal_timer_apply_period(g_motor_params);
+		if (ret != 0 && g_motor_params->profile_seq.running) {
+			shell_error(sh, "Failed to update internal TIM5 period (err %d)", ret);
+			return ret;
+		}
 	}
 
 	motor_command_feed_watchdog(g_motor_params);
@@ -567,11 +739,12 @@ int cmd_motor_profile_seq_config(const struct shell *sh, size_t argc, char **arg
 	return 0;
 }
 
-/* motor profile seq trigger source <timer|external> */
+/* motor profile seq trigger source <internal|external|software> */
 int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc != 2) {
-		shell_error(sh, "Usage: motor profile seq trigger source <timer|external>");
+		shell_error(sh,
+			    "Usage: motor profile seq trigger source <internal|external|software>");
 		return -EINVAL;
 	}
 
@@ -587,12 +760,14 @@ int cmd_motor_profile_seq_trigger_source(const struct shell *sh, size_t argc, ch
 
 	uint8_t source = PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL;
 	if (!motor_profile_seq_parse_trigger_source(argv[1], &source)) {
-		shell_error(sh, "Source must be 'timer' or 'external' (alias: 'internal').");
+		shell_error(sh,
+			    "Source must be 'internal', 'external', or 'software'. Aliases: timer/tim5, tim2/index, manual.");
 		return -EINVAL;
 	}
 
 	g_motor_params->profile_seq.trigger_source = source;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
+	(void)motor_profile_seq_internal_timer_disable(g_motor_params);
 	if (source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
 		int ret = motor_profile_seq_update_ext_min_interval_cycles(g_motor_params);
 		if (ret < 0) {
@@ -734,18 +909,23 @@ int cmd_motor_profile_seq_trigger_fire(const struct shell *sh, size_t argc, char
 		return -EACCES;
 	}
 
-	if (g_motor_params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
-		shell_error(sh, "Trigger fire is only valid when source is 'external'.");
+	if (g_motor_params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL &&
+	    g_motor_params->profile_seq.trigger_source != PROFILE_SEQUENCE_TRIGGER_SRC_SOFTWARE) {
+		shell_error(sh, "Trigger fire is only valid when source is 'external' or 'software'.");
 		return -EACCES;
 	}
 
-	int ret = motor_profile_seq_post_tick_event(g_motor_params, true);
+	bool counted_as_external =
+		g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL;
+	int ret = motor_profile_seq_post_tick_event(g_motor_params, counted_as_external);
 	if (ret != 0) {
 		shell_error(sh, "Failed to inject trigger (queue full)");
 		return ret;
 	}
 
-	shell_print(sh, "Injected external sequence trigger");
+	shell_print(sh, "Injected %s sequence trigger",
+		    motor_profile_seq_trigger_source_to_string(
+			    g_motor_params->profile_seq.trigger_source));
 	return 0;
 }
 
@@ -833,6 +1013,7 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 	g_motor_params->profile_seq.ext_reject_count = 0U;
 	g_motor_params->profile_seq.ext_last_capture_valid = false;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
+	(void)motor_profile_seq_internal_timer_disable(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 
 	if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_EXTERNAL) {
@@ -856,10 +1037,12 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 			    motor_profile_seq_trigger_edge_to_string(
 				    g_motor_params->profile_seq.trigger_edge),
 			    g_motor_params->profile_seq.trigger_channel);
-	} else {
-		int ret = motor_profile_seq_post_tick_event(g_motor_params, false);
+	} else if (g_motor_params->profile_seq.trigger_source == PROFILE_SEQUENCE_TRIGGER_SRC_INTERNAL) {
+		int ret = motor_profile_seq_internal_timer_enable(g_motor_params);
 		if (ret != 0) {
-			shell_warn(sh, "Sequence started, initial tick dropped (queue full)");
+			g_motor_params->profile_seq.running = false;
+			shell_error(sh, "Failed to enable internal TIM5 trigger (err %d)", ret);
+			return ret;
 		}
 
 		if (g_motor_params->command_timeout_ms > 0U &&
@@ -867,7 +1050,12 @@ int cmd_motor_profile_seq_start(const struct shell *sh, size_t argc, char **argv
 			shell_warn(sh, "period_ms >= command_timeout_ms; increase timeout to avoid disarm");
 		}
 
-		shell_print(sh, "Profile sequence started (%u points), source=TIMER",
+		shell_print(sh, "Profile sequence started (%u points), source=INTERNAL TIM5 CH1 period=%u ms",
+			    g_motor_params->profile_seq.count,
+			    g_motor_params->profile_seq.period_ms);
+	} else {
+		shell_print(sh,
+			    "Profile sequence started (%u points), source=SOFTWARE; use 'motor profile seq trigger fire'",
 			    g_motor_params->profile_seq.count);
 	}
 	return 0;
@@ -887,6 +1075,7 @@ int cmd_motor_profile_seq_stop(const struct shell *sh, size_t argc, char **argv)
 	g_motor_params->profile_seq.running = false;
 	g_motor_params->profile_seq.tick_counter = 0U;
 	(void)motor_profile_seq_external_capture_disable(g_motor_params);
+	(void)motor_profile_seq_internal_timer_disable(g_motor_params);
 	motor_command_feed_watchdog(g_motor_params);
 	shell_print(sh, "Profile sequence stopped");
 	return 0;
