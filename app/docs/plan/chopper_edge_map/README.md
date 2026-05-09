@@ -1,7 +1,7 @@
 # Chopper Edge Map
 
 ## Goal
-Build a calibrated chopper wheel index table from optical edge captures so position moves target slot/tooth centerpoints instead of ideal 22.5 degree assumptions.
+Build a calibrated chopper wheel edge map from optical captures so position moves can target derived slot/tooth centerpoints instead of ideal 22.5 degree assumptions, and so PB4 can report blade state from encoder position.
 
 ## Non-Goals
 Do not implement final hardware timer/capture ISR index playback in this phase.
@@ -9,10 +9,20 @@ Do not optimize position PI further until the index table exists.
 Do not require mechanical ID to succeed.
 
 ## Current Problem
-The position controller can move to angular targets, but the chopper wheel has real slot/tooth geometry. The application needs the actual centerpoints of the slots and teeth so each external tick can command the next calibrated index position. The existing `motor chopper calib` command captures optical edges, but geometry is passed manually, only slot midpoints are produced, and the map is not persisted.
+The position controller can move to angular targets, but the chopper wheel has real slot/tooth geometry. The application needs the actual centerpoints of the slots and teeth so each external tick can command the next calibrated index position. It also needs a deterministic blade-state GPIO that is independent of the optical emitter/capture path after calibration. The existing `motor chopper calib` command captures optical edges, but geometry is passed manually, only slot midpoints are produced, and the map is not persisted in a form that can regenerate both edge intervals and centerpoints.
 
 ## Design
-Store chopper wheel geometry as devicetree defaults and runtime settings. For an 8-slot blade, default `chopper-slot-count=8`; the tooth count is derived as 8 unless a nonstandard wheel overrides it, producing 16 slot/tooth centerpoints. Capture optical edges while running controlled velocity in either direction, average repeated edges over multiple revolutions, sort the edge angles, classify equal slot/tooth wheels by alternating parity with timer edge-status used only to choose the starting polarity, and calculate every region centerpoint between adjacent edges. Apply the resulting centerpoint table to the profile sequence as absolute position targets.
+Store chopper wheel geometry as devicetree defaults and runtime settings. For an 8-slot blade, default `chopper-slot-count=8`; the tooth count is derived as 8 unless a nonstandard wheel overrides it, producing 16 slot/tooth regions.
+
+The canonical calibrated map is the physical edge list:
+
+- `edge_count`
+- sorted `edges_rad`
+- `edge_region_after`, where each entry labels the interval after that edge as slot or tooth
+
+Capture optical edges while running controlled velocity in either direction, average repeated edges over multiple revolutions, sort the edge angles, classify equal slot/tooth wheels by alternating parity with timer edge-status used only to choose the starting polarity, and derive every region centerpoint between adjacent edges. Apply the derived centerpoint table to the profile sequence as absolute position targets.
+
+PB4 is the blade-state output. It is high for slot and low for tooth. Runtime code evaluates the calibrated edge intervals against the current encoder angle in the motor control loop, using a cached adjacent-first interval lookup before falling back to a full scan. PB4 is not driven by the photo-interrupter callback, so it remains valid after the photo-interrupter emitter is disabled.
 
 ## Implementation Phases
 Phase 1:
@@ -22,17 +32,22 @@ Phase 2:
 Refactor `motor chopper calib start` to use configured geometry, accept signed velocity, allow velocity encoder mode, and compute `slots + teeth` centerpoints from sorted edges.
 
 Phase 3:
-Add a `chopper` settings group for geometry and the centerpoint table.
+Add a `chopper` settings group for geometry and the canonical edge map. Centerpoints are derived after load and are not persisted.
 
 Phase 4:
 Build and run HIL capture on the MT6835 target after baseline electrical/encoder settings are loaded.
+
+Phase 5:
+Add PB4 blade-state output driven by the calibrated edge map and encoder angle in the control loop.
 
 ## Acceptance Criteria
 `motor chopper geometry` reports `slots=8 teeth=8 centers=16` by default.
 `motor chopper calib start <revs> <velocity_hz>` captures `16 * revs` edges for the 8-slot wheel.
 `motor chopper calib status` prints 16 slot/tooth centerpoints approximately 22.5 degrees apart.
 `motor chopper calib apply` loads 16 sequence points.
-`motor settings save chopper` and `motor settings load chopper` preserve the geometry and table.
+`motor settings save chopper` and `motor settings load chopper` preserve the geometry and edge map; centerpoints are derived at runtime.
+PB4 is high in calibrated slot intervals and low in calibrated tooth intervals based on encoder position, regardless of whether the photo-interrupter emitter is enabled.
+Legacy centerpoint settings are not loaded or migrated. Targets with old center-only chopper settings must clear settings and save a new edge map.
 
 ## HIL Evidence
 Use the MT6835 HIL build. After baseline settings are loaded and generated-angle
@@ -203,6 +218,49 @@ Result:
 - `motor settings status` reports generation 7 with `chopper=YES` present and
   valid.
 ```
+
+2026-05-08 edge-map canonicalization:
+
+- Changed Settings/ZMS chopper persistence to store only the canonical edge map:
+  `edge_count`, `edges_rad`, and `edge_region_after`.
+- Removed legacy centerpoint key loading/migration. Existing center-only
+  persisted maps are intentionally ignored; clear settings and regenerate the
+  chopper map.
+- Added shared edge-map derivation/lookup helper used by settings load,
+  calibration, and runtime blade-state lookup.
+- Added PB4 blade-state output: high=slot, low=tooth, driven from encoder angle
+  against the calibrated edge intervals in the control loop.
+- Added adjacent-first cached lookup so normal runtime checks inspect current,
+  next, and previous edge intervals before a full scan.
+
+Validation:
+
+```text
+rg -n "chopper_center|center_count|centers_rad|center_kind|MOTOR_SETTINGS_CHOPPER_FIELD_.*CENTER|KEY_CHOPPER_CENTER|motor/chopper/center" app/src app/include modules -S
+Result: no matches
+
+git diff --check
+Result: PASS
+
+podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2_mt6835_067a'
+Result: PASS
+
+Resolved DTS:
+/chopper_blade_state {
+    compatible = "rubus,app-gpio";
+    gpios = < &gpiob 0x4 0x0 >;
+    status = "okay";
+};
+
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.runtime.unit
+Result: PASS, 9/9 cases
+
+./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit
+Result: PASS, 4/4 cases
+```
+
+Note: the first parallel unit-test attempt raced on the shared
+`/tmp/twister-unit` output directory. Rerunning the suites sequentially passed.
 
 Autoload evidence:
 

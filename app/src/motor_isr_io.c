@@ -26,6 +26,7 @@
 #include "motor/protection/interlocks.h"
 #include "motor/motion/motion_profile.h"
 #include "motor_control_telemetry.h"
+#include "motor_hardware.h"
 
 LOG_MODULE_REGISTER(motor_isr, CONFIG_APP_LOG_LEVEL);
 
@@ -228,6 +229,11 @@ static void motor_adc_stage_process(struct motor_parameters *params,
 
 static void motor_adc_stage_apply(const struct motor_adc_process_stage *process)
 {
+	if (process->step_report.chopper_blade_state_valid) {
+		(void)motor_hardware_set_chopper_blade_state(
+			process->step_report.chopper_blade_slot);
+	}
+
 	/* Apply only finalized modulation commands produced by Process stage. */
 	if (process->pwm_out.update_pwm) {
 		mcpwm_stm32_set_duty_cycle_2phase_f32(pwm1,

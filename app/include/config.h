@@ -283,13 +283,15 @@ struct motor_profile_sequence_ctx {
 
 struct motor_chopper_cal_ctx {
 	bool active;            /* Edge capture in progress */
-	bool complete;          /* Capture complete and midpoint table valid */
-	bool valid;             /* Midpoint table can be used */
+	bool complete;          /* Capture complete and edge/center tables valid */
+	bool valid;             /* Edge map and derived midpoint table can be used */
 	uint16_t slots;         /* Number of optical slots being calibrated */
 	uint16_t teeth;         /* Number of opaque teeth being calibrated */
 	uint16_t revs_target;   /* Number of revolutions to average */
 	uint16_t samples_per_edge; /* Expected samples per edge bin */
+	uint16_t edge_map_count; /* Number of calibrated physical edges */
 	uint16_t midpoint_count; /* Number of valid midpoint entries */
+	uint16_t blade_state_edge_idx; /* Cached edge interval for ISR slot/tooth lookup */
 	uint32_t total_edges_target;   /* (slots + teeth) * revs */
 	uint32_t total_edges_captured; /* Number of accepted edges */
 	uint32_t discarded_edges;      /* Edges rejected by sanity checks */
@@ -306,8 +308,11 @@ struct motor_chopper_cal_ctx {
 	float32_t edge_sum_rad[CHOPPER_CAL_MAX_EDGES];      /* Unwrapped angle sum per edge bin */
 	uint32_t edge_count[CHOPPER_CAL_MAX_EDGES];         /* Sample count per edge bin */
 	uint8_t edge_status[CHOPPER_CAL_MAX_EDGES];         /* TIMER_IC_STATUS_EDGE_* observed per bin */
-	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS];   /* Alternating slot/tooth centers [0, 2pi) */
-	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];       /* CHOPPER_REGION_KIND_* per midpoint */
+	float32_t blade_edges_rad[CHOPPER_CAL_MAX_SLOTS];   /* Physical slot/tooth boundaries [0, 2pi) */
+	uint8_t edge_region_after[CHOPPER_CAL_MAX_SLOTS];   /* CHOPPER_REGION_KIND_* after each edge */
+	float32_t blade_midpoints_rad[CHOPPER_CAL_MAX_SLOTS]; /* Derived slot/tooth centers [0, 2pi) */
+	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];       /* Derived CHOPPER_REGION_KIND_* per midpoint */
+	bool blade_state_edge_idx_valid; /* True when cached edge interval is usable */
 };
 
 struct motor_calibration_ctx {

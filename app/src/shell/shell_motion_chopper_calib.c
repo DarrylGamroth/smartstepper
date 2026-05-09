@@ -17,6 +17,7 @@
 #include "shell_commands_motion_common.h"
 #include "motor_state_utils.h"
 #include "motor_hardware.h"
+#include "motor_chopper_map.h"
 #include "config.h"
 #include "motor/math/angle_wrap.h"
 #include "motor/motion/traj.h"
@@ -40,7 +41,10 @@ static void motor_chopper_cal_reset_buffers(struct motor_parameters *params)
 
 	params->chopper_cal.complete = false;
 	params->chopper_cal.valid = false;
+	params->chopper_cal.edge_map_count = 0U;
 	params->chopper_cal.midpoint_count = 0U;
+	params->chopper_cal.blade_state_edge_idx = 0U;
+	params->chopper_cal.blade_state_edge_idx_valid = false;
 	params->chopper_cal.total_edges_target = 0U;
 	params->chopper_cal.total_edges_captured = 0U;
 	params->chopper_cal.discarded_edges = 0U;
@@ -58,6 +62,8 @@ static void motor_chopper_cal_reset_buffers(struct motor_parameters *params)
 		params->chopper_cal.edge_status[i] = 0U;
 	}
 	for (uint32_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
+		params->chopper_cal.blade_edges_rad[i] = 0.0f;
+		params->chopper_cal.edge_region_after[i] = CHOPPER_REGION_KIND_UNKNOWN;
 		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
 		params->chopper_cal.midpoint_kind[i] = CHOPPER_REGION_KIND_UNKNOWN;
 	}
@@ -95,8 +101,8 @@ struct chopper_edge_mean {
 
 struct chopper_cal_map_snapshot {
 	uint16_t count;
-	float32_t midpoints_rad[CHOPPER_CAL_MAX_SLOTS];
-	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];
+	float32_t edges_rad[CHOPPER_CAL_MAX_SLOTS];
+	uint8_t edge_region_after[CHOPPER_CAL_MAX_SLOTS];
 	float32_t spacing_min_rad;
 	float32_t spacing_max_rad;
 	float32_t spacing_mean_rad;
@@ -139,7 +145,7 @@ static uint8_t motor_chopper_region_kind_from_edge_status(uint8_t status, bool r
 static void motor_chopper_assign_alternating_kinds(const struct chopper_edge_mean *edges,
 						   uint16_t edge_bins,
 						   bool reverse_motion,
-						   uint8_t *midpoint_kind)
+						   uint8_t *edge_region_after)
 {
 	uint16_t parity_slot_votes[2] = {0U, 0U};
 	uint16_t parity_tooth_votes[2] = {0U, 0U};
@@ -173,11 +179,11 @@ static void motor_chopper_assign_alternating_kinds(const struct chopper_edge_mea
 	for (uint16_t i = 0U; i < edge_bins; i++) {
 		bool even = ((i & 1U) == 0U);
 		if (even) {
-			midpoint_kind[i] = even_kind;
+			edge_region_after[i] = even_kind;
 		} else {
-			midpoint_kind[i] = (even_kind == CHOPPER_REGION_KIND_SLOT) ?
-						   CHOPPER_REGION_KIND_TOOTH :
-						   CHOPPER_REGION_KIND_SLOT;
+			edge_region_after[i] = (even_kind == CHOPPER_REGION_KIND_SLOT) ?
+						       CHOPPER_REGION_KIND_TOOTH :
+						       CHOPPER_REGION_KIND_SLOT;
 		}
 	}
 }
@@ -234,89 +240,34 @@ static int motor_chopper_cal_compute_midpoints(struct motor_parameters *params)
 		edges[i].status = params->chopper_cal.edge_status[i];
 	}
 	motor_chopper_sort_edges(edges, edge_bins);
-	uint8_t midpoint_kind[CHOPPER_CAL_MAX_SLOTS];
+	uint8_t edge_region_after[CHOPPER_CAL_MAX_SLOTS];
 	if (params->chopper_cal.slots == params->chopper_cal.teeth) {
 		motor_chopper_assign_alternating_kinds(
 			edges, edge_bins,
 			params->chopper_cal.speed_target_rad_s < 0.0f,
-			midpoint_kind);
+			edge_region_after);
 	} else {
 		for (uint16_t i = 0U; i < edge_bins; i++) {
-			midpoint_kind[i] =
+			edge_region_after[i] =
 				motor_chopper_region_kind_from_edge_status(
 					edges[i].status,
 					params->chopper_cal.speed_target_rad_s < 0.0f);
 		}
 	}
 
-	float32_t ideal_spacing = 2.0f * PI_F32 / (float32_t)edge_bins;
-	float32_t spacing_sum = 0.0f;
-	float32_t spacing_min = 2.0f * PI_F32;
-	float32_t spacing_max = 0.0f;
-	float32_t spacing_max_error = 0.0f;
 	for (uint16_t i = 0U; i < edge_bins; i++) {
-		float32_t a = edges[i].angle_rad;
-		float32_t b = edges[(uint16_t)((i + 1U) % edge_bins)].angle_rad;
-		if ((i + 1U) == edge_bins) {
-			b += 2.0f * PI_F32;
-		}
-		float32_t spacing = b - a;
-		float32_t midpoint = a + (0.5f * spacing);
-
-		params->chopper_cal.blade_midpoints_rad[i] = wrap_rad_2pi(midpoint);
-		params->chopper_cal.midpoint_kind[i] = midpoint_kind[i];
-		spacing_sum += spacing;
-		spacing_min = fminf(spacing_min, spacing);
-		spacing_max = fmaxf(spacing_max, spacing);
-		spacing_max_error = fmaxf(spacing_max_error, fabsf(spacing - ideal_spacing));
+		params->chopper_cal.blade_edges_rad[i] = edges[i].angle_rad;
+		params->chopper_cal.edge_region_after[i] = edge_region_after[i];
 	}
 
-	params->chopper_cal.midpoint_count = edge_bins;
-	params->chopper_cal.spacing_min_rad = spacing_min;
-	params->chopper_cal.spacing_max_rad = spacing_max;
-	params->chopper_cal.spacing_mean_rad = spacing_sum / (float32_t)edge_bins;
-	params->chopper_cal.spacing_max_error_rad = spacing_max_error;
-	params->chopper_cal.valid = true;
-	return 0;
-}
-
-static void motor_chopper_cal_compute_spacing(float32_t *midpoints_rad,
-					      uint16_t count,
-					      float32_t *spacing_min_rad,
-					      float32_t *spacing_max_rad,
-					      float32_t *spacing_mean_rad,
-					      float32_t *spacing_max_error_rad)
-{
-	float32_t ideal_spacing = 2.0f * PI_F32 / (float32_t)count;
-	float32_t spacing_sum = 0.0f;
-	float32_t spacing_min = 2.0f * PI_F32;
-	float32_t spacing_max = 0.0f;
-	float32_t spacing_max_error = 0.0f;
-
-	for (uint16_t i = 0U; i < count; i++) {
-		float32_t a = midpoints_rad[i];
-		float32_t b = midpoints_rad[(uint16_t)((i + 1U) % count)];
-		if ((i + 1U) == count) {
-			b += 2.0f * PI_F32;
-		}
-		float32_t spacing = b - a;
-
-		spacing_sum += spacing;
-		spacing_min = fminf(spacing_min, spacing);
-		spacing_max = fmaxf(spacing_max, spacing);
-		spacing_max_error = fmaxf(spacing_max_error, fabsf(spacing - ideal_spacing));
-	}
-
-	*spacing_min_rad = spacing_min;
-	*spacing_max_rad = spacing_max;
-	*spacing_mean_rad = spacing_sum / (float32_t)count;
-	*spacing_max_error_rad = spacing_max_error;
+	params->chopper_cal.edge_map_count = edge_bins;
+	return motor_chopper_map_derive_centers(&params->chopper_cal);
 }
 
 static void motor_chopper_cal_snapshot(const struct motor_parameters *params,
 				       struct chopper_cal_map_snapshot *snapshot)
 {
-	snapshot->count = params->chopper_cal.midpoint_count;
+	snapshot->count = params->chopper_cal.edge_map_count;
 	snapshot->spacing_min_rad = params->chopper_cal.spacing_min_rad;
 	snapshot->spacing_max_rad = params->chopper_cal.spacing_max_rad;
 	snapshot->spacing_mean_rad = params->chopper_cal.spacing_mean_rad;
@@ -325,8 +276,8 @@ static void motor_chopper_cal_snapshot(const struct motor_parameters *params,
 	snapshot->discarded_edges = params->chopper_cal.discarded_edges;
 
 	for (uint16_t i = 0U; i < snapshot->count; i++) {
-		snapshot->midpoints_rad[i] = params->chopper_cal.blade_midpoints_rad[i];
-		snapshot->midpoint_kind[i] = params->chopper_cal.midpoint_kind[i];
+		snapshot->edges_rad[i] = params->chopper_cal.blade_edges_rad[i];
+		snapshot->edge_region_after[i] = params->chopper_cal.edge_region_after[i];
 	}
 }
 
@@ -356,11 +307,11 @@ static int motor_chopper_cal_stage_average(struct motor_parameters *params,
 	float32_t delta_sum = 0.0f;
 
 	for (uint16_t i = 0U; i < forward->count; i++) {
-		if (forward->midpoint_kind[i] != reverse->midpoint_kind[i]) {
+		if (forward->edge_region_after[i] != reverse->edge_region_after[i]) {
 			return -EINVAL;
 		}
-		float32_t delta = fabsf(wrap_rad_pi(reverse->midpoints_rad[i] -
-						    forward->midpoints_rad[i]));
+		float32_t delta = fabsf(wrap_rad_pi(reverse->edges_rad[i] -
+						    forward->edges_rad[i]));
 		max_delta = fmaxf(max_delta, delta);
 		delta_sum += delta;
 	}
@@ -371,21 +322,18 @@ static int motor_chopper_cal_stage_average(struct motor_parameters *params,
 		return -ERANGE;
 	}
 
-	params->chopper_cal.midpoint_count = forward->count;
+	params->chopper_cal.edge_map_count = forward->count;
 	for (uint16_t i = 0U; i < forward->count; i++) {
-		params->chopper_cal.blade_midpoints_rad[i] =
-			motor_chopper_cal_average_angle(forward->midpoints_rad[i],
-							reverse->midpoints_rad[i]);
-		params->chopper_cal.midpoint_kind[i] = forward->midpoint_kind[i];
+		params->chopper_cal.blade_edges_rad[i] =
+			motor_chopper_cal_average_angle(forward->edges_rad[i],
+							reverse->edges_rad[i]);
+		params->chopper_cal.edge_region_after[i] = forward->edge_region_after[i];
 	}
 
-	motor_chopper_cal_compute_spacing(params->chopper_cal.blade_midpoints_rad,
-					  params->chopper_cal.midpoint_count,
-					  &params->chopper_cal.spacing_min_rad,
-					  &params->chopper_cal.spacing_max_rad,
-					  &params->chopper_cal.spacing_mean_rad,
-					  &params->chopper_cal.spacing_max_error_rad);
-	params->chopper_cal.valid = true;
+	int ret = motor_chopper_map_derive_centers(&params->chopper_cal);
+	if (ret != 0) {
+		return ret;
+	}
 	params->chopper_cal.complete = true;
 	return 0;
 }
@@ -527,6 +475,7 @@ int cmd_motor_chopper_geometry(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "Chopper Geometry:");
 		shell_print(sh, "  Slots:        %u", g_motor_params->chopper_cal.slots);
 		shell_print(sh, "  Teeth:        %u", g_motor_params->chopper_cal.teeth);
+		shell_print(sh, "  Edges:        %u", g_motor_params->chopper_cal.edge_map_count);
 		shell_print(sh, "  Centerpoints: %u", centers);
 		shell_print(sh, "  Map valid:    %s", g_motor_params->chopper_cal.valid ? "YES" : "NO");
 		return 0;
@@ -579,7 +528,14 @@ int cmd_motor_chopper_sensor(const struct shell *sh, size_t argc, char **argv)
 			shell_error(sh, "Failed to read photo-interrupter enable GPIO (%d)", ret);
 			return ret;
 		}
+		bool slot = false;
+		ret = motor_hardware_get_chopper_blade_state(&slot);
+		if (ret < 0) {
+			shell_error(sh, "Failed to read chopper blade-state GPIO (%d)", ret);
+			return ret;
+		}
 		shell_print(sh, "Photo-interrupter emitter: %s", enabled ? "enabled" : "disabled");
+		shell_print(sh, "Blade-state output PB4:    %s", slot ? "slot/high" : "tooth/low");
 		return 0;
 	}
 	if (argc != 2U) {
@@ -967,6 +923,7 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 		    g_motor_params->chopper_cal.total_edges_captured,
 		    g_motor_params->chopper_cal.total_edges_target);
 	shell_print(sh, "  Discarded:      %u", g_motor_params->chopper_cal.discarded_edges);
+	shell_print(sh, "  Edge map:       %u", g_motor_params->chopper_cal.edge_map_count);
 	shell_print(sh, "  Midpoints:      %u", g_motor_params->chopper_cal.midpoint_count);
 	if (g_motor_params->chopper_cal.valid) {
 		shell_print(sh, "  Spacing min/max/mean/error: %.3f / %.3f / %.3f / %.3f deg",
@@ -981,7 +938,7 @@ int cmd_motor_chopper_calib_status(const struct shell *sh, size_t argc, char **a
 		for (uint16_t i = 0U; i < g_motor_params->chopper_cal.midpoint_count; i++) {
 			const char *kind = motor_chopper_region_kind_name(
 				g_motor_params->chopper_cal.midpoint_kind[i]);
-			shell_print(sh, "    [%u] %-5s %.3f deg", i, kind,
+			shell_print(sh, "    center[%u] %-5s %.3f deg", i, kind,
 				    (double)(g_motor_params->chopper_cal.blade_midpoints_rad[i] *
 					     180.0f / PI_F32));
 		}

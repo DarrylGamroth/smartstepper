@@ -27,6 +27,7 @@
 #include "motor/control/position_regulator.h"
 #include "motor/control/velocity_regulator.h"
 #include "motor_state_utils.h"
+#include "motor_chopper_map.h"
 #include "motor_torque.h"
 
 #define MOTOR_SETTINGS_ROOT "motor"
@@ -94,9 +95,9 @@
 
 #define KEY_CHOPPER_SLOTS "motor/chopper/slots"
 #define KEY_CHOPPER_TEETH "motor/chopper/teeth"
-#define KEY_CHOPPER_CENTER_COUNT "motor/chopper/center_count"
-#define KEY_CHOPPER_CENTERS "motor/chopper/centers_rad"
-#define KEY_CHOPPER_CENTER_KIND "motor/chopper/center_kind"
+#define KEY_CHOPPER_EDGE_COUNT "motor/chopper/edge_count"
+#define KEY_CHOPPER_EDGES "motor/chopper/edges_rad"
+#define KEY_CHOPPER_EDGE_REGION_AFTER "motor/chopper/edge_region_after"
 
 #define KEY_LIMITS_NOMINAL_VOLTAGE "motor/limits/nominal_voltage_v"
 #define KEY_LIMITS_MAX_CURRENT "motor/limits/max_current_a"
@@ -142,13 +143,13 @@
 	 MOTOR_SETTINGS_MODEL_ELEC_FIELD_LQ)
 #define MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS BIT(0)
 #define MOTOR_SETTINGS_CHOPPER_FIELD_TEETH BIT(1)
-#define MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT BIT(2)
-#define MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS BIT(3)
-#define MOTOR_SETTINGS_CHOPPER_FIELD_KIND BIT(4)
-#define MOTOR_SETTINGS_CHOPPER_FIELDS_ALL \
+#define MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_COUNT BIT(2)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_EDGES BIT(3)
+#define MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_REGION BIT(4)
+#define MOTOR_SETTINGS_CHOPPER_EDGE_FIELDS_ALL \
 	(MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS | MOTOR_SETTINGS_CHOPPER_FIELD_TEETH | \
-	 MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT | MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS | \
-	 MOTOR_SETTINGS_CHOPPER_FIELD_KIND)
+	 MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_COUNT | MOTOR_SETTINGS_CHOPPER_FIELD_EDGES | \
+	 MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_REGION)
 #define MOTOR_SETTINGS_AUTOLOAD_ALLOWED_GROUPS \
 	(MOTOR_SETTINGS_GROUP_BASELINE | MOTOR_SETTINGS_GROUP_CHOPPER)
 
@@ -318,12 +319,12 @@ static int settings_read_cb_direct(const char *key, size_t len,
 			   MOTOR_SETTINGS_CHOPPER_FIELD_SLOTS);
 	LOAD_CHOPPER_FIELD("chopper/teeth", chopper_teeth,
 			   MOTOR_SETTINGS_CHOPPER_FIELD_TEETH);
-	LOAD_CHOPPER_FIELD("chopper/center_count", chopper_center_count,
-			   MOTOR_SETTINGS_CHOPPER_FIELD_CENTER_COUNT);
-	LOAD_CHOPPER_FIELD("chopper/centers_rad", chopper_centers_rad,
-			   MOTOR_SETTINGS_CHOPPER_FIELD_CENTERS);
-	LOAD_CHOPPER_FIELD("chopper/center_kind", chopper_center_kind,
-			   MOTOR_SETTINGS_CHOPPER_FIELD_KIND);
+	LOAD_CHOPPER_FIELD("chopper/edge_count", chopper_edge_count,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_COUNT);
+	LOAD_CHOPPER_FIELD("chopper/edges_rad", chopper_edges_rad,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_EDGES);
+	LOAD_CHOPPER_FIELD("chopper/edge_region_after", chopper_edge_region_after,
+			   MOTOR_SETTINGS_CHOPPER_FIELD_EDGE_REGION);
 	LOAD_LIMIT_FIELD("limits/nominal_voltage_v", limits_nominal_voltage_v,
 			 MOTOR_SETTINGS_LIMIT_FIELD_NOMINAL_VOLTAGE);
 	LOAD_LIMIT_FIELD("limits/max_current_a", limits_max_current_a,
@@ -381,8 +382,10 @@ int motor_settings_read(struct motor_settings_snapshot *snapshot, uint32_t *pres
 	    MOTOR_SETTINGS_LIMIT_FIELDS_ALL) {
 		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_LIMITS;
 	}
-	if ((ctx.chopper_fields & MOTOR_SETTINGS_CHOPPER_FIELDS_ALL) !=
-	    MOTOR_SETTINGS_CHOPPER_FIELDS_ALL) {
+	bool chopper_edge_complete =
+		(ctx.chopper_fields & MOTOR_SETTINGS_CHOPPER_EDGE_FIELDS_ALL) ==
+		MOTOR_SETTINGS_CHOPPER_EDGE_FIELDS_ALL;
+	if (!chopper_edge_complete) {
 		ctx.present_groups &= ~MOTOR_SETTINGS_GROUP_CHOPPER;
 	}
 
@@ -728,16 +731,19 @@ static int save_chopper_group(const struct motor_parameters *params)
 {
 	if (params->chopper_cal.slots == 0U ||
 	    params->chopper_cal.teeth == 0U ||
-	    params->chopper_cal.midpoint_count == 0U ||
-	    params->chopper_cal.midpoint_count > MOTOR_SETTINGS_CHOPPER_MAX_CENTERS ||
-	    params->chopper_cal.midpoint_count !=
+	    params->chopper_cal.edge_map_count == 0U ||
+	    params->chopper_cal.edge_map_count > MOTOR_SETTINGS_CHOPPER_MAX_CENTERS ||
+	    params->chopper_cal.edge_map_count !=
 		    (uint16_t)(params->chopper_cal.slots + params->chopper_cal.teeth) ||
 	    !params->chopper_cal.valid) {
 		return -ERANGE;
 	}
 
-	for (uint16_t i = 0U; i < params->chopper_cal.midpoint_count; i++) {
-		if (!isfinite(params->chopper_cal.blade_midpoints_rad[i])) {
+	for (uint16_t i = 0U; i < params->chopper_cal.edge_map_count; i++) {
+		uint8_t kind = params->chopper_cal.edge_region_after[i];
+
+		if (!isfinite(params->chopper_cal.blade_edges_rad[i]) ||
+		    (kind != CHOPPER_REGION_KIND_SLOT && kind != CHOPPER_REGION_KIND_TOOTH)) {
 			return -ERANGE;
 		}
 	}
@@ -745,23 +751,28 @@ static int save_chopper_group(const struct motor_parameters *params)
 	int ret;
 	uint16_t slots = params->chopper_cal.slots;
 	uint16_t teeth = params->chopper_cal.teeth;
-	uint16_t center_count = params->chopper_cal.midpoint_count;
-	float32_t centers[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
-	uint8_t kinds[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
+	uint16_t edge_count = params->chopper_cal.edge_map_count;
+	float32_t edges[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
+	uint8_t regions[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS] = {0};
 
-	for (uint16_t i = 0U; i < center_count; i++) {
-		centers[i] = params->chopper_cal.blade_midpoints_rad[i];
-		kinds[i] = params->chopper_cal.midpoint_kind[i];
+	for (uint16_t i = 0U; i < edge_count; i++) {
+		edges[i] = params->chopper_cal.blade_edges_rad[i];
+		regions[i] = params->chopper_cal.edge_region_after[i];
 	}
 
 	SAVE_SCALAR(KEY_CHOPPER_SLOTS, slots);
 	SAVE_SCALAR(KEY_CHOPPER_TEETH, teeth);
-	SAVE_SCALAR(KEY_CHOPPER_CENTER_COUNT, center_count);
-	ret = save_one(KEY_CHOPPER_CENTERS, centers, sizeof(centers));
+	SAVE_SCALAR(KEY_CHOPPER_EDGE_COUNT, edge_count);
+	ret = save_one(KEY_CHOPPER_EDGES, edges, sizeof(edges));
 	if (ret != 0) {
 		return ret;
 	}
-	return save_one(KEY_CHOPPER_CENTER_KIND, kinds, sizeof(kinds));
+	ret = save_one(KEY_CHOPPER_EDGE_REGION_AFTER, regions, sizeof(regions));
+	if (ret != 0) {
+		return ret;
+	}
+
+	return 0;
 }
 
 int motor_settings_save(const struct motor_parameters *params, uint32_t groups,
@@ -1114,17 +1125,20 @@ static int apply_detent_group(struct motor_parameters *params,
 static int apply_chopper_group(struct motor_parameters *params,
 			       const struct motor_settings_snapshot *snapshot)
 {
-	uint32_t center_count = snapshot->chopper_center_count;
+	uint32_t edge_count = snapshot->chopper_edge_count;
 	if (snapshot->chopper_slots == 0U ||
 	    snapshot->chopper_teeth == 0U ||
-	    center_count == 0U ||
-	    center_count > CHOPPER_CAL_MAX_SLOTS ||
-	    center_count != ((uint32_t)snapshot->chopper_slots + snapshot->chopper_teeth)) {
+	    edge_count == 0U ||
+	    edge_count > CHOPPER_CAL_MAX_SLOTS ||
+	    edge_count != ((uint32_t)snapshot->chopper_slots + snapshot->chopper_teeth)) {
 		return -ERANGE;
 	}
 
-	for (uint16_t i = 0U; i < center_count; i++) {
-		if (!isfinite(snapshot->chopper_centers_rad[i])) {
+	for (uint16_t i = 0U; i < edge_count; i++) {
+		uint8_t kind = snapshot->chopper_edge_region_after[i];
+
+		if (!isfinite(snapshot->chopper_edges_rad[i]) ||
+		    (kind != CHOPPER_REGION_KIND_SLOT && kind != CHOPPER_REGION_KIND_TOOTH)) {
 			return -ERANGE;
 		}
 	}
@@ -1136,7 +1150,10 @@ static int apply_chopper_group(struct motor_parameters *params,
 	params->chopper_cal.teeth = snapshot->chopper_teeth;
 	params->chopper_cal.revs_target = 0U;
 	params->chopper_cal.samples_per_edge = 0U;
-	params->chopper_cal.midpoint_count = snapshot->chopper_center_count;
+	params->chopper_cal.edge_map_count = snapshot->chopper_edge_count;
+	params->chopper_cal.midpoint_count = 0U;
+	params->chopper_cal.blade_state_edge_idx = 0U;
+	params->chopper_cal.blade_state_edge_idx_valid = false;
 	params->chopper_cal.total_edges_target = 0U;
 	params->chopper_cal.total_edges_captured = 0U;
 	params->chopper_cal.discarded_edges = 0U;
@@ -1153,15 +1170,17 @@ static int apply_chopper_group(struct motor_parameters *params,
 		params->chopper_cal.edge_status[i] = 0U;
 	}
 	for (uint16_t i = 0U; i < CHOPPER_CAL_MAX_SLOTS; i++) {
+		params->chopper_cal.blade_edges_rad[i] = 0.0f;
+		params->chopper_cal.edge_region_after[i] = CHOPPER_REGION_KIND_UNKNOWN;
 		params->chopper_cal.blade_midpoints_rad[i] = 0.0f;
 		params->chopper_cal.midpoint_kind[i] = CHOPPER_REGION_KIND_UNKNOWN;
 	}
-	for (uint16_t i = 0U; i < center_count; i++) {
-		params->chopper_cal.blade_midpoints_rad[i] =
-			wrap_rad_2pi(snapshot->chopper_centers_rad[i]);
-		params->chopper_cal.midpoint_kind[i] = snapshot->chopper_center_kind[i];
+	for (uint16_t i = 0U; i < edge_count; i++) {
+		params->chopper_cal.blade_edges_rad[i] =
+			wrap_rad_2pi(snapshot->chopper_edges_rad[i]);
+		params->chopper_cal.edge_region_after[i] = snapshot->chopper_edge_region_after[i];
 	}
-	return 0;
+	return motor_chopper_map_derive_centers(&params->chopper_cal);
 }
 
 int motor_settings_load(struct motor_parameters *params, uint32_t groups,
@@ -1358,7 +1377,7 @@ static int clear_detent_keys(void)
 static int clear_chopper_keys(void)
 {
 	const char *keys[] = { KEY_CHOPPER_SLOTS, KEY_CHOPPER_TEETH,
-		KEY_CHOPPER_CENTER_COUNT, KEY_CHOPPER_CENTERS, KEY_CHOPPER_CENTER_KIND };
+		KEY_CHOPPER_EDGE_COUNT, KEY_CHOPPER_EDGES, KEY_CHOPPER_EDGE_REGION_AFTER };
 	for (size_t i = 0U; i < ARRAY_SIZE(keys); i++) {
 		int ret = delete_key(keys[i]);
 		if (ret != 0) {

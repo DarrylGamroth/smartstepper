@@ -24,6 +24,7 @@ extern const struct device *const gate_driver_b;
  * Configures:
  * - Photo interruptor enable (pi_enable)
  * - Trigger/debug output (trig)
+ * - Chopper blade state output (PB4; high=slot, low=tooth)
  * 
  * @return 0 on success, negative error code on failure
  */
@@ -103,5 +104,24 @@ int motor_hardware_set_photo_interruptor_enable(bool enable);
  * @return 0 on success, negative error code on failure
  */
 int motor_hardware_get_photo_interruptor_enable(bool *enabled);
+
+/**
+ * @brief Drive the chopper blade-state output.
+ *
+ * This output mirrors the calibrated encoder-derived blade state:
+ * high means slot, low means tooth.
+ *
+ * @param slot true for slot/high, false for tooth/low
+ * @return 0 on success, negative error code on failure
+ */
+int motor_hardware_set_chopper_blade_state(bool slot);
+
+/**
+ * @brief Read the current chopper blade-state output.
+ *
+ * @param slot receives true when the output is high/slot
+ * @return 0 on success, negative error code on failure
+ */
+int motor_hardware_get_chopper_blade_state(bool *slot);
 
 #endif /* MOTOR_HARDWARE_H */

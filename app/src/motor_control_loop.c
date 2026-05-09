@@ -46,6 +46,7 @@
 #include "motor/control/transforms.h"
 #include "motor_encoder_fault_reason.h"
 #include "motor_current_slew.h"
+#include "motor_chopper_map.h"
 
 /**
  * @brief Convert Q31 ADC value to current in Amperes
@@ -496,6 +497,29 @@ static inline void motor_control_publish_encoder_live(
 	params->live.velocity_filtered_rad_s = control_fb->speed_mech_filtered_rad_s;
 	params->live.position_quality_flags = position_quality_flags;
 	params->live.position_trust_state = control_fb->trust_state;
+}
+
+static inline void motor_control_step_prepare_chopper_blade_state(
+	struct motor_parameters *params,
+	const struct motor_encoder_stage_result *enc_res,
+	struct motor_control_step_report *report)
+{
+	if (params == NULL || enc_res == NULL || report == NULL ||
+	    !params->chopper_cal.valid ||
+	    enc_res->frame_error ||
+	    !enc_res->fresh) {
+		return;
+	}
+
+	float32_t mech_angle_rad = enc_res->angle_control_deg * (PI_F32 / 180.0f);
+	uint8_t kind = CHOPPER_REGION_KIND_UNKNOWN;
+
+	if (motor_chopper_map_kind_at_angle(&params->chopper_cal, mech_angle_rad, &kind) != 0) {
+		return;
+	}
+
+	report->chopper_blade_state_valid = true;
+	report->chopper_blade_slot = kind == CHOPPER_REGION_KIND_SLOT;
 }
 
 static inline void motor_outer_loop_runtime_ctx_refresh(struct motor_outer_loop_runtime_ctx *ctx,
@@ -1778,6 +1802,7 @@ void motor_control_loop_step(struct motor_parameters *params,
 	motor_control_step_prepare_encoder_reports(params, encoder_sample, enc_stage, report);
 	motor_control_measurements_from_encoder(meas, enc_stage);
 	motor_feedback_ref_from_measurements(feedback_ref, meas);
+	motor_control_step_prepare_chopper_blade_state(params, enc_stage, report);
 	if (IS_ENABLED(CONFIG_MOTOR_ISR_FAULT_SNAPSHOT) && params->fault_snapshot.enabled) {
 		motor_fault_snapshot_prepare(report,
 					     meas->angle_control_degrees,

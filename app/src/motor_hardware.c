@@ -18,6 +18,8 @@
 
 /* GPIO specifications */
 static const struct gpio_dt_spec pi_enable = GPIO_DT_SPEC_GET(DT_PATH(photo_interruptor_enable), gpios);
+static const struct gpio_dt_spec chopper_blade_state =
+	GPIO_DT_SPEC_GET(DT_PATH(chopper_blade_state), gpios);
 const struct gpio_dt_spec trig = GPIO_DT_SPEC_GET(DT_PATH(trig), gpios);
 
 /* Hardware device instances */
@@ -35,6 +37,10 @@ int motor_hardware_init_gpio(void)
 		printk("GPIO PE1 device is not ready\n");
 		return -ENODEV;
 	}
+	if (!gpio_is_ready_dt(&chopper_blade_state)) {
+		printk("GPIO PB4 device is not ready\n");
+		return -ENODEV;
+	}
 
 	/* Configure GPIO pins */
 	int ret = gpio_pin_configure_dt(&pi_enable, GPIO_OUTPUT_INACTIVE);
@@ -46,6 +52,12 @@ int motor_hardware_init_gpio(void)
 	ret = gpio_pin_configure_dt(&trig, GPIO_OUTPUT_INACTIVE);
 	if (ret < 0) {
 		printk("Failed to configure trig GPIO\n");
+		return ret;
+	}
+
+	ret = gpio_pin_configure_dt(&chopper_blade_state, GPIO_OUTPUT_INACTIVE);
+	if (ret < 0) {
+		printk("Failed to configure chopper_blade_state GPIO\n");
 		return ret;
 	}
 
@@ -189,5 +201,24 @@ int motor_hardware_get_photo_interruptor_enable(bool *enabled)
 		return ret;
 	}
 	*enabled = ret != 0;
+	return 0;
+}
+
+int motor_hardware_set_chopper_blade_state(bool slot)
+{
+	return gpio_pin_set_dt(&chopper_blade_state, slot ? 1 : 0);
+}
+
+int motor_hardware_get_chopper_blade_state(bool *slot)
+{
+	if (slot == NULL) {
+		return -EINVAL;
+	}
+
+	int ret = gpio_pin_get_dt(&chopper_blade_state);
+	if (ret < 0) {
+		return ret;
+	}
+	*slot = ret != 0;
 	return 0;
 }

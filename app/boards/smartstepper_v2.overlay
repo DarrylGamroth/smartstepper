@@ -52,6 +52,12 @@
 		gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
+
+	chopper_blade_state {
+		compatible = "rubus,app-gpio";
+		gpios = <&gpiob 4 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 };
 
 // / {

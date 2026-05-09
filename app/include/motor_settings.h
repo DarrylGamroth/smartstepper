@@ -78,9 +78,9 @@ struct motor_settings_snapshot {
 
 	uint16_t chopper_slots;
 	uint16_t chopper_teeth;
-	uint16_t chopper_center_count;
-	float32_t chopper_centers_rad[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
-	uint8_t chopper_center_kind[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
+	uint16_t chopper_edge_count;
+	float32_t chopper_edges_rad[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
+	uint8_t chopper_edge_region_after[MOTOR_SETTINGS_CHOPPER_MAX_CENTERS];
 };
 
 int motor_settings_read(struct motor_settings_snapshot *snapshot,

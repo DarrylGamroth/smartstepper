@@ -229,19 +229,19 @@ static void print_snapshot(const struct shell *sh,
 	}
 	if ((present_groups & MOTOR_SETTINGS_GROUP_CHOPPER) != 0U) {
 		shell_print(sh, "  Chopper map:");
-		shell_print(sh, "    slots=%u teeth=%u centers=%u",
-			    s->chopper_slots, s->chopper_teeth, s->chopper_center_count);
+		shell_print(sh, "    slots=%u teeth=%u edges=%u",
+			    s->chopper_slots, s->chopper_teeth, s->chopper_edge_count);
 		for (uint16_t i = 0U;
-		     i < s->chopper_center_count && i < MOTOR_SETTINGS_CHOPPER_MAX_CENTERS;
+		     i < s->chopper_edge_count && i < MOTOR_SETTINGS_CHOPPER_MAX_CENTERS;
 		     i++) {
 			const char *kind = "unknown";
-			if (s->chopper_center_kind[i] == CHOPPER_REGION_KIND_SLOT) {
+			if (s->chopper_edge_region_after[i] == CHOPPER_REGION_KIND_SLOT) {
 				kind = "slot";
-			} else if (s->chopper_center_kind[i] == CHOPPER_REGION_KIND_TOOTH) {
+			} else if (s->chopper_edge_region_after[i] == CHOPPER_REGION_KIND_TOOTH) {
 				kind = "tooth";
 			}
-			shell_print(sh, "    [%u] %-7s %.3f deg", i, kind,
-				    (double)(s->chopper_centers_rad[i] * 180.0f / PI_F32));
+			shell_print(sh, "    edge[%u] after=%-7s %.3f deg", i, kind,
+				    (double)(s->chopper_edges_rad[i] * 180.0f / PI_F32));
 		}
 	}
 	shell_print(sh, "  Note: ADC current offsets are intentionally boot-calibrated and not persisted.");

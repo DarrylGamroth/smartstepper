@@ -24,6 +24,7 @@ target_sources(app PRIVATE
 	src/shell/shell_regulators.c
 	src/shell/shell_settings.c
 	src/motor_settings.c
+	src/motor_chopper_map.c
 	src/shell/shell_state.c
 	src/shell/shell_safety.c
 	src/shell/shell_gate.c

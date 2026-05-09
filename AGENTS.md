@@ -533,7 +533,26 @@ motor commission encoder clear
   STM32 timer capture driver can report rising/falling edge status for
   slot/tooth midpoint classification.
 - Use `motor chopper sensor [0|1]` to inspect or manually control the
-  photo-interrupter emitter enable GPIO during bring-up.
+  photo-interrupter emitter enable GPIO during bring-up. It also reports the
+  PB4 blade-state output.
+- PB4 is the runtime blade-state output: high means slot, low means tooth. It is
+  driven from the calibrated chopper edge map and encoder angle in the motor
+  control loop, not from the photo-interrupter capture callback, so it continues
+  to work when the photo-interrupter emitter is disabled.
+- The canonical persisted chopper data is the edge map:
+  `motor/chopper/edge_count`, `motor/chopper/edges_rad`, and
+  `motor/chopper/edge_region_after`. Slot/tooth centerpoints are derived at
+  runtime from those edges.
+- Legacy centerpoint settings are not loaded or migrated. If a target has old
+  center-only chopper settings, explicitly clear settings, rerun chopper
+  calibration, and save the new edge-map group:
+
+```text
+motor settings clear all
+motor chopper calib bidir <revs> <velocity_hz> [max_delta_deg]
+motor chopper calib apply
+motor settings save chopper
+```
 
 ## AEAT-9955 Telemetry-Only Use
 

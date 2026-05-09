@@ -66,6 +66,8 @@ struct motor_control_step_report {
 	uint8_t encoder_fault_reason;
 	bool encoder_capture_valid;
 	bool encoder_raw_trace_valid;
+	bool chopper_blade_state_valid;
+	bool chopper_blade_slot;
 	struct motor_control_encoder_sample encoder_sample;
 	struct motor_control_feedback encoder_feedback;
 	struct motor_capture_feedback encoder_capture;

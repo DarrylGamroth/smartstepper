@@ -8,6 +8,7 @@
 #define MOTOR_ISR_H
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include "config.h"
 
