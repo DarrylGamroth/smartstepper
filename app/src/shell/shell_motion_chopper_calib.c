@@ -94,6 +94,11 @@ static bool motor_chopper_cal_geometry_valid(uint16_t slots, uint16_t teeth)
 	return slots > 0U && teeth > 0U && centers <= CHOPPER_CAL_MAX_SLOTS;
 }
 
+static bool motor_chopper_encoder_mapping_ready(const struct motor_parameters *params)
+{
+	return params != NULL && params->calibration.encoder_mapping_complete;
+}
+
 struct chopper_edge_mean {
 	float32_t angle_rad;
 	uint8_t status;
@@ -597,6 +602,12 @@ int cmd_motor_chopper_calib_start(const struct shell *sh, size_t argc, char **ar
 
 	if (!motor_control_is_armed(g_motor_params)) {
 		shell_error(sh, "Control is disarmed; run 'motor arm' first.");
+		return -EACCES;
+	}
+
+	if (!motor_chopper_encoder_mapping_ready(g_motor_params)) {
+		shell_error(sh,
+			    "Chopper edge capture requires applied encoder alignment; run/load encoder commissioning first.");
 		return -EACCES;
 	}
 

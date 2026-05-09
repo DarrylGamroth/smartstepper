@@ -539,6 +539,10 @@ motor commission encoder clear
   driven from the calibrated chopper edge map and encoder angle in the motor
   control loop, not from the photo-interrupter capture callback, so it continues
   to work when the photo-interrupter emitter is disabled.
+- Chopper edge-map capture, save, and load require applied encoder alignment
+  (`encoder_mapping_complete`). A blade removed and reinstalled can invalidate
+  the edge map even if motor commutation alignment is still valid; rerun chopper
+  calibration after any blade/coupler mechanical change.
 - The canonical persisted chopper data is the edge map:
   `motor/chopper/edge_count`, `motor/chopper/edges_rad`, and
   `motor/chopper/edge_region_after`. Slot/tooth centerpoints are derived at

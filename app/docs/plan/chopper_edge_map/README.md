@@ -14,6 +14,12 @@ The position controller can move to angular targets, but the chopper wheel has r
 ## Design
 Store chopper wheel geometry as devicetree defaults and runtime settings. For an 8-slot blade, default `chopper-slot-count=8`; the tooth count is derived as 8 unless a nonstandard wheel overrides it, producing 16 slot/tooth regions.
 
+The chopper edge map is only meaningful in the same encoder coordinate frame
+used during capture. Capture, save, and load therefore require applied encoder
+alignment (`encoder_mapping_complete`). If the blade is removed/reinstalled or
+the blade-to-encoder mechanical relationship changes, the edge map must be
+regenerated even if the motor commutation alignment remains valid.
+
 The canonical calibrated map is the physical edge list:
 
 - `edge_count`
@@ -47,6 +53,7 @@ Add PB4 blade-state output driven by the calibrated edge map and encoder angle i
 `motor chopper calib apply` loads 16 sequence points.
 `motor settings save chopper` and `motor settings load chopper` preserve the geometry and edge map; centerpoints are derived at runtime.
 PB4 is high in calibrated slot intervals and low in calibrated tooth intervals based on encoder position, regardless of whether the photo-interrupter emitter is enabled.
+Chopper edge capture/save/load is rejected unless encoder alignment has been applied or the encoder group is loaded in the same settings load operation.
 Legacy centerpoint settings are not loaded or migrated. Targets with old center-only chopper settings must clear settings and save a new edge map.
 
 ## HIL Evidence
@@ -232,6 +239,14 @@ Result:
   against the calibrated edge intervals in the control loop.
 - Added adjacent-first cached lookup so normal runtime checks inspect current,
   next, and previous edge intervals before a full scan.
+- Added dependency guards so chopper capture/save/load requires applied encoder
+  alignment. `motor settings load baseline chopper` remains valid because the
+  encoder group is applied before the chopper group.
+- Guard validation build passed after adding the dependency checks:
+  `podman exec wonderful_goldberg bash -lc 'cd /workspace && west build --build-dir /workspace/build/chopper/smartstepper_v2_mt6835_067a'`.
+- Focused unit suites passed after adding the dependency checks:
+  `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.runtime.unit` and
+  `./tests/run_unit_tests.sh wonderful_goldberg -s chopper.motor_persistent_config.unit`.
 
 Validation:
 

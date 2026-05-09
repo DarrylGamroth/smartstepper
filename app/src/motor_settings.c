@@ -729,6 +729,10 @@ static int save_detent_group(const struct motor_parameters *params)
 
 static int save_chopper_group(const struct motor_parameters *params)
 {
+	if (!params->calibration.encoder_mapping_complete) {
+		return -EACCES;
+	}
+
 	if (params->chopper_cal.slots == 0U ||
 	    params->chopper_cal.teeth == 0U ||
 	    params->chopper_cal.edge_map_count == 0U ||
@@ -1125,6 +1129,10 @@ static int apply_detent_group(struct motor_parameters *params,
 static int apply_chopper_group(struct motor_parameters *params,
 			       const struct motor_settings_snapshot *snapshot)
 {
+	if (!params->calibration.encoder_mapping_complete) {
+		return -EACCES;
+	}
+
 	uint32_t edge_count = snapshot->chopper_edge_count;
 	if (snapshot->chopper_slots == 0U ||
 	    snapshot->chopper_teeth == 0U ||
